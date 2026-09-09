@@ -48,6 +48,60 @@ final class ContractTests: XCTestCase {
         XCTAssertNil(ExportRel.handoffFileIfPresent("export/shots/leak.jpg", sessionURL: root))
     }
 
+    func testWriteContainedDataReplacesArchiveJSONSymlink() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("st-contained-json-\(UUID().uuidString)")
+        let archive = root.appendingPathComponent("archive")
+        try FileManager.default.createDirectory(at: archive, withIntermediateDirectories: true)
+        let secret = FileManager.default.temporaryDirectory.appendingPathComponent("secret-transcript-\(UUID().uuidString).json")
+        try Data("do-not-overwrite".utf8).write(to: secret)
+        let dest = archive.appendingPathComponent("full_transcript.json")
+        try FileManager.default.createSymbolicLink(at: dest, withDestinationURL: secret)
+        let payload = Data("{\"words\":[]}".utf8)
+        try ExportRel.writeContainedData(payload, relative: "archive/full_transcript.json", sessionURL: root)
+        XCTAssertEqual(try String(contentsOf: secret, encoding: .utf8), "do-not-overwrite")
+        XCTAssertNotEqual((try dest.resourceValues(forKeys: [.isSymbolicLinkKey])).isSymbolicLink, true)
+        XCTAssertEqual(try Data(contentsOf: dest), payload)
+        try? FileManager.default.removeItem(at: root)
+        try? FileManager.default.removeItem(at: secret)
+    }
+
+    func testWriteContainedDataRefusesArchiveDirectorySymlink() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("st-archive-dirlink-\(UUID().uuidString)")
+        let export = root.appendingPathComponent("export")
+        try FileManager.default.createDirectory(at: export, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(
+            at: root.appendingPathComponent("archive"),
+            withDestinationURL: export
+        )
+        defer { try? FileManager.default.removeItem(at: root) }
+        XCTAssertNil(ExportRel.containedRelative("archive/full_transcript.json", sessionURL: root))
+        XCTAssertNil(ExportRel.existingSessionFile("archive/full_transcript.json", sessionURL: root))
+        XCTAssertThrowsError(
+            try ExportRel.writeContainedData(Data("{\"words\":[]}".utf8), relative: "archive/full_transcript.json", sessionURL: root)
+        )
+        XCTAssertFalse(FileManager.default.fileExists(atPath: export.appendingPathComponent("full_transcript.json").path))
+    }
+
+    func testWriteContainedDataCreatesNestedShotDirectory() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("st-shot-dir-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root.appendingPathComponent("archive"), withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let payload = Data("png".utf8)
+        try ExportRel.writeContainedData(payload, relative: "archive/shots/001.png", sessionURL: root)
+        let dest = root.appendingPathComponent("archive/shots/001.png")
+        XCTAssertEqual(try Data(contentsOf: dest), payload)
+        XCTAssertNotEqual((try dest.resourceValues(forKeys: [.isSymbolicLinkKey])).isSymbolicLink, true)
+    }
+
+    func testIsAllowedClipDestRejectsMasterMovie() {
+        XCTAssertTrue(ExportRel.isAllowedClipDest("archive/media-work/task-01/clip.mp4"))
+        XCTAssertTrue(ExportRel.isAllowedClipDest("export/media/task-01/clip.mp4"))
+        XCTAssertFalse(ExportRel.isAllowedClipDest("archive/session.mp4"))
+        XCTAssertFalse(ExportRel.isAllowedClipDest("archive/media-work/session.mp4"))
+        XCTAssertFalse(ExportRel.isAllowedClipDest("export/media/task-01/shot-1.jpg"))
+        XCTAssertFalse(ExportRel.isAllowedClipDest("export/../archive/session.mp4"))
+    }
+
     func testWriteExportTextReplacesSymlinkInsteadOfFollowing() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("st-write-export-\(UUID().uuidString)")
         let export = root.appendingPathComponent("export")

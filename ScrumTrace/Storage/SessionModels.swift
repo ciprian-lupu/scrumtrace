@@ -80,13 +80,26 @@ enum ExportRel {
     }
 
     /// Normalized session-relative path that still lives under the session folder.
+    /// Any symlink in the relative path (including a planted `archive/` or `shots/`
+    /// directory link) is refused so later writes cannot follow into another tree.
     static func containedRelative(_ path: String, sessionURL: URL) -> String? {
         guard isUnderSession(path), let parts = normalizedComponents(path) else { return nil }
         let joined = parts.joined(separator: "/")
+        var current = sessionURL.standardizedFileURL
+        for part in parts {
+            let next = current.appendingPathComponent(part)
+            if (try? next.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+                return nil
+            }
+            current = next
+        }
+        let stdRoot = sessionURL.standardizedFileURL
+        let destPath = current.standardizedFileURL.path
+        guard destPath == stdRoot.path || destPath.hasPrefix(stdRoot.path + "/") else { return nil }
         let root = sessionURL.standardizedFileURL.resolvingSymlinksInPath()
-        let url = sessionURL.appendingPathComponent(joined).standardizedFileURL.resolvingSymlinksInPath()
+        let resolved = current.standardizedFileURL.resolvingSymlinksInPath()
         let rootPath = root.path
-        guard url.path == rootPath || url.path.hasPrefix(rootPath + "/") else { return nil }
+        guard resolved.path == rootPath || resolved.path.hasPrefix(rootPath + "/") else { return nil }
         return joined
     }
 
@@ -146,22 +159,85 @@ enum ExportRel {
     /// so the write cannot follow into `archive/` or overwrite a sibling via a link.
     static func writeExportText(_ text: String, relative: String, sessionURL: URL) throws {
         let session = sessionPath(relative)
-        guard isUnderExport(session), let parts = normalizedComponents(session) else {
+        guard isUnderExport(session) else {
             throw SessionVaultError.writeFailed(relative)
         }
-        let url = sessionURL.appendingPathComponent(parts.joined(separator: "/"))
-        if (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
-            try FileManager.default.removeItem(at: url)
-        }
-        guard let destRel = containedRelative(session, sessionURL: sessionURL),
-              isUnderExport(destRel) else {
+        guard let data = text.data(using: .utf8) else {
             throw SessionVaultError.writeFailed(relative)
         }
-        try text.write(
-            to: sessionURL.appendingPathComponent(destRel),
-            atomically: true,
-            encoding: .utf8
-        )
+        try writeContainedData(data, relative: session, sessionURL: sessionURL)
+    }
+
+    /// Create missing real directories and unlink a dest file-symlink so a
+    /// subsequent write cannot follow `archive/` or `export/` into another tree.
+    static func prepareContainedWrite(relative: String, sessionURL: URL) throws -> String {
+        guard isUnderSession(relative), let parts = normalizedComponents(relative), parts.count >= 2 else {
+            throw SessionVaultError.writeFailed(relative)
+        }
+        let joined = parts.joined(separator: "/")
+        var current = sessionURL.standardizedFileURL
+        for (index, part) in parts.enumerated() {
+            let next = current.appendingPathComponent(part)
+            let isLast = index == parts.count - 1
+            let isLink = (try? next.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true
+            if isLast {
+                if isLink {
+                    try FileManager.default.removeItem(at: next)
+                } else {
+                    var isDir: ObjCBool = false
+                    if FileManager.default.fileExists(atPath: next.path, isDirectory: &isDir), isDir.boolValue {
+                        throw SessionVaultError.writeFailed(relative)
+                    }
+                }
+            } else if isLink {
+                throw SessionVaultError.writeFailed(relative)
+            } else {
+                var isDir: ObjCBool = false
+                if FileManager.default.fileExists(atPath: next.path, isDirectory: &isDir) {
+                    if !isDir.boolValue {
+                        throw SessionVaultError.writeFailed(relative)
+                    }
+                } else {
+                    try FileManager.default.createDirectory(at: next, withIntermediateDirectories: false)
+                }
+                if (try? next.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+                    throw SessionVaultError.writeFailed(relative)
+                }
+            }
+            current = next
+        }
+        guard let destRel = containedRelative(joined, sessionURL: sessionURL), destRel == joined else {
+            throw SessionVaultError.writeFailed(relative)
+        }
+        return destRel
+    }
+
+    /// Write bytes under the session folder. A dest symlink is removed first so
+    /// the write cannot follow out of `archive/` or `export/`. Intermediate
+    /// directory symlinks are refused (a planted `archive/` → `export/` link
+    /// must not receive Whisper JSON).
+    static func writeContainedData(_ data: Data, relative: String, sessionURL: URL) throws {
+        let destRel = try prepareContainedWrite(relative: relative, sessionURL: sessionURL)
+        let dest = sessionURL.appendingPathComponent(destRel)
+        try data.write(to: dest, options: .atomic)
+        guard isContainedRegularFile(dest, sessionRoot: sessionURL) else {
+            throw SessionVaultError.writeFailed(relative)
+        }
+    }
+
+    /// Working clips live under `archive/media-work/`. Export clips live under
+    /// `export/media/`. Never overwrite `archive/session.mp4`.
+    static func isAllowedClipDest(_ relative: String) -> Bool {
+        guard let parts = normalizedComponents(relative), parts.count >= 3, parts.last == "clip.mp4" else {
+            return false
+        }
+        if parts[0] == "archive", parts[1] == "media-work" {
+            return true
+        }
+        if parts[0] == "export", parts[1] == "media" {
+            return true
+        }
+        return false
     }
 
     static func parentIsSymbolicLink(_ file: URL) -> Bool {
@@ -703,9 +779,10 @@ struct CaptureAudioLayout: Codable, Sendable, Hashable {
     func write(sessionURL: URL) throws {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        try encoder.encode(self).write(
-            to: sessionURL.appendingPathComponent(ScrumTracePath.captureLayout),
-            options: .atomic
+        try ExportRel.writeContainedData(
+            try encoder.encode(self),
+            relative: ScrumTracePath.captureLayout,
+            sessionURL: sessionURL
         )
     }
 
@@ -756,9 +833,10 @@ struct PipelineTiming: Codable, Sendable, Hashable {
     func write(sessionURL: URL) throws {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        try encoder.encode(self).write(
-            to: sessionURL.appendingPathComponent(ScrumTracePath.pipelineTiming),
-            options: .atomic
+        try ExportRel.writeContainedData(
+            try encoder.encode(self),
+            relative: ScrumTracePath.pipelineTiming,
+            sessionURL: sessionURL
         )
     }
 }

@@ -390,12 +390,6 @@ final class SessionController: ObservableObject {
         let stem = String(format: "%03d", index)
         let rawPath = "\(ScrumTracePath.shots)/\(stem).png"
         let annotatedPath = "\(ScrumTracePath.shots)/\(stem).annotated.png"
-        let rawURL = sessionURL.appendingPathComponent(rawPath)
-        guard ExportRel.containedRelative(rawPath, sessionURL: sessionURL) != nil,
-              !ExportRel.parentIsSymbolicLink(rawURL) else {
-            lastError = "Could not write the Shot PNG."
-            return
-        }
         guard let tiff = image.tiffRepresentation,
               let rep = NSBitmapImageRep(data: tiff),
               let png = rep.representation(using: .png, properties: [:]) else {
@@ -403,7 +397,7 @@ final class SessionController: ObservableObject {
             return
         }
         do {
-            try png.write(to: rawURL)
+            try ExportRel.writeContainedData(png, relative: rawPath, sessionURL: sessionURL)
         } catch {
             lastError = error.localizedDescription
             statusLine = "Could not write the Shot PNG."
@@ -468,17 +462,11 @@ final class SessionController: ObservableObject {
         annotatedPath: String
     ) {
         guard let sessionURL, var manifest else { return }
-        let url = sessionURL.appendingPathComponent(annotatedPath)
-        guard ExportRel.containedRelative(annotatedPath, sessionURL: sessionURL) != nil,
-              !ExportRel.parentIsSymbolicLink(url) else {
-            lastError = "Could not write the annotated Shot."
-            return
-        }
         if let tiff = annotated.tiffRepresentation,
            let rep = NSBitmapImageRep(data: tiff),
            let png = rep.representation(using: .png, properties: [:]) {
             do {
-                try png.write(to: url)
+                try ExportRel.writeContainedData(png, relative: annotatedPath, sessionURL: sessionURL)
             } catch {
                 lastError = error.localizedDescription
                 statusLine = "Could not write the annotated Shot."
@@ -495,12 +483,9 @@ final class SessionController: ObservableObject {
             "source": source.rawValue
         ]
         let jsonRel = "\(ScrumTracePath.shots)/\(stemFrom(record.id)).json"
-        let jsonURL = sessionURL.appendingPathComponent(jsonRel)
-        if ExportRel.containedRelative(jsonRel, sessionURL: sessionURL) != nil,
-           !ExportRel.parentIsSymbolicLink(jsonURL),
-           let data = try? JSONSerialization.data(withJSONObject: json, options: [.prettyPrinted]) {
+        if let data = try? JSONSerialization.data(withJSONObject: json, options: [.prettyPrinted]) {
             do {
-                try data.write(to: jsonURL, options: .atomic)
+                try ExportRel.writeContainedData(data, relative: jsonRel, sessionURL: sessionURL)
             } catch {
                 lastError = error.localizedDescription
             }

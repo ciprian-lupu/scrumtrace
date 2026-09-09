@@ -134,6 +134,9 @@ final class SessionVault: @unchecked Sendable {
         if (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
             try fileManager.removeItem(at: url)
         }
+        guard ExportRel.containedRelative(ScrumTracePath.events, sessionURL: session) == ScrumTracePath.events else {
+            throw SessionVaultError.writeFailed("events.jsonl")
+        }
         var data = try eventEncoder.encode(event)
         data.append(contentsOf: [0x0A])
         if fileManager.fileExists(atPath: url.path) {
@@ -145,7 +148,7 @@ final class SessionVault: @unchecked Sendable {
             try handle.seekToEnd()
             try handle.write(contentsOf: data)
         } else {
-            try data.write(to: url, options: .atomic)
+            try ExportRel.writeContainedData(data, relative: ScrumTracePath.events, sessionURL: session)
         }
     }
 
@@ -160,7 +163,11 @@ final class SessionVault: @unchecked Sendable {
 
     func nextShotIndex(sessionId: String) -> Int {
         guard Self.isValidSessionId(sessionId) else { return 1 }
-        let shots = sessionURL(id: sessionId).appendingPathComponent(ScrumTracePath.shots)
+        let session = sessionURL(id: sessionId)
+        let shots = session.appendingPathComponent(ScrumTracePath.shots)
+        if ExportRel.containedRelative("\(ScrumTracePath.shots)/.probe", sessionURL: session) == nil {
+            return 1
+        }
         if (try? shots.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
             return 1
         }

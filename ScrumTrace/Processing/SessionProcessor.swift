@@ -39,15 +39,16 @@ final class SessionProcessor: @unchecked Sendable {
             var transcript = await transcribe(sessionURL: sessionURL, model: whisperModel)
             transcript.sessionId = sessionId
             let data = try JSONEncoder().encode(transcript)
-            try data.write(to: sessionURL.appendingPathComponent(ScrumTracePath.fullTranscript))
+            try ExportRel.writeContainedData(
+                data,
+                relative: ScrumTracePath.fullTranscript,
+                sessionURL: sessionURL
+            )
             timing.whisperWallSeconds = Date().timeIntervalSince(whisperStarted)
             timing.whisperSources = transcript.sources ?? []
             try timing.write(sessionURL: sessionURL)
-            let hadAudio = FileManager.default.fileExists(
-                atPath: sessionURL.appendingPathComponent(ScrumTracePath.audioWav).path
-            ) || FileManager.default.fileExists(
-                atPath: sessionURL.appendingPathComponent(ScrumTracePath.sessionMovie).path
-            )
+            let hadAudio = ExportRel.existingSessionFile(ScrumTracePath.audioWav, sessionURL: sessionURL) != nil
+                || ExportRel.existingSessionFile(ScrumTracePath.sessionMovie, sessionURL: sessionURL) != nil
             // If Whisper never loaded, leave the stage open so Retry can try again.
             // Empty speech after a successful load still completes.
             if transcriber.isReady || !hadAudio {

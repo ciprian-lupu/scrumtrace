@@ -157,6 +157,8 @@ def test_zipper_never_deletes_archive() -> None:
     assert "removeItem(at: export)" in projector.split("func resetExportTree")[1].split("func writeProjectionManifest")[0]
     omit_md = zipper.split("func writeOmittedMarkdown")[1].split("private func uniquedOmitted")[0]
     assert "omittedHandoffPath" in omit_md
+    assert "writeExportText" in omit_md
+    assert ".write(to: url, atomically" not in omit_md
     omit_fn = zipper.split("static func omissionOrder")[1].split("static func stripOmitted")[0]
     dropped = omit_fn.split("return uniqued")[1].split(".filter")[0]
     assert "keyword + extraStills + extraShots + leftover + extraClips" in dropped
@@ -179,7 +181,12 @@ def test_clip_exporter_macos14() -> None:
     assert "clip_path escaped" in clip
     assert "clip_path is not a working or export clip" in clip
     assert "isAllowedClipDest" in clip
+    assert "prepareContainedWrite" in clip
     assert 'hasSuffix("/clip.mp4")' in clip
+    models_clip = (ROOT / "ScrumTrace" / "Storage" / "SessionModels.swift").read_text()
+    allowed = models_clip.split("static func isAllowedClipDest")[1].split("static func parentIsSymbolicLink")[0]
+    assert 'parts.last == "clip.mp4"' in allowed
+    assert "archive/session.mp4" not in allowed or "Never overwrite" in models_clip
     assert "AVAssetExportPreset640x480" in clip
     assert "fileLengthLimit" in clip
     assert "clipVideoBitrate" in clip
@@ -252,11 +259,14 @@ def test_retry_failed_slices_and_pins() -> None:
     assert "isContainedRegularFile" in vault
     next_shot = vault.split("func nextShotIndex")[1].split("func loadPinTimes")[0]
     assert "isSymbolicLink" in next_shot
+    assert ".probe" in next_shot
     events_fn = vault.split("private func events")[1].split("func revealInFinder")[0]
     assert "isContainedRegularFile" in events_fn
     append = vault.split("func appendEvent")[1].split("func recentSessions")[0]
     assert "isSymbolicLink" in append
     assert "isContainedRegularFile" in append
+    assert "writeContainedData" in append
+    assert "containedRelative(ScrumTracePath.events" in append
     reveal = vault.split("func revealInFinder")[1].split("private static let folderStamp")[0]
     assert "isSymbolicLink" in reveal
     assert "isDirectory" in reveal
@@ -272,16 +282,16 @@ def test_retry_failed_slices_and_pins() -> None:
     capture = controller.split("private func captureShot")[1].split("private func finishShot")[0]
     assert "try? vault.write(manifest: &local)" not in capture
     assert "annotatedPath: nil" in capture
-    assert "containedRelative(rawPath" in capture
-    assert "parentIsSymbolicLink" in capture
+    assert "writeContainedData(png, relative: rawPath" in capture
+    assert "png.write(to:" not in capture
     finish = controller.split("private func finishShot")[1].split("private func privacyPause")[0]
     assert "try? vault.write" not in finish
     assert "catalog write failed" in finish
     assert "self.manifest = manifest" in finish
     assert "try? data.write" not in finish
-    assert "options: .atomic" in finish
-    assert "containedRelative(annotatedPath" in finish
-    assert "parentIsSymbolicLink" in finish
+    assert "writeContainedData(png, relative: annotatedPath" in finish
+    assert "writeContainedData(data, relative: jsonRel" in finish
+    assert "png.write(to:" not in finish
     stop = controller.split("func stopRecordingAsync")[1].split("func runProcessor")[0]
     assert stop.index("freezeWriters") < stop.index('phase = .transcribing')
     assert "scrumTraceSessionEnding" in stop
@@ -433,7 +443,7 @@ def test_pause_privacy_and_metadata_gate() -> None:
     assert "NSApp.activate" in controller.split("func requestUploadConsent")[1].split("private func captureShot")[0]
     capture = controller.split("private func captureShot")[1].split("private func finishShot")[0]
     assert "shots.append(record)" in capture
-    assert "try png.write(to: rawURL)" in capture
+    assert "writeContainedData(png, relative: rawPath" in capture
     assert "Could not write the Shot PNG" in capture
     finish = controller.split("private func finishShot")[1].split("private func privacyPause")[0]
     assert "firstIndex(where: { $0.id == stored.id })" in finish
@@ -517,11 +527,14 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "containedRelative" in jpeg
     assert "isContainedRegularFile" in jpeg
     assert "isUnderExport" in jpeg
+    assert "writeContainedData" in jpeg
+    assert "jpeg.write(to:" not in jpeg
     assert "hasPrefix(prefix)" not in jpeg
     copy_if = projector.split("func copyIfPresent")[1]
     assert "containedRelative" in copy_if
     assert "isContainedRegularFile" in copy_if
     assert "isUnderExport(toRel)" in copy_if
+    assert "prepareContainedWrite" in copy_if
     assert "hasPrefix(prefix)" not in copy_if
     agent = (ROOT / "ScrumTrace" / "Export" / "AgentContextRenderer.swift").read_text()
     assert "stillCandidates" in agent.split("func displayPath")[1]
@@ -635,7 +648,7 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "evenCaptureSize" in start_fn
     assert "prepareWriters(width:" in start_fn
     prepare = recorder.split("func prepareWriters")[1].split("func startMicrophoneFallback")[0]
-    assert "containedRelative" in prepare
+    assert "prepareContainedWrite" in prepare
     assert "archive capture paths escaped" in prepare
     assert "config.width = size.width" in start_fn
     assert "config.height = size.height" in start_fn
@@ -672,6 +685,36 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "AgentInstructionTemplate.render(kind: .unknown, product: product)" in processor
 
 
+def test_write_contained_data_refuses_directory_symlinks() -> None:
+    models = (ROOT / "ScrumTrace" / "Storage" / "SessionModels.swift").read_text()
+    assert "func prepareContainedWrite" in models
+    assert "func writeContainedData" in models
+    prepare = models.split("static func prepareContainedWrite")[1].split("static func writeContainedData")[0]
+    assert "isSymbolicLink" in prepare
+    assert "createDirectory" in prepare
+    write_fn = models.split("static func writeContainedData")[1].split("static func isAllowedClipDest")[0]
+    assert "prepareContainedWrite" in write_fn
+    assert "options: .atomic" in write_fn
+    assert "isContainedRegularFile" in write_fn
+    rel = models.split("static func containedRelative(_ path: String, sessionURL: URL)")[1].split("static func existingSessionFile")[0]
+    assert "isSymbolicLink" in rel
+    processor = (ROOT / "ScrumTrace" / "Processing" / "SessionProcessor.swift").read_text()
+    whisper_write = processor.split("transcript.sessionId = sessionId")[1].split("timing.whisperWallSeconds")[0]
+    assert "writeContainedData" in whisper_write
+    assert "data.write(to: fullTranscript" not in whisper_write
+    had = processor.split("timing.whisperSources")[1].split("If Whisper never loaded")[0]
+    assert "existingSessionFile(ScrumTracePath.audioWav" in had
+    assert "existingSessionFile(ScrumTracePath.sessionMovie" in had
+    layout = models.split("func write(sessionURL: URL) throws")[1]
+    assert "writeContainedData" in layout.split("func shouldTranscribeMovie")[0]
+    clip = (ROOT / "ScrumTrace" / "Slicing" / "ClipExporter.swift").read_text()
+    export_fn = clip.split("func export(")[1].split("func tightenExportClips")[0]
+    assert "prepareContainedWrite" in export_fn
+    assert "isAllowedClipDest" in export_fn
+    assert export_fn.index("isAllowedClipDest") < export_fn.index("prepareContainedWrite")
+    assert "writeContainedData(jpeg, relative: stillRelative" in export_fn
+
+
 def main() -> None:
     test_export_has_no_archive_and_no_tokens()
     test_agent_context_uses_export_relative_paths()
@@ -689,6 +732,7 @@ def main() -> None:
     test_pipeline_timing_stays_in_archive()
     test_pause_privacy_and_metadata_gate()
     test_phase45_clip_consent_and_budget()
+    test_write_contained_data_refuses_directory_symlinks()
     print("contract tests ok")
 
 

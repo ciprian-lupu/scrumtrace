@@ -32,11 +32,12 @@ def test_quote_window() -> None:
     assert "quote not found in transcript window" in confirm
     controller = (ROOT / "ScrumTrace" / "Processing" / "SessionController.swift").read_text()
     capture = controller.split("private func captureShot")[1].split("private func finishShot")[0]
-    assert "try png.write(to: rawURL)" in capture
+    assert "writeContainedData(png, relative: rawPath" in capture
     assert "try? png.write(to: rawURL)" not in capture
     finish = controller.split("private func finishShot")[1].split("private func privacyPause")[0]
     assert "Could not write the annotated Shot" in finish
     assert "try? png.write" not in finish
+    assert "writeContainedData(png, relative: annotatedPath" in finish
 
 
 def test_export_rel_in_swift() -> None:

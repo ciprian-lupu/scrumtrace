@@ -19,32 +19,34 @@ struct ClipExporter {
         guard let relativeClip = slice.clipPath else {
             throw SessionRecorderError.writerFailed("Slice is missing clip_path.")
         }
-        guard let containedClip = ExportRel.containedRelative(relativeClip, sessionURL: sessionURL) else {
+        guard let parts = ExportRel.normalizedComponents(relativeClip) else {
             throw SessionRecorderError.writerFailed("Slice clip_path escaped the session folder.")
         }
-        guard isAllowedClipDest(containedClip) else {
+        let containedClip = parts.joined(separator: "/")
+        guard ExportRel.isAllowedClipDest(containedClip) else {
             throw SessionRecorderError.writerFailed("Slice clip_path is not a working or export clip.")
         }
-        let clipURL = sessionURL.appendingPathComponent(containedClip)
-        try FileManager.default.createDirectory(
-            at: clipURL.deletingLastPathComponent(),
-            withIntermediateDirectories: true
-        )
+        let prepared: String
+        do {
+            prepared = try ExportRel.prepareContainedWrite(relative: containedClip, sessionURL: sessionURL)
+        } catch {
+            throw SessionRecorderError.writerFailed("Slice clip_path escaped the session folder.")
+        }
+        let clipURL = sessionURL.appendingPathComponent(prepared)
         try await reencode(source: source, destination: clipURL, slice: slice, mediaDuration: mediaDuration)
 
         var updated = slice
-        updated.clipPath = containedClip
-        guard containedClip.hasSuffix("/clip.mp4") else {
+        updated.clipPath = prepared
+        guard prepared.hasSuffix("/clip.mp4") else {
             return updated
         }
         let stillRelative = containedClip.replacingOccurrences(of: "/clip.mp4", with: "/shot-1.jpg")
-        let stillURL = sessionURL.appendingPathComponent(stillRelative)
-        guard stillRelative != containedClip,
-              ExportRel.containedRelative(stillRelative, sessionURL: sessionURL) != nil else {
+        guard stillRelative != containedClip else {
             return updated
         }
         do {
-            try await extractStill(source: source, at: (slice.startMedia + slice.endMedia) / 2, to: stillURL)
+            let jpeg = try await extractStill(source: source, at: (slice.startMedia + slice.endMedia) / 2)
+            try ExportRel.writeContainedData(jpeg, relative: stillRelative, sessionURL: sessionURL)
             if !updated.stills.contains(stillRelative) {
                 updated.stills.insert(stillRelative, at: 0)
             }
@@ -83,19 +85,6 @@ struct ClipExporter {
 
     /// Working clips live under `archive/media-work/`. Tighten rewrites
     /// `export/media/` only. Never overwrite `archive/session.mp4`.
-    private func isAllowedClipDest(_ relative: String) -> Bool {
-        guard let parts = ExportRel.normalizedComponents(relative), parts.count >= 3 else {
-            return false
-        }
-        if parts[0] == "archive", parts[1] == "media-work" {
-            return true
-        }
-        if parts[0] == "export", parts[1] == "media" {
-            return true
-        }
-        return false
-    }
-
     private func tighten(file url: URL) async throws {
         let presets = [AVAssetExportPreset640x480, AVAssetExportPresetLowQuality]
         for preset in presets {
@@ -390,7 +379,7 @@ struct ClipExporter {
             .concatenating(CGAffineTransform(translationX: tx, y: ty))
     }
 
-    private func extractStill(source: URL, at media: TimeInterval, to destination: URL) async throws {
+    private func extractStill(source: URL, at media: TimeInterval) async throws -> Data {
         let asset = AVURLAsset(url: source)
         let generator = AVAssetImageGenerator(asset: asset)
         generator.appliesPreferredTrackTransform = true
@@ -406,11 +395,9 @@ struct ClipExporter {
         ) else {
             throw SessionRecorderError.writerFailed("JPEG encode failed.")
         }
-        try FileManager.default.createDirectory(
-            at: destination.deletingLastPathComponent(),
-            withIntermediateDirectories: true
-        )
-        try jpeg.write(to: destination)
+        return jpeg
+        #else
+        throw SessionRecorderError.writerFailed("JPEG encode requires macOS.")
         #endif
     }
 }

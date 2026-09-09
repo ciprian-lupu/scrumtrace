@@ -269,13 +269,12 @@ struct ExportProjector {
             maxEdge: CGFloat(MediaBudget.stillMaxWidth),
             quality: MediaBudget.stillJPEGQuality
         ) else { return nil }
-        let dest = sessionURL.appendingPathComponent(destRel)
-        try FileManager.default.createDirectory(at: dest.deletingLastPathComponent(), withIntermediateDirectories: true)
-        if FileManager.default.fileExists(atPath: dest.path) {
-            try FileManager.default.removeItem(at: dest)
+        do {
+            try ExportRel.writeContainedData(jpeg, relative: destRel, sessionURL: sessionURL)
+            return destRel
+        } catch {
+            return nil
         }
-        try jpeg.write(to: dest)
-        return destRel
     }
     #endif
 
@@ -299,12 +298,22 @@ struct ExportProjector {
             omitted.append(OmittedAsset(path: to.lastPathComponent, reason: "Copy destination escaped export/"))
             return nil
         }
-        let dest = sessionURL.appendingPathComponent(toRel)
-        try fileManager.createDirectory(at: dest.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let prepared: String
+        do {
+            prepared = try ExportRel.prepareContainedWrite(relative: toRel, sessionURL: sessionURL)
+        } catch {
+            omitted.append(OmittedAsset(path: to.lastPathComponent, reason: "Copy destination escaped export/"))
+            return nil
+        }
+        let dest = sessionURL.appendingPathComponent(prepared)
         if fileManager.fileExists(atPath: dest.path) {
+            guard ExportRel.isContainedRegularFile(dest, sessionRoot: sessionURL) else {
+                omitted.append(OmittedAsset(path: to.lastPathComponent, reason: "Copy destination escaped export/"))
+                return nil
+            }
             try fileManager.removeItem(at: dest)
         }
         try fileManager.copyItem(at: from, to: dest)
-        return toRel
+        return prepared
     }
 }

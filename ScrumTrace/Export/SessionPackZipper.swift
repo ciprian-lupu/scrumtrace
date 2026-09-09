@@ -89,15 +89,19 @@ struct SessionPackZipper {
         PackBudget.removeEscapingExportLinks(
             exportDir: sessionURL.appendingPathComponent(ScrumTracePath.export)
         )
-        let url = sessionURL.appendingPathComponent(ScrumTracePath.omitted)
+        let dest = sessionURL.appendingPathComponent(ScrumTracePath.omitted)
         if omitted.isEmpty {
-            try? FileManager.default.removeItem(at: url)
+            if (try? dest.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+                try? FileManager.default.removeItem(at: dest)
+            } else if ExportRel.isContainedRegularFile(dest, sessionRoot: sessionURL) {
+                try? FileManager.default.removeItem(at: dest)
+            }
             return
         }
         let lines = ["# Omitted from export", ""] + omitted.map {
             "- `\(ExportRel.omittedHandoffPath($0.path))` — \($0.reason)"
         }
-        try lines.joined(separator: "\n").write(to: url, atomically: true, encoding: .utf8)
+        try ExportRel.writeExportText(lines.joined(separator: "\n"), relative: ScrumTracePath.omitted, sessionURL: sessionURL)
     }
 
     private func uniquedOmitted(_ items: [OmittedAsset]) -> [OmittedAsset] {
