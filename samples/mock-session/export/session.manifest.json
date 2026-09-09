@@ -1,0 +1,90 @@
+{
+  "manifest_version": "1.1.0",
+  "session_id": "2026-09-09-1530-mock01",
+  "created_at": "2026-09-09T15:30:00Z",
+  "pipeline_status": "completed",
+  "duration": {
+    "wall_seconds": 1635,
+    "media_seconds": 1620
+  },
+  "pauses": [
+    {
+      "pause_wall": 190.0,
+      "resume_wall": 205.0,
+      "duration": 15.0
+    }
+  ],
+  "product_context": {
+    "app_name": "AthleteTracker",
+    "repo_url": "https://github.com/acme/athlete-app",
+    "tech_stack": "Next.js, Tailwind, PostgreSQL"
+  },
+  "shots": [
+    {
+      "id": "shot-001",
+      "t_media": 188.2,
+      "raw_path": "shots/001.png",
+      "annotated_path": "shots/001.annotated.png",
+      "note": "Save button does nothing",
+      "source": "typed"
+    }
+  ],
+  "slices": [
+    {
+      "slice_id": "slice-01",
+      "start_media": 178.0,
+      "end_media": 198.0,
+      "trigger": "shot",
+      "associated_shot_id": "shot-001",
+      "clip_path": null,
+      "stills": [
+        "shots/001.annotated.png"
+      ],
+      "analysis_status": "success"
+    },
+    {
+      "slice_id": "slice-02",
+      "start_media": 420.0,
+      "end_media": 440.0,
+      "trigger": "pin",
+      "clip_path": "media/task-02/clip.mp4",
+      "stills": [
+        "media/task-02/shot-1.jpg"
+      ],
+      "analysis_status": "success"
+    }
+  ],
+  "tasks": [
+    {
+      "task_id": "TASK-01",
+      "source_slice_id": "slice-01",
+      "kind": "bug",
+      "status": "confirmed",
+      "title": "Save athlete does not persist a valid form",
+      "observed": "See shots/001.annotated.png \u2014 failure identity is in the image pixels.",
+      "stated": "this does nothing, it should store the athlete",
+      "inferred": "Client validation is not enabling Save after the date field is filled.",
+      "agent_instructions": "Inspect the Save control and form validation. Ground claims in the linked evidence only.",
+      "evidence_media": [
+        "shots/001.annotated.png",
+        "shots/001.png"
+      ]
+    },
+    {
+      "task_id": "TASK-02",
+      "source_slice_id": "slice-02",
+      "kind": "action_item",
+      "status": "confirmed",
+      "title": "Ingest stall recovery sequence",
+      "observed": "See media/task-02/clip.mp4 \u2014 recovery order is in the clip.",
+      "stated": "Walk through the recovery overlay, then we can ship the ingest hotfix.",
+      "inferred": "Ingest and overlay share a sync flag that must be toggled before the worker restart.",
+      "agent_instructions": "Inspect the ingest recovery overlay. Use only the linked clip.",
+      "evidence_media": [
+        "media/task-02/clip.mp4",
+        "media/task-02/shot-1.jpg"
+      ]
+    }
+  ],
+  "omitted": []
+}

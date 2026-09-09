@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AthleteTracker · ScrumTrace</title>
+  <style>@import url("https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;1,500&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap");
+
+:root {
+  --ink: #0c0b09;
+  --panel: #16140f;
+  --panel-2: #1e1b16;
+  --paper: #ede6d6;
+  --amber: #f0a35e;
+  --rec: #e23b2e;
+  --sage: #8fbf9f;
+  --line: rgba(237, 230, 214, 0.12);
+  --muted: rgba(237, 230, 214, 0.62);
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--ink); color: var(--paper); }
+body {
+  font-family: "IBM Plex Sans", sans-serif;
+  min-height: 100vh;
+  background:
+    repeating-linear-gradient(
+      90deg,
+      #0a0907 0 18px,
+      #120f0b 18px 26px
+    ),
+    radial-gradient(1200px 600px at 80% -10%, rgba(240, 163, 94, 0.08), transparent 50%);
+}
+
+.sprocket {
+  position: fixed;
+  inset: 0 auto 0 0;
+  width: 28px;
+  background:
+    repeating-linear-gradient(
+      #0c0b09 0 18px,
+      #d7c7a2 18px 26px,
+      #0c0b09 26px 44px
+    );
+  opacity: 0.35;
+  pointer-events: none;
+}
+
+.shell { margin-left: 42px; padding: 28px 8vw 80px; }
+
+.slate {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 18px;
+  align-items: end;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 22px;
+  margin-bottom: 28px;
+}
+.clapper {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--amber);
+}
+h1 {
+  font-family: "Cormorant Garamond", serif;
+  font-weight: 500;
+  font-size: clamp(2.4rem, 5vw, 4.6rem);
+  margin: 0;
+  letter-spacing: -0.03em;
+  line-height: 0.9;
+}
+h1 em { font-style: italic; color: var(--amber); }
+.meta { display: flex; flex-wrap: wrap; gap: 14px 22px; color: var(--muted); font-family: "IBM Plex Mono", monospace; font-size: 12px; }
+.meta a { color: var(--paper); }
+
+.ruler {
+  position: relative;
+  height: 28px;
+  margin: 18px 0 36px;
+  background: linear-gradient(90deg, rgba(237,230,214,0.08), rgba(237,230,214,0.02));
+  border-radius: 999px;
+  overflow: hidden;
+}
+.ruler .pause {
+  position: absolute;
+  top: 0; bottom: 0;
+  background: repeating-linear-gradient(135deg, #3a2a18, #3a2a18 4px, #1a1610 4px, #1a1610 8px);
+}
+.ruler .shot {
+  position: absolute;
+  top: 4px;
+  width: 8px; height: 8px;
+  background: var(--rec);
+  border-radius: 50%;
+  transform: translateX(-50%);
+}
+
+.take {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  padding: 22px;
+  margin: 0 0 22px;
+}
+.take header { display: flex; flex-wrap: wrap; gap: 10px; align-items: baseline; }
+.take .slate {
+  border: 0; padding: 0; margin: 0;
+  font-family: "IBM Plex Mono", monospace;
+  color: var(--amber);
+}
+.take .kind {
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--sage);
+}
+.take h2 {
+  flex-basis: 100%;
+  font-family: "Cormorant Garamond", serif;
+  font-size: 1.8rem;
+  margin: 4px 0 12px;
+}
+.epistemic {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin: 0 0 16px;
+}
+.epistemic div {
+  background: var(--panel-2);
+  padding: 12px 14px;
+  border-radius: 12px;
+}
+.epistemic dt {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--amber);
+  margin-bottom: 6px;
+}
+.epistemic dd { margin: 0; font-size: 14px; line-height: 1.45; color: var(--paper); }
+.agent { color: var(--muted); font-size: 14px; }
+blockquote {
+  margin: 12px 0;
+  padding: 10px 14px;
+  border-left: 2px solid var(--amber);
+  color: var(--paper);
+  background: rgba(240, 163, 94, 0.05);
+}
+.spk { display: block; font-family: "IBM Plex Mono", monospace; font-size: 11px; color: var(--amber); margin-bottom: 4px; }
+.evidence { display: grid; grid-template-columns: 1.2fr 0.8fr; gap: 12px; margin-top: 12px; }
+.clip { width: 100%; border-radius: 12px; background: #000; }
+.still img, figure img { width: 100%; border-radius: 12px; display: block; }
+.contact { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 14px; }
+figure { margin: 0; }
+figcaption { font-family: "IBM Plex Mono", monospace; font-size: 11px; color: var(--muted); margin-top: 8px; }
+
+.review { margin-top: 48px; }
+.review summary {
+  cursor: pointer;
+  font-family: "IBM Plex Mono", monospace;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--amber);
+}
+
+.lightbox {
+  position: fixed; inset: 0;
+  background: rgba(6,5,4,0.92);
+  display: none;
+  place-items: center;
+  z-index: 20;
+  padding: 24px;
+}
+.lightbox.open { display: grid; }
+.lightbox img { max-width: min(92vw, 1400px); max-height: 92vh; }
+
+@media (max-width: 860px) {
+  .shell { margin-left: 0; padding: 18px 18px 64px; }
+  .sprocket { display: none; }
+  .epistemic, .evidence { grid-template-columns: 1fr; }
+  .slate { grid-template-columns: 1fr; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; transition: none !important; }
+}
+</style>
+</head>
+<body>
+  <div class="sprocket" aria-hidden="true"></div>
+  <div class="shell">
+    <header class="slate">
+      <div>
+        <div class="clapper">ScrumTrace · session slate</div>
+        <h1>AthleteTracker<br><em>2026-09-09-1530-mock01</em></h1>
+      </div>
+      <div class="meta">
+        <span>t_media 27:00</span>
+        <span>wall 27:15</span>
+        <span>1 pauses</span>
+        <span>2 confirmed</span>
+        <span>0 review</span>
+      </div>
+      <div class="meta">
+        <span>AthleteTracker</span>
+        <span>Next.js, Tailwind, PostgreSQL</span>
+        <a href="https://github.com/acme/athlete-app">https://github.com/acme/athlete-app</a>
+        <span>2026-09-09T15:30:00Z</span>
+      </div>
+    </header>
+    <div class="ruler"><i class="pause" style="left:12%;width:3%"></i><b class="shot" style="left:18%"></b></div>
+    <section>
+      
+    <article class="take" id="TASK-01" data-status="confirmed">
+      <header>
+        <span class="slate">TASK-01</span>
+        <span class="kind">bug</span>
+        <h2>Save athlete does not persist a valid form</h2>
+      </header>
+      <dl class="epistemic">
+        <div><dt>Observed</dt><dd>Open the annotated shot. Read the Save control and the error banner. Do not guess codes that are only in the pixels.</dd></div>
+        <div><dt>Stated</dt><dd>This does nothing, it should store the athlete.</dd></div>
+        <div><dt>Inferred</dt><dd>Client validation or submit handler is not enabling Save after the date field is filled.</dd></div>
+      </dl>
+      <p class="agent">Inspect the Save control and form validation on the athlete create screen. Ground claims in the linked evidence only.</p>
+      <blockquote><span class="spk">presenter</span>this does nothing, it should store the athlete</blockquote>
+      <div class="evidence">
+        <a class="still" href="shots/001.annotated.png" data-lightbox><img src="shots/001.annotated.png" alt="Save control"></a>
+      </div>
+    </article>
+    <article class="take" id="TASK-02" data-status="confirmed">
+      <header>
+        <span class="slate">TASK-02</span>
+        <span class="kind">action item</span>
+        <h2>Ingest stall recovery sequence</h2>
+      </header>
+      <dl class="epistemic">
+        <div><dt>Observed</dt><dd>Play media/task-02/clip.mp4. The operator overlay shows the recovery order. Do not invent the steps from this page.</dd></div>
+        <div><dt>Stated</dt><dd>Walk through the recovery overlay, then we can ship the ingest hotfix.</dd></div>
+        <div><dt>Inferred</dt><dd>Ingest and live overlay share a sync flag that must be toggled before the worker restart.</dd></div>
+      </dl>
+      <p class="agent">Inspect the ingest recovery overlay. Use only the linked clip. Do not invent UI copy, error codes, or sequences that are not in the evidence.</p>
+      <div class="evidence">
+        <video class="clip" controls preload="metadata" src="media/task-02/clip.mp4"></video>
+        <a class="still" href="media/task-02/shot-1.jpg" data-lightbox><img src="media/task-02/shot-1.jpg" alt="Clip still"></a>
+      </div>
+    </article>
+    
+    </section>
+    <section class="review">
+      <details>
+        <summary>Needs review</summary>
+        
+      </details>
+    </section>
+    <section>
+      <h2>Contact sheet</h2>
+      <div class="contact">
+    <figure>
+      <a href="shots/001.annotated.png" data-lightbox>
+        <img src="shots/001.annotated.png" alt="Shot 001">
+      </a>
+      <figcaption>shot-001 · 3:08 · Save control on new athlete</figcaption>
+    </figure>
+    </div>
+    </section>
+    <section class="review">
+      <details>
+        <summary>Transcript excerpts</summary>
+        <p>Save control is inert on a filled form. Recovery sequence is on the ingest overlay clip.</p>
+      </details>
+    </section>
+  </div>
+  <script>(() => {
+  const box = document.createElement("div");
+  box.className = "lightbox";
+  box.innerHTML = "<img alt=''>";
+  document.body.appendChild(box);
+  const img = box.querySelector("img");
+  const close = () => box.classList.remove("open");
+  box.addEventListener("click", close);
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") close();
+  });
+  document.querySelectorAll("[data-lightbox]").forEach((link) => {
+    link.addEventListener("click", (event) => {
+      event.preventDefault();
+      const href = link.getAttribute("href");
+      if (!href) return;
+      img.src = href;
+      box.classList.add("open");
+    });
+  });
+})();
+</script>
+</body>
+</html>

@@ -171,7 +171,14 @@ final class SessionProcessor: @unchecked Sendable {
         do {
             let response = try await provider.evaluate(request: request)
             slice.analysisStatus = .success
-            let tasks = tasks(from: response, slice: slice, shot: shot, product: manifest.productContext)
+            let tasks = tasks(
+                from: response,
+                slice: slice,
+                shot: shot,
+                product: manifest.productContext,
+                transcript: transcript,
+                sessionURL: sessionURL
+            )
             return (slice, tasks)
         } catch {
             slice.analysisStatus = .offlineFailed
@@ -186,7 +193,9 @@ final class SessionProcessor: @unchecked Sendable {
         from response: CandidateEvaluationResponse,
         slice: SliceRecord,
         shot: ShotRecord?,
-        product: ProductContext
+        product: ProductContext,
+        transcript: FullTranscript,
+        sessionURL: URL
     ) -> [TaskRecord] {
         var out: [TaskRecord] = []
         for (index, candidate) in response.candidates.enumerated() {
@@ -205,6 +214,15 @@ final class SessionProcessor: @unchecked Sendable {
             if status == .dropped {
                 continue
             }
+            let issues = EvidenceValidator.canConfirm(
+                candidate: candidate,
+                slice: slice,
+                transcript: transcript,
+                sessionURL: sessionURL
+            )
+            if !issues.isEmpty && status == .confirmed {
+                status = .needsReview
+            }
             let evidence = (slice.stills + [slice.clipPath].compactMap { $0 } + [shot?.annotatedPath ?? shot?.rawPath].compactMap { $0 })
             let uniqueEvidence = Array(NSOrderedSet(array: evidence)) as? [String] ?? evidence
             out.append(
@@ -219,7 +237,7 @@ final class SessionProcessor: @unchecked Sendable {
                     inferred: candidate.inferred,
                     agentInstructions: AgentInstructionTemplate.render(
                         kind: candidate.kind,
-                        product: manifest.productContext
+                        product: product
                     ),
                     quotes: candidate.quotes,
                     evidenceMedia: uniqueEvidence,

@@ -32,6 +32,15 @@ Grant Screen Recording and Microphone. First WhisperKit launch downloads `large-
 
 Give the agent **`export/`** only. Never drop the session root or `archive/` (master `session.mp4`, `audio.wav`, full transcript, raw events).
 
+Phase -1 mock pack (open in a browser or drop into Cursor):
+
+```bash
+python3 scripts/generate_mock_session.py
+python3 scripts/serve_preview.py --port 43147
+```
+
+Then open `samples/mock-session/export/SESSION_BRIEF.html`. The image-only failure code and the clip-only recovery sequence are **not** in `AGENT_CONTEXT.md` — they live in `shots/` and `media/task-02/clip.mp4`. See `samples/mock-session/HANDOFF_LOG.md`.
+
 ## Next gates
 
 1. Phase -1 mock `export/` + `HANDOFF_LOG.md`
