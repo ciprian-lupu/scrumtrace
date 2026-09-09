@@ -396,5 +396,11 @@ final class ShotNoteWindow: NSPanel {
         orderFrontRegardless()
     }
 
+    /// Close finishes the pre-pause annotation (C1). Persist is idempotent.
+    override func close() {
+        talk.persist()
+        super.close()
+    }
+
     override var canBecomeMain: Bool { false }
 }

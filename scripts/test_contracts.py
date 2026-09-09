@@ -295,6 +295,10 @@ def test_pause_gate_hold_to_talk() -> None:
     assert "addObserver" in shot
     assert "queue: nil" in shot
     assert "class ShotTalkState" in shot
+    assert "override func close()" in shot
+    close_fn = shot.split("override func close()")[1].split("override var canBecomeMain")[0]
+    assert "talk.persist()" in close_fn
+    assert close_fn.index("talk.persist()") < close_fn.index("super.close()")
     start_talk = shot.split("func startTalk()")[1].split("func abortTalk()")[0]
     assert "holdingTalk = true" in start_talk
     assert start_talk.index("guard let rec") < start_talk.index("holdingTalk = true")
@@ -520,6 +524,11 @@ def test_pipeline_timing_stays_in_archive() -> None:
     assert "ResumeOnce" in sampler
     assert "requestTrust" in sampler
     assert "private var suspended = false" in sampler
+    sample_fn = sampler.split("func sample(")[1].split("func readFrontmost")[0]
+    assert sample_fn.count("isSuspended") >= 3
+    read_fn = sampler.split("func readFrontmost")[1].split("func documentURL")[0]
+    assert read_fn.count("isSuspended") >= 3
+    assert "if isSuspended { return nil }" in read_fn
     icons = ROOT / "ScrumTrace" / "Assets.xcassets" / "AppIcon.appiconset"
     for name in ("icon_16.png", "icon_32.png", "icon_64.png", "icon_128.png", "icon_256.png", "icon_512.png", "icon_1024.png"):
         assert (icons / name).is_file(), name

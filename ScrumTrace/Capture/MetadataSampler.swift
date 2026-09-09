@@ -52,6 +52,7 @@ final class MetadataSampler: @unchecked Sendable {
     }
 
     private func readFrontmost() -> WindowMetadata? {
+        if isSuspended { return nil }
         let system = AXUIElementCreateSystemWide()
         var focused: AnyObject?
         let focusedStatus = AXUIElementCopyAttributeValue(
@@ -59,14 +60,16 @@ final class MetadataSampler: @unchecked Sendable {
             kAXFocusedApplicationAttribute as CFString,
             &focused
         )
+        if isSuspended { return nil }
         guard focusedStatus == .success, let app = focused else {
-            return NSWorkspaceFallback.frontmost()
+            return isSuspended ? nil : NSWorkspaceFallback.frontmost()
         }
         let appElement = unsafeBitCast(app, to: AXUIElement.self)
         var titleRef: AnyObject?
         AXUIElementCopyAttributeValue(appElement, kAXTitleAttribute as CFString, &titleRef)
         var windowRef: AnyObject?
         AXUIElementCopyAttributeValue(appElement, kAXFocusedWindowAttribute as CFString, &windowRef)
+        if isSuspended { return nil }
         var windowTitle: String = (titleRef as? String) ?? ""
         if let window = windowRef {
             let windowElement = unsafeBitCast(window, to: AXUIElement.self)
@@ -76,6 +79,7 @@ final class MetadataSampler: @unchecked Sendable {
                 windowTitle = text
             }
             if let url = Self.documentURL(from: windowElement) {
+                if isSuspended { return nil }
                 let bundle = NSWorkspaceFallback.frontmost()?.bundleIdentifier ?? ""
                 return WindowMetadata(
                     appName: (titleRef as? String) ?? "App",
@@ -85,6 +89,7 @@ final class MetadataSampler: @unchecked Sendable {
                 )
             }
         }
+        if isSuspended { return nil }
         return WindowMetadata(
             appName: (titleRef as? String) ?? "App",
             windowTitle: windowTitle,
