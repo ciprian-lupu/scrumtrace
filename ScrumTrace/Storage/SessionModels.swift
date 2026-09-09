@@ -82,8 +82,8 @@ enum ExportRel {
     static func containedRelative(_ path: String, sessionURL: URL) -> String? {
         guard isUnderSession(path), let parts = normalizedComponents(path) else { return nil }
         let joined = parts.joined(separator: "/")
-        let root = sessionURL.standardizedFileURL
-        let url = sessionURL.appendingPathComponent(joined).standardizedFileURL
+        let root = sessionURL.standardizedFileURL.resolvingSymlinksInPath()
+        let url = sessionURL.appendingPathComponent(joined).standardizedFileURL.resolvingSymlinksInPath()
         let rootPath = root.path
         guard url.path == rootPath || url.path.hasPrefix(rootPath + "/") else { return nil }
         return joined

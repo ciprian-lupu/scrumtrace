@@ -168,12 +168,14 @@ struct ShotNoteView: View {
                 abortTalk()
             }
         }
+        .onDisappear {
+            abortTalk()
+        }
     }
 
     private func startTalk() {
         guard !holdingTalk else { return }
         guard allowsNewCapture() else { return }
-        holdingTalk = true
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(
             "scrumtrace-note-\(UUID().uuidString).wav"
         )
@@ -185,8 +187,10 @@ struct ShotNoteView: View {
             AVLinearPCMBitDepthKey: 16,
             AVLinearPCMIsFloatKey: false
         ]
-        recorder = try? AVAudioRecorder(url: url, settings: settings)
-        recorder?.record()
+        guard let rec = try? AVAudioRecorder(url: url, settings: settings) else { return }
+        holdingTalk = true
+        recorder = rec
+        rec.record()
     }
 
     private func abortTalk() {

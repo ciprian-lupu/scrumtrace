@@ -105,7 +105,7 @@ enum EvidenceValidator {
             copy.evidenceMedia = task.evidenceMedia.filter { path in
                 exportFileExists(path, sessionURL: sessionURL)
             }
-            if copy.status == .confirmed && copy.evidenceMedia.isEmpty {
+            if copy.status == .confirmed && (copy.evidenceMedia.isEmpty || copy.sourceSliceId.isEmpty) {
                 copy.status = .needsReview
             }
             return copy

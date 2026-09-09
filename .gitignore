@@ -13,3 +13,5 @@ secrets*
 *.xcscmblueprint
 .idea/
 agent-tools/
+scripts/__pycache__/
+

@@ -524,8 +524,22 @@ final class ContractTests: XCTestCase {
             evidenceMedia: ["archive/shots/001.png"],
             confidence: 0.9
         )
+        let noSlice = TaskRecord(
+            taskId: "TASK-04",
+            sourceSliceId: "",
+            kind: .bug,
+            status: .confirmed,
+            title: "No slice",
+            observed: "x",
+            stated: "",
+            inferred: "",
+            agentInstructions: "inspect",
+            quotes: [],
+            evidenceMedia: ["shots/001.jpg"],
+            confidence: 0.9
+        )
         let applied = EvidenceValidator.applyExportEvidence(
-            tasks: [kept, missing, archiveOnly],
+            tasks: [kept, missing, archiveOnly, noSlice],
             sessionURL: root
         )
         XCTAssertEqual(applied[0].status, .confirmed)
@@ -534,6 +548,26 @@ final class ContractTests: XCTestCase {
         XCTAssertTrue(applied[1].evidenceMedia.isEmpty)
         XCTAssertEqual(applied[2].status, .needsReview)
         XCTAssertTrue(applied[2].evidenceMedia.isEmpty)
+        XCTAssertEqual(applied[3].status, .needsReview)
+        XCTAssertEqual(applied[3].evidenceMedia, ["shots/001.jpg"])
+    }
+
+    func testExistingSessionFileRejectsSymlinkEscape() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("scrumtrace-sym-\(UUID().uuidString)")
+        let shots = root.appendingPathComponent("archive/shots")
+        try FileManager.default.createDirectory(at: shots, withIntermediateDirectories: true)
+        let outside = FileManager.default.temporaryDirectory.appendingPathComponent("scrumtrace-outside-\(UUID().uuidString)")
+        try Data("secret".utf8).write(to: outside)
+        defer {
+            try? FileManager.default.removeItem(at: root)
+            try? FileManager.default.removeItem(at: outside)
+        }
+        try FileManager.default.createSymbolicLink(
+            at: shots.appendingPathComponent("001.png"),
+            withDestinationURL: outside
+        )
+        XCTAssertNil(ExportRel.existingSessionFile("archive/shots/001.png", sessionURL: root))
+        XCTAssertNil(ExportRel.containedRelative("archive/shots/001.png", sessionURL: root))
     }
 
     func testKeywordTaskClipIsDroppedAfterExtraStills() throws {

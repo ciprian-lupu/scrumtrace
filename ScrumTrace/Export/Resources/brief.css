@@ -138,6 +138,12 @@ h1 em { font-style: italic; color: var(--amber); }
 }
 .epistemic dd { margin: 0; font-size: 14px; line-height: 1.45; color: var(--paper); }
 .agent { color: var(--muted); font-size: 14px; }
+.excerpt {
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--muted);
+  margin: 0 0 12px;
+}
 blockquote {
   margin: 12px 0;
   padding: 10px 14px;

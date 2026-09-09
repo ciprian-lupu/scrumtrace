@@ -60,7 +60,9 @@ enum PromptTemplates {
     }
 
     static func sanitizeUntrusted(_ body: String) -> String {
-        body.replacingOccurrences(of: "</untrusted_meeting_data>", with: "", options: .caseInsensitive)
+        body
+            .replacingOccurrences(of: "</untrusted_meeting_data>", with: "", options: .caseInsensitive)
+            .replacingOccurrences(of: "<untrusted_meeting_data>", with: "", options: .caseInsensitive)
     }
 
     static func evaluationUserPrompt(

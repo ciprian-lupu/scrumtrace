@@ -1,6 +1,7 @@
 import AVFoundation
 import CoreMedia
 import CoreVideo
+import Darwin
 import Foundation
 import ScreenCaptureKit
 
@@ -355,13 +356,54 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         let format = input.outputFormat(forBus: 0)
         input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
             guard let self else { return }
+            // The tap reuses `buffer`. Copy before hopping queues or pause-dropped
+            // frames can still scribble into a later WAV write (C1).
+            guard let copy = Self.copyPCM(buffer) else { return }
             self.writerQueue.async {
                 guard !self.paused, self.started else { return }
-                self.writeEngineBuffer(buffer)
+                self.writeEngineBuffer(copy)
             }
         }
         try engine.start()
         self.engine = engine
+    }
+
+    /// Snapshot a tap buffer. AVAudioEngine reuses the pointer after the callback returns.
+    static func copyPCM(_ buffer: AVAudioPCMBuffer) -> AVAudioPCMBuffer? {
+        guard let copy = AVAudioPCMBuffer(pcmFormat: buffer.format, frameCapacity: buffer.frameLength) else {
+            return nil
+        }
+        copy.frameLength = buffer.frameLength
+        let frames = Int(buffer.frameLength)
+        let channels = Int(buffer.format.channelCount)
+        if let src = buffer.floatChannelData, let dst = copy.floatChannelData {
+            for channel in 0..<channels {
+                dst[channel].update(from: src[channel], count: frames)
+            }
+            return copy
+        }
+        if let src = buffer.int16ChannelData, let dst = copy.int16ChannelData {
+            for channel in 0..<channels {
+                dst[channel].update(from: src[channel], count: frames)
+            }
+            return copy
+        }
+        if let src = buffer.int32ChannelData, let dst = copy.int32ChannelData {
+            for channel in 0..<channels {
+                dst[channel].update(from: src[channel], count: frames)
+            }
+            return copy
+        }
+        let srcBuffers = UnsafeMutableAudioBufferListPointer(
+            UnsafeMutablePointer(mutating: buffer.audioBufferList)
+        )
+        let dstBuffers = UnsafeMutableAudioBufferListPointer(copy.mutableAudioBufferList)
+        for index in 0..<min(srcBuffers.count, dstBuffers.count) {
+            guard let srcData = srcBuffers[index].mData, let dstData = dstBuffers[index].mData else { continue }
+            memcpy(dstData, srcData, Int(srcBuffers[index].mDataByteSize))
+            dstBuffers[index].mDataByteSize = srcBuffers[index].mDataByteSize
+        }
+        return copy
     }
 
     private func writeEngineBuffer(_ buffer: AVAudioPCMBuffer) {

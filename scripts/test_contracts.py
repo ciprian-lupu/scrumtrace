@@ -78,6 +78,7 @@ def test_html_escaper_order() -> None:
     models = (ROOT / "ScrumTrace" / "Storage" / "SessionModels.swift").read_text()
     assert "normalizedComponents" in models
     assert 'part == ".."' in models
+    assert "resolvingSymlinksInPath" in models
     gen = (ROOT / "scripts" / "generate_mock_session.py").read_text()
     assert "def fill_template" in gen
     assert "html.replace(key, value)" not in gen
@@ -157,6 +158,10 @@ def test_pause_gate_hold_to_talk() -> None:
     shot = (ROOT / "ScrumTrace" / "UI" / "ShotNoteWindow.swift").read_text()
     assert "abortTalk" in shot
     assert "scrumTraceCaptureGate" in shot
+    assert ".onDisappear" in shot
+    start_talk = shot.split("private func startTalk()")[1].split("private func abortTalk()")[0]
+    assert "holdingTalk = true" in start_talk
+    assert start_talk.index("guard let rec") < start_talk.index("holdingTalk = true")
     hud = (ROOT / "ScrumTrace" / "UI" / "RecordingHUDWindow.swift").read_text()
     assert "allowsNewCapture" in hud
 
@@ -180,6 +185,10 @@ def test_audio_split_and_brief_loader() -> None:
     assert "microphoneWav" in recorder
     assert "CaptureAudioLayout" in recorder
     assert "guard !paused, started else { return }" in recorder
+    assert "func copyPCM" in recorder
+    tap = recorder.split("func startMicrophoneFallback")[1].split("func copyPCM")[0]
+    assert "copyPCM(buffer)" in tap
+    assert "writeEngineBuffer(buffer)" not in tap
     brief = (ROOT / "ScrumTrace" / "Export" / "SessionBriefRenderer.swift").read_text()
     assert "Export/Resources" in brief
     menu = (ROOT / "ScrumTrace" / "UI" / "MenuBarController.swift").read_text()
@@ -337,6 +346,14 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "for pass in 0..<3" in processor
     prompts = (ROOT / "ScrumTrace" / "AI" / "PromptTemplates.swift").read_text()
     assert "wrapUntrusted(\"Window metadata" in prompts
+    sanitize = prompts.split("func sanitizeUntrusted")[1].split("func evaluationUserPrompt")[0]
+    assert "</untrusted_meeting_data>" in sanitize
+    assert "<untrusted_meeting_data>" in sanitize
+    processor = (ROOT / "ScrumTrace" / "Processing" / "SessionProcessor.swift").read_text()
+    assert "wrapUntrustedInline(draft)" in processor
+    brief = (ROOT / "ScrumTrace" / "Export" / "SessionBriefRenderer.swift").read_text()
+    assert "func transcriptHTML" in brief
+    assert "excerpts[task.taskId]" in brief.split("func taskCard")[1].split("func transcriptHTML")[0]
     settings = (ROOT / "ScrumTrace" / "UI" / "SettingsView.swift").read_text()
     assert "capabilities.acceptsText" in settings
     assert "willUploadClip" in settings

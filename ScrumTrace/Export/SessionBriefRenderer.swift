@@ -68,7 +68,7 @@ struct SessionBriefRenderer {
             "{{NEEDS_REVIEW_HTML}}": review.isEmpty ? "" : review.map { taskCard($0, excerpts: excerpts) }.joined(),
             "{{TIMELINE_HTML}}": timeline(manifest),
             "{{SHOTS_HTML}}": shots(manifest),
-            "{{TRANSCRIPT_HTML}}": excerpts.values.map { "<p>\(HTMLEscaper.escape($0))</p>" }.joined(),
+            "{{TRANSCRIPT_HTML}}": transcriptHTML(manifest: manifest, excerpts: excerpts),
             "{{CONFIRMED_COUNT}}": "\(confirmed.count)",
             "{{REVIEW_COUNT}}": "\(review.count)",
             "{{OMITTED_HTML}}": omittedHTML(manifest)
@@ -119,6 +119,12 @@ struct SessionBriefRenderer {
             let when = "t_media \(Self.clock(quote.tMediaStart))–\(Self.clock(quote.tMediaEnd))"
             return "<blockquote><span class=\"spk\">\(HTMLEscaper.escape(quote.speaker))</span><span class=\"when\">\(HTMLEscaper.escape(when))</span>\(HTMLEscaper.escape(quote.text))</blockquote>"
         }.joined()
+        let excerpt: String
+        if let text = excerpts[task.taskId], !text.isEmpty {
+            excerpt = "<p class=\"excerpt\">\(HTMLEscaper.escape(text))</p>"
+        } else {
+            excerpt = ""
+        }
         return """
         <article class="take" id="\(HTMLEscaper.escape(task.taskId))" data-status="\(task.status.rawValue)">
           <header>
@@ -133,9 +139,17 @@ struct SessionBriefRenderer {
           </dl>
           <p class="agent">\(HTMLEscaper.escape(task.agentInstructions))</p>
           \(quotes)
+          \(excerpt)
           <div class="evidence">\(media)</div>
         </article>
         """
+    }
+
+    private func transcriptHTML(manifest: SessionManifest, excerpts: [String: String]) -> String {
+        manifest.tasks.compactMap { task -> String? in
+            guard let text = excerpts[task.taskId], !text.isEmpty else { return nil }
+            return "<p><span class=\"slate\">\(HTMLEscaper.escape(task.taskId))</span> \(HTMLEscaper.escape(text))</p>"
+        }.joined()
     }
 
     private func timeline(_ manifest: SessionManifest) -> String {
@@ -267,6 +281,7 @@ struct SessionBriefRenderer {
     .ruler .pause { position: absolute; top: 0; bottom: 0; background: #3a2a18; }
     .ruler .shot { position: absolute; top: 4px; width: 8px; height: 8px; background: var(--rec); border-radius: 50%; transform: translateX(-50%); }
     .take { background: var(--panel); border: 1px solid var(--line); border-radius: 18px; padding: 22px; margin: 0 0 22px; }
+    .excerpt { font-size: 13px; color: var(--muted); margin: 0 0 12px; }
     .epistemic { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
     .clip { width: 100%; border-radius: 12px; background: #000; }
     .still img, figure img { width: 100%; border-radius: 12px; display: block; }

@@ -97,7 +97,9 @@ def test_frame_ref_basename_resolves() -> None:
     assert "existingSessionFile" in validator
     models = (ROOT / "ScrumTrace" / "Storage" / "SessionModels.swift").read_text()
     assert "func existingSessionFile" in models
+    assert "resolvingSymlinksInPath" in models
     assert "archive/shots/" in validator
+    assert "sourceSliceId.isEmpty" in validator
     slicer = (ROOT / "ScrumTrace" / "Slicing" / "MeetingSlicer.swift").read_text()
     assert "clipMaxDuration" in slicer
     plist = (ROOT / "ScrumTrace" / "App" / "Info.plist").read_text()
