@@ -6,7 +6,7 @@ final class MenuBarController {
     private let controller: SessionController
     private let item: NSStatusItem
     private var hud: RecordingHUDWindow?
-    private var cancellable: Any?
+    private var lastMenuSignature = ""
 
     init(controller: SessionController, hud: RecordingHUDWindow) {
         self.controller = controller
@@ -17,13 +17,6 @@ final class MenuBarController {
             button.image?.isTemplate = true
         }
         rebuild()
-        NotificationCenter.default.addObserver(
-            forName: .init("ScrumTrace.rebuildMenu"),
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            self?.rebuild()
-        }
         Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
             self?.sync()
         }
@@ -37,7 +30,17 @@ final class MenuBarController {
                 : (controller.isRecording ? "record.circle.fill" : "record.circle")
             button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: "ScrumTrace")
         }
-        rebuild()
+        let signature = [
+            controller.phase.rawValue,
+            controller.lastSessionId ?? "",
+            controller.isBusy ? "1" : "0",
+            controller.statusLine,
+            controller.captureState.rawValue
+        ].joined(separator: "|")
+        if signature != lastMenuSignature {
+            lastMenuSignature = signature
+            rebuild()
+        }
     }
 
     private func rebuild() {
@@ -57,6 +60,11 @@ final class MenuBarController {
         } else {
             menu.addItem(actionItem("Start recording", #selector(start)))
         }
+        if controller.isBusy {
+            let status = NSMenuItem(title: controller.statusLine, action: nil, keyEquivalent: "")
+            status.isEnabled = false
+            menu.addItem(status)
+        }
         menu.addItem(.separator())
         let retry = actionItem("Retry analysis", #selector(retry))
         retry.isEnabled = controller.lastSessionId != nil
@@ -73,11 +81,27 @@ final class MenuBarController {
             for session in sessions {
                 let item = NSMenuItem(
                     title: "\(session.sessionId) · \(PipelineStatusOrder.label(session.pipelineStatus))",
+                    action: nil,
+                    keyEquivalent: ""
+                )
+                let sub = NSMenu()
+                let revealItem = NSMenuItem(
+                    title: "Reveal export/",
                     action: #selector(openRecent(_:)),
                     keyEquivalent: ""
                 )
-                item.representedObject = session.sessionId
-                item.target = self
+                revealItem.representedObject = session.sessionId
+                revealItem.target = self
+                let retryItem = NSMenuItem(
+                    title: "Retry analysis",
+                    action: #selector(retryRecent(_:)),
+                    keyEquivalent: ""
+                )
+                retryItem.representedObject = session.sessionId
+                retryItem.target = self
+                sub.addItem(revealItem)
+                sub.addItem(retryItem)
+                item.submenu = sub
                 recentMenu.addItem(item)
             }
         }
@@ -118,6 +142,11 @@ final class MenuBarController {
     @objc private func openRecent(_ sender: NSMenuItem) {
         guard let id = sender.representedObject as? String else { return }
         controller.vault.revealInFinder(sessionId: id)
+    }
+
+    @objc private func retryRecent(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? String else { return }
+        controller.retryAnalysis(sessionId: id)
     }
 }
 #endif

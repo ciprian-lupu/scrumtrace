@@ -105,6 +105,18 @@ def test_retry_failed_slices_and_pins() -> None:
     assert "mergePins" in controller
 
 
+def test_audio_split_and_brief_loader() -> None:
+    recorder = (ROOT / "ScrumTrace" / "Capture" / "SessionRecorder.swift").read_text()
+    assert "appendAudioToMovie" in recorder
+    assert "case .microphone:" in recorder
+    assert "writeWav(from: sampleBuffer)" in recorder
+    brief = (ROOT / "ScrumTrace" / "Export" / "SessionBriefRenderer.swift").read_text()
+    assert "Export/Resources" in brief
+    menu = (ROOT / "ScrumTrace" / "UI" / "MenuBarController.swift").read_text()
+    assert "retryRecent" in menu
+    assert "lastMenuSignature" in menu
+
+
 def main() -> None:
     test_export_has_no_archive_and_no_tokens()
     test_agent_context_uses_export_relative_paths()
@@ -116,6 +128,7 @@ def main() -> None:
     test_handoff_log_names_mp4_tools()
     test_pause_gate_hold_to_talk()
     test_retry_failed_slices_and_pins()
+    test_audio_split_and_brief_loader()
     print("contract tests ok")
 
 

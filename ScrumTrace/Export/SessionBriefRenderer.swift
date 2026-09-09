@@ -2,13 +2,25 @@ import Foundation
 
 enum BriefTemplateLoader {
     static func text(_ name: String, ext: String) -> String {
-        if let url = Bundle.main.url(forResource: name, withExtension: ext, subdirectory: "Resources"),
-           let text = try? String(contentsOf: url, encoding: .utf8) {
-            return text
+        let subdirs = ["Resources", "Export/Resources", "Export"]
+        for folder in subdirs {
+            if let url = Bundle.main.url(forResource: name, withExtension: ext, subdirectory: folder),
+               let text = try? String(contentsOf: url, encoding: .utf8) {
+                return text
+            }
         }
         if let url = Bundle.main.url(forResource: name, withExtension: ext),
            let text = try? String(contentsOf: url, encoding: .utf8) {
             return text
+        }
+        if let root = Bundle.main.resourceURL,
+           let enumerator = FileManager.default.enumerator(at: root, includingPropertiesForKeys: nil) {
+            for case let url as URL in enumerator {
+                if url.deletingPathExtension().lastPathComponent == name, url.pathExtension == ext,
+                   let text = try? String(contentsOf: url, encoding: .utf8) {
+                    return text
+                }
+            }
         }
         return ""
     }

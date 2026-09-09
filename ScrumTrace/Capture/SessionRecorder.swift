@@ -34,6 +34,7 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
     private var started = false
     private var firstVideoPTS: CMTime?
     private var firstAudioPTS: CMTime?
+    private var microphoneTap = false
 
     init(sessionURL: URL, clock: ClockSynchronizer) {
         self.sessionURL = sessionURL
@@ -73,9 +74,16 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         try stream.addStreamOutput(self, type: .screen, sampleHandlerQueue: writerQueue)
         try stream.addStreamOutput(self, type: .audio, sampleHandlerQueue: writerQueue)
         if #available(macOS 15.0, *) {
-            try? stream.addStreamOutput(self, type: .microphone, sampleHandlerQueue: writerQueue)
+            do {
+                try stream.addStreamOutput(self, type: .microphone, sampleHandlerQueue: writerQueue)
+                microphoneTap = true
+            } catch {
+                microphoneTap = false
+                try startMicrophoneFallback()
+            }
         } else {
             try startMicrophoneFallback()
+            microphoneTap = true
         }
         try await stream.startCapture()
         self.stream = stream
@@ -128,8 +136,13 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         switch type {
         case .screen:
             appendVideo(sampleBuffer)
-        case .audio, .microphone:
-            appendAudio(sampleBuffer)
+        case .audio:
+            appendAudioToMovie(sampleBuffer)
+            if !microphoneTap {
+                writeWav(from: sampleBuffer)
+            }
+        case .microphone:
+            writeWav(from: sampleBuffer)
         @unknown default:
             break
         }
@@ -146,14 +159,13 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         _ = videoInput.append(remapped)
     }
 
-    private func appendAudio(_ sampleBuffer: CMSampleBuffer) {
+    private func appendAudioToMovie(_ sampleBuffer: CMSampleBuffer) {
         guard !paused, started, CMSampleBufferDataIsReady(sampleBuffer) else { return }
         if let writer, writer.status == .writing, let audioInput, audioInput.isReadyForMoreMediaData {
             if let remapped = remappedBuffer(sampleBuffer, first: &firstAudioPTS) {
                 _ = audioInput.append(remapped)
             }
         }
-        writeWav(from: sampleBuffer)
     }
 
     private func remappedBuffer(_ sampleBuffer: CMSampleBuffer, first: inout CMTime?) -> CMSampleBuffer? {
@@ -178,6 +190,7 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
     }
 
     private func writeWav(from sampleBuffer: CMSampleBuffer) {
+        guard !paused, started else { return }
         guard let wavFile else { return }
         guard let formatDesc = CMSampleBufferGetFormatDescription(sampleBuffer),
               let asbdPtr = CMAudioFormatDescriptionGetStreamBasicDescription(formatDesc) else { return }
@@ -269,6 +282,7 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         firstVideoPTS = nil
         firstAudioPTS = nil
         paused = false
+        microphoneTap = false
     }
 
     private func startMicrophoneFallback() throws {

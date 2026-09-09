@@ -102,7 +102,12 @@ final class SessionController: ObservableObject {
 
     func retryAnalysis() {
         guard let id = lastSessionId ?? manifest?.sessionId else { return }
-        Task { await runProcessor(sessionId: id) }
+        retryAnalysis(sessionId: id)
+    }
+
+    func retryAnalysis(sessionId: String) {
+        lastSessionId = sessionId
+        Task { await runProcessor(sessionId: sessionId) }
     }
 
     func revealLast() {
