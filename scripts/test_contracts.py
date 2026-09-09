@@ -175,6 +175,9 @@ def test_clip_exporter_macos14() -> None:
     assert "containedExportMember" in tighten
     assert "existingSessionFile" in clip
     assert "clip_path escaped" in clip
+    assert "clip_path is not a working or export clip" in clip
+    assert "isAllowedClipDest" in clip
+    assert 'hasSuffix("/clip.mp4")' in clip
     assert "AVAssetExportPreset640x480" in clip
     assert "fileLengthLimit" in clip
     assert "clipVideoBitrate" in clip
@@ -609,6 +612,9 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "try await writerQueue.sync" not in recorder
     assert "evenCaptureSize" in start_fn
     assert "prepareWriters(width:" in start_fn
+    prepare = recorder.split("func prepareWriters")[1].split("func startMicrophoneFallback")[0]
+    assert "containedRelative" in prepare
+    assert "archive capture paths escaped" in prepare
     assert "config.width = size.width" in start_fn
     assert "config.height = size.height" in start_fn
     assert "AVVideoWidthKey: w" in recorder

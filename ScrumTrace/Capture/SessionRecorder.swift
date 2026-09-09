@@ -297,6 +297,10 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
     }
 
     private func prepareWriters(width: Int, height: Int) throws {
+        guard ExportRel.containedRelative(ScrumTracePath.sessionMovie, sessionURL: sessionURL) != nil,
+              ExportRel.containedRelative(ScrumTracePath.audioWav, sessionURL: sessionURL) != nil else {
+            throw SessionRecorderError.writerFailed("archive capture paths escaped the session folder.")
+        }
         let movieURL = sessionURL.appendingPathComponent(ScrumTracePath.sessionMovie)
         let wavURL = sessionURL.appendingPathComponent(ScrumTracePath.audioWav)
         try? FileManager.default.removeItem(at: movieURL)

@@ -22,6 +22,9 @@ struct ClipExporter {
         guard let containedClip = ExportRel.containedRelative(relativeClip, sessionURL: sessionURL) else {
             throw SessionRecorderError.writerFailed("Slice clip_path escaped the session folder.")
         }
+        guard isAllowedClipDest(containedClip) else {
+            throw SessionRecorderError.writerFailed("Slice clip_path is not a working or export clip.")
+        }
         let clipURL = sessionURL.appendingPathComponent(containedClip)
         try FileManager.default.createDirectory(
             at: clipURL.deletingLastPathComponent(),
@@ -31,10 +34,13 @@ struct ClipExporter {
 
         var updated = slice
         updated.clipPath = containedClip
-        let stillRelative = containedClip
-            .replacingOccurrences(of: "/clip.mp4", with: "/shot-1.jpg")
+        guard containedClip.hasSuffix("/clip.mp4") else {
+            return updated
+        }
+        let stillRelative = containedClip.replacingOccurrences(of: "/clip.mp4", with: "/shot-1.jpg")
         let stillURL = sessionURL.appendingPathComponent(stillRelative)
-        guard ExportRel.containedRelative(stillRelative, sessionURL: sessionURL) != nil else {
+        guard stillRelative != containedClip,
+              ExportRel.containedRelative(stillRelative, sessionURL: sessionURL) != nil else {
             return updated
         }
         do {
@@ -73,6 +79,21 @@ struct ClipExporter {
         for url in files.dropLast() {
             try? await tighten(file: url)
         }
+    }
+
+    /// Working clips live under `archive/media-work/`. Tighten rewrites
+    /// `export/media/` only. Never overwrite `archive/session.mp4`.
+    private func isAllowedClipDest(_ relative: String) -> Bool {
+        guard let parts = ExportRel.normalizedComponents(relative), parts.count >= 3 else {
+            return false
+        }
+        if parts[0] == "archive", parts[1] == "media-work" {
+            return true
+        }
+        if parts[0] == "export", parts[1] == "media" {
+            return true
+        }
+        return false
     }
 
     private func tighten(file url: URL) async throws {
