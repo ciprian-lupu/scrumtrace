@@ -869,6 +869,9 @@ def test_write_contained_data_refuses_directory_symlinks() -> None:
     write_fn = models.split("static func writeContainedData")[1].split("static func isAllowedClipDest")[0]
     assert "prepareContainedWrite" in write_fn
     assert "options: .atomic" in write_fn
+    assert "fsyncRegularFile" in write_fn
+    assert "Darwin.fsync" in write_fn
+    assert "O_NOFOLLOW" in write_fn
     assert "isContainedRegularFile" in write_fn
     assert "removeItemIfRegularFile" in write_fn
     assert "replaceItemAt" not in write_fn

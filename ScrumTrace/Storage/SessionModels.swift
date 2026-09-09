@@ -308,10 +308,31 @@ enum ExportRel {
         }
         do {
             try data.write(to: tmp, options: .atomic)
+            try fsyncRegularFile(tmp, relative: relative)
             try moveIntoSession(from: tmp, relative: relative, sessionURL: sessionURL)
         } catch {
             try? FileManager.default.removeItem(at: tmp)
             throw error
+        }
+    }
+
+    /// `O_NOFOLLOW` + `fsync` so a planted temp symlink is refused and Whisper JSON
+    /// is durable before `moveIntoSession`.
+    private static func fsyncRegularFile(_ url: URL, relative: String) throws {
+        if (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+            throw SessionVaultError.writeFailed(relative)
+        }
+        let fd = url.withUnsafeFileSystemRepresentation { ptr -> Int32 in
+            guard let ptr else { return -1 }
+            return Darwin.open(ptr, O_RDONLY | O_CLOEXEC | O_NOFOLLOW)
+        }
+        guard fd >= 0 else {
+            throw SessionVaultError.writeFailed(relative)
+        }
+        let ok = Darwin.fsync(fd) == 0
+        Darwin.close(fd)
+        guard ok else {
+            throw SessionVaultError.writeFailed(relative)
         }
     }
 
