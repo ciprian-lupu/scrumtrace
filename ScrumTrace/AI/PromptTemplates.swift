@@ -83,7 +83,7 @@ enum PromptTemplates {
         if !windowContext.isEmpty {
             parts.append(wrapUntrusted("Window metadata:\n\(windowContext)"))
         }
-        parts.append("Still paths: \(slice.stills.joined(separator: ", "))")
+        parts.append("Still paths: \(wrapUntrustedInline(slice.stills.joined(separator: ", ")))")
         parts.append(wrapUntrusted("Transcript excerpt:\n\(transcript)"))
         parts.append("Respond with JSON only:\n\(jsonSchemaHint)")
         return parts.joined(separator: "\n\n")

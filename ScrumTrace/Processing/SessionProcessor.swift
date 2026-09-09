@@ -154,6 +154,9 @@ final class SessionProcessor: @unchecked Sendable {
                     )
                     updatedSlices.append(result.0)
                     tasks.append(contentsOf: result.1)
+                    // Unique IDs only — do not rank/drop until every slice is in
+                    // (a crash must not lose extras that later ranking needs).
+                    tasks = uniquedTaskIds(tasks)
                     let done = Set(updatedSlices.map(\.sliceId))
                     let remaining = toRun.filter { !done.contains($0.sliceId) }
                     manifest.slices = (updatedSlices + remaining).sorted { $0.sliceId < $1.sliceId }
@@ -552,6 +555,15 @@ final class SessionProcessor: @unchecked Sendable {
 
     private func rankedTasks(_ tasks: [TaskRecord]) -> [TaskRecord] {
         TaskRanking.selectForPack(tasks)
+    }
+
+    /// Stable unique `TASK-NN` ids without dropping or reordering by pack rank.
+    private func uniquedTaskIds(_ tasks: [TaskRecord]) -> [TaskRecord] {
+        tasks.enumerated().map { index, task in
+            var copy = task
+            copy.taskId = String(format: "TASK-%02d", index + 1)
+            return copy
+        }
     }
 
     private func fallbackTask(shot: ShotRecord, slice: SliceRecord, error: Error?, product: ProductContext) -> TaskRecord {

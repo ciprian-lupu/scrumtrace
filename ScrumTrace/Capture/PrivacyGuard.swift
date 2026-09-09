@@ -123,10 +123,13 @@ final class CaptureFreeze: @unchecked Sendable {
         lock.lock()
         let rec = recorder
         lock.unlock()
+        let alreadyPaused = rec?.isPaused == true
         rec?.setPaused(true)
         sampler.isSuspended = true
         // Hold-to-Talk observers run on this queue (`queue: nil`) and abort
-        // before the MainActor HUD hop (C1).
+        // before the MainActor HUD hop (C1). Skip re-posting while already
+        // frozen so an open Shot annotation is not aborted every 0.4 s.
+        if alreadyPaused { return }
         NotificationCenter.default.post(
             name: .scrumTraceCaptureGate,
             object: CaptureSessionState.paused

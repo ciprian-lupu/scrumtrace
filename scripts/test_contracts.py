@@ -591,6 +591,9 @@ def test_pause_privacy_and_metadata_gate() -> None:
     assert "terminate" in quit_fn
     log_fn = controller.split("private func log(")[1].split("private func flashStatus")[0]
     assert "case .pin, .url, .window" in log_fn
+    flash = controller.split("private func flashStatus")[1].split("static func clock")[0]
+    assert "captureState.allowsNewCapture" in flash
+    assert "phase == .recording" in flash
     agent = (ROOT / "ScrumTrace" / "Export" / "AgentContextRenderer.swift").read_text()
     assert "this export folder" in agent
     assert "Never open the private capture folder" in agent
@@ -614,10 +617,12 @@ def test_pause_privacy_and_metadata_gate() -> None:
     tick = privacy.split("func tick()")[1].split("func currentCredentialApp")[0]
     assert "freezeCapture?()" in tick
     assert tick.index("freezeCapture") < tick.index("onTrip")
-    freeze_fn = privacy.split("final class CaptureFreeze")[1].split("func freeze()")[1]
-    assert "scrumTraceCaptureGate" in freeze_fn
-    assert "setPaused(true)" in freeze_fn
-    assert freeze_fn.index("setPaused(true)") < freeze_fn.index("scrumTraceCaptureGate")
+    freeze_body = privacy.split("func freeze()")[1]
+    assert "scrumTraceCaptureGate" in freeze_body
+    assert "setPaused(true)" in freeze_body
+    assert freeze_body.index("setPaused(true)") < freeze_body.index("scrumTraceCaptureGate")
+    assert "alreadyPaused" in freeze_body
+    assert freeze_body.index("alreadyPaused") < freeze_body.index("scrumTraceCaptureGate")
     toggle = controller.split("func togglePause()")[1].split("func pin()")[0]
     assert "captureState == .paused" in toggle
     assert "phase == .paused" not in toggle
@@ -721,6 +726,7 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "wrapUntrustedInline(product.appName)" in eval_prompt
     assert "wrapUntrustedInline(product.repoURL)" in eval_prompt
     assert "wrapUntrustedInline(product.techStack)" in eval_prompt
+    assert "wrapUntrustedInline(slice.stills.joined" in eval_prompt
     template = prompts.split("enum AgentInstructionTemplate")[1].split("enum PromptTemplates")[0]
     assert "wrapUntrustedInline(product.appName)" in template
     assert "the product" in template
@@ -979,6 +985,7 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "let remaining = toRun.filter" in eval_loop
     assert "rankedTasks" not in eval_loop
     assert "manifest.tasks = tasks" in eval_loop
+    assert "uniquedTaskIds(tasks)" in eval_loop
     eval_slice = processor.split("private func evaluateSlice")[1].split("private func tasks(")[0]
     assert eval_slice.count("abortedForAuth") >= 3
     assert eval_slice.rfind("abortedForAuth") < eval_slice.find("provider.evaluate")

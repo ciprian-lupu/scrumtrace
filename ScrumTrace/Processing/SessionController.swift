@@ -669,7 +669,7 @@ final class SessionController: ObservableObject {
 
     private func flashStatus() {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) { [weak self] in
-            guard let self, self.phase == .recording else { return }
+            guard let self, self.phase == .recording, self.captureState.allowsNewCapture else { return }
             self.statusLine = "Recording"
         }
     }

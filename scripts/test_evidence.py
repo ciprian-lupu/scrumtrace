@@ -155,6 +155,7 @@ def test_frame_ref_basename_resolves() -> None:
     assert "let remaining = toRun.filter" in eval_loop
     assert "rankedTasks" not in eval_loop
     assert "manifest.tasks = tasks" in eval_loop
+    assert "uniquedTaskIds(tasks)" in eval_loop
     assert "unknown task kind" in validator
     assert "decision is not keep" in validator
     assert "existingSessionFile" in validator
