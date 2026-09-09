@@ -15,7 +15,12 @@ struct SessionPackZipper {
         let zipURL = sessionURL.appendingPathComponent(ScrumTracePath.packZip)
         var omitted = uniquedOmitted(manifest.omitted)
 
-        try runZip(exportDir: exportDir, zipURL: zipURL)
+        do {
+            try runZip(exportDir: exportDir, zipURL: zipURL)
+        } catch {
+            omitted.append(OmittedAsset(path: "session-pack.zip", reason: error.localizedDescription))
+            return Result(zipURL: zipURL, byteCount: fileSize(zipURL), omitted: uniquedOmitted(omitted))
+        }
         var size = fileSize(zipURL)
 
         let dropList = PackBudget.omissionOrder(manifest: manifest, sessionURL: sessionURL)
@@ -26,8 +31,13 @@ struct SessionPackZipper {
             guard FileManager.default.fileExists(atPath: url.path) else { continue }
             try? FileManager.default.removeItem(at: url)
             omitted.append(OmittedAsset(path: ExportRel.toExportRoot(path), reason: "Pack over 35 MB; dropped by priority"))
-            try runZip(exportDir: exportDir, zipURL: zipURL)
-            size = fileSize(zipURL)
+            do {
+                try runZip(exportDir: exportDir, zipURL: zipURL)
+                size = fileSize(zipURL)
+            } catch {
+                omitted.append(OmittedAsset(path: "session-pack.zip", reason: error.localizedDescription))
+                break
+            }
         }
 
         if size > MediaBudget.maxZipBytes {
@@ -38,10 +48,10 @@ struct SessionPackZipper {
                 )
             )
         }
-        try writeOmittedMarkdown(sessionURL: sessionURL, omitted: omitted)
-        // Include OMITTED.md in the zip when present.
+        omitted = uniquedOmitted(omitted)
+        try? writeOmittedMarkdown(sessionURL: sessionURL, omitted: omitted)
         if omitted.contains(where: { !$0.path.isEmpty }) {
-            try runZip(exportDir: exportDir, zipURL: zipURL)
+            try? runZip(exportDir: exportDir, zipURL: zipURL)
             size = fileSize(zipURL)
         }
         return Result(zipURL: zipURL, byteCount: size, omitted: omitted)

@@ -56,6 +56,9 @@ def main() -> None:
     active = [(12.0, None)]
     assert_close(media_time(12, active), 12, "active-12")
     assert_close(media_time(30, active), 12, "active-30")
+
+    mixed = [(10.0, 20.0), (50.0, None)]
+    assert_close(media_time(60, mixed), 40, "mixed-active")
     print("timeline contract ok")
 
 

@@ -8,12 +8,18 @@ final class WhisperTranscriber: @unchecked Sendable {
     private var kit: WhisperKit?
     private let lock = NSLock()
     private var preparing: Task<Void, Error>?
-    private(set) var isReady = false
+    private var ready = false
+
+    var isReady: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return ready
+    }
 
     func prepare(model: String = "large-v3-turbo") async throws {
         let work: Task<Void, Error>
         lock.lock()
-        if isReady {
+        if ready {
             lock.unlock()
             return
         }
@@ -35,7 +41,7 @@ final class WhisperTranscriber: @unchecked Sendable {
             let loaded = try await WhisperKit(config)
             self.lock.lock()
             self.kit = loaded
-            self.isReady = true
+            self.ready = true
             self.lock.unlock()
         }
         preparing = work
@@ -44,7 +50,7 @@ final class WhisperTranscriber: @unchecked Sendable {
             try await work.value
         } catch {
             lock.lock()
-            if !isReady {
+            if !self.ready {
                 preparing = nil
             }
             lock.unlock()
@@ -89,12 +95,15 @@ final class WhisperTranscriber: @unchecked Sendable {
 
     /// System audio lives in `archive/session.mp4`. Extract AAC, then fall back to the movie path.
     func transcribeMovieAudio(at movie: URL) async throws -> FullTranscript {
-        let dest = movie.deletingLastPathComponent().appendingPathComponent("system-audio-extract.m4a")
+        let dest = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "scrumtrace-system-audio-\(UUID().uuidString).m4a"
+        )
         do {
             try await extractAudio(from: movie, to: dest)
             defer { try? FileManager.default.removeItem(at: dest) }
             return try await transcribeFile(at: dest)
         } catch {
+            try? FileManager.default.removeItem(at: dest)
             return try await transcribeFile(at: movie)
         }
     }

@@ -159,11 +159,24 @@ def test_pipeline_timing_stays_in_archive() -> None:
     assert "pipeline-timing.json" not in zipper
     allow = (ROOT / "ScrumTrace" / "Export" / "SessionPackZipper.swift").read_text()
     assert "AGENT_CONTEXT.md" in allow
+    assert "try? runZip" in zipper
+    recorder = (ROOT / "ScrumTrace" / "Capture" / "SessionRecorder.swift").read_text()
+    assert "writerQueue.sync" in recorder
+    pause_fn = recorder.split("func setPaused")[1].split("func stop")[0]
+    assert "writerQueue.sync" in pause_fn
+    assert "writerQueue.async" not in pause_fn
+    speech = (ROOT / "ScrumTrace" / "Speech" / "WhisperTranscriber.swift").read_text()
+    assert "temporaryDirectory" in speech
+    assert "private var ready = false" in speech
     recorder = (ROOT / "ScrumTrace" / "Capture" / "SessionRecorder.swift").read_text()
     assert "AVCaptureDevice.requestAccess(for: .audio)" in recorder
     sampler = (ROOT / "ScrumTrace" / "Capture" / "MetadataSampler.swift").read_text()
     assert "ResumeOnce" in sampler
     assert "requestTrust" in sampler
+    assert "private var suspended = false" in sampler
+    icons = ROOT / "ScrumTrace" / "Assets.xcassets" / "AppIcon.appiconset"
+    for name in ("icon_16.png", "icon_32.png", "icon_64.png", "icon_128.png", "icon_256.png", "icon_512.png", "icon_1024.png"):
+        assert (icons / name).is_file(), name
     app = (ROOT / "ScrumTrace" / "App" / "AppDelegate.swift").read_text()
     assert "MetadataSampler.requestTrust" in app
     controller = (ROOT / "ScrumTrace" / "Processing" / "SessionController.swift").read_text()

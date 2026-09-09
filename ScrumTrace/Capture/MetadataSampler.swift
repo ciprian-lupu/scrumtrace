@@ -8,7 +8,21 @@ import Foundation
 /// runs off the main thread and is abandoned after 200ms.
 final class MetadataSampler: @unchecked Sendable {
     private let queue = DispatchQueue(label: "com.str8minds.ScrumTrace.metadata", qos: .userInitiated)
-    var isSuspended = false
+    private let lock = NSLock()
+    private var suspended = false
+
+    var isSuspended: Bool {
+        get {
+            lock.lock()
+            defer { lock.unlock() }
+            return suspended
+        }
+        set {
+            lock.lock()
+            suspended = newValue
+            lock.unlock()
+        }
+    }
 
     static func requestTrust() {
         let prompt = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String

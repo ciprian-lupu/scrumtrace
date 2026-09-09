@@ -96,8 +96,9 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
     }
 
     func setPaused(_ next: Bool) {
-        writerQueue.async { [weak self] in
-            guard let self else { return }
+        // sync: Pause must apply before the next SCStream/mic buffer on this queue.
+        // async left a window where paused samples were still appended (C1).
+        writerQueue.sync {
             guard self.paused != next else { return }
             self.paused = next
             if next {
@@ -109,6 +110,7 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
     }
 
     func stop() async throws {
+        writerQueue.sync { self.paused = true }
         if let stream {
             try await stream.stopCapture()
         }
