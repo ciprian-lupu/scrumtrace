@@ -533,6 +533,8 @@ def test_pipeline_timing_stays_in_archive() -> None:
     read_fn = sampler.split("func readFrontmost")[1].split("func documentURL")[0]
     assert read_fn.count("isSuspended") >= 3
     assert "if isSuspended { return nil }" in read_fn
+    assert "let fallback = NSWorkspaceFallback.frontmost()" in read_fn
+    assert read_fn.rfind("isSuspended") > read_fn.find("NSWorkspaceFallback.frontmost")
     icons = ROOT / "ScrumTrace" / "Assets.xcassets" / "AppIcon.appiconset"
     for name in ("icon_16.png", "icon_32.png", "icon_64.png", "icon_128.png", "icon_256.png", "icon_512.png", "icon_1024.png"):
         assert (icons / name).is_file(), name

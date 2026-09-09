@@ -62,7 +62,9 @@ final class MetadataSampler: @unchecked Sendable {
         )
         if isSuspended { return nil }
         guard focusedStatus == .success, let app = focused else {
-            return isSuspended ? nil : NSWorkspaceFallback.frontmost()
+            if isSuspended { return nil }
+            let fallback = NSWorkspaceFallback.frontmost()
+            return isSuspended ? nil : fallback
         }
         let appElement = unsafeBitCast(app, to: AXUIElement.self)
         var titleRef: AnyObject?
