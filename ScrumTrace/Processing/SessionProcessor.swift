@@ -140,6 +140,11 @@ final class SessionProcessor: @unchecked Sendable {
             includeFullTranscript: manifest.includeFullTranscriptInZip
         )
         manifest.omitted = projection.omitted
+        let trial = try zipper.writeZip(sessionURL: sessionURL)
+        if trial > MediaBudget.maxZipBytes {
+            await onStatus(.synthesizing, "Re-encoding clips to fit the 35 MB pack")
+            await exporter.tightenExportClips(sessionURL: sessionURL)
+        }
         var zipResult = try zipper.zip(sessionURL: sessionURL, manifest: projection.manifest)
         projection.manifest = PackBudget.stripOmitted(zipResult.omitted, from: projection.manifest)
         projection.manifest.omitted = zipResult.omitted

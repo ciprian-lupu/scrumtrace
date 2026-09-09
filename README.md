@@ -11,7 +11,7 @@ The working spec is [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) (contracts 
 - Session disk layout: `archive/` (private) vs `export/` (handoff, export-relative paths)
 - Measured 35 MB `session-pack.zip` with `OMITTED.md` when the cap drops files
 - Pluggable AI adapters behind one internal contract (MVP: OpenAI-compatible + JSON Schema)
-- Timeline / contract / pack-budget tests (no Mac required): `python3 scripts/run_linux_tests.sh`
+- Timeline / contract / pack-budget / evidence tests (no Mac required): `bash scripts/run_linux_tests.sh`
 
 ## Build (macOS 14+, Apple Silicon recommended)
 

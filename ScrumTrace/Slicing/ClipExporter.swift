@@ -38,6 +38,46 @@ struct ClipExporter {
         return updated
     }
 
+    /// Spec C3: if the measured pack is over 35 MB, encode harder before omitting.
+    func tightenExportClips(sessionURL: URL) async {
+        let media = sessionURL.appendingPathComponent(ScrumTracePath.media)
+        guard let enumerator = FileManager.default.enumerator(
+            at: media,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        ) else { return }
+        for case let url as URL in enumerator {
+            guard url.pathExtension.lowercased() == "mp4" else { continue }
+            try? await tighten(file: url)
+        }
+    }
+
+    private func tighten(file url: URL) async throws {
+        let presets = [AVAssetExportPreset640x480, AVAssetExportPresetLowQuality]
+        for preset in presets {
+            let before = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? NSNumber)?.intValue ?? 0
+            let temp = url.deletingLastPathComponent().appendingPathComponent("\(UUID().uuidString).mp4")
+            let asset = AVURLAsset(url: url)
+            guard let session = AVAssetExportSession(asset: asset, presetName: preset) else { continue }
+            session.outputURL = temp
+            session.outputFileType = .mp4
+            session.shouldOptimizeForNetworkUse = true
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                session.exportAsynchronously { continuation.resume() }
+            }
+            guard session.status == .completed else {
+                try? FileManager.default.removeItem(at: temp)
+                continue
+            }
+            let after = (try? FileManager.default.attributesOfItem(atPath: temp.path)[.size] as? NSNumber)?.intValue ?? before
+            if after < before {
+                _ = try FileManager.default.replaceItemAt(url, withItemAt: temp)
+                return
+            }
+            try? FileManager.default.removeItem(at: temp)
+        }
+    }
+
     private func reencode(
         source: URL,
         destination: URL,

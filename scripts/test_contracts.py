@@ -65,6 +65,8 @@ def test_html_escaper_order() -> None:
 def test_zipper_never_deletes_archive() -> None:
     zipper = (ROOT / "ScrumTrace" / "Export" / "SessionPackZipper.swift").read_text()
     assert "ExportRel.isUnderExport" in zipper
+    assert "allowList" in zipper
+    assert '"-@"' in zipper
     assert "archive/session.mp4" not in zipper
 
 
@@ -73,6 +75,8 @@ def test_clip_exporter_macos14() -> None:
     assert "exportAsynchronously" in clip
     assert "export(to:" not in clip
     assert "AVAssetExportPreset1280x720" in clip
+    assert "tightenExportClips" in clip
+    assert "AVAssetExportPreset640x480" in clip
 
 
 def test_handoff_log_names_mp4_tools() -> None:

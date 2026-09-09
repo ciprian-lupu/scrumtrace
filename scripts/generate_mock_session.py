@@ -124,6 +124,7 @@ def fill_brief(tasks_html: str, shots_html: str, timeline_html: str) -> str:
         "{{TRANSCRIPT_HTML}}": "<p>Save control is inert on a filled form. Recovery sequence is on the ingest overlay clip.</p>",
         "{{CONFIRMED_COUNT}}": "2",
         "{{REVIEW_COUNT}}": "0",
+        "{{OMITTED_HTML}}": "",
     }
     html = shell
     for key, value in replacements.items():
@@ -342,7 +343,12 @@ This pack is `samples/mock-session/export/` only. Do not hand `archive/` (this m
 """
     )
     packed = EXPORT / "session-pack.zip"
-    subprocess.run(["zip", "-r", "-q", str(packed), "."], cwd=EXPORT, check=True)
+    packed.unlink(missing_ok=True)
+    subprocess.run(
+        ["zip", "-r", "-q", str(packed), ".", "-x", "session-pack.zip"],
+        cwd=EXPORT,
+        check=True,
+    )
     size = packed.stat().st_size
     print(f"export ready at {EXPORT} zip={size} bytes")
 

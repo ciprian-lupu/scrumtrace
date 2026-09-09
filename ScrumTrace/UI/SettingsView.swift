@@ -35,6 +35,14 @@ struct SettingsView: View {
                     try? settings.saveAPIKey()
                 }
             }
+            Section("Provider capabilities") {
+                Text("MVP backend: OpenAI-compatible. This adapter sends text and stills. It does not upload MP4.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                LabeledContent("Text", value: "yes")
+                LabeledContent("Images", value: "yes")
+                LabeledContent("Video", value: "no")
+            }
             Section("Speech") {
                 TextField("WhisperKit model", text: $settings.whisperModel)
                 Text("Pinned default is large-v3-turbo (openai_whisper-large-v3-turbo). First run downloads the CoreML model.")
@@ -61,7 +69,7 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 520, height: 620)
+        .frame(width: 520, height: 720)
         .padding()
     }
 }

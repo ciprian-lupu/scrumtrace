@@ -76,11 +76,21 @@ struct SessionPackZipper {
 
     private func runZip(exportDir: URL, zipURL: URL) throws {
         try? FileManager.default.removeItem(at: zipURL)
+        let members = PackBudget.allowList(exportDir: exportDir)
+        guard !members.isEmpty else {
+            throw SessionRecorderError.writerFailed("export/ allow-list is empty; nothing to zip.")
+        }
         let process = Process()
         process.currentDirectoryURL = exportDir
         process.executableURL = URL(fileURLWithPath: "/usr/bin/zip")
-        process.arguments = ["-r", "-q", zipURL.path, ".", "-x", "session-pack.zip", "*.zip"]
+        process.arguments = ["-q", zipURL.path, "-@"]
+        let pipe = Pipe()
+        process.standardInput = pipe
         try process.run()
+        if let data = (members.joined(separator: "\n") + "\n").data(using: .utf8) {
+            try pipe.fileHandleForWriting.write(contentsOf: data)
+        }
+        try pipe.fileHandleForWriting.close()
         process.waitUntilExit()
         guard process.terminationStatus == 0 else {
             throw SessionRecorderError.writerFailed("zip failed with status \(process.terminationStatus).")
@@ -100,6 +110,39 @@ enum PackBudget {
 
     static func isProtected(_ sessionPath: String) -> Bool {
         protectedNames.contains(URL(fileURLWithPath: sessionPath).lastPathComponent)
+    }
+
+    /// Explicit members under `export/` — never the session root, never `archive/`.
+    static func allowList(exportDir: URL) -> [String] {
+        let named = [
+            "AGENT_CONTEXT.md",
+            "SESSION_BRIEF.html",
+            "AGENT_PROMPT.txt",
+            "session.manifest.json",
+            "OMITTED.md",
+            "full_transcript.json"
+        ]
+        var out: [String] = []
+        for name in named {
+            if FileManager.default.fileExists(atPath: exportDir.appendingPathComponent(name).path) {
+                out.append(name)
+            }
+        }
+        let prefix = exportDir.path.hasSuffix("/") ? exportDir.path : exportDir.path + "/"
+        for folder in ["shots", "media"] {
+            let root = exportDir.appendingPathComponent(folder)
+            guard let enumerator = FileManager.default.enumerator(
+                at: root,
+                includingPropertiesForKeys: [.isRegularFileKey],
+                options: [.skipsHiddenFiles]
+            ) else { continue }
+            for case let url as URL in enumerator {
+                guard (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true else { continue }
+                if url.lastPathComponent == "session-pack.zip" { continue }
+                out.append(url.path.replacingOccurrences(of: prefix, with: ""))
+            }
+        }
+        return out.sorted()
     }
 
     /// Lowest priority first. 35 MB wins: evidence media is last, never archive/.
