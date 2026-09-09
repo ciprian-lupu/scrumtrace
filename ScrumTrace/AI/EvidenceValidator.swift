@@ -44,6 +44,9 @@ enum EvidenceValidator {
             }
         }
         for folder in [ScrumTracePath.shots, ScrumTracePath.mediaWork, ScrumTracePath.exportShots, ScrumTracePath.media] {
+            if ExportRel.containsSymlinkComponent(folder, sessionURL: sessionURL) {
+                continue
+            }
             if let match = firstMatch(name: name, stem: stem, in: sessionURL.appendingPathComponent(folder), sessionURL: sessionURL) {
                 return match
             }
@@ -129,6 +132,9 @@ enum EvidenceValidator {
     }
 
     private static func firstMatch(name: String, stem: String, in root: URL, sessionURL: URL) -> String? {
+        if (try? root.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+            return nil
+        }
         guard let enumerator = FileManager.default.enumerator(
             at: root,
             includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey],

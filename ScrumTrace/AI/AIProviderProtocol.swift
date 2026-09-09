@@ -186,6 +186,9 @@ enum ImageBase64 {
         if (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
             return nil
         }
+        if ExportRel.parentIsSymbolicLink(url) {
+            return nil
+        }
         #if os(macOS)
         guard let image = NSImage(contentsOf: url) else { return nil }
         guard let jpeg = jpegData(from: image, maxEdge: maxEdge, quality: 0.82) else { return nil }

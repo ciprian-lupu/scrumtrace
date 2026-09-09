@@ -14,7 +14,7 @@ Drop **this export folder** into a coding-agent workspace. Read this file first,
 
 ## Confirmed tasks
 
-### TASK-01 — Save athlete does not persist a valid form
+### TASK-01 — <untrusted_meeting_data>Save athlete does not persist a valid form</untrusted_meeting_data>
 - Kind: `bug` · status: `confirmed`
 - Observed: <untrusted_meeting_data>Open `shots/001.annotated.png`. Read the Save control and the error banner in the image. The failure identity is visible only there.</untrusted_meeting_data>
 - Stated: <untrusted_meeting_data>this does nothing, it should store the athlete</untrusted_meeting_data>
@@ -26,7 +26,7 @@ Drop **this export folder** into a coding-agent workspace. Read this file first,
   - ![](shots/001.annotated.png)
   - ![](shots/001.png)
 
-### TASK-02 — Ingest stall recovery sequence
+### TASK-02 — <untrusted_meeting_data>Ingest stall recovery sequence</untrusted_meeting_data>
 - Kind: `action_item` · status: `confirmed`
 - Observed: <untrusted_meeting_data>Play `media/task-02/clip.mp4`. The operator overlay shows the recovery order. The watermark and step list are in the clip, not in this markdown.</untrusted_meeting_data>
 - Stated: <untrusted_meeting_data>Walk through the recovery overlay, then we can ship the ingest hotfix.</untrusted_meeting_data>

@@ -74,7 +74,7 @@ struct AgentContextRenderer {
 
     private func taskBlock(_ task: TaskRecord, sessionURL: URL) -> [String] {
         var lines = [""]
-        lines.append("### \(task.taskId) — \(task.title)")
+        lines.append("### \(task.taskId) — \(PromptTemplates.wrapUntrustedInline(task.title))")
         lines.append("- Kind: `\(task.kind.rawValue)` · status: `\(task.status.rawValue)` · confidence: \(String(format: "%.2f", task.confidence))")
         lines.append("- Observed: \(PromptTemplates.wrapUntrustedInline(task.observed))")
         lines.append("- Stated: \(PromptTemplates.wrapUntrustedInline(task.stated))")

@@ -33,6 +33,7 @@ def test_agent_context_uses_export_relative_paths() -> None:
     assert "archive/" not in ctx
     assert "export/shots" not in ctx
     assert "<untrusted_meeting_data>this does nothing, it should store the athlete</untrusted_meeting_data>" in ctx
+    assert "<untrusted_meeting_data>Save athlete does not persist a valid form</untrusted_meeting_data>" in ctx
     assert "1 pause" in ctx
     assert "1 pauses" not in ctx
 
@@ -432,6 +433,7 @@ def test_pause_privacy_and_metadata_gate() -> None:
     assert "handoffFileIfPresent" in agent
     assert "omittedHandoffPath" in agent
     assert "wrapUntrustedInline" in agent
+    assert "wrapUntrustedInline(task.title)" in agent
     assert "pauseLabel" in agent
     assert "pauses.count) pauses" not in agent
     assert "Still auto-paused for a password manager" in controller
@@ -561,6 +563,7 @@ def test_phase45_clip_consent_and_budget() -> None:
     protocol_src = (ROOT / "ScrumTrace" / "AI" / "AIProviderProtocol.swift").read_text()
     payload = protocol_src.split("func jpegPayload")[1]
     assert "isSymbolicLink" in payload
+    assert "parentIsSymbolicLink" in payload
     assert "mp4BodyURL" in openai
     assert "mp4BodyURL" in anthropic
     assert "mp4BodyURL" in google
