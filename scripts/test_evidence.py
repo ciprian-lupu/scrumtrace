@@ -115,6 +115,10 @@ def test_frame_ref_basename_resolves() -> None:
     assert "replacingOccurrences(of: prefix" not in first_match
     assert "func resolvePath" in validator
     assert "func applyExportEvidence" in validator
+    processor = (ROOT / "ScrumTrace" / "Processing" / "SessionProcessor.swift").read_text()
+    eval_slice = processor.split("private func evaluateSlice")[1].split("private func tasks(")[0]
+    assert "existingSessionFile" in eval_slice
+    assert "fileExists(atPath: url.path), seenImage" not in eval_slice
     assert "unknown task kind" in validator
     assert "decision is not keep" in validator
     assert "existingSessionFile" in validator

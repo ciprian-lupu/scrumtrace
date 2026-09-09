@@ -302,10 +302,10 @@ final class SessionProcessor: @unchecked Sendable {
             return FullTranscript(sessionId: "", language: "en", segments: [])
         }
         let layout = CaptureAudioLayout.load(sessionURL: sessionURL)
+        let wavExists = ExportRel.existingSessionFile(ScrumTracePath.audioWav, sessionURL: sessionURL) != nil
+        let movieExists = ExportRel.existingSessionFile(ScrumTracePath.sessionMovie, sessionURL: sessionURL) != nil
         let wav = sessionURL.appendingPathComponent(ScrumTracePath.audioWav)
         let movie = sessionURL.appendingPathComponent(ScrumTracePath.sessionMovie)
-        let wavExists = FileManager.default.fileExists(atPath: wav.path)
-        let movieExists = FileManager.default.fileExists(atPath: movie.path)
         var passes: [TranscriptQuery.SourcePass] = []
         if wavExists {
             do {
@@ -331,6 +331,9 @@ final class SessionProcessor: @unchecked Sendable {
     }
 
     private func loadTranscript(sessionURL: URL, sessionId: String) -> FullTranscript {
+        guard ExportRel.existingSessionFile(ScrumTracePath.fullTranscript, sessionURL: sessionURL) != nil else {
+            return FullTranscript(sessionId: sessionId, language: "en", segments: [])
+        }
         let url = sessionURL.appendingPathComponent(ScrumTracePath.fullTranscript)
         guard let data = try? Data(contentsOf: url),
               let transcript = try? JSONDecoder().decode(FullTranscript.self, from: data) else {
@@ -361,8 +364,9 @@ final class SessionProcessor: @unchecked Sendable {
         var images: [URL] = []
         var seenImage = Set<String>()
         func appendImage(_ relative: String) {
-            let url = sessionURL.appendingPathComponent(relative)
-            guard FileManager.default.fileExists(atPath: url.path), seenImage.insert(url.path).inserted else { return }
+            guard let contained = ExportRel.existingSessionFile(relative, sessionURL: sessionURL) else { return }
+            let url = sessionURL.appendingPathComponent(contained)
+            guard seenImage.insert(url.path).inserted else { return }
             images.append(url)
         }
         if let shot {
@@ -384,11 +388,10 @@ final class SessionProcessor: @unchecked Sendable {
             mediaSent.append("transcript")
         }
         var clipURL: URL?
-        if ProviderWireMedia.willUploadClip(configuration: configuration), let clip = slice.clipPath {
-            let url = sessionURL.appendingPathComponent(clip)
-            if FileManager.default.fileExists(atPath: url.path) {
-                clipURL = url
-            }
+        if ProviderWireMedia.willUploadClip(configuration: configuration),
+           let clip = slice.clipPath,
+           let contained = ExportRel.existingSessionFile(clip, sessionURL: sessionURL) {
+            clipURL = sessionURL.appendingPathComponent(contained)
         }
         // media_sent is what actually leaves the Mac. Shipped adapters never
         // attach MP4, even when the internal request carries clipURL.

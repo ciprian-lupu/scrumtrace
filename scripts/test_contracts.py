@@ -488,6 +488,17 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "if last.stills.isEmpty" not in slicer
     processor = (ROOT / "ScrumTrace" / "Processing" / "SessionProcessor.swift").read_text()
     assert "shotsLinked" in processor
+    append = processor.split("func appendImage")[1].split("if let shot")[0]
+    assert "existingSessionFile" in append
+    assert "fileExists(atPath: url.path)" not in append
+    transcribe = processor.split("private func transcribe(")[1].split("private func loadTranscript")[0]
+    assert "existingSessionFile(ScrumTracePath.audioWav" in transcribe
+    assert "existingSessionFile(ScrumTracePath.sessionMovie" in transcribe
+    load_tr = processor.split("private func loadTranscript")[1].split("private func evaluateSlice")[0]
+    assert "existingSessionFile(ScrumTracePath.fullTranscript" in load_tr
+    models = (ROOT / "ScrumTrace" / "Storage" / "SessionModels.swift").read_text()
+    layout_load = models.split("static func load(sessionURL: URL) -> CaptureAudioLayout")[1].split("func write(sessionURL")[0]
+    assert "existingSessionFile(ScrumTracePath.captureLayout" in layout_load
     shot = (ROOT / "ScrumTrace" / "UI" / "ShotNoteWindow.swift").read_text()
     assert "let hadText = !note.isEmpty" in shot
     processor = (ROOT / "ScrumTrace" / "Processing" / "SessionProcessor.swift").read_text()
