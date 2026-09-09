@@ -213,7 +213,23 @@ final class SessionController: ObservableObject {
                     model: settings.model,
                     acceptsVideo: capabilities.acceptsVideo
                 ) {
+                    let previous = local.uploadConsent
+                    let askedBefore = !previous.provider.isEmpty
                     local.uploadConsent = requestUploadConsent()
+                    if askedBefore && (
+                        previous.provider != local.uploadConsent.provider
+                        || previous.endpoint != local.uploadConsent.endpoint
+                        || previous.model != local.uploadConsent.model
+                        || previous.includesClipAudio != local.uploadConsent.includesClipAudio
+                    ) {
+                        local.completedStages.removeAll {
+                            $0 == .evaluating || $0 == .synthesizing || $0 == .completed
+                        }
+                        local.tasks = []
+                        for index in local.slices.indices {
+                            local.slices[index].analysisStatus = .pending
+                        }
+                    }
                 }
                 try vault.write(manifest: &local)
             }

@@ -200,6 +200,8 @@ def test_phase45_clip_consent_and_budget() -> None:
     controller = (ROOT / "ScrumTrace" / "Processing" / "SessionController.swift").read_text()
     assert "needsReprompt" in controller
     assert "!local.uploadConsent.approved || destinationChanged" not in controller
+    assert "askedBefore" in controller
+    assert "analysisStatus = .pending" in controller
     openai = (ROOT / "ScrumTrace" / "AI" / "OpenAICompatibleClient.swift").read_text()
     anthropic = (ROOT / "ScrumTrace" / "AI" / "AnthropicClient.swift").read_text()
     google = (ROOT / "ScrumTrace" / "AI" / "GoogleClient.swift").read_text()
