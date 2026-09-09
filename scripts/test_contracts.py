@@ -332,8 +332,7 @@ def test_retry_failed_slices_and_pins() -> None:
     assert "func abandonEvaluate" in processor
     abandon = processor.split("func abandonEvaluate")[1].split("func localReviewTasks")[0]
     assert "analysisStatus != .success" in abandon
-    assert "rankedTasks(kept)" in abandon
-    assert "kept + extra" in abandon
+    assert "rankedTasks(kept + extra)" in abandon
     assert "localReviewTasks" in abandon
     denied = processor.split("Upload not approved")[1].split("Anthropic model missing")[0]
     assert "abandonEvaluate" in denied
