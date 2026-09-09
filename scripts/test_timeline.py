@@ -33,6 +33,20 @@ def wall_time(media: float, pauses: list[tuple[float, float | None]]) -> float:
     return wall
 
 
+def even_capture_size(width: int, height: int) -> tuple[int, int]:
+    w = max(width, 2)
+    h = max(height, 2)
+    if w > 1920:
+        h = max(int(round(h * 1920.0 / w)), 2)
+        w = 1920
+    if h > 1080:
+        w = max(int(round(w * 1080.0 / h)), 2)
+        h = 1080
+    w -= w % 2
+    h -= h % 2
+    return max(w, 2), max(h, 2)
+
+
 def assert_close(actual: float, expected: float, label: str) -> None:
     if abs(actual - expected) > 1e-6:
         raise SystemExit(f"{label}: {actual} != {expected}")
@@ -59,6 +73,18 @@ def main() -> None:
 
     mixed = [(10.0, 20.0), (50.0, None)]
     assert_close(media_time(60, mixed), 40, "mixed-active")
+
+    # Stop while paused closes the active interval at stop wall; media stays frozen.
+    stopped = [(10.0, 20.0), (50.0, 55.0)]
+    assert_close(media_time(55, stopped), 40, "stop-while-paused")
+    assert_close(media_time(80, stopped), 65, "after-stop-closed")
+
+    assert even_capture_size(1920, 1080) == (1920, 1080)
+    rw, rh = even_capture_size(3024, 1964)
+    assert rw % 2 == 0 and rh % 2 == 0
+    assert rw <= 1920 and rh <= 1080
+    ow, rh2 = even_capture_size(1367, 769)
+    assert ow % 2 == 0 and rh2 % 2 == 0
     print("timeline contract ok")
 
 

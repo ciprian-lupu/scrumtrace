@@ -176,7 +176,8 @@ final class SessionController: ObservableObject {
         phase = .transcribing
         privacy.stop()
         sampler.isSuspended = true
-        recorder?.setPaused(false)
+        // Freeze writers immediately without resuming a paused session (C1).
+        recorder?.freezeWriters()
         do {
             try await recorder?.stop()
         } catch {
@@ -420,7 +421,7 @@ final class SessionController: ObservableObject {
 
     private func startTimer() {
         hudTimer?.invalidate()
-        hudTimer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] _ in
+        hudTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 guard let self else { return }
                 self.wallElapsed = self.clock.currentWallSeconds()

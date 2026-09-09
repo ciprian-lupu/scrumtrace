@@ -112,7 +112,7 @@ def test_audio_split_and_brief_loader() -> None:
     assert "writeWav(from: sampleBuffer)" in recorder
     assert "microphoneWav" in recorder
     assert "CaptureAudioLayout" in recorder
-    assert "guard !paused else { return }" in recorder
+    assert "guard !paused, started else { return }" in recorder
     brief = (ROOT / "ScrumTrace" / "Export" / "SessionBriefRenderer.swift").read_text()
     assert "Export/Resources" in brief
     menu = (ROOT / "ScrumTrace" / "UI" / "MenuBarController.swift").read_text()
@@ -283,6 +283,21 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "self.started = true" in start_fn
     assert "startCapture" in start_fn
     assert start_fn.index("self.started = true") < start_fn.index("startCapture")
+    assert "try await writerQueue.sync" not in recorder
+    assert "evenCaptureSize" in start_fn
+    assert "prepareWriters(width:" in start_fn
+    assert "config.width = size.width" in start_fn
+    assert "config.height = size.height" in start_fn
+    assert "AVVideoWidthKey: w" in recorder
+    assert "AVVideoHeightKey: h" in recorder
+    stop_fn = controller.split("private func stopRecordingAsync")[1].split("private func runProcessor")[0]
+    assert "setPaused(false)" not in stop_fn
+    assert "freezeWriters" in stop_fn
+    assert "markRecordingStopped" in recorder
+    assert "func freezeWriters" in recorder
+    clock = (ROOT / "ScrumTrace" / "Capture" / "ClockSynchronizer.swift").read_text()
+    assert "stoppedWall" in clock
+    assert "func markRecordingStopped" in clock
 
 
 def main() -> None:

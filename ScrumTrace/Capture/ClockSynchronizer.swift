@@ -66,6 +66,7 @@ final class ClockSynchronizer: @unchecked Sendable {
     private var startHost: CMTime = .invalid
     private var pauses: [PauseInterval] = []
     private var recording = false
+    private var stoppedWall: TimeInterval?
 
     init(hostClock: CMClock = CMClockGetHostTimeClock()) {
         self.hostClock = hostClock
@@ -79,6 +80,7 @@ final class ClockSynchronizer: @unchecked Sendable {
         startHost = .invalid
         pauses = []
         recording = false
+        stoppedWall = nil
     }
 
     func markRecordingStarted() {
@@ -87,13 +89,18 @@ final class ClockSynchronizer: @unchecked Sendable {
         startHost = CMClockGetTime(hostClock)
         pauses = []
         recording = true
+        stoppedWall = nil
     }
 
     func currentWallSeconds() -> TimeInterval {
         lock.lock()
         let start = startHost
+        let stopped = stoppedWall
         lock.unlock()
         guard start.isValid else { return 0 }
+        if let stopped {
+            return stopped
+        }
         let now = CMClockGetTime(hostClock)
         return max(0, CMTimeGetSeconds(CMTimeSubtract(now, start)))
     }
@@ -126,6 +133,20 @@ final class ClockSynchronizer: @unchecked Sendable {
         guard recording, var last = pauses.last, last.resumeWall == nil else { return }
         last.close(at: wallSecondsLocked())
         pauses[pauses.count - 1] = last
+    }
+
+    /// Freeze wall/media at Stop so writer teardown is not part of the session duration.
+    func markRecordingStopped() {
+        lock.lock()
+        defer { lock.unlock() }
+        guard recording else { return }
+        let wall = wallSecondsLocked()
+        if var last = pauses.last, last.resumeWall == nil {
+            last.close(at: wall)
+            pauses[pauses.count - 1] = last
+        }
+        recording = false
+        stoppedWall = wall
     }
 
     func mediaTime(forHostTime hostTime: CMTime) -> CMTime {

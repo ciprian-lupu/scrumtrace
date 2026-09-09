@@ -1,5 +1,6 @@
 import AVFoundation
 import CoreMedia
+import CoreVideo
 import Foundation
 import ScreenCaptureKit
 
@@ -49,52 +50,85 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
 
     func start() async throws {
         try await requestPermission()
-        clock.markRecordingStarted()
-        try await writerQueue.sync {
-            try self.prepareWriters()
-        }
         let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
         guard let display = content.displays.first else {
             throw SessionRecorderError.writerFailed("No display available for capture.")
         }
+        let size = Self.evenCaptureSize(width: display.width, height: display.height)
         let excluded = content.applications.filter { app in
             app.bundleIdentifier == Bundle.main.bundleIdentifier
         }
+
+        clock.markRecordingStarted()
+        // DispatchQueue.sync is synchronous — `await` here does not compile.
+        try writerQueue.sync {
+            try self.prepareWriters(width: size.width, height: size.height)
+        }
+
         let filter = SCContentFilter(display: display, excludingApplications: excluded, exceptingWindows: [])
         let config = SCStreamConfiguration()
-        config.width = display.width
-        config.height = display.height
+        config.width = size.width
+        config.height = size.height
         config.minimumFrameInterval = CMTime(value: 1, timescale: 30)
         config.queueDepth = 8
         config.showsCursor = true
         config.capturesAudio = true
+        config.pixelFormat = kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
         if #available(macOS 15.0, *) {
             config.captureMicrophone = true
         }
         let stream = SCStream(filter: filter, configuration: config, delegate: self)
         try stream.addStreamOutput(self, type: .screen, sampleHandlerQueue: writerQueue)
         try stream.addStreamOutput(self, type: .audio, sampleHandlerQueue: writerQueue)
+        var mic = false
         if #available(macOS 15.0, *) {
             do {
                 try stream.addStreamOutput(self, type: .microphone, sampleHandlerQueue: writerQueue)
-                microphoneWav = true
+                mic = true
             } catch {
                 do {
                     try startMicrophoneFallback()
-                    microphoneWav = true
+                    mic = true
                 } catch {
-                    microphoneWav = false
+                    mic = false
                 }
             }
         } else {
-            try startMicrophoneFallback()
-            microphoneWav = true
+            do {
+                try startMicrophoneFallback()
+                mic = true
+            } catch {
+                mic = false
+            }
         }
         writerQueue.sync {
+            self.microphoneWav = mic
             self.stream = stream
             self.started = true
         }
-        try await stream.startCapture()
+        do {
+            try await stream.startCapture()
+        } catch {
+            writerQueue.sync { self.started = false }
+            throw error
+        }
+    }
+
+    /// Even pixel size shared by SCStream and AVAssetWriter, capped at 1920×1080.
+    static func evenCaptureSize(width: Int, height: Int) -> (width: Int, height: Int) {
+        var w = max(width, 2)
+        var h = max(height, 2)
+        if w > 1920 {
+            h = max(Int((Double(h) * 1920.0 / Double(w)).rounded()), 2)
+            w = 1920
+        }
+        if h > 1080 {
+            w = max(Int((Double(w) * 1080.0 / Double(h)).rounded()), 2)
+            h = 1080
+        }
+        w -= w % 2
+        h -= h % 2
+        return (max(w, 2), max(h, 2))
     }
 
     func setPaused(_ next: Bool) {
@@ -111,8 +145,20 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         }
     }
 
+    /// Drop every capture source immediately without opening a Pause interval.
+    func freezeWriters() {
+        writerQueue.sync {
+            self.paused = true
+            self.started = false
+            self.clock.markRecordingStopped()
+        }
+    }
+
     func stop() async throws {
         let live = writerQueue.sync { () -> SCStream? in
+            // Freeze t_wall / t_media at Stop so finishWriting is not counted,
+            // and do not resume writers if the user stopped while paused (C1).
+            self.clock.markRecordingStopped()
             self.paused = true
             self.started = false
             let captured = self.stream
@@ -147,7 +193,7 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
 
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
         // Pause drops every ScreenCaptureKit output: screen, system audio, microphone.
-        guard !paused else { return }
+        guard !paused, started else { return }
         switch type {
         case .screen:
             appendVideo(sampleBuffer)
@@ -246,17 +292,19 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         }
     }
 
-    private func prepareWriters() throws {
+    private func prepareWriters(width: Int, height: Int) throws {
         let movieURL = sessionURL.appendingPathComponent(ScrumTracePath.sessionMovie)
         let wavURL = sessionURL.appendingPathComponent(ScrumTracePath.audioWav)
         try? FileManager.default.removeItem(at: movieURL)
         try? FileManager.default.removeItem(at: wavURL)
 
+        let w = max(width - width % 2, 2)
+        let h = max(height - height % 2, 2)
         let writer = try AVAssetWriter(outputURL: movieURL, fileType: .mp4)
         let videoSettings: [String: Any] = [
             AVVideoCodecKey: AVVideoCodecType.h264,
-            AVVideoWidthKey: 1920,
-            AVVideoHeightKey: 1080,
+            AVVideoWidthKey: w,
+            AVVideoHeightKey: h,
             AVVideoCompressionPropertiesKey: [
                 AVVideoAverageBitRateKey: 6_000_000,
                 AVVideoProfileLevelKey: AVVideoProfileLevelH264HighAutoLevel
@@ -297,7 +345,7 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         firstVideoPTS = nil
         firstAudioPTS = nil
         paused = false
-        microphoneWav = false
+        started = false
     }
 
     private func startMicrophoneFallback() throws {
@@ -307,7 +355,7 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, time in
             guard let self else { return }
             self.writerQueue.async {
-                guard !self.paused else { return }
+                guard !self.paused, self.started else { return }
                 self.writeEngineBuffer(buffer, time: time)
             }
         }
@@ -316,7 +364,7 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
     }
 
     private func writeEngineBuffer(_ buffer: AVAudioPCMBuffer, time: AVAudioTime) {
-        guard let wavFile else { return }
+        guard !paused, started, let wavFile else { return }
         let host = CMClockMakeHostTimeFromSystemUnits(time.hostTime)
         _ = clock.mediaTime(forHostTime: host)
         let target = wavFile.processingFormat

@@ -28,4 +28,22 @@ final class TimelineTests: XCTestCase {
         XCTAssertEqual(TimelineMath.mediaTime(wall: 12, pauses: pauses), 12, accuracy: 0.0001)
         XCTAssertEqual(TimelineMath.mediaTime(wall: 30, pauses: pauses), 12, accuracy: 0.0001)
     }
+
+    func testEvenCaptureSizeMatchesWriterAndStream() {
+        let fullHD = SessionRecorder.evenCaptureSize(width: 1920, height: 1080)
+        XCTAssertEqual(fullHD.width, 1920)
+        XCTAssertEqual(fullHD.height, 1080)
+
+        let retina = SessionRecorder.evenCaptureSize(width: 3024, height: 1964)
+        XCTAssertEqual(retina.width % 2, 0)
+        XCTAssertEqual(retina.height % 2, 0)
+        XCTAssertLessThanOrEqual(retina.width, 1920)
+        XCTAssertLessThanOrEqual(retina.height, 1080)
+
+        let odd = SessionRecorder.evenCaptureSize(width: 1367, height: 769)
+        XCTAssertEqual(odd.width % 2, 0)
+        XCTAssertEqual(odd.height % 2, 0)
+        XCTAssertGreaterThanOrEqual(odd.width, 2)
+        XCTAssertGreaterThanOrEqual(odd.height, 2)
+    }
 }
