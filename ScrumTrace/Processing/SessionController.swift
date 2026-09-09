@@ -190,6 +190,7 @@ final class SessionController: ObservableObject {
             mediaSeconds: clock.currentMediaSeconds()
         )
         local.pauses = clock.snapshotPauses()
+        local.pipelineStatus = .idle
         do {
             try vault.write(manifest: &local)
         } catch {
@@ -228,6 +229,11 @@ final class SessionController: ObservableObject {
             self.recorder = recorder
             phase = .recording
             statusLine = "Recording"
+            if var local = manifest {
+                local.pipelineStatus = .recording
+                try? vault.write(manifest: &local)
+                manifest = local
+            }
             privacy.start()
             sampler.isSuspended = false
             startTimer()

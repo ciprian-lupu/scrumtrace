@@ -552,6 +552,8 @@ def test_pipeline_timing_stays_in_archive() -> None:
     assert "requestTrust(prompt: true)" in start_rec
     assert "clock.reset()" in start_rec
     assert "captureFreeze.attach(nil)" in start_rec
+    assert "pipelineStatus = .recording" in start_rec
+    assert start_rec.index("try await recorder.start()") < start_rec.index("pipelineStatus = .recording")
     assert "transcriber.prepare" in controller
     hud = (ROOT / "ScrumTrace" / "UI" / "RecordingHUDWindow.swift").read_text()
     assert "wallElapsed" in hud
@@ -575,6 +577,7 @@ def test_pause_privacy_and_metadata_gate() -> None:
     assert "scrumTraceCaptureGate" in halt
     persist = controller.split("func persistInterruptedCapture")[1].split("func startRecordingAsync")[0]
     assert "try? vault.write" not in persist
+    assert "pipelineStatus = .idle" in persist
     app = (ROOT / "ScrumTrace" / "App" / "AppDelegate.swift").read_text()
     assert "haltCaptureForTermination" in app
     assert "height: 780" in app
