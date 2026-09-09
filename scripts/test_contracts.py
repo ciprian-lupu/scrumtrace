@@ -799,6 +799,11 @@ def test_write_contained_data_refuses_directory_symlinks() -> None:
     assert "replaceItemAt" not in write_man
     assert "removeItemIfRegularFile(url, sessionRoot: dir)" in write_man
     assert "isContainedRegularFile" in write_man
+    assert "writeFailed(\"session folder\")" in write_man
+    load_fn = vault.split("func loadManifest")[1].split("func write(manifest")[0]
+    assert "isSymbolicLink" in load_fn
+    create_fn = vault.split("func createSession")[1].split("func loadManifest")[0]
+    assert "isSymbolicLink" in create_fn
     append_ev = vault.split("func appendEvent")[1].split("func recentSessions")[0]
     assert "fileExists(atPath: url.path)" not in append_ev
     assert "isContainedRegularFile" in append_ev

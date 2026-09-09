@@ -73,6 +73,9 @@ final class SessionVault: @unchecked Sendable {
         try ensureRoot()
         let id = makeSessionID()
         let url = sessionURL(id: id)
+        if (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+            throw SessionVaultError.writeFailed("session folder")
+        }
         try fileManager.createDirectory(at: url, withIntermediateDirectories: true)
         for folder in [
             ScrumTracePath.archive,
@@ -96,8 +99,11 @@ final class SessionVault: @unchecked Sendable {
         guard Self.isValidSessionId(id) else {
             throw SessionVaultError.sessionMissing(id)
         }
-        let url = sessionURL(id: id).appendingPathComponent(ScrumTracePath.manifest)
         let session = sessionURL(id: id)
+        if (try? session.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+            throw SessionVaultError.sessionMissing(id)
+        }
+        let url = session.appendingPathComponent(ScrumTracePath.manifest)
         guard ExportRel.isContainedRegularFile(url, sessionRoot: session) else {
             throw SessionVaultError.sessionMissing(id)
         }
@@ -110,6 +116,9 @@ final class SessionVault: @unchecked Sendable {
             throw SessionVaultError.writeFailed("invalid session id")
         }
         let dir = sessionURL(id: manifest.sessionId)
+        if (try? dir.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+            throw SessionVaultError.writeFailed("session folder")
+        }
         try fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
         let url = dir.appendingPathComponent(ScrumTracePath.manifest)
         if (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
@@ -144,8 +153,11 @@ final class SessionVault: @unchecked Sendable {
         guard Self.isValidSessionId(sessionId) else {
             throw SessionVaultError.writeFailed("invalid session id")
         }
-        let url = sessionURL(id: sessionId).appendingPathComponent(ScrumTracePath.events)
         let session = sessionURL(id: sessionId)
+        if (try? session.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+            throw SessionVaultError.writeFailed("session folder")
+        }
+        let url = session.appendingPathComponent(ScrumTracePath.events)
         if (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
             try fileManager.removeItem(at: url)
         }
@@ -176,6 +188,9 @@ final class SessionVault: @unchecked Sendable {
     func nextShotIndex(sessionId: String) -> Int {
         guard Self.isValidSessionId(sessionId) else { return 1 }
         let session = sessionURL(id: sessionId)
+        if (try? session.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+            return 1
+        }
         let shots = session.appendingPathComponent(ScrumTracePath.shots)
         if ExportRel.containsSymlinkComponent(ScrumTracePath.shots, sessionURL: session) {
             return 1
@@ -219,6 +234,9 @@ final class SessionVault: @unchecked Sendable {
     private func events(sessionId: String) -> [SessionEvent] {
         guard Self.isValidSessionId(sessionId) else { return [] }
         let session = sessionURL(id: sessionId)
+        if (try? session.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+            return []
+        }
         let url = session.appendingPathComponent(ScrumTracePath.events)
         guard ExportRel.isContainedRegularFile(url, sessionRoot: session) else { return [] }
         guard let text = try? String(contentsOf: url, encoding: .utf8) else { return [] }
@@ -231,7 +249,11 @@ final class SessionVault: @unchecked Sendable {
     func revealInFinder(sessionId: String) {
         #if os(macOS)
         guard Self.isValidSessionId(sessionId) else { return }
-        let export = sessionURL(id: sessionId).appendingPathComponent(ScrumTracePath.export)
+        let session = sessionURL(id: sessionId)
+        if (try? session.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+            return
+        }
+        let export = session.appendingPathComponent(ScrumTracePath.export)
         let values = try? export.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
         guard values?.isSymbolicLink != true else { return }
         var isDir: ObjCBool = false
