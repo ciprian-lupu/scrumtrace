@@ -329,9 +329,10 @@ final class SessionProcessor: @unchecked Sendable {
         guard ExportRel.existingSessionFile(ScrumTracePath.fullTranscript, sessionURL: sessionURL) != nil else {
             return FullTranscript(sessionId: sessionId, language: "en", segments: [])
         }
-        let url = sessionURL.appendingPathComponent(ScrumTracePath.fullTranscript)
-        guard ExportRel.isReadableSessionFile(url, sessionRoot: sessionURL),
-              let data = try? Data(contentsOf: url),
+        guard let data = ExportRel.readContainedData(
+            relative: ScrumTracePath.fullTranscript,
+            sessionURL: sessionURL
+        ),
               let transcript = try? JSONDecoder().decode(FullTranscript.self, from: data) else {
             return FullTranscript(sessionId: sessionId, language: "en", segments: [])
         }

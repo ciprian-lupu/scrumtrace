@@ -274,7 +274,8 @@ struct ExportProjector {
               ExportRel.isUnderExport(destRel) else {
             return nil
         }
-        guard let image = NSImage(contentsOf: from) else { return nil }
+        guard let bytes = ExportRel.readContainedData(from, sessionRoot: sessionURL),
+              let image = NSImage(data: bytes) else { return nil }
         guard let jpeg = ImageBase64.jpegData(
             from: image,
             maxEdge: CGFloat(MediaBudget.stillMaxWidth),
@@ -321,19 +322,14 @@ struct ExportProjector {
             return nil
         }
         let from = sessionURL.appendingPathComponent(fromRel)
-        guard ExportRel.isReadableSessionFile(from, sessionRoot: sessionURL) else {
+        guard ExportRel.isReadableSessionFile(from, sessionRoot: sessionURL),
+              let bytes = ExportRel.readContainedData(relative: fromRel, sessionURL: sessionURL) else {
             omitted.append(unreadableSource(fromRelative, sessionURL: sessionURL))
             return nil
         }
-        let temp = FileManager.default.temporaryDirectory.appendingPathComponent(
-            "scrumtrace-copy-\(UUID().uuidString)"
-        )
-        try? FileManager.default.removeItem(at: temp)
         do {
-            try FileManager.default.copyItem(at: from, to: temp)
-            try ExportRel.moveIntoSession(from: temp, relative: prepared, sessionURL: sessionURL)
+            try ExportRel.writeContainedData(bytes, relative: prepared, sessionURL: sessionURL)
         } catch {
-            try? FileManager.default.removeItem(at: temp)
             omitted.append(OmittedAsset(path: destRelative, reason: "Copy destination escaped export/"))
             return nil
         }

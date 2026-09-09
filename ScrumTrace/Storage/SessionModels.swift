@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 
 extension Notification.Name {
@@ -348,6 +349,68 @@ enum ExportRel {
         }
         guard isContainedRegularFile(file, sessionRoot: sessionRoot) else { return }
         try FileManager.default.removeItem(at: file)
+    }
+
+    /// Read bytes without following a dest or intermediate symlink. `Data(contentsOf:)`
+    /// and `NSImage(contentsOf:)` follow a link planted after `isReadableSessionFile`.
+    static func readContainedData(relative: String, sessionURL: URL) -> Data? {
+        guard isUsableSessionRoot(sessionURL) else { return nil }
+        guard isUnderSession(relative), let parts = normalizedComponents(relative) else { return nil }
+        return openatRead(parts: parts, root: sessionURL)
+    }
+
+    static func readContainedData(_ file: URL, sessionRoot: URL) -> Data? {
+        guard let rel = unfollowedRelative(file, sessionRoot: sessionRoot) else { return nil }
+        return readContainedData(relative: rel, sessionURL: sessionRoot)
+    }
+
+    private static func openatRead(parts: [String], root: URL) -> Data? {
+        let rootFd = root.withUnsafeFileSystemRepresentation { ptr -> Int32 in
+            guard let ptr else { return -1 }
+            return Darwin.open(ptr, O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW)
+        }
+        guard rootFd >= 0 else { return nil }
+        var dirFd = rootFd
+        defer {
+            if dirFd >= 0 {
+                Darwin.close(dirFd)
+            }
+        }
+        for (index, part) in parts.enumerated() {
+            let isLast = index == parts.count - 1
+            let flags: Int32 = isLast
+                ? (O_RDONLY | O_CLOEXEC | O_NOFOLLOW)
+                : (O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW)
+            let next = part.withCString { name in
+                Darwin.openat(dirFd, name, flags)
+            }
+            guard next >= 0 else { return nil }
+            if isLast {
+                defer { Darwin.close(next) }
+                var info = stat()
+                guard Darwin.fstat(next, &info) == 0 else { return nil }
+                guard (info.st_mode & S_IFMT) == S_IFREG else { return nil }
+                let size = Int(info.st_size)
+                guard size >= 0, size <= 256 * 1024 * 1024 else { return nil }
+                if size == 0 { return Data() }
+                var data = Data(count: size)
+                let filled = data.withUnsafeMutableBytes { buf -> Int in
+                    guard let base = buf.baseAddress else { return -1 }
+                    var offset = 0
+                    while offset < size {
+                        let n = Darwin.read(next, base.advanced(by: offset), size - offset)
+                        if n <= 0 { return n == 0 ? offset : -1 }
+                        offset += Int(n)
+                    }
+                    return offset
+                }
+                guard filled == size else { return nil }
+                return data
+            }
+            Darwin.close(dirFd)
+            dirFd = next
+        }
+        return nil
     }
 }
 
@@ -873,9 +936,10 @@ struct CaptureAudioLayout: Codable, Sendable, Hashable {
         guard ExportRel.existingSessionFile(ScrumTracePath.captureLayout, sessionURL: sessionURL) != nil else {
             return .both
         }
-        let url = sessionURL.appendingPathComponent(ScrumTracePath.captureLayout)
-        guard ExportRel.isReadableSessionFile(url, sessionRoot: sessionURL),
-              let data = try? Data(contentsOf: url),
+        guard let data = ExportRel.readContainedData(
+            relative: ScrumTracePath.captureLayout,
+            sessionURL: sessionURL
+        ),
               let layout = try? JSONDecoder().decode(CaptureAudioLayout.self, from: data) else {
             return .both
         }
@@ -931,9 +995,10 @@ struct PipelineTiming: Codable, Sendable, Hashable {
         guard ExportRel.existingSessionFile(ScrumTracePath.pipelineTiming, sessionURL: sessionURL) != nil else {
             return nil
         }
-        let url = sessionURL.appendingPathComponent(ScrumTracePath.pipelineTiming)
-        guard ExportRel.isReadableSessionFile(url, sessionRoot: sessionURL),
-              let data = try? Data(contentsOf: url) else { return nil }
+        guard let data = ExportRel.readContainedData(
+            relative: ScrumTracePath.pipelineTiming,
+            sessionURL: sessionURL
+        ) else { return nil }
         return try? JSONDecoder().decode(PipelineTiming.self, from: data)
     }
 

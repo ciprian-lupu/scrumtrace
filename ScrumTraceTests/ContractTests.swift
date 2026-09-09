@@ -94,6 +94,48 @@ final class ContractTests: XCTestCase {
         XCTAssertNotEqual((try dest.resourceValues(forKeys: [.isSymbolicLinkKey])).isSymbolicLink, true)
     }
 
+    func testReadContainedDataRefusesDestSymlink() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("st-read-link-\(UUID().uuidString)")
+        let archive = root.appendingPathComponent("archive")
+        try FileManager.default.createDirectory(at: archive, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let secret = FileManager.default.temporaryDirectory.appendingPathComponent("secret-read-\(UUID().uuidString).json")
+        try Data("outside".utf8).write(to: secret)
+        defer { try? FileManager.default.removeItem(at: secret) }
+        try FileManager.default.createSymbolicLink(
+            at: archive.appendingPathComponent("full_transcript.json"),
+            withDestinationURL: secret
+        )
+        XCTAssertNil(ExportRel.readContainedData(relative: "archive/full_transcript.json", sessionURL: root))
+        XCTAssertEqual(try String(contentsOf: secret, encoding: .utf8), "outside")
+    }
+
+    func testReadContainedDataReadsRegularFile() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("st-read-ok-\(UUID().uuidString)")
+        let archive = root.appendingPathComponent("archive")
+        try FileManager.default.createDirectory(at: archive, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let payload = Data("{\"words\":[]}".utf8)
+        try ExportRel.writeContainedData(payload, relative: "archive/full_transcript.json", sessionURL: root)
+        XCTAssertEqual(
+            ExportRel.readContainedData(relative: "archive/full_transcript.json", sessionURL: root),
+            payload
+        )
+    }
+
+    func testReadContainedDataRefusesArchiveDirectorySymlink() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("st-read-dirlink-\(UUID().uuidString)")
+        let export = root.appendingPathComponent("export")
+        try FileManager.default.createDirectory(at: export, withIntermediateDirectories: true)
+        try Data("inside".utf8).write(to: export.appendingPathComponent("full_transcript.json"))
+        try FileManager.default.createSymbolicLink(
+            at: root.appendingPathComponent("archive"),
+            withDestinationURL: export
+        )
+        defer { try? FileManager.default.removeItem(at: root) }
+        XCTAssertNil(ExportRel.readContainedData(relative: "archive/full_transcript.json", sessionURL: root))
+    }
+
     func testRemoveItemIfRegularFileUnlinksDestSymlinkWithoutFollowing() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("st-rm-\(UUID().uuidString)")
         let export = root.appendingPathComponent("export")

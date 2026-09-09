@@ -192,12 +192,12 @@ enum ImageBase64 {
             return nil
         }
         guard ExportRel.isReadableSessionFile(url, sessionRoot: sessionRoot) else { return nil }
+        guard let data = ExportRel.readContainedData(url, sessionRoot: sessionRoot) else { return nil }
         #if os(macOS)
-        guard let image = NSImage(contentsOf: url) else { return nil }
+        guard let image = NSImage(data: data) else { return nil }
         guard let jpeg = jpegData(from: image, maxEdge: maxEdge, quality: 0.82) else { return nil }
         return ("image/jpeg", jpeg.base64EncodedString())
         #else
-        guard let data = try? Data(contentsOf: url) else { return nil }
         return ("image/jpeg", data.base64EncodedString())
         #endif
     }

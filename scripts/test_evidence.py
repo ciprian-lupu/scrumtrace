@@ -84,6 +84,8 @@ def test_export_rel_in_swift() -> None:
     assert 'path.hasPrefix("export/")' not in rewrite
     transcode = projector.split("func transcodeJPEG")[1]
     assert "isReadableSessionFile" in transcode
+    assert "readContainedData" in transcode
+    assert "NSImage(contentsOf:" not in transcode
 
 
 def test_frame_ref_basename_resolves() -> None:

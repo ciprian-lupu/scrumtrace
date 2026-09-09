@@ -125,11 +125,12 @@ final class SessionVault: @unchecked Sendable {
         guard ExportRel.existingSessionFile(ScrumTracePath.manifest, sessionURL: session) != nil else {
             throw SessionVaultError.sessionMissing(id)
         }
-        let url = session.appendingPathComponent(ScrumTracePath.manifest)
-        guard ExportRel.isReadableSessionFile(url, sessionRoot: session) else {
+        guard let data = ExportRel.readContainedData(
+            relative: ScrumTracePath.manifest,
+            sessionURL: session
+        ) else {
             throw SessionVaultError.sessionMissing(id)
         }
-        let data = try Data(contentsOf: url)
         return try decoder.decode(SessionManifest.self, from: data)
     }
 
@@ -175,8 +176,9 @@ final class SessionVault: @unchecked Sendable {
             throw SessionVaultError.writeFailed("events.jsonl")
         }
         var payload = Data()
-        if ExportRel.isContainedRegularFile(url, sessionRoot: session) {
-            payload = try Data(contentsOf: url)
+        if ExportRel.isContainedRegularFile(url, sessionRoot: session),
+           let existing = ExportRel.readContainedData(relative: ScrumTracePath.events, sessionURL: session) {
+            payload = existing
         }
         var data = try eventEncoder.encode(event)
         data.append(contentsOf: [0x0A])
@@ -250,8 +252,9 @@ final class SessionVault: @unchecked Sendable {
         }
         let url = session.appendingPathComponent(ScrumTracePath.events)
         guard ExportRel.isContainedRegularFile(url, sessionRoot: session),
-              ExportRel.isReadableSessionFile(url, sessionRoot: session) else { return [] }
-        guard let text = try? String(contentsOf: url, encoding: .utf8) else { return [] }
+              ExportRel.isReadableSessionFile(url, sessionRoot: session),
+              let data = ExportRel.readContainedData(relative: ScrumTracePath.events, sessionURL: session),
+              let text = String(data: data, encoding: .utf8) else { return [] }
         return text.split(whereSeparator: \.isNewline).compactMap { line in
             guard let data = line.data(using: .utf8) else { return nil }
             return try? decoder.decode(SessionEvent.self, from: data)

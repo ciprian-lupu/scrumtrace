@@ -309,10 +309,14 @@ def test_retry_failed_slices_and_pins() -> None:
     events_fn = vault.split("private func events")[1].split("func revealInFinder")[0]
     assert "isContainedRegularFile" in events_fn
     assert "isReadableSessionFile" in events_fn
+    assert "readContainedData" in events_fn
+    assert "String(contentsOf:" not in events_fn
     append = vault.split("func appendEvent")[1].split("func recentSessions")[0]
     assert "isSymbolicLink" in append
     assert "isContainedRegularFile" in append
+    assert "readContainedData" in append
     assert "writeContainedData" in append
+    assert "Data(contentsOf:" not in append
     assert "containedRelative(ScrumTracePath.events" in append
     reveal = vault.split("func revealInFinder")[1].split("private static let folderStamp")[0]
     assert "isSymbolicLink" in reveal
@@ -611,6 +615,9 @@ def test_phase45_clip_consent_and_budget() -> None:
     jpeg = projector.split("func transcodeJPEG")[1].split("func unreadableSource")[0]
     assert "containedRelative" in jpeg
     assert "isReadableSessionFile" in jpeg
+    assert "readContainedData" in jpeg
+    assert "NSImage(data:" in jpeg
+    assert "NSImage(contentsOf:" not in jpeg
     assert "isUnderExport" in jpeg
     assert "writeContainedData" in jpeg
     assert "jpeg.write(to:" not in jpeg
@@ -620,12 +627,12 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "fromRelative" in still_fn
     copy_if = projector.split("func copyIfPresent")[1]
     assert "existingSessionFile" in copy_if
-    assert "moveIntoSession" in copy_if
-    assert "scrumtrace-copy" in copy_if
-    assert "temporaryDirectory" in copy_if
+    assert "readContainedData" in copy_if
+    assert "writeContainedData" in copy_if
     assert "isUnderExport(destSession)" in copy_if
     assert "prepareContainedWrite" in copy_if
     assert "copyItem(at: from, to: dest)" not in copy_if
+    assert "copyItem(at: from, to: temp)" not in copy_if
     assert "isReadableSessionFile" in copy_if
     assert "fileExists(atPath:" not in copy_if
     assert "hasPrefix(prefix)" not in copy_if
@@ -650,6 +657,9 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "isSymbolicLink" in payload
     assert "parentIsSymbolicLink" in payload
     assert "isReadableSessionFile" in payload
+    assert "readContainedData" in payload
+    assert "NSImage(data:" in payload
+    assert "NSImage(contentsOf:" not in payload
     assert "sessionRoot: request.sessionURL" in openai
     assert "sessionRoot: request.sessionURL" in anthropic
     assert "sessionRoot: request.sessionURL" in google
@@ -683,13 +693,16 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "transcribeMovieAudio(at: movie, sessionURL: sessionURL)" in transcribe
     load_tr = processor.split("private func loadTranscript")[1].split("private func evaluateSlice")[0]
     assert "existingSessionFile(ScrumTracePath.fullTranscript" in load_tr
-    assert "isReadableSessionFile" in load_tr
+    assert "readContainedData" in load_tr
+    assert "Data(contentsOf:" not in load_tr
     models = (ROOT / "ScrumTrace" / "Storage" / "SessionModels.swift").read_text()
     layout_load = models.split("static func load(sessionURL: URL) -> CaptureAudioLayout")[1].split("func write(sessionURL")[0]
     assert "existingSessionFile(ScrumTracePath.captureLayout" in layout_load
-    assert "isReadableSessionFile" in layout_load
+    assert "readContainedData" in layout_load
+    assert "Data(contentsOf:" not in layout_load
     timing_load = models.split("static func load(sessionURL: URL) -> PipelineTiming?")[1].split("func write(sessionURL")[0]
-    assert "isReadableSessionFile" in timing_load
+    assert "readContainedData" in timing_load
+    assert "Data(contentsOf:" not in timing_load
     shot = (ROOT / "ScrumTrace" / "UI" / "ShotNoteWindow.swift").read_text()
     assert "let hadText = !note.isEmpty" in shot
     processor = (ROOT / "ScrumTrace" / "Processing" / "SessionProcessor.swift").read_text()
@@ -798,6 +811,12 @@ def test_write_contained_data_refuses_directory_symlinks() -> None:
     assert "func containsSymlinkComponent" in models
     assert "func prepareContainedWrite" in models
     assert "func writeContainedData" in models
+    assert "func readContainedData" in models
+    read_fn = models.split("static func readContainedData(relative:")[1].split("static func readContainedData(_ file")[0]
+    assert "openatRead" in models
+    assert "O_NOFOLLOW" in models
+    assert "openat" in models
+    assert "O_DIRECTORY" in models
     prepare = models.split("static func prepareContainedWrite")[1].split("static func writeContainedData")[0]
     assert "isSymbolicLink" in prepare
     assert "createDirectory" in prepare
@@ -849,7 +868,8 @@ def test_write_contained_data_refuses_directory_symlinks() -> None:
     load_fn = vault.split("func loadManifest")[1].split("func write(manifest")[0]
     assert "isSymbolicLink" in load_fn
     assert "existingSessionFile(ScrumTracePath.manifest" in load_fn
-    assert "isReadableSessionFile" in load_fn
+    assert "readContainedData" in load_fn
+    assert "Data(contentsOf:" not in load_fn
     assert "isContainedRegularFile" not in load_fn
     assert "isUsableSessionRoot(rootURL)" in load_fn
     create_fn = vault.split("func createSession")[1].split("func loadManifest")[0]
