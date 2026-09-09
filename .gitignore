@@ -1,0 +1,9 @@
+.DS_Store
+xcuserdata/
+DerivedData/
+*.xcuserstate
+*.p12
+*.cer
+secrets*
+.env
+.gemini_key
