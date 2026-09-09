@@ -141,10 +141,13 @@ final class ClockSynchronizer: @unchecked Sendable {
 
     func mediaTime(forSampleBuffer buffer: CMSampleBuffer) -> CMTime {
         let pts = CMSampleBufferGetPresentationTimeStamp(buffer)
-        if pts.isValid, startHostValid() {
-            return mediaTime(forHostTime: pts)
+        guard pts.isValid, startHostValid() else {
+            return mediaTime(forHostTime: CMClockGetTime(hostClock))
         }
-        return mediaTime(forHostTime: CMClockGetTime(hostClock))
+        // D2: sample PTS is converted onto CMClockGetHostTimeClock() before t_media.
+        let aligned = CMSyncConvertTime(pts, CMClockGetHostTimeClock(), hostClock)
+        let source = aligned.flags.contains(.valid) ? aligned : pts
+        return mediaTime(forHostTime: source)
     }
 
     private func startHostValid() -> Bool {

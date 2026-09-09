@@ -171,6 +171,20 @@ def test_pipeline_timing_stays_in_archive() -> None:
     assert "wallElapsed" in hud
 
 
+def test_pause_privacy_and_metadata_gate() -> None:
+    controller = (ROOT / "ScrumTrace" / "Processing" / "SessionController.swift").read_text()
+    assert "pausedByPrivacy" in controller
+    assert "isCurrentlyTripped" in controller
+    assert "sampleMetadataTick" in controller
+    assert "Still auto-paused for a password manager" in controller
+    assert "Stills and transcript excerpts" in controller
+    assert "includesClipAudio: approved && capabilities.acceptsVideo" in controller
+    clock = (ROOT / "ScrumTrace" / "Capture" / "ClockSynchronizer.swift").read_text()
+    assert "CMSyncConvertTime" in clock
+    privacy = (ROOT / "ScrumTrace" / "Capture" / "PrivacyGuard.swift").read_text()
+    assert "isCurrentlyTripped" in privacy
+
+
 def main() -> None:
     test_export_has_no_archive_and_no_tokens()
     test_agent_context_uses_export_relative_paths()
@@ -185,6 +199,7 @@ def main() -> None:
     test_audio_split_and_brief_loader()
     test_dual_transcript_merge_wired()
     test_pipeline_timing_stays_in_archive()
+    test_pause_privacy_and_metadata_gate()
     print("contract tests ok")
 
 

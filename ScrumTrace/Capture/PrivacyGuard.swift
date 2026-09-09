@@ -26,6 +26,12 @@ final class PrivacyGuard: @unchecked Sendable {
     var onTrip: ((String) -> Void)?
     var onClear: (() -> Void)?
 
+    var isCurrentlyTripped: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return isTripped
+    }
+
     func start() {
         stop()
         let timer = DispatchSource.makeTimerSource(queue: .global(qos: .utility))

@@ -24,10 +24,13 @@ final class SessionController: ObservableObject {
     private var recorder: SessionRecorder?
     private var processor: SessionProcessor?
     private var hudTimer: Timer?
+    private var metadataTimer: Timer?
     private var pinTimes: [TimeInterval] = []
     private var sessionURL: URL?
     private var manifest: SessionManifest?
     private var shotWindow: ShotNoteWindow?
+    private var pausedByPrivacy = false
+    private var lastMetaSignature = ""
 
     init(settings: AppSettings = .shared, vault: SessionVault = SessionVault()) {
         self.settings = settings
@@ -64,6 +67,11 @@ final class SessionController: ObservableObject {
     func togglePause() {
         guard isRecording else { return }
         if phase == .paused {
+            if privacy.isCurrentlyTripped {
+                statusLine = "Still auto-paused for a password manager"
+                return
+            }
+            pausedByPrivacy = false
             recorder?.setPaused(false)
             sampler.isSuspended = false
             phase = .recording
@@ -71,6 +79,7 @@ final class SessionController: ObservableObject {
             log(.resume, [:])
             NotificationCenter.default.post(name: .scrumTraceCaptureGate, object: CaptureSessionState.recording)
         } else {
+            pausedByPrivacy = false
             recorder?.setPaused(true)
             sampler.isSuspended = true
             phase = .paused
@@ -133,6 +142,8 @@ final class SessionController: ObservableObject {
             manifest = createdManifest
             lastSessionId = created.manifest.sessionId
             pinTimes = []
+            lastMetaSignature = ""
+            pausedByPrivacy = false
             clock.reset()
             let recorder = SessionRecorder(sessionURL: created.url, clock: clock)
             try await recorder.start()
@@ -168,6 +179,8 @@ final class SessionController: ObservableObject {
         }
         hudTimer?.invalidate()
         hudTimer = nil
+        metadataTimer?.invalidate()
+        metadataTimer = nil
         var local = manifest
         local?.pipelineStatus = .transcribing
         local?.duration = DurationPair(
@@ -233,13 +246,20 @@ final class SessionController: ObservableObject {
     private func requestUploadConsent() -> UploadConsent {
         #if os(macOS)
         let alert = NSAlert()
-        alert.messageText = "Send stills and clip audio off this Mac?"
+        alert.messageText = "Send stills and transcript excerpts off this Mac?"
+        let capabilities = settings.providerConfiguration()
+        let payload: String
+        if capabilities.acceptsVideo {
+            payload = "Stills, transcript excerpts, and clip video will leave this Mac."
+        } else {
+            payload = "Stills and transcript excerpts will leave this Mac. The master movie is not uploaded."
+        }
         alert.informativeText = """
         Destination: \(settings.provider.title)
         \(settings.baseURL)
         Model: \(settings.model.isEmpty ? "(none)" : settings.model)
 
-        Stills and clip audio will leave this Mac. The archive (session.mp4, full transcript, raw events) is not uploaded. Keychain storage is not consent.
+        \(payload) The archive (session.mp4, full transcript, raw events) stays local. Keychain storage is not consent.
         """
         alert.addButton(withTitle: "Approve upload")
         alert.addButton(withTitle: "Local export only")
@@ -250,7 +270,7 @@ final class SessionController: ObservableObject {
             provider: settings.provider.rawValue,
             endpoint: settings.baseURL,
             model: settings.model,
-            includesClipAudio: approved,
+            includesClipAudio: approved && capabilities.acceptsVideo,
             includesStills: approved
         )
         #else
@@ -347,6 +367,7 @@ final class SessionController: ObservableObject {
 
     private func privacyPause(bundle: String) {
         guard phase == .recording else { return }
+        pausedByPrivacy = true
         recorder?.setPaused(true)
         sampler.isSuspended = true
         phase = .paused
@@ -356,7 +377,9 @@ final class SessionController: ObservableObject {
     }
 
     private func privacyResume() {
-        guard phase == .paused, isRecording else { return }
+        guard pausedByPrivacy, phase == .paused, isRecording else { return }
+        if privacy.isCurrentlyTripped { return }
+        pausedByPrivacy = false
         recorder?.setPaused(false)
         sampler.isSuspended = false
         phase = .recording
@@ -373,6 +396,25 @@ final class SessionController: ObservableObject {
                 self.wallElapsed = self.clock.currentWallSeconds()
                 self.mediaElapsed = self.clock.currentMediaSeconds()
             }
+        }
+        metadataTimer?.invalidate()
+        metadataTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                await self?.sampleMetadataTick()
+            }
+        }
+    }
+
+    private func sampleMetadataTick() async {
+        guard captureState.allowsNewCapture else { return }
+        guard let meta = await sampler.sample() else { return }
+        let signature = "\(meta.bundleIdentifier)|\(meta.windowTitle)|\(meta.url ?? "")"
+        guard signature != lastMetaSignature else { return }
+        lastMetaSignature = signature
+        if let url = meta.url, !url.isEmpty {
+            log(.url, ["url": url, "title": meta.windowTitle, "app": meta.appName])
+        } else {
+            log(.window, ["app": meta.appName, "title": meta.windowTitle])
         }
     }
 
