@@ -244,8 +244,10 @@ enum PackBudget {
         }
         let evidenceStillsDrop = Array(evidenceShotsNewestFirst.reversed())
 
+        // Spec drop order: keyword-only clips, extra stills, remaining clips,
+        // then evidence clips, then evidence Shot stills (newest kept longest).
         return uniqued(
-            keyword + extraStills + extraClips + extraShots + leftover + evidenceClipsDrop + evidenceStillsDrop
+            keyword + extraStills + extraShots + leftover + extraClips + evidenceClipsDrop + evidenceStillsDrop
         )
         .filter { FileManager.default.fileExists(atPath: sessionURL.appendingPathComponent($0).path) }
         .filter { ExportRel.isUnderExport($0) && !isProtected($0) }

@@ -118,6 +118,10 @@ def test_zipper_never_deletes_archive() -> None:
     assert "removeItem(at: export)" in projector.split("func resetExportTree")[1].split("func writeProjectionManifest")[0]
     omit_md = zipper.split("func writeOmittedMarkdown")[1].split("private func uniquedOmitted")[0]
     assert "omittedHandoffPath" in omit_md
+    omit_fn = zipper.split("static func omissionOrder")[1].split("static func stripOmitted")[0]
+    dropped = omit_fn.split("return uniqued")[1].split(".filter")[0]
+    assert "keyword + extraStills + extraShots + leftover + extraClips" in dropped
+    assert "extraClips + extraShots" not in dropped
 
 
 def test_clip_exporter_macos14() -> None:
@@ -190,12 +194,16 @@ def test_retry_failed_slices_and_pins() -> None:
     controller = (ROOT / "ScrumTrace" / "Processing" / "SessionController.swift").read_text()
     assert "mergePins" in controller
     assert "mergeLiveCatalog" in controller
+    assert "pinTimesSessionId" in controller
+    assert "pinTimesSessionId == sessionId" in controller
     capture = controller.split("private func captureShot")[1].split("private func finishShot")[0]
     assert "try? vault.write(manifest: &local)" not in capture
     finish = controller.split("private func finishShot")[1].split("private func privacyPause")[0]
     assert "try? vault.write" not in finish
     assert "catalog write failed" in finish
     assert "self.manifest = manifest" in finish
+    assert "try? data.write" not in finish
+    assert "options: .atomic" in finish
 
 
 def test_audio_split_and_brief_loader() -> None:

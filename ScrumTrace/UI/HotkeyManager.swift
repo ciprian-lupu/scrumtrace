@@ -85,15 +85,20 @@ final class HotkeyManager {
             return noErr
         }
         DispatchQueue.main.async { [weak self] in
-            switch action {
-            case .pin:
-                self?.controller?.pin()
-            case .shot:
-                self?.controller?.openShot()
-            case .pause:
-                self?.controller?.togglePause()
-            }
+            guard let self else { return }
+            self.perform(action)
         }
         return noErr
+    }
+
+    private func perform(_ action: Action) {
+        switch action {
+        case .pin:
+            controller?.pin()
+        case .shot:
+            controller?.openShot()
+        case .pause:
+            controller?.togglePause()
+        }
     }
 }

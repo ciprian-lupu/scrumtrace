@@ -27,6 +27,7 @@ final class SessionController: ObservableObject {
     private var hudTimer: Timer?
     private var metadataTimer: Timer?
     private var pinTimes: [TimeInterval] = []
+    private var pinTimesSessionId: String?
     private var sessionURL: URL?
     private var manifest: SessionManifest?
     private var shotWindow: ShotNoteWindow?
@@ -98,6 +99,7 @@ final class SessionController: ObservableObject {
         guard captureState.allowsNewCapture else { return }
         let media = clock.currentMediaSeconds()
         pinTimes.append(media)
+        pinTimesSessionId = manifest?.sessionId
         log(.pin, ["t_media": String(format: "%.2f", media)])
         statusLine = "Pinned \(Self.clock(media))"
         flashStatus()
@@ -188,6 +190,7 @@ final class SessionController: ObservableObject {
             manifest = createdManifest
             lastSessionId = created.manifest.sessionId
             pinTimes = []
+            pinTimesSessionId = created.manifest.sessionId
             lastMetaSignature = ""
             pausedByPrivacy = false
             clock.reset()
@@ -295,7 +298,8 @@ final class SessionController: ObservableObject {
                 manifest = local
             }
             let storedPins = vault.loadPinTimes(sessionId: sessionId)
-            let pins = Self.mergePins(pinTimes, storedPins)
+            let livePins = pinTimesSessionId == sessionId ? pinTimes : []
+            let pins = Self.mergePins(livePins, storedPins)
             let result = try await processor?.process(
                 sessionId: sessionId,
                 pinTimes: pins,
@@ -475,7 +479,11 @@ final class SessionController: ObservableObject {
         ]
         let jsonURL = sessionURL.appendingPathComponent("\(ScrumTracePath.shots)/\(stemFrom(record.id)).json")
         if let data = try? JSONSerialization.data(withJSONObject: json, options: [.prettyPrinted]) {
-            try? data.write(to: jsonURL)
+            do {
+                try data.write(to: jsonURL, options: .atomic)
+            } catch {
+                lastError = error.localizedDescription
+            }
         }
         var stored = record
         stored.note = note
@@ -559,12 +567,7 @@ final class SessionController: ObservableObject {
     }
 
     private func log(_ kind: SessionEventKind, _ payload: [String: String]) {
-        switch kind {
-        case .start, .stop, .pause, .resume, .shot, .privacyPause, .error:
-            break
-        case .pin, .url, .window:
-            guard captureState.allowsNewCapture else { return }
-        }
+        guard shouldPersistEvent(kind) else { return }
         guard let id = manifest?.sessionId else { return }
         let event = SessionEvent(
             tWall: clock.currentWallSeconds(),
@@ -573,6 +576,15 @@ final class SessionController: ObservableObject {
             payload: payload
         )
         try? vault.appendEvent(event, sessionId: id)
+    }
+
+    private func shouldPersistEvent(_ kind: SessionEventKind) -> Bool {
+        switch kind {
+        case .start, .stop, .pause, .resume, .shot, .privacyPause, .error:
+            return true
+        case .pin, .url, .window:
+            return captureState.allowsNewCapture
+        }
     }
 
     private func flashStatus() {
