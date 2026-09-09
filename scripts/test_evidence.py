@@ -146,6 +146,9 @@ def test_frame_ref_basename_resolves() -> None:
     assert "jpegPayload(url: url, sessionRoot: sessionURL)" in eval_slice
     assert "skippedNoSendableMedia" in eval_slice
     assert "AIProviderError.emptyResponse" not in eval_slice
+    assert "reviewTasks(shots: linked" in eval_slice
+    assert "for shot in linked" in eval_slice
+    assert "let shot = linked.first" not in eval_slice
     eval_loop = processor.split("let toRun =")[1].split("manifest.slices = updatedSlices.sorted")[0]
     assert "withTaskGroup" not in eval_loop
     assert "try vault.write(manifest: &manifest)" in eval_loop

@@ -812,9 +812,12 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "shotsLinked" in processor
     linked = processor.split("func shotsLinked")[1].split("private func uniquedPaths")[0]
     assert "stillCandidates" in linked
-    append = processor.split("func appendImage")[1].split("if let shot")[0]
+    append = processor.split("func appendImage")[1].split("if !configuration.acceptsImages")[0]
     assert "existingSessionFile" in append
     assert "fileExists(atPath: url.path)" not in append
+    assert "for shot in linked" in append
+    assert "for still in slice.stills" in append
+    assert "let shot = linked.first" not in processor.split("private func evaluateSlice")[1].split("private func tasks(")[0]
     transcribe = processor.split("private func transcribe(")[1].split("private func loadTranscript")[0]
     assert "existingSessionFile(ScrumTracePath.audioWav" in transcribe
     assert "existingSessionFile(ScrumTracePath.sessionMovie" in transcribe
@@ -951,9 +954,20 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "readContainedData(url, sessionRoot: sessionURL)" not in eval_slice
     assert "skippedNoSendableMedia" in eval_slice
     assert "AIProviderError.emptyResponse" not in eval_slice
+    assert "reviewTasks(shots: linked" in eval_slice
+    assert "shots: linked" in eval_slice
+    assert "let shot = linked.first" not in eval_slice
     tasks_fn = processor.split("private func tasks(")[1].split("private func rankedTasks")[0]
     assert "noKeepableCandidate" in tasks_fn
     assert "fallbackOffline" in tasks_fn
+    assert "shots: [ShotRecord]" in tasks_fn
+    assert "shots.flatMap" in tasks_fn
+    assert "!shots.isEmpty" in tasks_fn
+    assert "func reviewTasks" in tasks_fn
+    abort_auth = processor.split("func abortedForAuth")[1].split("func resetEvalAuthGate")[0]
+    assert "shots: [ShotRecord]" in abort_auth
+    assert "reviewTasks(shots: shots" in abort_auth
+    assert "shot: ShotRecord?" not in abort_auth
     assert "willUploadClip(configuration: configuration)" in processor
     assert "includeFullTranscript: projection.manifest.includeFullTranscriptInZip" in processor
     google = (ROOT / "ScrumTrace" / "AI" / "GoogleClient.swift").read_text()

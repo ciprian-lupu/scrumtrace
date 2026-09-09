@@ -345,9 +345,8 @@ final class SessionProcessor: @unchecked Sendable {
     ) async -> (SliceRecord, [TaskRecord]) {
         var slice = slice
         let linked = shotsLinked(to: slice, in: manifest)
-        let shot = linked.first
         let shotNote = linked.map(\.note).filter { !$0.isEmpty }.joined(separator: "\n")
-        if let aborted = abortedForAuth(slice: slice, shot: shot, product: manifest.productContext) {
+        if let aborted = abortedForAuth(slice: slice, shots: linked, product: manifest.productContext) {
             return aborted
         }
         var excerpt = TranscriptQuery.excerpt(from: transcript, start: slice.startMedia, end: slice.endMedia)
@@ -362,7 +361,7 @@ final class SessionProcessor: @unchecked Sendable {
             guard seenImage.insert(url.path).inserted else { return }
             images.append(url)
         }
-        if let shot {
+        for shot in linked {
             for path in shot.stillCandidates {
                 appendImage(path)
             }
@@ -401,12 +400,9 @@ final class SessionProcessor: @unchecked Sendable {
             && !hasStill && excerpt.isEmpty && shotNote.isEmpty {
             slice.analysisStatus = .skipped
             let skipped = AIProviderError.skippedNoSendableMedia
-            if let shot {
-                return (slice, [fallbackTask(shot: shot, slice: slice, error: skipped, product: manifest.productContext)])
-            }
-            return (slice, [fallbackOffline(slice: slice, error: skipped, product: manifest.productContext)])
+            return (slice, reviewTasks(shots: linked, slice: slice, error: skipped, product: manifest.productContext))
         }
-        if let aborted = abortedForAuth(slice: slice, shot: shot, product: manifest.productContext) {
+        if let aborted = abortedForAuth(slice: slice, shots: linked, product: manifest.productContext) {
             return aborted
         }
         let request = SliceEvaluationRequest(
@@ -423,7 +419,7 @@ final class SessionProcessor: @unchecked Sendable {
             clipURL: clipURL,
             sessionURL: sessionURL
         )
-        if let aborted = abortedForAuth(slice: slice, shot: shot, product: manifest.productContext) {
+        if let aborted = abortedForAuth(slice: slice, shots: linked, product: manifest.productContext) {
             return aborted
         }
         do {
@@ -432,7 +428,7 @@ final class SessionProcessor: @unchecked Sendable {
             let tasks = tasks(
                 from: response,
                 slice: slice,
-                shot: shot,
+                shots: linked,
                 product: manifest.productContext,
                 transcript: transcript,
                 sessionURL: sessionURL,
@@ -444,17 +440,14 @@ final class SessionProcessor: @unchecked Sendable {
                 markEvalAuthFailed()
             }
             slice.analysisStatus = .offlineFailed
-            if let shot {
-                return (slice, [fallbackTask(shot: shot, slice: slice, error: error, product: manifest.productContext)])
-            }
-            return (slice, [fallbackOffline(slice: slice, error: error, product: manifest.productContext)])
+            return (slice, reviewTasks(shots: linked, slice: slice, error: error, product: manifest.productContext))
         }
     }
 
     private func tasks(
         from response: CandidateEvaluationResponse,
         slice: SliceRecord,
-        shot: ShotRecord?,
+        shots: [ShotRecord],
         product: ProductContext,
         transcript: FullTranscript,
         sessionURL: URL,
@@ -471,7 +464,7 @@ final class SessionProcessor: @unchecked Sendable {
             case .drop:
                 status = .dropped
             }
-            if shot != nil && status == .dropped {
+            if !shots.isEmpty && status == .dropped {
                 // D7: a human Shot on this slice must stay visible.
                 status = .needsReview
             }
@@ -492,7 +485,7 @@ final class SessionProcessor: @unchecked Sendable {
             }
             let resolvedFrames = EvidenceValidator.existingPaths(candidate.frameReferences, sessionURL: sessionURL)
             let uniqueEvidence = uniquedPaths(
-                resolvedFrames + slice.stills + [slice.clipPath].compactMap { $0 } + (shot?.stillCandidates ?? [])
+                resolvedFrames + slice.stills + [slice.clipPath].compactMap { $0 } + shots.flatMap(\.stillCandidates)
             )
             var instructions = AgentInstructionTemplate.render(
                 kind: candidate.kind,
@@ -522,11 +515,13 @@ final class SessionProcessor: @unchecked Sendable {
             )
         }
         if out.isEmpty {
-            if let shot {
-                out.append(fallbackTask(shot: shot, slice: slice, error: nil, product: product))
-            } else if !uniquedPaths(slice.stills + [slice.clipPath].compactMap { $0 }).isEmpty {
+            let media = uniquedPaths(
+                slice.stills + [slice.clipPath].compactMap { $0 } + shots.flatMap(\.stillCandidates)
+            )
+            if !shots.isEmpty || !media.isEmpty {
                 out.append(
-                    fallbackOffline(
+                    contentsOf: reviewTasks(
+                        shots: shots,
                         slice: slice,
                         error: AIProviderError.noKeepableCandidate,
                         product: product
@@ -535,6 +530,24 @@ final class SessionProcessor: @unchecked Sendable {
             }
         }
         return out
+    }
+
+    /// D7: overlapping Shots that merged onto one slice each stay visible.
+    private func reviewTasks(
+        shots: [ShotRecord],
+        slice: SliceRecord,
+        error: Error?,
+        product: ProductContext
+    ) -> [TaskRecord] {
+        if shots.isEmpty {
+            let err = error ?? AIProviderError.noKeepableCandidate
+            return [fallbackOffline(slice: slice, error: err, product: product)]
+        }
+        return shots.enumerated().map { index, shot in
+            var task = fallbackTask(shot: shot, slice: slice, error: error, product: product)
+            task.taskId = String(format: "TASK-%02d", index + 1)
+            return task
+        }
     }
 
     private func rankedTasks(_ tasks: [TaskRecord]) -> [TaskRecord] {
@@ -610,7 +623,7 @@ final class SessionProcessor: @unchecked Sendable {
 
     private func abortedForAuth(
         slice: SliceRecord,
-        shot: ShotRecord?,
+        shots: [ShotRecord],
         product: ProductContext
     ) -> (SliceRecord, [TaskRecord])? {
         guard evalAuthHasFailed() else { return nil }
@@ -620,10 +633,7 @@ final class SessionProcessor: @unchecked Sendable {
             401,
             "Skipped remaining slices after provider authentication failed."
         )
-        if let shot {
-            return (slice, [fallbackTask(shot: shot, slice: slice, error: skipped, product: product)])
-        }
-        return (slice, [fallbackOffline(slice: slice, error: skipped, product: product)])
+        return (slice, reviewTasks(shots: shots, slice: slice, error: skipped, product: product))
     }
 
     private func resetEvalAuthGate() {
