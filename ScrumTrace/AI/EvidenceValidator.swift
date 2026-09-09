@@ -19,8 +19,49 @@ enum EvidenceValidator {
         }
     }
 
+    /// Model `frame_references` are untrusted strings: basename, `shots/…`, or archive paths.
+    static func resolvePath(_ path: String, sessionURL: URL) -> String? {
+        let fileManager = FileManager.default
+        let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let name = URL(fileURLWithPath: trimmed).lastPathComponent
+        let stem = URL(fileURLWithPath: name).deletingPathExtension().lastPathComponent
+        var tries: [String] = [
+            trimmed,
+            ExportRel.sessionPath(trimmed),
+            "archive/shots/\(name)",
+            "archive/shots/\(stem).png",
+            "archive/shots/\(stem).annotated.png",
+            "export/shots/\(stem).jpg",
+            "export/shots/\(stem).annotated.jpg"
+        ]
+        if trimmed.hasPrefix("./") {
+            tries.insert(String(trimmed.dropFirst(2)), at: 1)
+        }
+        var seen = Set<String>()
+        for rel in tries where seen.insert(rel).inserted {
+            if fileManager.fileExists(atPath: sessionURL.appendingPathComponent(rel).path) {
+                return rel
+            }
+        }
+        for folder in [ScrumTracePath.shots, ScrumTracePath.mediaWork, ScrumTracePath.exportShots, ScrumTracePath.media] {
+            if let match = firstMatch(name: name, stem: stem, in: sessionURL.appendingPathComponent(folder), sessionURL: sessionURL) {
+                return match
+            }
+        }
+        return nil
+    }
+
     static func existingPaths(_ paths: [String], sessionURL: URL) -> [String] {
-        paths.filter { FileManager.default.fileExists(atPath: sessionURL.appendingPathComponent($0).path) }
+        var seen = Set<String>()
+        var out: [String] = []
+        for path in paths {
+            guard let resolved = resolvePath(path, sessionURL: sessionURL) else { continue }
+            if seen.insert(resolved).inserted {
+                out.append(resolved)
+            }
+        }
+        return out
     }
 
     static func canConfirm(
@@ -50,5 +91,21 @@ enum EvidenceValidator {
             issues.append(EvidenceIssue(reason: "missing source_slice_id"))
         }
         return issues
+    }
+
+    private static func firstMatch(name: String, stem: String, in root: URL, sessionURL: URL) -> String? {
+        guard let enumerator = FileManager.default.enumerator(
+            at: root,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        ) else { return nil }
+        let prefix = sessionURL.path.hasSuffix("/") ? sessionURL.path : sessionURL.path + "/"
+        for case let url as URL in enumerator {
+            guard (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true else { continue }
+            if url.lastPathComponent == name || url.deletingPathExtension().lastPathComponent == stem {
+                return url.path.replacingOccurrences(of: prefix, with: "")
+            }
+        }
+        return nil
     }
 }

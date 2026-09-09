@@ -162,4 +162,39 @@ final class ContractTests: XCTestCase {
         XCTAssertEqual(decoded.omittedCount, 2)
         XCTAssertTrue(String(data: data, encoding: .utf8)?.contains("whisper_wall_seconds") == true)
     }
+
+    func testFrameReferenceResolvesBasename() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("scrumtrace-ev-\(UUID().uuidString)")
+        let shots = root.appendingPathComponent("archive/shots")
+        try FileManager.default.createDirectory(at: shots, withIntermediateDirectories: true)
+        let file = shots.appendingPathComponent("001.png")
+        try Data("png".utf8).write(to: file)
+        defer { try? FileManager.default.removeItem(at: root) }
+        XCTAssertEqual(
+            EvidenceValidator.resolvePath("001.png", sessionURL: root),
+            "archive/shots/001.png"
+        )
+        XCTAssertEqual(
+            EvidenceValidator.resolvePath("shots/001.png", sessionURL: root),
+            "archive/shots/001.png"
+        )
+        XCTAssertNil(EvidenceValidator.resolvePath("missing.png", sessionURL: root))
+    }
+
+    func testMergedSlicesStayWithinClipMax() {
+        let shots = [
+            ShotRecord(id: "shot-001", tMedia: 10, rawPath: "archive/shots/001.png", annotatedPath: nil, note: "a", source: .typed),
+            ShotRecord(id: "shot-002", tMedia: 28, rawPath: "archive/shots/002.png", annotatedPath: nil, note: "b", source: .typed)
+        ]
+        let slices = MeetingSlicer().slice(
+            shots: shots,
+            pins: [],
+            transcript: FullTranscript(sessionId: "s", language: "en", segments: []),
+            mediaDuration: 120
+        )
+        XCTAssertFalse(slices.isEmpty)
+        for slice in slices {
+            XCTAssertLessThanOrEqual(slice.endMedia - slice.startMedia, MediaBudget.clipMaxDuration + 0.001)
+        }
+    }
 }

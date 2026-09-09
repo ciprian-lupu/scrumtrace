@@ -68,7 +68,7 @@ struct MeetingSlicer {
                 )
             )
         }
-        let merged = mergeOverlapping(candidates)
+        let merged = mergeOverlapping(candidates, mediaDuration: mediaDuration)
         let capped = Array(merged.sorted { $0.score > $1.score }.prefix(MediaBudget.maxCandidateSlices))
         return capped.enumerated().map { index, slice in
             var copy = slice
@@ -83,7 +83,7 @@ struct MeetingSlicer {
         }
     }
 
-    private func mergeOverlapping(_ slices: [SliceRecord]) -> [SliceRecord] {
+    private func mergeOverlapping(_ slices: [SliceRecord], mediaDuration: TimeInterval) -> [SliceRecord] {
         let sorted = slices.sorted { $0.startMedia < $1.startMedia }
         var result: [SliceRecord] = []
         for slice in sorted {
@@ -92,11 +92,27 @@ struct MeetingSlicer {
                     last.trigger = slice.trigger
                     last.associatedShotId = slice.associatedShotId ?? last.associatedShotId
                     last.score = slice.score
-                }
-                last.startMedia = min(last.startMedia, slice.startMedia)
-                last.endMedia = max(last.endMedia, slice.endMedia)
-                if last.stills.isEmpty {
+                    if last.stills.isEmpty {
+                        last.stills = slice.stills
+                    }
+                } else if last.stills.isEmpty {
                     last.stills = slice.stills
+                }
+                let combinedStart = min(last.startMedia, slice.startMedia)
+                let combinedEnd = max(last.endMedia, slice.endMedia)
+                if combinedEnd - combinedStart <= MediaBudget.clipMaxDuration {
+                    last.startMedia = combinedStart
+                    last.endMedia = combinedEnd
+                } else {
+                    let prefer = slice.score > last.score ? slice : last
+                    let center = (prefer.startMedia + prefer.endMedia) / 2
+                    let window = TimelineMath.clampMediaWindow(
+                        center: center,
+                        duration: MediaBudget.clipMaxDuration,
+                        mediaDuration: mediaDuration
+                    )
+                    last.startMedia = window.start
+                    last.endMedia = window.end
                 }
                 result[result.count - 1] = last
             } else {

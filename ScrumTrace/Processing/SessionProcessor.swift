@@ -381,8 +381,13 @@ final class SessionProcessor: @unchecked Sendable {
         if !issues.isEmpty && status == .confirmed {
             status = .needsReview
         }
-        let evidence = (slice.stills + [slice.clipPath].compactMap { $0 } + [shot?.annotatedPath ?? shot?.rawPath].compactMap { $0 })
-        let uniqueEvidence = Array(NSOrderedSet(array: evidence)) as? [String] ?? evidence
+        let resolvedFrames = EvidenceValidator.existingPaths(candidate.frameReferences, sessionURL: sessionURL)
+        let evidence = resolvedFrames + slice.stills + [slice.clipPath].compactMap { $0 } + [shot?.annotatedPath ?? shot?.rawPath].compactMap { $0 }
+        var uniqueEvidence: [String] = []
+        var seenEvidence = Set<String>()
+        for path in evidence where seenEvidence.insert(path).inserted {
+            uniqueEvidence.append(path)
+        }
         var instructions = AgentInstructionTemplate.render(
             kind: candidate.kind,
             product: product

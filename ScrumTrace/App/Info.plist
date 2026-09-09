@@ -32,6 +32,8 @@
 	<true/>
 	<key>NSAppleEventsUsageDescription</key>
 	<string>ScrumTrace reads the frontmost window title so meeting context can name the app you were presenting.</string>
+	<key>NSAccessibilityUsageDescription</key>
+	<string>ScrumTrace reads the frontmost window title so agent context can name the app you were presenting. It does not control the computer.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>ScrumTrace records meeting audio so spoken decisions can be transcribed locally and attached to coding-agent context.</string>
 	<key>NSAudioCaptureUsageDescription</key>
