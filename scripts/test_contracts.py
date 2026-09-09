@@ -31,6 +31,9 @@ def test_agent_context_uses_export_relative_paths() -> None:
     assert "`media/task-02/clip.mp4`" in ctx
     assert "archive/" not in ctx
     assert "export/shots" not in ctx
+    assert "<untrusted_meeting_data>this does nothing, it should store the athlete</untrusted_meeting_data>" in ctx
+    assert "1 pause" in ctx
+    assert "1 pauses" not in ctx
 
 
 def test_retired_anthropic_ids() -> None:
@@ -248,6 +251,9 @@ def test_pause_privacy_and_metadata_gate() -> None:
     assert "this export folder" in agent
     assert "Never open the private capture folder" in agent
     assert "handoffPath" in agent
+    assert "wrapUntrustedInline" in agent
+    assert "pauseLabel" in agent
+    assert "pauses.count) pauses" not in agent
     assert "Still auto-paused for a password manager" in controller
     assert "Stills and transcript excerpts" in controller
     assert "clip audio will leave this Mac" in controller
@@ -380,6 +386,8 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert 'box.addEventListener("click", close)' not in fallback_js
     prompts = (ROOT / "ScrumTrace" / "AI" / "PromptTemplates.swift").read_text()
     assert 'wrapUntrusted("Human shot note' in prompts
+    assert "func sanitizeUntrusted" in prompts
+    assert "func wrapUntrustedInline" in prompts
     pbx = (ROOT / "ScrumTrace.xcodeproj" / "project.pbxproj").read_text()
     assert "ENABLE_TESTABILITY = YES" in pbx
     assert "!configuration.acceptsText" in processor

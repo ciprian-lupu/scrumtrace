@@ -51,7 +51,16 @@ enum PromptTemplates {
     """
 
     static func wrapUntrusted(_ body: String) -> String {
-        "<untrusted_meeting_data>\n\(body)\n</untrusted_meeting_data>"
+        "<untrusted_meeting_data>\n\(sanitizeUntrusted(body))\n</untrusted_meeting_data>"
+    }
+
+    /// Inline form for AGENT_CONTEXT.md list items (D13).
+    static func wrapUntrustedInline(_ body: String) -> String {
+        "<untrusted_meeting_data>\(sanitizeUntrusted(body))</untrusted_meeting_data>"
+    }
+
+    static func sanitizeUntrusted(_ body: String) -> String {
+        body.replacingOccurrences(of: "</untrusted_meeting_data>", with: "", options: .caseInsensitive)
     }
 
     static func evaluationUserPrompt(

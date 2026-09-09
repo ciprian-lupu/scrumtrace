@@ -11,7 +11,7 @@ struct AgentContextRenderer {
         lines.append("- App: \(manifest.productContext.appName)")
         lines.append("- Repo: \(manifest.productContext.repoURL)")
         lines.append("- Stack: \(manifest.productContext.techStack)")
-        lines.append("- Media duration: \(Self.clock(manifest.duration.mediaSeconds)) (wall \(Self.clock(manifest.duration.wallSeconds)), \(manifest.pauses.count) pauses)")
+        lines.append("- Media duration: \(Self.clock(manifest.duration.mediaSeconds)) (wall \(Self.clock(manifest.duration.wallSeconds)), \(Self.pauseLabel(manifest.pauses.count)))")
         lines.append("")
         let confirmed = manifest.tasks.filter { $0.status == .confirmed }
         let review = manifest.tasks.filter { $0.status == .needsReview }
@@ -37,7 +37,7 @@ struct AgentContextRenderer {
         let shotLines = manifest.shots.compactMap { shot -> [String]? in
             guard let path = displayPath(shot) else { return nil }
             return [
-                "- \(shot.id) at t_media \(Self.clock(shot.tMedia)): \(shot.note)",
+                "- \(shot.id) at t_media \(Self.clock(shot.tMedia)): \(PromptTemplates.wrapUntrustedInline(shot.note))",
                 "  - ![](\(path))"
             ]
         }
@@ -76,15 +76,15 @@ struct AgentContextRenderer {
         var lines = [""]
         lines.append("### \(task.taskId) — \(task.title)")
         lines.append("- Kind: `\(task.kind.rawValue)` · status: `\(task.status.rawValue)` · confidence: \(String(format: "%.2f", task.confidence))")
-        lines.append("- Observed: \(task.observed)")
-        lines.append("- Stated: \(task.stated)")
+        lines.append("- Observed: \(PromptTemplates.wrapUntrustedInline(task.observed))")
+        lines.append("- Stated: \(PromptTemplates.wrapUntrustedInline(task.stated))")
         lines.append("- Inferred: \(task.inferred)")
         lines.append("- Agent instructions: \(task.agentInstructions)")
         if !task.quotes.isEmpty {
             lines.append("- Quotes:")
             for quote in task.quotes {
                 lines.append(
-                    "  - \(quote.speaker) [t_media \(String(format: "%.1f", quote.tMediaStart))s–\(String(format: "%.1f", quote.tMediaEnd))s]: \"\(quote.text)\""
+                    "  - \(quote.speaker) [t_media \(String(format: "%.1f", quote.tMediaStart))s–\(String(format: "%.1f", quote.tMediaEnd))s]: \(PromptTemplates.wrapUntrustedInline(quote.text))"
                 )
             }
         }
@@ -109,6 +109,10 @@ struct AgentContextRenderer {
         guard let raw else { return nil }
         let rel = ExportRel.handoffPath(raw)
         return rel
+    }
+
+    private static func pauseLabel(_ count: Int) -> String {
+        count == 1 ? "1 pause" : "\(count) pauses"
     }
 
     private static func clock(_ seconds: TimeInterval) -> String {
