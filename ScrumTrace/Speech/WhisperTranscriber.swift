@@ -59,13 +59,7 @@ final class WhisperTranscriber: @unchecked Sendable {
     }
 
     func transcribeFile(at url: URL) async throws -> FullTranscript {
-        if (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
-            throw NSError(
-                domain: "ScrumTrace",
-                code: 4,
-                userInfo: [NSLocalizedDescriptionKey: "Refusing to transcribe a symbolic link."]
-            )
-        }
+        try Self.refuseSymlinkMedia(url)
         let local = lockKit()
         guard let local else {
             throw NSError(
@@ -103,13 +97,7 @@ final class WhisperTranscriber: @unchecked Sendable {
 
     /// System audio lives in `archive/session.mp4`. Extract AAC, then fall back to the movie path.
     func transcribeMovieAudio(at movie: URL) async throws -> FullTranscript {
-        if (try? movie.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
-            throw NSError(
-                domain: "ScrumTrace",
-                code: 4,
-                userInfo: [NSLocalizedDescriptionKey: "Refusing to transcribe a symbolic link."]
-            )
-        }
+        try Self.refuseSymlinkMedia(movie)
         let dest = FileManager.default.temporaryDirectory.appendingPathComponent(
             "scrumtrace-system-audio-\(UUID().uuidString).m4a"
         )
@@ -151,6 +139,17 @@ final class WhisperTranscriber: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         return kit
+    }
+
+    private static func refuseSymlinkMedia(_ url: URL) throws {
+        if (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true
+            || ExportRel.parentIsSymbolicLink(url) {
+            throw NSError(
+                domain: "ScrumTrace",
+                code: 4,
+                userInfo: [NSLocalizedDescriptionKey: "Refusing to transcribe a symbolic link."]
+            )
+        }
     }
 
     /// Spec model is `large-v3-turbo`; WhisperKit downloads `openai_whisper-large-v3-turbo`.
