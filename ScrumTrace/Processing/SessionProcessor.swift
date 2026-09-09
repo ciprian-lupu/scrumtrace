@@ -67,6 +67,20 @@ final class SessionProcessor: @unchecked Sendable {
         }
 
         if !manifest.hasCompleted(.evaluating) {
+            if !manifest.uploadConsent.approved {
+                await onStatus(.evaluating, "Upload not approved — local export only")
+                manifest.tasks = localReviewTasks(manifest: manifest)
+                for index in manifest.slices.indices {
+                    manifest.slices[index].analysisStatus = .skipped
+                }
+                manifest.markCompleted(.evaluating)
+                try vault.write(manifest: &manifest)
+            } else if configuration.kind == .anthropic && AIProviderConfiguration.isRetiredAnthropic(configuration.model) {
+                await onStatus(.evaluating, "Retired Anthropic model refused")
+                manifest.tasks = localReviewTasks(manifest: manifest)
+                manifest.markCompleted(.evaluating)
+                try vault.write(manifest: &manifest)
+            } else {
             await onStatus(.evaluating, "Evaluating slices with the configured model")
             manifest.pipelineStatus = .evaluating
             let provider = AIEngine.make(configuration: configuration)
@@ -81,7 +95,8 @@ final class SessionProcessor: @unchecked Sendable {
                             manifest: manifest,
                             transcript: transcript,
                             sessionURL: sessionURL,
-                            provider: provider
+                            provider: provider,
+                            configuration: configuration
                         )
                     }
                     inflight += 1
@@ -106,18 +121,22 @@ final class SessionProcessor: @unchecked Sendable {
                 manifest.pipelineStatus = .offlineFailed
             }
             try vault.write(manifest: &manifest)
+            }
         }
 
         await onStatus(.synthesizing, "Writing AGENT_CONTEXT.md and SESSION_BRIEF.html")
         manifest.pipelineStatus = .synthesizing
         let excerpts = excerptMap(manifest: manifest, transcript: transcript)
-        let markdown = agentRenderer.render(manifest: manifest)
-        let prompt = agentRenderer.prompt(manifest: manifest)
-        let html = briefRenderer.render(manifest: manifest, excerpts: excerpts)
+        let projection = try ExportProjector().project(sessionURL: sessionURL, manifest: manifest)
+        manifest.omitted = projection.omitted
+        let markdown = agentRenderer.render(manifest: projection.manifest)
+        let prompt = agentRenderer.prompt(manifest: projection.manifest)
+        let html = briefRenderer.render(manifest: projection.manifest, excerpts: excerpts)
         try markdown.write(to: sessionURL.appendingPathComponent(ScrumTracePath.agentContext), atomically: true, encoding: .utf8)
         try prompt.write(to: sessionURL.appendingPathComponent(ScrumTracePath.agentPrompt), atomically: true, encoding: .utf8)
         try html.write(to: sessionURL.appendingPathComponent(ScrumTracePath.sessionBrief), atomically: true, encoding: .utf8)
-        _ = try zipper.zip(sessionURL: sessionURL, manifest: manifest)
+        let zipResult = try zipper.zip(sessionURL: sessionURL, manifest: manifest)
+        manifest.omitted.append(contentsOf: zipResult.omitted)
         manifest.markCompleted(.synthesizing)
         manifest.pipelineStatus = manifest.slices.contains(where: { $0.analysisStatus == .offlineFailed })
             ? .offlineFailed
@@ -153,13 +172,21 @@ final class SessionProcessor: @unchecked Sendable {
         manifest: SessionManifest,
         transcript: FullTranscript,
         sessionURL: URL,
-        provider: any AIProvider
+        provider: any AIProvider,
+        configuration: AIProviderConfiguration
     ) async -> (SliceRecord, [TaskRecord]) {
         var slice = slice
         let excerpt = TranscriptQuery.excerpt(from: transcript, start: slice.startMedia, end: slice.endMedia)
         let shot = manifest.shots.first { $0.id == slice.associatedShotId }
-        let images = slice.stills.map { sessionURL.appendingPathComponent($0) }
+        var images = slice.stills.map { sessionURL.appendingPathComponent($0) }
             .filter { FileManager.default.fileExists(atPath: $0.path) }
+        if !configuration.acceptsImages {
+            images = []
+        }
+        if !configuration.acceptsVideo && !configuration.acceptsImages && images.isEmpty && excerpt.isEmpty && (shot?.note.isEmpty ?? true) {
+            slice.analysisStatus = .skipped
+            return (slice, [fallbackOffline(slice: slice, error: AIProviderError.emptyResponse)])
+        }
         let request = SliceEvaluationRequest(
             product: manifest.productContext,
             slice: slice,
@@ -293,6 +320,43 @@ final class SessionProcessor: @unchecked Sendable {
             evidenceMedia: slice.stills + [slice.clipPath].compactMap { $0 },
             confidence: 0
         )
+    }
+
+    private func localReviewTasks(manifest: SessionManifest) -> [TaskRecord] {
+        if manifest.shots.isEmpty {
+            return [
+                TaskRecord(
+                    taskId: "TASK-01",
+                    sourceSliceId: manifest.slices.first?.sliceId ?? "slice-00",
+                    kind: .unknown,
+                    status: .needsReview,
+                    title: "Requires Manual Review - API Offline",
+                    observed: "No provider upload was approved for this session.",
+                    stated: "",
+                    inferred: "Local shots and clips remain in archive/. Inspect export/ after synthesis.",
+                    agentInstructions: AgentInstructionTemplate.render(kind: .unknown, product: manifest.productContext),
+                    quotes: [],
+                    evidenceMedia: manifest.shots.map { $0.annotatedPath ?? $0.rawPath },
+                    confidence: 0
+                )
+            ]
+        }
+        return manifest.shots.enumerated().map { index, shot in
+            TaskRecord(
+                taskId: String(format: "TASK-%02d", index + 1),
+                sourceSliceId: manifest.slices.first(where: { $0.associatedShotId == shot.id })?.sliceId ?? "slice-shot",
+                kind: .bug,
+                status: .needsReview,
+                title: shot.note.isEmpty ? "Human shot requires review" : shot.note,
+                observed: "Human-captured frame at t_media \(shot.tMedia)s.",
+                stated: shot.note,
+                inferred: "Provider evaluation skipped.",
+                agentInstructions: AgentInstructionTemplate.render(kind: .bug, product: manifest.productContext),
+                quotes: [],
+                evidenceMedia: [shot.annotatedPath ?? shot.rawPath],
+                confidence: 0
+            )
+        }
     }
 
     private func excerptMap(manifest: SessionManifest, transcript: FullTranscript) -> [String: String] {

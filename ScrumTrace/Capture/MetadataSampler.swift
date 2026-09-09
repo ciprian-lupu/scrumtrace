@@ -8,8 +8,10 @@ import Foundation
 /// runs off the main thread and is abandoned after 200ms.
 final class MetadataSampler: @unchecked Sendable {
     private let queue = DispatchQueue(label: "com.str8minds.ScrumTrace.metadata", qos: .userInitiated)
+    var isSuspended = false
 
     func sample(timeoutMs: UInt64 = MediaBudget.metadataSampleTimeoutMs) async -> WindowMetadata? {
+        if isSuspended { return nil }
         await withTaskGroup(of: WindowMetadata?.self) { group in
             group.addTask {
                 await self.blockingSample()

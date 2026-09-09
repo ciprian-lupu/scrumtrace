@@ -61,11 +61,13 @@ final class SessionController: ObservableObject {
         guard isRecording else { return }
         if phase == .paused {
             recorder?.setPaused(false)
+            sampler.isSuspended = false
             phase = .recording
             statusLine = "Recording"
             log(.resume, [:])
         } else {
             recorder?.setPaused(true)
+            sampler.isSuspended = true
             phase = .paused
             statusLine = "Paused — nothing is written"
             log(.pause, [:])
@@ -120,6 +122,7 @@ final class SessionController: ObservableObject {
             phase = .recording
             statusLine = "Recording"
             privacy.start()
+            sampler.isSuspended = false
             startTimer()
             log(.start, [:])
         } catch {
@@ -131,6 +134,7 @@ final class SessionController: ObservableObject {
     private func stopRecordingAsync() async {
         guard isRecording else { return }
         privacy.stop()
+        sampler.isSuspended = true
         recorder?.setPaused(false)
         do {
             try await recorder?.stop()
@@ -158,6 +162,16 @@ final class SessionController: ObservableObject {
     private func runProcessor(sessionId: String) async {
         isBusy = true
         do {
+            if var local = try? vault.loadManifest(id: sessionId) {
+                let destinationChanged = local.uploadConsent.approved
+                    && (local.uploadConsent.provider != settings.provider.rawValue
+                        || local.uploadConsent.endpoint != settings.baseURL
+                        || local.uploadConsent.model != settings.model)
+                if !local.uploadConsent.approved || destinationChanged {
+                    local.uploadConsent = requestUploadConsent()
+                    try vault.write(manifest: &local)
+                }
+            }
             let result = try await processor?.process(
                 sessionId: sessionId,
                 pinTimes: pinTimes,
@@ -182,6 +196,34 @@ final class SessionController: ObservableObject {
         isBusy = false
     }
 
+    private func requestUploadConsent() -> UploadConsent {
+        #if os(macOS)
+        let alert = NSAlert()
+        alert.messageText = "Send stills and clip audio off this Mac?"
+        alert.informativeText = """
+        Destination: \(settings.provider.title)
+        \(settings.baseURL)
+        Model: \(settings.model.isEmpty ? "(none)" : settings.model)
+
+        Stills and clip audio will leave this Mac. The archive (session.mp4, full transcript, raw events) is not uploaded. Keychain storage is not consent.
+        """
+        alert.addButton(withTitle: "Approve upload")
+        alert.addButton(withTitle: "Local export only")
+        let approved = alert.runModal() == .alertFirstButtonReturn
+        return UploadConsent(
+            approved: approved,
+            approvedAt: Date(),
+            provider: settings.provider.rawValue,
+            endpoint: settings.baseURL,
+            model: settings.model,
+            includesClipAudio: approved,
+            includesStills: approved
+        )
+        #else
+        return .denied
+        #endif
+    }
+
     private func captureShot() async {
         guard let sessionURL, var manifest else { return }
         let media = clock.currentMediaSeconds()
@@ -191,8 +233,8 @@ final class SessionController: ObservableObject {
         }
         let index = vault.nextShotIndex(sessionId: manifest.sessionId)
         let stem = String(format: "%03d", index)
-        let rawPath = "shots/\(stem).png"
-        let annotatedPath = "shots/\(stem).annotated.png"
+        let rawPath = "\(ScrumTracePath.shots)/\(stem).png"
+        let annotatedPath = "\(ScrumTracePath.shots)/\(stem).annotated.png"
         let rawURL = sessionURL.appendingPathComponent(rawPath)
         guard let tiff = image.tiffRepresentation,
               let rep = NSBitmapImageRep(data: tiff),
@@ -271,6 +313,7 @@ final class SessionController: ObservableObject {
     private func privacyPause(bundle: String) {
         guard phase == .recording else { return }
         recorder?.setPaused(true)
+        sampler.isSuspended = true
         phase = .paused
         statusLine = "Auto-paused for \(bundle)"
         log(.privacyPause, ["bundle": bundle])
@@ -279,6 +322,7 @@ final class SessionController: ObservableObject {
     private func privacyResume() {
         guard phase == .paused, isRecording else { return }
         recorder?.setPaused(false)
+        sampler.isSuspended = false
         phase = .recording
         statusLine = "Recording"
         log(.resume, ["reason": "privacy_clear"])

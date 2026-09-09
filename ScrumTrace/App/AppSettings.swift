@@ -38,6 +38,15 @@ struct AIProviderConfiguration: Sendable {
     var baseURL: String
     var model: String
     var apiKey: String
+    var acceptsText: Bool
+    var acceptsImages: Bool
+    var acceptsVideo: Bool
+
+    static func isRetiredAnthropic(_ model: String) -> Bool {
+        let lowered = model.lowercased()
+        return lowered.contains("claude-3-5") || lowered.contains("claude-3.5")
+            || lowered.contains("claude-3-7") || lowered.contains("claude-3.7")
+    }
 }
 
 @MainActor
@@ -112,7 +121,10 @@ final class AppSettings: ObservableObject {
             kind: provider,
             baseURL: baseURL,
             model: model,
-            apiKey: KeychainStore.get(account: keyAccount) ?? apiKeyDraft
+            apiKey: KeychainStore.get(account: keyAccount) ?? apiKeyDraft,
+            acceptsText: true,
+            acceptsImages: provider != .anthropic || !model.isEmpty,
+            acceptsVideo: false
         )
     }
 

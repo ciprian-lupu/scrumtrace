@@ -37,7 +37,7 @@ struct SettingsView: View {
             }
             Section("Export") {
                 Toggle("Include full transcript in session-pack.zip", isOn: $settings.includeFullTranscriptInZip)
-                Text("Off by default. The local archive always keeps full_transcript.json.")
+                Text("Off by default. The local archive always keeps full_transcript.json. Agents receive export/ only. The first provider call still asks for upload consent.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

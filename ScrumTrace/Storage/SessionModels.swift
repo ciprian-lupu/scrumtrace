@@ -157,6 +157,7 @@ struct ShotRecord: Codable, Sendable, Identifiable, Hashable {
     var tMedia: TimeInterval
     var rawPath: String
     var annotatedPath: String?
+    var exportPath: String? = nil
     var note: String
     var source: ShotSource
 
@@ -165,6 +166,7 @@ struct ShotRecord: Codable, Sendable, Identifiable, Hashable {
         case tMedia = "t_media"
         case rawPath = "raw_path"
         case annotatedPath = "annotated_path"
+        case exportPath = "export_path"
         case note
         case source
     }
@@ -177,6 +179,7 @@ struct SliceRecord: Codable, Sendable, Identifiable, Hashable {
     var trigger: SliceTrigger
     var associatedShotId: String?
     var clipPath: String?
+    var exportClipPath: String? = nil
     var stills: [String]
     var analysisStatus: SliceAnalysisStatus
     var score: Double
@@ -190,6 +193,7 @@ struct SliceRecord: Codable, Sendable, Identifiable, Hashable {
         case trigger
         case associatedShotId = "associated_shot_id"
         case clipPath = "clip_path"
+        case exportClipPath = "export_clip_path"
         case stills
         case analysisStatus = "analysis_status"
         case score

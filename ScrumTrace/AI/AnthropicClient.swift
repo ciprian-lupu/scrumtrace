@@ -5,6 +5,9 @@ struct AnthropicClient: AIProvider {
     var kind: AIProviderKind { .anthropic }
 
     func evaluate(request: SliceEvaluationRequest) async throws -> CandidateEvaluationResponse {
+        if configuration.kind == .anthropic && AIProviderConfiguration.isRetiredAnthropic(configuration.model) {
+            throw AIProviderError.invalidURL("Retired Anthropic model \(configuration.model)")
+        }
         let key = configuration.apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !key.isEmpty else { throw AIProviderError.missingAPIKey }
         let root = configuration.baseURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))

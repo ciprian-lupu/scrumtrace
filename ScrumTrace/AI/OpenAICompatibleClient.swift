@@ -21,12 +21,14 @@ struct OpenAICompatibleClient: AIProvider {
                 windowContext: request.windowContext
             )]
         ]
-        for imageURL in request.imageURLs.prefix(4) {
-            if let payload = ImageBase64.jpegPayload(url: imageURL) {
-                content.append([
-                    "type": "image_url",
-                    "image_url": ["url": "data:\(payload.mime);base64,\(payload.base64)"]
-                ])
+        if configuration.acceptsImages {
+            for imageURL in request.imageURLs.prefix(4) {
+                if let payload = ImageBase64.jpegPayload(url: imageURL) {
+                    content.append([
+                        "type": "image_url",
+                        "image_url": ["url": "data:\(payload.mime);base64,\(payload.base64)"]
+                    ])
+                }
             }
         }
 

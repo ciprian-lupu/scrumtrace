@@ -138,7 +138,7 @@ final class SessionVault: @unchecked Sendable {
 
     func revealInFinder(sessionId: String) {
         #if os(macOS)
-        NSWorkspace.shared.activateFileViewerSelecting([sessionURL(id: sessionId)])
+        NSWorkspace.shared.activateFileViewerSelecting([sessionURL(id: sessionId).appendingPathComponent(ScrumTracePath.export)])
         #endif
     }
 
