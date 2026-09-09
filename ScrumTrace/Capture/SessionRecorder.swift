@@ -62,27 +62,36 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             try self.prepareWriters(width: size.width, height: size.height)
         }
 
-        let filter = SCContentFilter(display: display, excludingApplications: excluded, exceptingWindows: [])
-        let config = SCStreamConfiguration()
-        config.width = size.width
-        config.height = size.height
-        config.minimumFrameInterval = CMTime(value: 1, timescale: 30)
-        config.queueDepth = 8
-        config.showsCursor = true
-        config.capturesAudio = true
-        config.pixelFormat = kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
-        if #available(macOS 15.0, *) {
-            config.captureMicrophone = true
-        }
-        let stream = SCStream(filter: filter, configuration: config, delegate: self)
-        try stream.addStreamOutput(self, type: .screen, sampleHandlerQueue: writerQueue)
-        try stream.addStreamOutput(self, type: .audio, sampleHandlerQueue: writerQueue)
-        var mic = false
-        if #available(macOS 15.0, *) {
-            do {
-                try stream.addStreamOutput(self, type: .microphone, sampleHandlerQueue: writerQueue)
-                mic = true
-            } catch {
+        do {
+            let filter = SCContentFilter(display: display, excludingApplications: excluded, exceptingWindows: [])
+            let config = SCStreamConfiguration()
+            config.width = size.width
+            config.height = size.height
+            config.minimumFrameInterval = CMTime(value: 1, timescale: 30)
+            config.queueDepth = 8
+            config.showsCursor = true
+            config.capturesAudio = true
+            config.pixelFormat = kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
+            if #available(macOS 15.0, *) {
+                config.captureMicrophone = true
+            }
+            let stream = SCStream(filter: filter, configuration: config, delegate: self)
+            try stream.addStreamOutput(self, type: .screen, sampleHandlerQueue: writerQueue)
+            try stream.addStreamOutput(self, type: .audio, sampleHandlerQueue: writerQueue)
+            var mic = false
+            if #available(macOS 15.0, *) {
+                do {
+                    try stream.addStreamOutput(self, type: .microphone, sampleHandlerQueue: writerQueue)
+                    mic = true
+                } catch {
+                    do {
+                        try startMicrophoneFallback()
+                        mic = true
+                    } catch {
+                        mic = false
+                    }
+                }
+            } else {
                 do {
                     try startMicrophoneFallback()
                     mic = true
@@ -90,23 +99,14 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
                     mic = false
                 }
             }
-        } else {
-            do {
-                try startMicrophoneFallback()
-                mic = true
-            } catch {
-                mic = false
+            writerQueue.sync {
+                self.microphoneWav = mic
+                self.stream = stream
+                self.started = true
             }
-        }
-        writerQueue.sync {
-            self.microphoneWav = mic
-            self.stream = stream
-            self.started = true
-        }
-        do {
             try await stream.startCapture()
         } catch {
-            writerQueue.sync { self.started = false }
+            await abortFailedStart()
             throw error
         }
     }
@@ -126,6 +126,36 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         w -= w % 2
         h -= h % 2
         return (max(w, 2), max(h, 2))
+    }
+
+    /// `start()` failed after writers or the mic fallback existed. Stop the
+    /// tap and cancel writers so a discarded recorder cannot keep capturing.
+    private func abortFailedStart() async {
+        clock.markRecordingStopped()
+        let snapshot = writerQueue.sync { () -> (stream: SCStream?, engine: AVAudioEngine?) in
+            self.started = false
+            self.paused = true
+            let stream = self.stream
+            self.stream = nil
+            let engine = self.engine
+            self.engine = nil
+            return (stream, engine)
+        }
+        if let live = snapshot.stream {
+            try? await live.stopCapture()
+        }
+        snapshot.engine?.stop()
+        writerQueue.sync {
+            self.videoInput?.markAsFinished()
+            self.audioInput?.markAsFinished()
+            self.wavFile = nil
+            if let writer = self.writer, writer.status == .writing || writer.status == .unknown {
+                writer.cancelWriting()
+            }
+            self.writer = nil
+            self.videoInput = nil
+            self.audioInput = nil
+        }
     }
 
     func setPaused(_ next: Bool) {

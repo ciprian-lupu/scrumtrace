@@ -222,6 +222,7 @@ final class SessionController: ObservableObject {
                 try await recorder.start()
             } catch {
                 captureFreeze.attach(nil)
+                clock.reset()
                 throw error
             }
             self.recorder = recorder

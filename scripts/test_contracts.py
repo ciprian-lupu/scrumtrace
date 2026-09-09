@@ -545,6 +545,8 @@ def test_pipeline_timing_stays_in_archive() -> None:
     controller = (ROOT / "ScrumTrace" / "Processing" / "SessionController.swift").read_text()
     start_rec = controller.split("func startRecordingAsync")[1].split("func stopRecordingAsync")[0]
     assert "requestTrust(prompt: true)" in start_rec
+    assert "clock.reset()" in start_rec
+    assert "captureFreeze.attach(nil)" in start_rec
     assert "transcriber.prepare" in controller
     hud = (ROOT / "ScrumTrace" / "UI" / "RecordingHUDWindow.swift").read_text()
     assert "wallElapsed" in hud
@@ -889,6 +891,12 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "self.started = true" in start_fn
     assert "startCapture" in start_fn
     assert start_fn.index("self.started = true") < start_fn.index("startCapture")
+    assert "abortFailedStart" in start_fn
+    abort_start = recorder.split("func abortFailedStart")[1].split("func setPaused")[0]
+    assert "self.started = false" in abort_start
+    assert "snapshot.engine?.stop()" in abort_start
+    assert "cancelWriting" in abort_start
+    assert "markRecordingStopped" in abort_start
     assert "try await writerQueue.sync" not in recorder
     assert "evenCaptureSize" in start_fn
     assert "prepareWriters(width:" in start_fn
