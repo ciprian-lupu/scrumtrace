@@ -456,6 +456,8 @@ This pack is `samples/mock-session/export/` only. Do not hand `archive/` (this m
     fd, tmp_name = tempfile.mkstemp(prefix="scrumtrace-zip-", suffix=".zip")
     os.close(fd)
     tmp = Path(tmp_name)
+    # zip cannot update an empty placeholder; Swift runZip also removes the temp first.
+    tmp.unlink(missing_ok=True)
     try:
         subprocess.run(
             ["zip", "-q", "-y", str(tmp), "-@"],

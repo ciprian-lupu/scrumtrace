@@ -96,6 +96,10 @@ def test_html_escaper_order() -> None:
     assert "mkstemp" in gen
     assert "scrumtrace-zip-" in gen
     assert "shutil.move" in gen
+    zip_build = gen.split("packed = EXPORT / \"session-pack.zip\"")[1]
+    assert "os.close(fd)" in zip_build
+    assert "tmp.unlink(missing_ok=True)" in zip_build
+    assert zip_build.index("tmp.unlink") < zip_build.index('["zip"')
 
 
 def test_brief_template_does_not_rescan_values() -> None:
