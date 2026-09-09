@@ -411,8 +411,8 @@ def test_pause_privacy_and_metadata_gate() -> None:
     agent = (ROOT / "ScrumTrace" / "Export" / "AgentContextRenderer.swift").read_text()
     assert "this export folder" in agent
     assert "Never open the private capture folder" in agent
-    assert "handoffPath" in agent
     assert "handoffFileIfPresent" in agent
+    assert "omittedHandoffPath" in agent
     assert "wrapUntrustedInline" in agent
     assert "pauseLabel" in agent
     assert "pauses.count) pauses" not in agent
