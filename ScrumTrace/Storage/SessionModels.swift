@@ -1,5 +1,35 @@
 import Foundation
 
+extension Notification.Name {
+    static let scrumTraceCaptureGate = Notification.Name("ScrumTrace.captureGate")
+}
+
+/// Paths agents see are relative to `export/` (`shots/…`, `media/…`).
+enum ExportRel {
+    static func toExportRoot(_ path: String) -> String {
+        var value = path
+        if value.hasPrefix("./") {
+            value = String(value.dropFirst(2))
+        }
+        if value.hasPrefix("export/") {
+            return String(value.dropFirst("export/".count))
+        }
+        return value
+    }
+
+    /// Session-root path used for file I/O. Never rewrites `archive/` into `export/`.
+    static func sessionPath(_ path: String) -> String {
+        if path.hasPrefix("export/") || path.hasPrefix("archive/") {
+            return path
+        }
+        return "export/\(toExportRoot(path))"
+    }
+
+    static func isUnderExport(_ path: String) -> Bool {
+        path.hasPrefix("export/") && !path.hasPrefix("export/archive")
+    }
+}
+
 enum MediaBudget {
     static let maxZipBytes = 35 * 1024 * 1024
     static let maxTasks = 8
@@ -183,6 +213,7 @@ struct SliceRecord: Codable, Sendable, Identifiable, Hashable {
     var stills: [String]
     var analysisStatus: SliceAnalysisStatus
     var score: Double
+    var mediaSent: [String]? = nil
 
     var id: String { sliceId }
 
@@ -197,6 +228,7 @@ struct SliceRecord: Codable, Sendable, Identifiable, Hashable {
         case stills
         case analysisStatus = "analysis_status"
         case score
+        case mediaSent = "media_sent"
     }
 }
 
@@ -267,8 +299,63 @@ struct CandidateRecord: Codable, Sendable, Hashable {
         case stated
         case inferred
         case agentInstructionsDraft = "agent_instructions_draft"
+        case agentInstructions = "agent_instructions"
         case quotes
         case frameReferences = "frame_references"
+    }
+
+    init(
+        decision: CandidateDecision,
+        confidence: Double,
+        kind: TaskKind,
+        title: String,
+        observed: String,
+        stated: String,
+        inferred: String,
+        agentInstructionsDraft: String,
+        quotes: [QuoteRecord],
+        frameReferences: [String]
+    ) {
+        self.decision = decision
+        self.confidence = confidence
+        self.kind = kind
+        self.title = title
+        self.observed = observed
+        self.stated = stated
+        self.inferred = inferred
+        self.agentInstructionsDraft = agentInstructionsDraft
+        self.quotes = quotes
+        self.frameReferences = frameReferences
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        decision = try container.decode(CandidateDecision.self, forKey: .decision)
+        confidence = try container.decode(Double.self, forKey: .confidence)
+        kind = try container.decode(TaskKind.self, forKey: .kind)
+        title = try container.decode(String.self, forKey: .title)
+        observed = try container.decodeIfPresent(String.self, forKey: .observed) ?? ""
+        stated = try container.decodeIfPresent(String.self, forKey: .stated) ?? ""
+        inferred = try container.decodeIfPresent(String.self, forKey: .inferred) ?? ""
+        agentInstructionsDraft = try container.decodeIfPresent(String.self, forKey: .agentInstructionsDraft)
+            ?? container.decodeIfPresent(String.self, forKey: .agentInstructions)
+            ?? ""
+        quotes = try container.decodeIfPresent([QuoteRecord].self, forKey: .quotes) ?? []
+        frameReferences = try container.decodeIfPresent([String].self, forKey: .frameReferences) ?? []
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(decision, forKey: .decision)
+        try container.encode(confidence, forKey: .confidence)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(title, forKey: .title)
+        try container.encode(observed, forKey: .observed)
+        try container.encode(stated, forKey: .stated)
+        try container.encode(inferred, forKey: .inferred)
+        try container.encode(agentInstructionsDraft, forKey: .agentInstructionsDraft)
+        try container.encode(quotes, forKey: .quotes)
+        try container.encode(frameReferences, forKey: .frameReferences)
     }
 }
 

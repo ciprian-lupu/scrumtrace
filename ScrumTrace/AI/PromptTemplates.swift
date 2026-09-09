@@ -42,8 +42,8 @@ enum PromptTemplates {
           "observed": "strictly what is visible on screen",
           "stated": "verbatim statement from participants",
           "inferred": "hypothesis or recommended investigation",
-          "agent_instructions": "what a coding agent should do next",
-          "quotes": [{ "speaker": "string", "text": "string" }],
+          "agent_instructions_draft": "untrusted draft; ScrumTrace will replace this with a template",
+          "quotes": [{ "speaker": "string", "text": "string", "t_media_start": 0, "t_media_end": 0 }],
           "frame_references": ["relative/path.png"]
         }
       ]

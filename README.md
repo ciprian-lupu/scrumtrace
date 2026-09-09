@@ -8,9 +8,10 @@ The working spec is [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) (contracts 
 
 - Native Swift menu-bar app (`com.str8minds.ScrumTrace`, sandbox off)
 - Pause gate shared by screen, system audio, microphone, metadata, Shot, and Hold-to-Talk
-- Session disk layout: `archive/` (private) vs `export/` (handoff)
-- Pluggable AI adapters behind one internal contract (MVP: OpenAI-compatible)
-- Timeline math tests: `python3 scripts/test_timeline.py`
+- Session disk layout: `archive/` (private) vs `export/` (handoff, export-relative paths)
+- Measured 35 MB `session-pack.zip` with `OMITTED.md` when the cap drops files
+- Pluggable AI adapters behind one internal contract (MVP: OpenAI-compatible + JSON Schema)
+- Timeline / contract / pack-budget tests (no Mac required): `python3 scripts/run_linux_tests.sh`
 
 ## Build (macOS 14+, Apple Silicon recommended)
 
@@ -26,11 +27,11 @@ Grant Screen Recording and Microphone. First WhisperKit launch downloads `large-
 |---|---|---|
 | Shot | ⌥⌘S | Disabled (no new frame) |
 | Pin | ⌥⌘Space | Ignored |
-| Pause | ⌥⌘P | Toggles. No new bytes from any capture source |
+| Pause | ⌥⌘P | Toggles. No new bytes from any capture source. In-flight Hold-to-Talk is aborted. |
 
 ## Handoff
 
-Give the agent **`export/`** only. Never drop the session root or `archive/` (master `session.mp4`, `audio.wav`, full transcript, raw events).
+Give the agent **`export/`** only. Never drop the session root or `archive/` (master `session.mp4`, `audio.wav`, full transcript, raw events). Paths inside the pack are relative to that folder (`shots/…`, `media/…`).
 
 Phase -1 mock pack (open in a browser or drop into Cursor):
 
@@ -41,8 +42,8 @@ python3 scripts/serve_preview.py --port 43147
 
 Then open `samples/mock-session/export/SESSION_BRIEF.html`. The image-only failure code and the clip-only recovery sequence are **not** in `AGENT_CONTEXT.md` — they live in `shots/` and `media/task-02/clip.mp4`. See `samples/mock-session/HANDOFF_LOG.md`.
 
-## Next gates
+## Next gates (must run on a Mac)
 
-1. Phase -1 mock `export/` + `HANDOFF_LOG.md`
-2. Phase 0–1 on a Mac: 20 min record, 3 pauses, all-source pause token test
-3. Phase 5–6 only after consent, measured 35 MB pack, evidence validation
+1. Phase 0–1: 20 min record, 3 pauses, all-source pause token test (screen, system audio, mic, Shot, Hold-to-Talk)
+2. Phase 3: WhisperKit elapsed time on a named Mac
+3. Phase 5–6: invalid key does not crash; measured zip ≤ 35 MB; remaining `AGENT_CONTEXT.md` paths exist

@@ -52,7 +52,8 @@ struct SessionBriefRenderer {
             "{{SHOTS_HTML}}": shots(manifest),
             "{{TRANSCRIPT_HTML}}": excerpts.values.map { "<p>\(HTMLEscaper.escape($0))</p>" }.joined(),
             "{{CONFIRMED_COUNT}}": "\(confirmed.count)",
-            "{{REVIEW_COUNT}}": "\(review.count)"
+            "{{REVIEW_COUNT}}": "\(review.count)",
+            "{{OMITTED_HTML}}": omittedHTML(manifest)
         ]
         var html = shell
         for (token, value) in replacements {
@@ -63,14 +64,15 @@ struct SessionBriefRenderer {
 
     private func taskCard(_ task: TaskRecord, excerpts: [String: String]) -> String {
         let media = task.evidenceMedia.map { path -> String in
-            if path.hasSuffix(".mp4") {
+            let rel = ExportRel.toExportRoot(path)
+            if rel.hasSuffix(".mp4") {
                 return """
-                <video class="clip" controls preload="metadata" src="\(HTMLEscaper.escape(path))"></video>
+                <video class="clip" controls preload="metadata" src="\(HTMLEscaper.escape(rel))"></video>
                 """
             }
             return """
-            <a class="still" href="\(HTMLEscaper.escape(path))" data-lightbox>
-              <img src="\(HTMLEscaper.escape(path))" alt="\(HTMLEscaper.escape(task.title))">
+            <a class="still" href="\(HTMLEscaper.escape(rel))" data-lightbox>
+              <img src="\(HTMLEscaper.escape(rel))" alt="\(HTMLEscaper.escape(task.title))">
             </a>
             """
         }.joined()
@@ -112,8 +114,11 @@ struct SessionBriefRenderer {
     }
 
     private func shots(_ manifest: SessionManifest) -> String {
-        manifest.shots.map { shot in
-            let path = shot.annotatedPath ?? shot.rawPath
+        let figures = manifest.shots.compactMap { shot -> String? in
+            let raw = shot.exportPath ?? shot.annotatedPath ?? (shot.rawPath.isEmpty ? nil : shot.rawPath)
+            guard let raw else { return nil }
+            let path = ExportRel.toExportRoot(raw)
+            if path.hasPrefix("archive/") { return nil }
             return """
             <figure>
               <a href="\(HTMLEscaper.escape(path))" data-lightbox>
@@ -122,7 +127,25 @@ struct SessionBriefRenderer {
               <figcaption>\(HTMLEscaper.escape(shot.id)) · \(Self.clock(shot.tMedia)) · \(HTMLEscaper.escape(shot.note))</figcaption>
             </figure>
             """
+        }
+        if figures.isEmpty {
+            return "<p class=\"muted\">No shots in this pack.</p>"
+        }
+        return figures.joined()
+    }
+
+    private func omittedHTML(_ manifest: SessionManifest) -> String {
+        if manifest.omitted.isEmpty { return "" }
+        let items = manifest.omitted.map { item in
+            "<li><code>\(HTMLEscaper.escape(ExportRel.toExportRoot(item.path)))</code> — \(HTMLEscaper.escape(item.reason))</li>"
         }.joined()
+        return """
+        <section class="omitted">
+          <h2>Omitted from this pack</h2>
+          <p>These files stayed in the local archive so the zip could stay at or under 35 MB.</p>
+          <ul>\(items)</ul>
+        </section>
+        """
     }
 
     private static func clock(_ seconds: TimeInterval) -> String {
@@ -138,6 +161,6 @@ struct SessionBriefRenderer {
 
     private static let fallbackShell = """
     <!doctype html><html><head><meta charset="utf-8"><style>{{CSS}}</style></head>
-    <body><main>{{TASKS_HTML}}</main><script>{{JS}}</script></body></html>
+    <body><main>{{TASKS_HTML}}</main>{{OMITTED_HTML}}<script>{{JS}}</script></body></html>
     """
 }

@@ -112,6 +112,7 @@ struct ShotNoteView: View {
     @State private var tool: DrawTool = .rectangle
     @State private var note = ""
     @State private var holdingTalk = false
+    @State private var canTalk = true
     @State private var recorder: AVAudioRecorder?
     @State private var source: ShotSource = .typed
     private let canvas = AnnotationCanvas()
@@ -137,7 +138,8 @@ struct ShotNoteView: View {
                 .textFieldStyle(.roundedBorder)
                 .lineLimit(2...4)
             HStack {
-                Button(holdingTalk ? "Release to transcribe" : "Hold to talk") {}
+                Button(holdingTalk ? "Release to transcribe" : (canTalk ? "Hold to talk" : "Hold to talk (paused)")) {}
+                    .disabled(!canTalk)
                     .simultaneousGesture(
                         DragGesture(minimumDistance: 0)
                             .onChanged { _ in startTalk() }
@@ -153,15 +155,22 @@ struct ShotNoteView: View {
         .onAppear {
             canvas.sourceImage = screenshot
             canvas.tool = tool
+            canTalk = allowsNewCapture()
         }
         .onChange(of: tool) { canvas.tool = tool }
-    }
+        .onReceive(NotificationCenter.default.publisher(for: .scrumTraceCaptureGate)) { _ in
+            canTalk = allowsNewCapture()
+            if !canTalk {
+                abortTalk()
+            }
+        }
 
     private func startTalk() {
         guard !holdingTalk else { return }
         guard allowsNewCapture() else { return }
         holdingTalk = true
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("scrumtrace-note.wav")
+        try? FileManager.default.removeItem(at: url)
         let settings: [String: Any] = [
             AVFormatIDKey: kAudioFormatLinearPCM,
             AVSampleRateKey: 16_000,
@@ -173,11 +182,27 @@ struct ShotNoteView: View {
         recorder?.record()
     }
 
-    private func stopTalk() async {
+    private func abortTalk() {
         guard holdingTalk else { return }
         holdingTalk = false
         recorder?.stop()
+        if let url = recorder?.url {
+            try? FileManager.default.removeItem(at: url)
+        }
+        recorder = nil
+    }
+
+    private func stopTalk() async {
+        guard holdingTalk else { return }
+        let live = allowsNewCapture()
+        holdingTalk = false
+        recorder?.stop()
         guard let url = recorder?.url else { return }
+        defer {
+            try? FileManager.default.removeItem(at: url)
+            recorder = nil
+        }
+        guard live else { return }
         if let text = try? await transcriber.transcribeVoiceNote(at: url), !text.isEmpty {
             note = note.isEmpty ? text : "\(note) \(text)"
             source = note.isEmpty ? .voice : .mixed

@@ -33,6 +33,12 @@ enum EvidenceValidator {
         if candidate.confidence < MediaBudget.keepConfidenceFloor {
             issues.append(EvidenceIssue(reason: "confidence below 0.55"))
         }
+        let inferred = normalize(candidate.inferred)
+        if !inferred.isEmpty {
+            if normalize(candidate.observed) == inferred || normalize(candidate.stated) == inferred {
+                issues.append(EvidenceIssue(reason: "inferred copied into observed/stated"))
+            }
+        }
         let frames = existingPaths(candidate.frameReferences, sessionURL: sessionURL)
         if frames.isEmpty {
             issues.append(EvidenceIssue(reason: "no valid frame_references on disk"))

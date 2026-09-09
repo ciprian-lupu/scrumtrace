@@ -47,8 +47,12 @@ final class MenuBarController {
                 controller.phase == .paused ? "Resume" : "Pause",
                 #selector(pause)
             ))
-            menu.addItem(actionItem("Shot  ⌥⌘S", #selector(shot)))
-            menu.addItem(actionItem("Pin  ⌥⌘Space", #selector(pin)))
+            let shotItem = actionItem("Shot  ⌥⌘S", #selector(shot))
+            shotItem.isEnabled = controller.captureState.allowsNewCapture
+            menu.addItem(shotItem)
+            let pinItem = actionItem("Pin  ⌥⌘Space", #selector(pin))
+            pinItem.isEnabled = controller.captureState.allowsNewCapture
+            menu.addItem(pinItem)
             menu.addItem(actionItem("Stop & process", #selector(stop)))
         } else {
             menu.addItem(actionItem("Start recording", #selector(start)))

@@ -16,6 +16,17 @@ struct SettingsView: View {
                 }
                 TextField("Endpoint", text: $settings.baseURL)
                 TextField("Model", text: $settings.model)
+                if settings.provider == .anthropic {
+                    if settings.model.isEmpty {
+                        Text("Anthropic stays off until you set a currently documented Messages model. Do not use retired claude-3-5 or claude-3-7 ids.")
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    } else if AIProviderConfiguration.isRetiredAnthropic(settings.model) {
+                        Text("This model id is retired (2025–2026). Anthropic calls are refused.")
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    }
+                }
                 SecureField("API key (Keychain)", text: $settings.apiKeyDraft)
                 Text("Keys stay on this Mac. ScrumTrace never proxies them.")
                     .font(.caption)

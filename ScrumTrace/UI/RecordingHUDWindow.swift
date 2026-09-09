@@ -18,8 +18,8 @@ struct HUDView: View {
                 .font(.system(size: 13, weight: .semibold, design: .monospaced))
                 .foregroundStyle(Color(red: 0.97, green: 0.93, blue: 0.86))
             Divider().frame(height: 16)
-            hudButton("Shot", action: controller.openShot)
-            hudButton("Pin", action: controller.pin)
+            hudButton("Shot", action: controller.openShot, enabled: controller.captureState.allowsNewCapture)
+            hudButton("Pin", action: controller.pin, enabled: controller.captureState.allowsNewCapture)
             hudButton(controller.phase == .paused ? "Resume" : "Pause", action: controller.togglePause)
             hudButton("Stop", action: controller.stopRecording)
         }
@@ -29,12 +29,14 @@ struct HUDView: View {
         .overlay(Capsule().strokeBorder(Color.white.opacity(0.12), lineWidth: 1))
     }
 
-    private func hudButton(_ title: String, action: @escaping () -> Void) -> some View {
+    private func hudButton(_ title: String, action: @escaping () -> Void, enabled: Bool = true) -> some View {
         Button(title, action: action)
             .buttonStyle(.plain)
             .font(.system(size: 11, weight: .semibold))
-            .foregroundStyle(Color(red: 0.97, green: 0.93, blue: 0.86).opacity(0.9))
+            .foregroundStyle(Color(red: 0.97, green: 0.93, blue: 0.86).opacity(enabled ? 0.9 : 0.35))
             .padding(.horizontal, 6)
+            .disabled(!enabled)
+            .allowsHitTesting(enabled)
     }
 }
 

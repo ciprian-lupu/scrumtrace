@@ -24,16 +24,18 @@ struct AnthropicClient: AIProvider {
                 windowContext: request.windowContext
             )]
         ]
-        for imageURL in request.imageURLs.prefix(4) {
-            if let payload = ImageBase64.jpegPayload(url: imageURL) {
-                content.append([
-                    "type": "image",
-                    "source": [
-                        "type": "base64",
-                        "media_type": payload.mime,
-                        "data": payload.base64
-                    ]
-                ])
+        if configuration.acceptsImages {
+            for imageURL in request.imageURLs.prefix(4) {
+                if let payload = ImageBase64.jpegPayload(url: imageURL) {
+                    content.append([
+                        "type": "image",
+                        "source": [
+                            "type": "base64",
+                            "media_type": payload.mime,
+                            "data": payload.base64
+                        ]
+                    ])
+                }
             }
         }
 

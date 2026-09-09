@@ -34,10 +34,27 @@ struct AgentContextRenderer {
         }
         lines.append("")
         lines.append("## Shots")
-        for shot in manifest.shots {
-            let path = shot.annotatedPath ?? shot.rawPath
-            lines.append("- \(shot.id) at t_media \(Self.clock(shot.tMedia)): \(shot.note)")
-            lines.append("  - ![](\(path))")
+        let shotLines = manifest.shots.compactMap { shot -> [String]? in
+            guard let path = displayPath(shot) else { return nil }
+            return [
+                "- \(shot.id) at t_media \(Self.clock(shot.tMedia)): \(shot.note)",
+                "  - ![](\(path))"
+            ]
+        }
+        if shotLines.isEmpty {
+            lines.append("_No shots in this pack._")
+        } else {
+            for block in shotLines {
+                lines.append(contentsOf: block)
+            }
+        }
+        if !manifest.omitted.isEmpty {
+            lines.append("")
+            lines.append("## Omitted from this pack")
+            lines.append("These files stayed in the local archive. Do not assume they are here.")
+            for item in manifest.omitted {
+                lines.append("- `\(ExportRel.toExportRoot(item.path))` — \(item.reason)")
+            }
         }
         lines.append("")
         lines.append("## Manifest")
@@ -70,14 +87,27 @@ struct AgentContextRenderer {
             }
         }
         lines.append("- Evidence:")
-        for path in task.evidenceMedia {
-            if path.hasSuffix(".png") || path.hasSuffix(".jpg") || path.hasSuffix(".jpeg") {
-                lines.append("  - ![](\(path))")
-            } else {
-                lines.append("  - `\(path)`")
+        if task.evidenceMedia.isEmpty {
+            lines.append("  - _No evidence files remained in this pack._")
+        } else {
+            for path in task.evidenceMedia {
+                let rel = ExportRel.toExportRoot(path)
+                if rel.hasSuffix(".png") || rel.hasSuffix(".jpg") || rel.hasSuffix(".jpeg") {
+                    lines.append("  - ![](\(rel))")
+                } else {
+                    lines.append("  - `\(rel)`")
+                }
             }
         }
         return lines
+    }
+
+    private func displayPath(_ shot: ShotRecord) -> String? {
+        let raw = shot.exportPath ?? shot.annotatedPath ?? (shot.rawPath.isEmpty ? nil : shot.rawPath)
+        guard let raw else { return nil }
+        let rel = ExportRel.toExportRoot(raw)
+        if rel.hasPrefix("archive/") { return nil }
+        return rel
     }
 
     private static func clock(_ seconds: TimeInterval) -> String {

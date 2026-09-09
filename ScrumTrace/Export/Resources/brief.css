@@ -161,6 +161,24 @@ figcaption { font-family: "IBM Plex Mono", monospace; font-size: 11px; color: va
   text-transform: uppercase;
   color: var(--amber);
 }
+.omitted {
+  margin: 36px 0;
+  padding: 18px 20px;
+  border: 1px dashed var(--line);
+  border-radius: 14px;
+  color: var(--muted);
+}
+.omitted h2 {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 13px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--amber);
+  margin: 0 0 10px;
+}
+.omitted ul { margin: 0; padding-left: 18px; }
+.omitted code { color: var(--paper); }
+.muted { color: var(--muted); }
 
 .lightbox {
   position: fixed; inset: 0;

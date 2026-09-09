@@ -75,68 +75,95 @@ final class SessionProcessor: @unchecked Sendable {
                 }
                 manifest.markCompleted(.evaluating)
                 try vault.write(manifest: &manifest)
-            } else if configuration.kind == .anthropic && AIProviderConfiguration.isRetiredAnthropic(configuration.model) {
-                await onStatus(.evaluating, "Retired Anthropic model refused")
+            } else if configuration.kind == .anthropic && (
+                configuration.model.isEmpty
+                    || AIProviderConfiguration.isRetiredAnthropic(configuration.model)
+            ) {
+                await onStatus(.evaluating, "Anthropic model missing or retired — local export only")
                 manifest.tasks = localReviewTasks(manifest: manifest)
+                for index in manifest.slices.indices {
+                    manifest.slices[index].analysisStatus = .skipped
+                }
                 manifest.markCompleted(.evaluating)
                 try vault.write(manifest: &manifest)
             } else {
-            await onStatus(.evaluating, "Evaluating slices with the configured model")
-            manifest.pipelineStatus = .evaluating
-            let provider = AIEngine.make(configuration: configuration)
-            var tasks: [TaskRecord] = []
-            var updatedSlices: [SliceRecord] = []
-            await withTaskGroup(of: (SliceRecord, [TaskRecord]).self) { group in
-                var inflight = 0
-                for slice in manifest.slices {
-                    group.addTask {
-                        await self.evaluateSlice(
-                            slice: slice,
-                            manifest: manifest,
-                            transcript: transcript,
-                            sessionURL: sessionURL,
-                            provider: provider,
-                            configuration: configuration
-                        )
-                    }
-                    inflight += 1
-                    if inflight >= 3 {
-                        if let result = await group.next() {
-                            updatedSlices.append(result.0)
-                            tasks.append(contentsOf: result.1)
-                            inflight -= 1
+                await onStatus(.evaluating, "Evaluating slices with the configured model")
+                manifest.pipelineStatus = .evaluating
+                let provider = AIEngine.make(configuration: configuration)
+                var tasks: [TaskRecord] = []
+                var updatedSlices: [SliceRecord] = []
+                await withTaskGroup(of: (SliceRecord, [TaskRecord]).self) { group in
+                    var inflight = 0
+                    for slice in manifest.slices {
+                        group.addTask {
+                            await self.evaluateSlice(
+                                slice: slice,
+                                manifest: manifest,
+                                transcript: transcript,
+                                sessionURL: sessionURL,
+                                provider: provider,
+                                configuration: configuration
+                            )
+                        }
+                        inflight += 1
+                        if inflight >= 3 {
+                            if let result = await group.next() {
+                                updatedSlices.append(result.0)
+                                tasks.append(contentsOf: result.1)
+                                inflight -= 1
+                            }
                         }
                     }
+                    for await result in group {
+                        updatedSlices.append(result.0)
+                        tasks.append(contentsOf: result.1)
+                    }
                 }
-                for await result in group {
-                    updatedSlices.append(result.0)
-                    tasks.append(contentsOf: result.1)
+                manifest.slices = updatedSlices.sorted { $0.sliceId < $1.sliceId }
+                manifest.tasks = rankedTasks(tasks)
+                let anyFailed = manifest.slices.contains { $0.analysisStatus == .offlineFailed }
+                manifest.markCompleted(.evaluating)
+                if anyFailed {
+                    manifest.pipelineStatus = .offlineFailed
                 }
-            }
-            manifest.slices = updatedSlices.sorted { $0.sliceId < $1.sliceId }
-            manifest.tasks = rankedTasks(tasks)
-            let anyFailed = manifest.slices.contains { $0.analysisStatus == .offlineFailed }
-            manifest.markCompleted(.evaluating)
-            if anyFailed {
-                manifest.pipelineStatus = .offlineFailed
-            }
-            try vault.write(manifest: &manifest)
+                try vault.write(manifest: &manifest)
             }
         }
 
         await onStatus(.synthesizing, "Writing AGENT_CONTEXT.md and SESSION_BRIEF.html")
         manifest.pipelineStatus = .synthesizing
         let excerpts = excerptMap(manifest: manifest, transcript: transcript)
-        let projection = try ExportProjector().project(sessionURL: sessionURL, manifest: manifest)
+        let projector = ExportProjector()
+        var projection = try projector.project(
+            sessionURL: sessionURL,
+            manifest: manifest,
+            includeFullTranscript: manifest.includeFullTranscriptInZip
+        )
         manifest.omitted = projection.omitted
-        let markdown = agentRenderer.render(manifest: projection.manifest)
-        let prompt = agentRenderer.prompt(manifest: projection.manifest)
-        let html = briefRenderer.render(manifest: projection.manifest, excerpts: excerpts)
-        try markdown.write(to: sessionURL.appendingPathComponent(ScrumTracePath.agentContext), atomically: true, encoding: .utf8)
-        try prompt.write(to: sessionURL.appendingPathComponent(ScrumTracePath.agentPrompt), atomically: true, encoding: .utf8)
-        try html.write(to: sessionURL.appendingPathComponent(ScrumTracePath.sessionBrief), atomically: true, encoding: .utf8)
-        let zipResult = try zipper.zip(sessionURL: sessionURL, manifest: manifest)
-        manifest.omitted.append(contentsOf: zipResult.omitted)
+        var zipResult = try zipper.zip(sessionURL: sessionURL, manifest: projection.manifest)
+        projection.manifest = PackBudget.stripOmitted(zipResult.omitted, from: projection.manifest)
+        projection.manifest.omitted = zipResult.omitted
+        try writeExportDocuments(
+            sessionURL: sessionURL,
+            projected: projection.manifest,
+            excerpts: excerpts,
+            projector: projector
+        )
+        try zipper.writeOmittedMarkdown(sessionURL: sessionURL, omitted: zipResult.omitted)
+        let measured = try zipper.writeZip(sessionURL: sessionURL)
+        if measured > MediaBudget.maxZipBytes {
+            zipResult = try zipper.zip(sessionURL: sessionURL, manifest: projection.manifest)
+            projection.manifest = PackBudget.stripOmitted(zipResult.omitted, from: projection.manifest)
+            try writeExportDocuments(
+                sessionURL: sessionURL,
+                projected: projection.manifest,
+                excerpts: excerpts,
+                projector: projector
+            )
+            try zipper.writeOmittedMarkdown(sessionURL: sessionURL, omitted: zipResult.omitted)
+            _ = try zipper.writeZip(sessionURL: sessionURL)
+        }
+        manifest.omitted = zipResult.omitted
         manifest.markCompleted(.synthesizing)
         manifest.pipelineStatus = manifest.slices.contains(where: { $0.analysisStatus == .offlineFailed })
             ? .offlineFailed
@@ -145,6 +172,33 @@ final class SessionProcessor: @unchecked Sendable {
         try vault.write(manifest: &manifest)
         await onStatus(manifest.pipelineStatus, "Session pack ready")
         return manifest
+    }
+
+    private func writeExportDocuments(
+        sessionURL: URL,
+        projected: SessionManifest,
+        excerpts: [String: String],
+        projector: ExportProjector
+    ) throws {
+        let markdown = agentRenderer.render(manifest: projected)
+        let prompt = agentRenderer.prompt(manifest: projected)
+        let html = briefRenderer.render(manifest: projected, excerpts: excerpts)
+        try markdown.write(
+            to: sessionURL.appendingPathComponent(ScrumTracePath.agentContext),
+            atomically: true,
+            encoding: .utf8
+        )
+        try prompt.write(
+            to: sessionURL.appendingPathComponent(ScrumTracePath.agentPrompt),
+            atomically: true,
+            encoding: .utf8
+        )
+        try html.write(
+            to: sessionURL.appendingPathComponent(ScrumTracePath.sessionBrief),
+            atomically: true,
+            encoding: .utf8
+        )
+        try projector.writeProjectionManifest(projected, sessionURL: sessionURL)
     }
 
     private func transcribe(sessionURL: URL, model: String) async throws -> FullTranscript {
@@ -180,10 +234,27 @@ final class SessionProcessor: @unchecked Sendable {
         let shot = manifest.shots.first { $0.id == slice.associatedShotId }
         var images = slice.stills.map { sessionURL.appendingPathComponent($0) }
             .filter { FileManager.default.fileExists(atPath: $0.path) }
+        if let shot {
+            let shotURL = sessionURL.appendingPathComponent(shot.annotatedPath ?? shot.rawPath)
+            if FileManager.default.fileExists(atPath: shotURL.path) {
+                images.insert(shotURL, at: 0)
+            }
+        }
         if !configuration.acceptsImages {
             images = []
         }
-        if !configuration.acceptsVideo && !configuration.acceptsImages && images.isEmpty && excerpt.isEmpty && (shot?.note.isEmpty ?? true) {
+        var mediaSent: [String] = []
+        if configuration.acceptsImages && !images.isEmpty {
+            mediaSent.append("stills")
+        }
+        if !excerpt.isEmpty {
+            mediaSent.append("transcript")
+        }
+        if configuration.acceptsVideo {
+            mediaSent.append("video")
+        }
+        slice.mediaSent = mediaSent
+        if !configuration.acceptsVideo && images.isEmpty && excerpt.isEmpty && (shot?.note.isEmpty ?? true) {
             slice.analysisStatus = .skipped
             return (slice, [fallbackOffline(slice: slice, error: AIProviderError.emptyResponse)])
         }
@@ -241,36 +312,43 @@ final class SessionProcessor: @unchecked Sendable {
             if status == .dropped {
                 continue
             }
-            let issues = EvidenceValidator.canConfirm(
-                candidate: candidate,
-                slice: slice,
-                transcript: transcript,
-                sessionURL: sessionURL
-            )
-            if !issues.isEmpty && status == .confirmed {
-                status = .needsReview
+        let issues = EvidenceValidator.canConfirm(
+            candidate: candidate,
+            slice: slice,
+            transcript: transcript,
+            sessionURL: sessionURL
+        )
+        if !issues.isEmpty && status == .confirmed {
+            status = .needsReview
+        }
+        let evidence = (slice.stills + [slice.clipPath].compactMap { $0 } + [shot?.annotatedPath ?? shot?.rawPath].compactMap { $0 })
+        let uniqueEvidence = Array(NSOrderedSet(array: evidence)) as? [String] ?? evidence
+        var instructions = AgentInstructionTemplate.render(
+            kind: candidate.kind,
+            product: product
+        )
+        if status == .needsReview {
+            let draft = candidate.agentInstructionsDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !draft.isEmpty {
+                instructions += "\n\n## Model notes (untrusted)\n\(draft)"
             }
-            let evidence = (slice.stills + [slice.clipPath].compactMap { $0 } + [shot?.annotatedPath ?? shot?.rawPath].compactMap { $0 })
-            let uniqueEvidence = Array(NSOrderedSet(array: evidence)) as? [String] ?? evidence
-            out.append(
-                TaskRecord(
-                    taskId: String(format: "TASK-%02d", out.count + 1),
-                    sourceSliceId: slice.sliceId,
-                    kind: candidate.kind == .unknown ? .bug : candidate.kind,
-                    status: status,
-                    title: candidate.title.isEmpty ? "Untitled candidate \(index + 1)" : candidate.title,
-                    observed: candidate.observed,
-                    stated: candidate.stated,
-                    inferred: candidate.inferred,
-                    agentInstructions: AgentInstructionTemplate.render(
-                        kind: candidate.kind,
-                        product: product
-                    ),
-                    quotes: candidate.quotes,
-                    evidenceMedia: uniqueEvidence,
-                    confidence: candidate.confidence
-                )
+        }
+        out.append(
+            TaskRecord(
+                taskId: String(format: "TASK-%02d", out.count + 1),
+                sourceSliceId: slice.sliceId,
+                kind: candidate.kind == .unknown ? .bug : candidate.kind,
+                status: status,
+                title: candidate.title.isEmpty ? "Untitled candidate \(index + 1)" : candidate.title,
+                observed: candidate.observed,
+                stated: candidate.stated,
+                inferred: candidate.inferred,
+                agentInstructions: instructions,
+                quotes: candidate.quotes,
+                evidenceMedia: uniqueEvidence,
+                confidence: candidate.confidence
             )
+        )
         }
         if let shot, out.isEmpty {
             out.append(fallbackTask(shot: shot, slice: slice, error: nil))

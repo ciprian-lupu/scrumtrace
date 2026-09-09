@@ -22,14 +22,16 @@ struct GoogleClient: AIProvider {
                 windowContext: request.windowContext
             )]
         ]
-        for imageURL in request.imageURLs.prefix(4) {
-            if let payload = ImageBase64.jpegPayload(url: imageURL) {
-                parts.append([
-                    "inline_data": [
-                        "mime_type": payload.mime,
-                        "data": payload.base64
-                    ]
-                ])
+        if configuration.acceptsImages {
+            for imageURL in request.imageURLs.prefix(4) {
+                if let payload = ImageBase64.jpegPayload(url: imageURL) {
+                    parts.append([
+                        "inline_data": [
+                            "mime_type": payload.mime,
+                            "data": payload.base64
+                        ]
+                    ])
+                }
             }
         }
 

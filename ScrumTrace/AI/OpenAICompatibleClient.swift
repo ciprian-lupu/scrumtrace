@@ -35,7 +35,14 @@ struct OpenAICompatibleClient: AIProvider {
         let body: [String: Any] = [
             "model": configuration.model,
             "temperature": 0.1,
-            "response_format": ["type": "json_object"],
+            "response_format": [
+                "type": "json_schema",
+                "json_schema": [
+                    "name": "scrumtrace_candidates",
+                    "strict": true,
+                    "schema": EvaluationJSONSchema.openaiStructured
+                ]
+            ],
             "messages": [
                 ["role": "system", "content": PromptTemplates.system],
                 ["role": "user", "content": content]

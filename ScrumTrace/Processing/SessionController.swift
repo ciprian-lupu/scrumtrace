@@ -65,12 +65,14 @@ final class SessionController: ObservableObject {
             phase = .recording
             statusLine = "Recording"
             log(.resume, [:])
+            NotificationCenter.default.post(name: .scrumTraceCaptureGate, object: CaptureSessionState.recording)
         } else {
             recorder?.setPaused(true)
             sampler.isSuspended = true
             phase = .paused
             statusLine = "Paused — nothing is written"
             log(.pause, [:])
+            NotificationCenter.default.post(name: .scrumTraceCaptureGate, object: CaptureSessionState.paused)
         }
     }
 
@@ -112,7 +114,10 @@ final class SessionController: ObservableObject {
         do {
             let created = try vault.createSession(product: settings.productContext)
             sessionURL = created.url
-            manifest = created.manifest
+            var createdManifest = created.manifest
+            createdManifest.includeFullTranscriptInZip = settings.includeFullTranscriptInZip
+            try vault.write(manifest: &createdManifest)
+            manifest = createdManifest
             lastSessionId = created.manifest.sessionId
             pinTimes = []
             clock.reset()
@@ -163,12 +168,15 @@ final class SessionController: ObservableObject {
         isBusy = true
         do {
             if var local = try? vault.loadManifest(id: sessionId) {
+                local.includeFullTranscriptInZip = settings.includeFullTranscriptInZip
                 let destinationChanged = local.uploadConsent.approved
                     && (local.uploadConsent.provider != settings.provider.rawValue
                         || local.uploadConsent.endpoint != settings.baseURL
                         || local.uploadConsent.model != settings.model)
                 if !local.uploadConsent.approved || destinationChanged {
                     local.uploadConsent = requestUploadConsent()
+                    try vault.write(manifest: &local)
+                } else {
                     try vault.write(manifest: &local)
                 }
             }
@@ -294,7 +302,7 @@ final class SessionController: ObservableObject {
             "note": note,
             "source": source.rawValue
         ]
-        let jsonURL = sessionURL.appendingPathComponent("shots/\(record.id.replacingOccurrences(of: "shot-", with: "")).json")
+        let jsonURL = sessionURL.appendingPathComponent("\(ScrumTracePath.shots)/\(stemFrom(record.id)).json")
         if let data = try? JSONSerialization.data(withJSONObject: json, options: [.prettyPrinted]) {
             try? data.write(to: jsonURL)
         }
@@ -317,6 +325,7 @@ final class SessionController: ObservableObject {
         phase = .paused
         statusLine = "Auto-paused for \(bundle)"
         log(.privacyPause, ["bundle": bundle])
+        NotificationCenter.default.post(name: .scrumTraceCaptureGate, object: CaptureSessionState.paused)
     }
 
     private func privacyResume() {
@@ -326,6 +335,7 @@ final class SessionController: ObservableObject {
         phase = .recording
         statusLine = "Recording"
         log(.resume, ["reason": "privacy_clear"])
+        NotificationCenter.default.post(name: .scrumTraceCaptureGate, object: CaptureSessionState.recording)
     }
 
     private func startTimer() {
@@ -362,6 +372,10 @@ final class SessionController: ObservableObject {
         let m = total / 60
         let s = total % 60
         return String(format: "%02d:%02d", m, s)
+    }
+
+    private func stemFrom(_ shotId: String) -> String {
+        shotId.replacingOccurrences(of: "shot-", with: "")
     }
 }
 
