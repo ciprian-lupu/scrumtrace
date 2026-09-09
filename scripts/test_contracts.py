@@ -442,6 +442,8 @@ def test_pipeline_timing_stays_in_archive() -> None:
     assert "transcriber.prepare" in controller
     hud = (ROOT / "ScrumTrace" / "UI" / "RecordingHUDWindow.swift").read_text()
     assert "wallElapsed" in hud
+    assert "canBecomeKey: Bool { false }" in hud
+    assert "nonactivatingPanel" in hud
 
 
 def test_pause_privacy_and_metadata_gate() -> None:
@@ -803,14 +805,17 @@ def test_write_contained_data_refuses_directory_symlinks() -> None:
     assert "fileExists(atPath: url.path)" not in write_man
     assert "replaceItemAt" not in write_man
     assert "FileHandle" not in write_man
+    assert "isUsableSessionRoot(rootURL)" in write_man
     assert "writeFailed(\"session folder\")" in write_man
     load_fn = vault.split("func loadManifest")[1].split("func write(manifest")[0]
     assert "isSymbolicLink" in load_fn
     assert "existingSessionFile(ScrumTracePath.manifest" in load_fn
     assert "isContainedRegularFile" not in load_fn
+    assert "isUsableSessionRoot(rootURL)" in load_fn
     create_fn = vault.split("func createSession")[1].split("func loadManifest")[0]
     assert "isSymbolicLink" in create_fn
     assert create_fn.count("isSymbolicLink") >= 2
+    assert "isUsableSessionRoot(rootURL)" in create_fn
     process_head = processor.split("func process(")[1].split("var timing")[0]
     assert "isSymbolicLink" in process_head
     append_ev = vault.split("func appendEvent")[1].split("func recentSessions")[0]
@@ -818,6 +823,7 @@ def test_write_contained_data_refuses_directory_symlinks() -> None:
     assert "isContainedRegularFile" in append_ev
     assert "writeContainedData" in append_ev
     assert "FileHandle" not in append_ev
+    assert "isUsableSessionRoot(rootURL)" in append_ev
     assert "containsSymlinkComponent" in vault.split("func nextShotIndex")[1].split("func loadPinTimes")[0]
     under = models.split("static func isUnderSession")[1].split("static func isUsableSessionRoot")[0]
     assert "ScrumTracePath.manifest" in under
@@ -829,6 +835,14 @@ def test_write_contained_data_refuses_directory_symlinks() -> None:
     assert "unfollowedRelative" in contained_reg
     assert "containsSymlinkComponent" in contained_reg
     assert "isUsableSessionRoot" in contained_reg
+    assert vault.count("isUsableSessionRoot(rootURL)") >= 8
+    ensure = vault.split("func ensureRoot")[1].split("func makeSessionID")[0]
+    assert "isUsableSessionRoot(rootURL)" in ensure
+    assert "sessions folder" in ensure
+    recent = vault.split("func recentSessions")[1].split("func nextShotIndex")[0]
+    assert "isUsableSessionRoot(rootURL)" in recent
+    reveal = vault.split("func revealInFinder")[1].split("private static let folderStamp")[0]
+    assert "isUsableSessionRoot(rootURL)" in reveal
 
 
 def main() -> None:

@@ -44,7 +44,13 @@ final class SessionVault: @unchecked Sendable {
     }
 
     func ensureRoot() throws {
+        if !ExportRel.isUsableSessionRoot(rootURL) {
+            throw SessionVaultError.writeFailed("sessions folder")
+        }
         try fileManager.createDirectory(at: rootURL, withIntermediateDirectories: true)
+        if !ExportRel.isUsableSessionRoot(rootURL) {
+            throw SessionVaultError.writeFailed("sessions folder")
+        }
     }
 
     func makeSessionID(now: Date = Date()) -> String {
@@ -73,6 +79,9 @@ final class SessionVault: @unchecked Sendable {
         try ensureRoot()
         let id = makeSessionID()
         let url = sessionURL(id: id)
+        guard ExportRel.isUsableSessionRoot(rootURL) else {
+            throw SessionVaultError.writeFailed("sessions folder")
+        }
         if (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
             throw SessionVaultError.writeFailed("session folder")
         }
@@ -106,6 +115,9 @@ final class SessionVault: @unchecked Sendable {
         guard Self.isValidSessionId(id) else {
             throw SessionVaultError.sessionMissing(id)
         }
+        guard ExportRel.isUsableSessionRoot(rootURL) else {
+            throw SessionVaultError.sessionMissing(id)
+        }
         let session = sessionURL(id: id)
         if (try? session.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
             throw SessionVaultError.sessionMissing(id)
@@ -121,6 +133,9 @@ final class SessionVault: @unchecked Sendable {
     func write(manifest: inout SessionManifest) throws {
         guard Self.isValidSessionId(manifest.sessionId) else {
             throw SessionVaultError.writeFailed("invalid session id")
+        }
+        guard ExportRel.isUsableSessionRoot(rootURL) else {
+            throw SessionVaultError.writeFailed("sessions folder")
         }
         let dir = sessionURL(id: manifest.sessionId)
         if (try? dir.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
@@ -141,6 +156,9 @@ final class SessionVault: @unchecked Sendable {
     func appendEvent(_ event: SessionEvent, sessionId: String) throws {
         guard Self.isValidSessionId(sessionId) else {
             throw SessionVaultError.writeFailed("invalid session id")
+        }
+        guard ExportRel.isUsableSessionRoot(rootURL) else {
+            throw SessionVaultError.writeFailed("sessions folder")
         }
         let session = sessionURL(id: sessionId)
         if (try? session.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
@@ -164,6 +182,7 @@ final class SessionVault: @unchecked Sendable {
     }
 
     func recentSessions(limit: Int = 12) -> [SessionManifest] {
+        guard ExportRel.isUsableSessionRoot(rootURL) else { return [] }
         guard let ids = try? fileManager.contentsOfDirectory(atPath: rootURL.path) else { return [] }
         let loaded: [SessionManifest] = ids.compactMap { id in
             guard Self.isValidSessionId(id) else { return nil }
@@ -174,6 +193,7 @@ final class SessionVault: @unchecked Sendable {
 
     func nextShotIndex(sessionId: String) -> Int {
         guard Self.isValidSessionId(sessionId) else { return 1 }
+        guard ExportRel.isUsableSessionRoot(rootURL) else { return 1 }
         let session = sessionURL(id: sessionId)
         if (try? session.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
             return 1
@@ -220,6 +240,7 @@ final class SessionVault: @unchecked Sendable {
 
     private func events(sessionId: String) -> [SessionEvent] {
         guard Self.isValidSessionId(sessionId) else { return [] }
+        guard ExportRel.isUsableSessionRoot(rootURL) else { return [] }
         let session = sessionURL(id: sessionId)
         if (try? session.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
             return []
@@ -236,6 +257,7 @@ final class SessionVault: @unchecked Sendable {
     func revealInFinder(sessionId: String) {
         #if os(macOS)
         guard Self.isValidSessionId(sessionId) else { return }
+        guard ExportRel.isUsableSessionRoot(rootURL) else { return }
         let session = sessionURL(id: sessionId)
         if (try? session.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
             return

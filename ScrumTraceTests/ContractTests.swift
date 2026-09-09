@@ -292,6 +292,21 @@ final class ContractTests: XCTestCase {
         )
     }
 
+    func testEnsureRootRefusesSessionsFolderSymlink() throws {
+        let parent = FileManager.default.temporaryDirectory.appendingPathComponent("st-vault-root-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: parent) }
+        let outside = parent.appendingPathComponent("outside")
+        try FileManager.default.createDirectory(at: outside, withIntermediateDirectories: true)
+        let root = parent.appendingPathComponent("sessions")
+        try FileManager.default.createSymbolicLink(at: root, withDestinationURL: outside)
+        let vault = SessionVault(rootURL: root)
+        XCTAssertThrowsError(try vault.createSession(product: .empty))
+        XCTAssertTrue(vault.recentSessions().isEmpty)
+        XCTAssertThrowsError(try vault.loadManifest(id: "2026-09-09-1530-abc123"))
+        XCTAssertEqual((try FileManager.default.contentsOfDirectory(atPath: outside.path)), [])
+    }
+
     func testContainedRegularFileRejectsSymlinkEvenIfTargetIsInsideSession() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("scrumtrace-regular-\(UUID().uuidString)")
         let shots = root.appendingPathComponent("archive/shots")
