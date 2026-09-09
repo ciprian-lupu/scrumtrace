@@ -152,7 +152,7 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
     }
 
     func stop() async throws {
-        let snapshot = writerQueue.sync { () -> (stream: SCStream?, mic: Bool) in
+        let snapshot = writerQueue.sync { () -> (stream: SCStream?, mic: Bool, engine: AVAudioEngine?) in
             // Freeze t_wall / t_media at Stop so finishWriting is not counted,
             // and do not resume writers if the user stopped while paused (C1).
             self.clock.markRecordingStopped()
@@ -160,13 +160,14 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             self.started = false
             let captured = self.stream
             self.stream = nil
-            return (captured, self.microphoneWav)
+            let engine = self.engine
+            self.engine = nil
+            return (captured, self.microphoneWav, engine)
         }
         if let live = snapshot.stream {
             try await live.stopCapture()
         }
-        engine?.stop()
-        engine = nil
+        snapshot.engine?.stop()
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             writerQueue.async {
                 self.videoInput?.markAsFinished()
@@ -383,7 +384,9 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             }
         }
         try engine.start()
-        self.engine = engine
+        writerQueue.sync {
+            self.engine = engine
+        }
     }
 
     /// Snapshot a tap buffer. AVAudioEngine reuses the pointer after the callback returns.

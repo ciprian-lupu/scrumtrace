@@ -143,7 +143,7 @@ def test_frame_ref_basename_resolves() -> None:
     assert "sessionURL: sessionURL" in eval_slice.split("SliceEvaluationRequest")[1]
     assert eval_slice.count("abortedForAuth") >= 3
     assert eval_slice.rfind("abortedForAuth") < eval_slice.find("provider.evaluate")
-    assert "readContainedData(url, sessionRoot: sessionURL)" in eval_slice
+    assert "jpegPayload(url: url, sessionRoot: sessionURL)" in eval_slice
     eval_loop = processor.split("let toRun =")[1].split("manifest.slices = updatedSlices.sorted")[0]
     assert "withTaskGroup" not in eval_loop
     assert "try vault.write(manifest: &manifest)" in eval_loop

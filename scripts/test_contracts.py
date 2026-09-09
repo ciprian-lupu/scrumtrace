@@ -407,12 +407,16 @@ def test_audio_split_and_brief_loader() -> None:
     stop_rec = recorder.split("func stop() async throws")[1].split("func stream(")[0]
     assert "self.microphoneWav" in stop_rec
     assert "snapshot.mic" in stop_rec
+    assert "snapshot.engine" in stop_rec
+    assert "snapshot.engine?.stop()" in stop_rec
     assert "microphoneWav: microphoneWav" not in stop_rec
     assert "guard !paused, started else { return }" in recorder
     assert "func copyPCM" in recorder
     tap = recorder.split("func startMicrophoneFallback")[1].split("func copyPCM")[0]
     assert "copyPCM(buffer)" in tap
     assert "writeEngineBuffer(buffer)" not in tap
+    assert "writerQueue.sync" in tap
+    assert "self.engine = engine" in tap
     brief = (ROOT / "ScrumTrace" / "Export" / "SessionBriefRenderer.swift").read_text()
     assert "Export/Resources" in brief
     menu = (ROOT / "ScrumTrace" / "UI" / "MenuBarController.swift").read_text()
@@ -923,7 +927,8 @@ def test_phase45_clip_consent_and_budget() -> None:
     eval_slice = processor.split("private func evaluateSlice")[1].split("private func tasks(")[0]
     assert eval_slice.count("abortedForAuth") >= 3
     assert eval_slice.rfind("abortedForAuth") < eval_slice.find("provider.evaluate")
-    assert "readContainedData(url, sessionRoot: sessionURL)" in eval_slice
+    assert "jpegPayload(url: url, sessionRoot: sessionURL)" in eval_slice
+    assert "readContainedData(url, sessionRoot: sessionURL)" not in eval_slice
     assert "willUploadClip(configuration: configuration)" in processor
     assert "includeFullTranscript: projection.manifest.includeFullTranscriptInZip" in processor
     google = (ROOT / "ScrumTrace" / "AI" / "GoogleClient.swift").read_text()

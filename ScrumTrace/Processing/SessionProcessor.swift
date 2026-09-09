@@ -374,9 +374,9 @@ final class SessionProcessor: @unchecked Sendable {
             images = []
         } else {
             // media_sent is what actually leaves the Mac (C4). Skip stills
-            // jpegPayload cannot openat-read (planted link, too large, missing).
+            // jpegPayload cannot openat-read or JPEG-encode.
             images = images.filter { url in
-                ExportRel.readContainedData(url, sessionRoot: sessionURL) != nil
+                ImageBase64.jpegPayload(url: url, sessionRoot: sessionURL) != nil
             }
         }
         var mediaSent: [String] = []
