@@ -230,6 +230,13 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert 'copy.stills = ["\\(folder)/shot-1.jpg"]' not in slicer
     shot = (ROOT / "ScrumTrace" / "UI" / "ShotNoteWindow.swift").read_text()
     assert "let hadText = !note.isEmpty" in shot
+    processor = (ROOT / "ScrumTrace" / "Processing" / "SessionProcessor.swift").read_text()
+    assert "transcriber.isReady || !hadAudio" in processor
+    assert "async -> FullTranscript" in processor
+    recorder = (ROOT / "ScrumTrace" / "Capture" / "SessionRecorder.swift").read_text()
+    assert "withCheckedContinuation" in recorder
+    gen = (ROOT / "scripts" / "generate_mock_session.py").read_text()
+    assert '"-@"' in gen
 
 
 def main() -> None:

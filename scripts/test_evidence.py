@@ -90,11 +90,21 @@ def test_brief_shell_tokens_are_filled() -> None:
     assert "{{" not in html
 
 
+def test_mock_agent_context_paths_exist() -> None:
+    export = ROOT / "samples" / "mock-session" / "export"
+    ctx = (export / "AGENT_CONTEXT.md").read_text()
+    for rel in re.findall(r"!\[\]\(([^)]+)\)", ctx):
+        assert (export / rel).is_file(), f"missing {rel}"
+    for rel in re.findall(r"`(media/[^`]+)`", ctx):
+        assert (export / rel).is_file(), f"missing {rel}"
+
+
 def main() -> None:
     test_quote_window()
     test_export_rel_in_swift()
     test_frame_ref_basename_resolves()
     test_brief_shell_tokens_are_filled()
+    test_mock_agent_context_paths_exist()
     print("evidence contracts ok")
 
 

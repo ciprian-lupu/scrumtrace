@@ -115,22 +115,18 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         stream = nil
         engine?.stop()
         engine = nil
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             writerQueue.async {
-                do {
-                    self.videoInput?.markAsFinished()
-                    self.audioInput?.markAsFinished()
-                    self.wavFile = nil
-                    if let writer = self.writer {
-                        if writer.status == .writing {
-                            writer.finishWriting {
-                                continuation.resume()
-                            }
-                            return
-                        }
+                self.videoInput?.markAsFinished()
+                self.audioInput?.markAsFinished()
+                self.wavFile = nil
+                if let writer = self.writer, writer.status == .writing {
+                    writer.finishWriting {
+                        continuation.resume()
                     }
-                    continuation.resume()
+                    return
                 }
+                continuation.resume()
             }
         }
         started = false

@@ -33,14 +33,23 @@ final class SessionProcessor: @unchecked Sendable {
             manifest.pipelineStatus = .transcribing
             try vault.write(manifest: &manifest)
             let whisperStarted = Date()
-            var transcript = try await transcribe(sessionURL: sessionURL, model: whisperModel)
+            var transcript = await transcribe(sessionURL: sessionURL, model: whisperModel)
             transcript.sessionId = sessionId
             let data = try JSONEncoder().encode(transcript)
             try data.write(to: sessionURL.appendingPathComponent(ScrumTracePath.fullTranscript))
             timing.whisperWallSeconds = Date().timeIntervalSince(whisperStarted)
             timing.whisperSources = transcript.sources ?? []
             try timing.write(sessionURL: sessionURL)
-            manifest.markCompleted(.transcribing)
+            let hadAudio = FileManager.default.fileExists(
+                atPath: sessionURL.appendingPathComponent(ScrumTracePath.audioWav).path
+            ) || FileManager.default.fileExists(
+                atPath: sessionURL.appendingPathComponent(ScrumTracePath.sessionMovie).path
+            )
+            // If Whisper never loaded, leave the stage open so Retry can try again.
+            // Empty speech after a successful load still completes.
+            if transcriber.isReady || !hadAudio {
+                manifest.markCompleted(.transcribing)
+            }
             try vault.write(manifest: &manifest)
         }
 
@@ -239,9 +248,13 @@ final class SessionProcessor: @unchecked Sendable {
         try projector.writeProjectionManifest(projected, sessionURL: sessionURL)
     }
 
-    private func transcribe(sessionURL: URL, model: String) async throws -> FullTranscript {
-        if !transcriber.isReady {
-            try await transcriber.prepare(model: model)
+    private func transcribe(sessionURL: URL, model: String) async -> FullTranscript {
+        do {
+            if !transcriber.isReady {
+                try await transcriber.prepare(model: model)
+            }
+        } catch {
+            return FullTranscript(sessionId: "", language: "en", segments: [])
         }
         let layout = CaptureAudioLayout.load(sessionURL: sessionURL)
         let wav = sessionURL.appendingPathComponent(ScrumTracePath.audioWav)
@@ -250,16 +263,20 @@ final class SessionProcessor: @unchecked Sendable {
         let movieExists = FileManager.default.fileExists(atPath: movie.path)
         var passes: [TranscriptQuery.SourcePass] = []
         if wavExists {
-            let speaker = layout.microphoneWav ? "room" : "system"
-            let wavTranscript = try await transcriber.transcribeFile(at: wav)
-            passes.append(TranscriptQuery.SourcePass(speaker: speaker, transcript: wavTranscript))
+            do {
+                let speaker = layout.microphoneWav ? "room" : "system"
+                let wavTranscript = try await transcriber.transcribeFile(at: wav)
+                passes.append(TranscriptQuery.SourcePass(speaker: speaker, transcript: wavTranscript))
+            } catch {
+                // Keep shots/clips; Retry Analysis can transcribe again.
+            }
         }
         if layout.shouldTranscribeMovie(wavExists: wavExists, movieExists: movieExists) {
             do {
                 let movieTranscript = try await transcriber.transcribeMovieAudio(at: movie)
                 passes.append(TranscriptQuery.SourcePass(speaker: "system", transcript: movieTranscript))
             } catch {
-                if passes.isEmpty { throw error }
+                // Movie audio is optional when the WAV pass already produced segments.
             }
         }
         if passes.isEmpty {

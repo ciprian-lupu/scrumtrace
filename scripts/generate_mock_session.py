@@ -344,9 +344,26 @@ This pack is `samples/mock-session/export/` only. Do not hand `archive/` (this m
     )
     packed = EXPORT / "session-pack.zip"
     packed.unlink(missing_ok=True)
+    named = [
+        "AGENT_CONTEXT.md",
+        "SESSION_BRIEF.html",
+        "AGENT_PROMPT.txt",
+        "session.manifest.json",
+        "OMITTED.md",
+    ]
+    members: list[str] = [name for name in named if (EXPORT / name).exists()]
+    for folder in ("shots", "media"):
+        root = EXPORT / folder
+        if not root.exists():
+            continue
+        for path in sorted(root.rglob("*")):
+            if path.is_file() and path.name != "session-pack.zip":
+                members.append(path.relative_to(EXPORT).as_posix())
     subprocess.run(
-        ["zip", "-r", "-q", str(packed), ".", "-x", "session-pack.zip"],
+        ["zip", "-q", str(packed), "-@"],
         cwd=EXPORT,
+        input="\n".join(members) + "\n",
+        text=True,
         check=True,
     )
     size = packed.stat().st_size

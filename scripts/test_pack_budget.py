@@ -83,6 +83,35 @@ def main() -> int:
         assert omitted[0] == "media-work/scratch.mp4", omitted
         assert not (src / "media" / "keyword.mp4").exists()
         print("pack budget: ok", size, omitted)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        src = Path(tmp) / "export"
+        src.mkdir()
+        (src / "AGENT_CONTEXT.md").write_text("# ctx\n![](shots/001.jpg)\n", encoding="utf-8")
+        (src / "SESSION_BRIEF.html").write_text("<html></html>", encoding="utf-8")
+        (src / "session.manifest.json").write_text("{}", encoding="utf-8")
+        (src / "media").mkdir()
+        (src / "shots").mkdir()
+        for i in range(1, 9):
+            folder = src / "media" / f"task-{i:02d}"
+            folder.mkdir()
+            (folder / "clip.mp4").write_bytes(os.urandom(6 * 1024 * 1024))
+        for i in range(1, 21):
+            (src / "shots" / f"{i:03d}.jpg").write_bytes(os.urandom(80_000))
+        dest = Path(tmp) / "pack.zip"
+        omitted = omit_until_under(src, dest)
+        size = dest.stat().st_size
+        assert size <= MAX_ZIP, f"8-clip zip still {size}"
+        assert omitted, "expected named omissions for 8×6 MB clips"
+        (src / "OMITTED.md").write_text(
+            "# Omitted from export\n\n" + "\n".join(f"- `{path}`" for path in omitted),
+            encoding="utf-8",
+        )
+        assert (src / "shots" / "001.jpg").exists(), "evidence shot 001 must survive omit"
+        assert (src / "AGENT_CONTEXT.md").exists()
+        remaining_ctx = "shots/001.jpg"
+        assert (src / remaining_ctx).is_file()
+        print("pack budget 8 clips / 20 shots: ok", size, "omitted", len(omitted))
     return 0
 
 
