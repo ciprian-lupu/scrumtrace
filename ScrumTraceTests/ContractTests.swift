@@ -76,6 +76,7 @@ final class ContractTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: root) }
         XCTAssertNil(ExportRel.containedRelative("archive/full_transcript.json", sessionURL: root))
         XCTAssertNil(ExportRel.existingSessionFile("archive/full_transcript.json", sessionURL: root))
+        XCTAssertTrue(ExportRel.containsSymlinkComponent("archive/shots", sessionURL: root))
         XCTAssertThrowsError(
             try ExportRel.writeContainedData(Data("{\"words\":[]}".utf8), relative: "archive/full_transcript.json", sessionURL: root)
         )

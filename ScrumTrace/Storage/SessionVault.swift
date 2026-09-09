@@ -116,6 +116,9 @@ final class SessionVault: @unchecked Sendable {
             try fileManager.removeItem(at: url)
         }
         let tmp = url.appendingPathExtension("tmp")
+        if (try? tmp.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+            try fileManager.removeItem(at: tmp)
+        }
         let data = try encoder.encode(manifest)
         try data.write(to: tmp, options: .atomic)
         if fileManager.fileExists(atPath: url.path) {
@@ -165,7 +168,7 @@ final class SessionVault: @unchecked Sendable {
         guard Self.isValidSessionId(sessionId) else { return 1 }
         let session = sessionURL(id: sessionId)
         let shots = session.appendingPathComponent(ScrumTracePath.shots)
-        if ExportRel.containedRelative("\(ScrumTracePath.shots)/.probe", sessionURL: session) == nil {
+        if ExportRel.containsSymlinkComponent(ScrumTracePath.shots, sessionURL: session) {
             return 1
         }
         if (try? shots.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {

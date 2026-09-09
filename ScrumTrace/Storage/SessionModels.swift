@@ -103,6 +103,20 @@ enum ExportRel {
         return joined
     }
 
+    /// True when any path component under the session folder is a symbolic link.
+    static func containsSymlinkComponent(_ relative: String, sessionURL: URL) -> Bool {
+        guard let parts = normalizedComponents(relative) else { return true }
+        var current = sessionURL.standardizedFileURL
+        for part in parts {
+            let next = current.appendingPathComponent(part)
+            if (try? next.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+                return true
+            }
+            current = next
+        }
+        return false
+    }
+
     static func existingSessionFile(_ path: String, sessionURL: URL) -> String? {
         guard let relative = containedRelative(path, sessionURL: sessionURL) else { return nil }
         let url = sessionURL.appendingPathComponent(relative)

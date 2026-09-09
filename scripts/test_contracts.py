@@ -259,7 +259,8 @@ def test_retry_failed_slices_and_pins() -> None:
     assert "isContainedRegularFile" in vault
     next_shot = vault.split("func nextShotIndex")[1].split("func loadPinTimes")[0]
     assert "isSymbolicLink" in next_shot
-    assert ".probe" in next_shot
+    assert "containsSymlinkComponent" in next_shot
+    assert ".probe" not in next_shot
     events_fn = vault.split("private func events")[1].split("func revealInFinder")[0]
     assert "isContainedRegularFile" in events_fn
     append = vault.split("func appendEvent")[1].split("func recentSessions")[0]
@@ -687,6 +688,7 @@ def test_phase45_clip_consent_and_budget() -> None:
 
 def test_write_contained_data_refuses_directory_symlinks() -> None:
     models = (ROOT / "ScrumTrace" / "Storage" / "SessionModels.swift").read_text()
+    assert "func containsSymlinkComponent" in models
     assert "func prepareContainedWrite" in models
     assert "func writeContainedData" in models
     prepare = models.split("static func prepareContainedWrite")[1].split("static func writeContainedData")[0]
@@ -713,6 +715,11 @@ def test_write_contained_data_refuses_directory_symlinks() -> None:
     assert "isAllowedClipDest" in export_fn
     assert export_fn.index("isAllowedClipDest") < export_fn.index("prepareContainedWrite")
     assert "writeContainedData(jpeg, relative: stillRelative" in export_fn
+    vault = (ROOT / "ScrumTrace" / "Storage" / "SessionVault.swift").read_text()
+    write_man = vault.split("func write(manifest")[1].split("func appendEvent")[0]
+    tmp_block = write_man.split("appendingPathExtension")[1].split("encoder.encode")[0]
+    assert "isSymbolicLink" in tmp_block
+    assert "containsSymlinkComponent" in vault.split("func nextShotIndex")[1].split("func loadPinTimes")[0]
 
 
 def main() -> None:
