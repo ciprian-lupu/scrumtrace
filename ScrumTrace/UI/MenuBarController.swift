@@ -8,6 +8,7 @@ final class MenuBarController {
     private var hud: RecordingHUDWindow?
     private var lastMenuSignature = ""
     private var statusMenuItem: NSMenuItem?
+    private var hudObserver: NSObjectProtocol?
 
     init(controller: SessionController, hud: RecordingHUDWindow) {
         self.controller = controller
@@ -18,13 +19,20 @@ final class MenuBarController {
             button.image?.isTemplate = true
         }
         rebuild()
+        hudObserver = NotificationCenter.default.addObserver(
+            forName: .scrumTraceHUDSuppress,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.sync()
+        }
         Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
             self?.sync()
         }
     }
 
     private func sync() {
-        hud?.setVisible(controller.isRecording || controller.isBusy)
+        hud?.setVisible(controller.hudShouldShow)
         if let button = item.button {
             let symbol: String
             if controller.isBusy {

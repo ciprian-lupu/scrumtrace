@@ -2,6 +2,7 @@ import Foundation
 
 extension Notification.Name {
     static let scrumTraceCaptureGate = Notification.Name("ScrumTrace.captureGate")
+    static let scrumTraceHUDSuppress = Notification.Name("ScrumTrace.hudSuppress")
 }
 
 /// Paths agents see are relative to `export/` (`shots/…`, `media/…`).

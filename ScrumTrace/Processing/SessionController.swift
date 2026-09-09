@@ -13,6 +13,7 @@ final class SessionController: ObservableObject {
     @Published var lastError: String?
     @Published var lastSessionId: String?
     @Published var isBusy = false
+    @Published var suppressHUD = false
 
     let settings: AppSettings
     let vault: SessionVault
@@ -53,6 +54,10 @@ final class SessionController: ObservableObject {
 
     var isRecording: Bool {
         phase == .recording || phase == .paused
+    }
+
+    var hudShouldShow: Bool {
+        (isRecording || isBusy) && !suppressHUD
     }
 
     func startRecording() {
@@ -296,6 +301,14 @@ final class SessionController: ObservableObject {
 
     private func captureShot() async {
         guard let sessionURL, var manifest else { return }
+        suppressHUD = true
+        NotificationCenter.default.post(name: .scrumTraceHUDSuppress, object: nil)
+        try? await Task.sleep(nanoseconds: 50_000_000)
+        defer {
+            suppressHUD = false
+            NotificationCenter.default.post(name: .scrumTraceHUDSuppress, object: nil)
+        }
+        guard captureState.allowsNewCapture else { return }
         let media = clock.currentMediaSeconds()
         guard let image = ScreenSnap.capture() else {
             lastError = "Could not capture the display."

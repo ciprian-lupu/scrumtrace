@@ -28,6 +28,7 @@ final class SessionProcessor: @unchecked Sendable {
 
         var timing = PipelineTiming.load(sessionURL: sessionURL) ?? PipelineTiming()
 
+        var justFinishedTranscribing = false
         if !manifest.hasCompleted(.transcribing) {
             await onStatus(.transcribing, "Transcribing locally with WhisperKit")
             manifest.pipelineStatus = .transcribing
@@ -49,11 +50,18 @@ final class SessionProcessor: @unchecked Sendable {
             // Empty speech after a successful load still completes.
             if transcriber.isReady || !hadAudio {
                 manifest.markCompleted(.transcribing)
+                justFinishedTranscribing = true
             }
             try vault.write(manifest: &manifest)
         }
 
         let transcript = loadTranscript(sessionURL: sessionURL, sessionId: sessionId)
+
+        if justFinishedTranscribing {
+            manifest.completedStages.removeAll {
+                $0 == .slicing || $0 == .evaluating || $0 == .synthesizing || $0 == .completed
+            }
+        }
 
         if !manifest.hasCompleted(.slicing) {
             await onStatus(.slicing, "Cutting evidence windows to the media budget")
@@ -303,7 +311,10 @@ final class SessionProcessor: @unchecked Sendable {
         configuration: AIProviderConfiguration
     ) async -> (SliceRecord, [TaskRecord]) {
         var slice = slice
-        let excerpt = TranscriptQuery.excerpt(from: transcript, start: slice.startMedia, end: slice.endMedia)
+        var excerpt = TranscriptQuery.excerpt(from: transcript, start: slice.startMedia, end: slice.endMedia)
+        if !configuration.acceptsText {
+            excerpt = ""
+        }
         let shot = manifest.shots.first { $0.id == slice.associatedShotId }
         var images = slice.stills.map { sessionURL.appendingPathComponent($0) }
             .filter { FileManager.default.fileExists(atPath: $0.path) }
