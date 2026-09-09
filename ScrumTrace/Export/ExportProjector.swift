@@ -31,7 +31,7 @@ struct ExportProjector {
             var copy = shot
             let stem = URL(fileURLWithPath: shot.rawPath).deletingPathExtension().lastPathComponent
             if let raw = try copyStill(
-                from: sessionURL.appendingPathComponent(shot.rawPath),
+                fromRelative: shot.rawPath,
                 destRelative: "export/shots/\(stem).jpg",
                 sessionURL: sessionURL,
                 omitted: &omitted
@@ -44,7 +44,7 @@ struct ExportProjector {
             if let annotated = shot.annotatedPath {
                 let dest = "export/shots/\(stem).annotated.jpg"
                 if let placedAnnotated = try copyStill(
-                    from: sessionURL.appendingPathComponent(annotated),
+                    fromRelative: annotated,
                     destRelative: dest,
                     sessionURL: sessionURL,
                     omitted: &omitted
@@ -71,8 +71,8 @@ struct ExportProjector {
             if let clip = slice.clipPath {
                 let dest = "\(ScrumTracePath.media)/task-\(ordinal)/clip.mp4"
                 if let placedClip = try copyIfPresent(
-                    from: sessionURL.appendingPathComponent(clip),
-                    to: sessionURL.appendingPathComponent(dest),
+                    fromRelative: clip,
+                    destRelative: dest,
                     sessionURL: sessionURL,
                     omitted: &omitted
                 ) {
@@ -109,7 +109,7 @@ struct ExportProjector {
                     continue
                 }
                 if let placedStill = try copyStill(
-                    from: sessionURL.appendingPathComponent(still),
+                    fromRelative: still,
                     destRelative: dest,
                     sessionURL: sessionURL,
                     omitted: &omitted
@@ -157,10 +157,9 @@ struct ExportProjector {
         projected.includeFullTranscriptInZip = includeFullTranscript
 
         if includeFullTranscript {
-            let source = sessionURL.appendingPathComponent(ScrumTracePath.fullTranscript)
             _ = try copyIfPresent(
-                from: source,
-                to: sessionURL.appendingPathComponent("export/full_transcript.json"),
+                fromRelative: ScrumTracePath.fullTranscript,
+                destRelative: "export/full_transcript.json",
                 sessionURL: sessionURL,
                 omitted: &omitted
             )
@@ -226,14 +225,18 @@ struct ExportProjector {
     }
 
     private func copyStill(
-        from: URL,
+        fromRelative: String,
         destRelative: String,
         sessionURL: URL,
         omitted: inout [OmittedAsset]
     ) throws -> String? {
+        guard let fromRel = ExportRel.existingSessionFile(fromRelative, sessionURL: sessionURL) else {
+            omitted.append(unreadableSource(fromRelative, sessionURL: sessionURL))
+            return nil
+        }
+        let from = sessionURL.appendingPathComponent(fromRel)
         #if os(macOS)
-        if ExportRel.isContainedRegularFile(from, sessionRoot: sessionURL),
-           let jpegRelative = try transcodeJPEG(from: from, destRelative: destRelative, sessionURL: sessionURL) {
+        if let jpegRelative = try transcodeJPEG(from: from, destRelative: destRelative, sessionURL: sessionURL) {
             return jpegRelative
         }
         #endif
@@ -249,8 +252,8 @@ struct ExportProjector {
             return nil
         }
         return try copyIfPresent(
-            from: from,
-            to: sessionURL.appendingPathComponent(destRelative),
+            fromRelative: fromRel,
+            destRelative: destRelative,
             sessionURL: sessionURL,
             omitted: &omitted
         )
@@ -278,42 +281,47 @@ struct ExportProjector {
     }
     #endif
 
+    private func unreadableSource(_ relative: String, sessionURL: URL) -> OmittedAsset {
+        let url = sessionURL.appendingPathComponent(relative)
+        let isLink = (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true
+        if isLink || ExportRel.containsSymlinkComponent(relative, sessionURL: sessionURL) {
+            return OmittedAsset(path: relative, reason: "Source is not a contained regular file")
+        }
+        return OmittedAsset(path: relative, reason: "Source missing in archive")
+    }
+
     private func copyIfPresent(
-        from: URL,
-        to: URL,
+        fromRelative: String,
+        destRelative: String,
         sessionURL: URL,
         omitted: inout [OmittedAsset]
     ) throws -> String? {
-        let fileManager = FileManager.default
-        guard fileManager.fileExists(atPath: from.path) else {
-            omitted.append(OmittedAsset(path: from.lastPathComponent, reason: "Source missing in archive"))
+        guard let fromRel = ExportRel.existingSessionFile(fromRelative, sessionURL: sessionURL) else {
+            omitted.append(unreadableSource(fromRelative, sessionURL: sessionURL))
             return nil
         }
-        guard ExportRel.isContainedRegularFile(from, sessionRoot: sessionURL) else {
-            omitted.append(OmittedAsset(path: from.lastPathComponent, reason: "Source is not a contained regular file"))
-            return nil
-        }
-        guard let toRel = ExportRel.containedRelative(to, sessionRoot: sessionURL),
-              ExportRel.isUnderExport(toRel) else {
-            omitted.append(OmittedAsset(path: to.lastPathComponent, reason: "Copy destination escaped export/"))
+        let destSession = ExportRel.sessionPath(destRelative)
+        guard ExportRel.isUnderExport(destSession) else {
+            omitted.append(OmittedAsset(path: destRelative, reason: "Copy destination escaped export/"))
             return nil
         }
         let prepared: String
         do {
-            prepared = try ExportRel.prepareContainedWrite(relative: toRel, sessionURL: sessionURL)
+            prepared = try ExportRel.prepareContainedWrite(relative: destSession, sessionURL: sessionURL)
         } catch {
-            omitted.append(OmittedAsset(path: to.lastPathComponent, reason: "Copy destination escaped export/"))
+            omitted.append(OmittedAsset(path: destRelative, reason: "Copy destination escaped export/"))
             return nil
         }
+        let from = sessionURL.appendingPathComponent(fromRel)
         let dest = sessionURL.appendingPathComponent(prepared)
-        if fileManager.fileExists(atPath: dest.path) {
-            guard ExportRel.isContainedRegularFile(dest, sessionRoot: sessionURL) else {
-                omitted.append(OmittedAsset(path: to.lastPathComponent, reason: "Copy destination escaped export/"))
-                return nil
-            }
-            try fileManager.removeItem(at: dest)
+        if (try? dest.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+            omitted.append(OmittedAsset(path: destRelative, reason: "Copy destination escaped export/"))
+            return nil
         }
-        try fileManager.copyItem(at: from, to: dest)
+        if ExportRel.isContainedRegularFile(dest, sessionRoot: sessionURL) {
+            try FileManager.default.removeItem(at: dest)
+        }
+        try FileManager.default.copyItem(at: from, to: dest)
         return prepared
     }
 }

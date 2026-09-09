@@ -524,18 +524,22 @@ def test_phase45_clip_consent_and_budget() -> None:
     slicer = (ROOT / "ScrumTrace" / "Slicing" / "MeetingSlicer.swift").read_text()
     assert "shot.stillCandidates" in slicer
     projector = (ROOT / "ScrumTrace" / "Export" / "ExportProjector.swift").read_text()
-    jpeg = projector.split("func transcodeJPEG")[1].split("func copyIfPresent")[0]
+    jpeg = projector.split("func transcodeJPEG")[1].split("func unreadableSource")[0]
     assert "containedRelative" in jpeg
     assert "isContainedRegularFile" in jpeg
     assert "isUnderExport" in jpeg
     assert "writeContainedData" in jpeg
     assert "jpeg.write(to:" not in jpeg
     assert "hasPrefix(prefix)" not in jpeg
+    still_fn = projector.split("func copyStill")[1].split("func transcodeJPEG")[0]
+    assert "existingSessionFile" in still_fn
+    assert "fromRelative" in still_fn
     copy_if = projector.split("func copyIfPresent")[1]
-    assert "containedRelative" in copy_if
+    assert "existingSessionFile" in copy_if
     assert "isContainedRegularFile" in copy_if
-    assert "isUnderExport(toRel)" in copy_if
+    assert "isUnderExport(destSession)" in copy_if
     assert "prepareContainedWrite" in copy_if
+    assert "fileExists(atPath:" not in copy_if
     assert "hasPrefix(prefix)" not in copy_if
     agent = (ROOT / "ScrumTrace" / "Export" / "AgentContextRenderer.swift").read_text()
     assert "stillCandidates" in agent.split("func displayPath")[1]
