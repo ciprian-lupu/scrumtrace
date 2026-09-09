@@ -81,7 +81,7 @@ final class SessionProcessor: @unchecked Sendable {
             )
             var exported: [SliceRecord] = []
             for slice in slices {
-                if FileManager.default.fileExists(atPath: sessionURL.appendingPathComponent(ScrumTracePath.sessionMovie).path) {
+                if ExportRel.existingSessionFile(ScrumTracePath.sessionMovie, sessionURL: sessionURL) != nil {
                     do {
                         let clipped = try await exporter.export(
                             sessionURL: sessionURL,

@@ -353,13 +353,10 @@ struct SliceRecord: Codable, Sendable, Identifiable, Hashable {
     /// Drop clip/still paths that were never written (failed encode or still grab).
     func withExistingMedia(sessionURL: URL) -> SliceRecord {
         var copy = self
-        if let clip = clipPath,
-           !FileManager.default.fileExists(atPath: sessionURL.appendingPathComponent(clip).path) {
+        if let clip = clipPath, ExportRel.existingSessionFile(clip, sessionURL: sessionURL) == nil {
             copy.clipPath = nil
         }
-        copy.stills = stills.filter {
-            FileManager.default.fileExists(atPath: sessionURL.appendingPathComponent($0).path)
-        }
+        copy.stills = stills.filter { ExportRel.existingSessionFile($0, sessionURL: sessionURL) != nil }
         return copy
     }
 

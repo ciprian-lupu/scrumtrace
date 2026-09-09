@@ -192,9 +192,9 @@ struct ShotNoteView: View {
             AVLinearPCMIsFloatKey: false
         ]
         guard let rec = try? AVAudioRecorder(url: url, settings: settings) else { return }
+        guard rec.record() else { return }
         holdingTalk = true
         recorder = rec
-        rec.record()
     }
 
     private func abortTalk() {

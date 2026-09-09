@@ -53,8 +53,20 @@ final class SessionVault: @unchecked Sendable {
         return "\(stamp)-\(suffix)"
     }
 
+    /// Session folder names are generated ids only. Reject `..` / `/` so Recent
+    /// and Retry cannot walk out of `Movies/ScrumTrace/sessions`.
+    static func isValidSessionId(_ id: String) -> Bool {
+        let trimmed = id.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed.count <= 96 else { return false }
+        if trimmed.hasPrefix(".") || trimmed.contains("..") { return false }
+        return trimmed.unicodeScalars.allSatisfy { scalar in
+            CharacterSet.alphanumerics.contains(scalar) || scalar == "-" || scalar == "_"
+        }
+    }
+
     func sessionURL(id: String) -> URL {
-        rootURL.appendingPathComponent(id, isDirectory: true)
+        let safe = Self.isValidSessionId(id) ? id : "invalid-session-id"
+        return rootURL.appendingPathComponent(safe, isDirectory: true)
     }
 
     func createSession(product: ProductContext) throws -> (url: URL, manifest: SessionManifest) {
@@ -81,6 +93,9 @@ final class SessionVault: @unchecked Sendable {
     }
 
     func loadManifest(id: String) throws -> SessionManifest {
+        guard Self.isValidSessionId(id) else {
+            throw SessionVaultError.sessionMissing(id)
+        }
         let url = sessionURL(id: id).appendingPathComponent(ScrumTracePath.manifest)
         guard fileManager.fileExists(atPath: url.path) else {
             throw SessionVaultError.sessionMissing(id)
@@ -90,6 +105,9 @@ final class SessionVault: @unchecked Sendable {
     }
 
     func write(manifest: inout SessionManifest) throws {
+        guard Self.isValidSessionId(manifest.sessionId) else {
+            throw SessionVaultError.writeFailed("invalid session id")
+        }
         let dir = sessionURL(id: manifest.sessionId)
         try fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
         let url = dir.appendingPathComponent(ScrumTracePath.manifest)
@@ -104,6 +122,9 @@ final class SessionVault: @unchecked Sendable {
     }
 
     func appendEvent(_ event: SessionEvent, sessionId: String) throws {
+        guard Self.isValidSessionId(sessionId) else {
+            throw SessionVaultError.writeFailed("invalid session id")
+        }
         let url = sessionURL(id: sessionId).appendingPathComponent(ScrumTracePath.events)
         var data = try eventEncoder.encode(event)
         data.append(contentsOf: [0x0A])
@@ -120,7 +141,8 @@ final class SessionVault: @unchecked Sendable {
     func recentSessions(limit: Int = 12) -> [SessionManifest] {
         guard let ids = try? fileManager.contentsOfDirectory(atPath: rootURL.path) else { return [] }
         let loaded: [SessionManifest] = ids.compactMap { id in
-            try? loadManifest(id: id)
+            guard Self.isValidSessionId(id) else { return nil }
+            return try? loadManifest(id: id)
         }
         return Array(loaded.sorted { $0.createdAt > $1.createdAt }.prefix(limit))
     }
@@ -171,6 +193,7 @@ final class SessionVault: @unchecked Sendable {
 
     func revealInFinder(sessionId: String) {
         #if os(macOS)
+        guard Self.isValidSessionId(sessionId) else { return }
         NSWorkspace.shared.activateFileViewerSelecting([sessionURL(id: sessionId).appendingPathComponent(ScrumTracePath.export)])
         #endif
     }

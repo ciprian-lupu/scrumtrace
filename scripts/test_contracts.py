@@ -189,6 +189,7 @@ def test_pause_gate_hold_to_talk() -> None:
     start_talk = shot.split("private func startTalk()")[1].split("private func abortTalk()")[0]
     assert "holdingTalk = true" in start_talk
     assert start_talk.index("guard let rec") < start_talk.index("holdingTalk = true")
+    assert start_talk.index("guard rec.record()") < start_talk.index("holdingTalk = true")
     hud = (ROOT / "ScrumTrace" / "UI" / "RecordingHUDWindow.swift").read_text()
     assert "allowsNewCapture" in hud
 
@@ -214,6 +215,12 @@ def test_retry_failed_slices_and_pins() -> None:
     assert "localReviewTasks(manifest: manifest)" not in empty_key
     vault = (ROOT / "ScrumTrace" / "Storage" / "SessionVault.swift").read_text()
     assert "loadPinTimes" in vault
+    assert "isValidSessionId" in vault
+    assert "invalid-session-id" in vault
+    models = (ROOT / "ScrumTrace" / "Storage" / "SessionModels.swift").read_text()
+    existing_media = models.split("func withExistingMedia")[1].split("enum CodingKeys")[0]
+    assert "existingSessionFile" in existing_media
+    assert "fileExists(atPath: sessionURL.appendingPathComponent(clip)" not in existing_media
     controller = (ROOT / "ScrumTrace" / "Processing" / "SessionController.swift").read_text()
     assert "mergePins" in controller
     assert "mergeLiveCatalog" in controller

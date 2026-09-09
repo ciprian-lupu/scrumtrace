@@ -26,6 +26,18 @@ final class ContractTests: XCTestCase {
         XCTAssertNil(ExportRel.normalizedComponents("export/foo/../../.."))
     }
 
+    func testSessionIdRejectsPathTraversal() {
+        XCTAssertTrue(SessionVault.isValidSessionId("2026-09-09-1530-abc123"))
+        XCTAssertFalse(SessionVault.isValidSessionId("../Movies"))
+        XCTAssertFalse(SessionVault.isValidSessionId("foo/bar"))
+        XCTAssertFalse(SessionVault.isValidSessionId(".."))
+        XCTAssertFalse(SessionVault.isValidSessionId(""))
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("scrumtrace-vault-\(UUID().uuidString)")
+        let vault = SessionVault(rootURL: root)
+        XCTAssertEqual(vault.sessionURL(id: "../etc").lastPathComponent, "invalid-session-id")
+        XCTAssertEqual(vault.sessionURL(id: "foo/bar").path, vault.sessionURL(id: "invalid-session-id").path)
+    }
+
     func testWhisperKitModelNamePrefixesShortAlias() {
         XCTAssertEqual(
             WhisperTranscriber.whisperKitModelName("large-v3-turbo"),

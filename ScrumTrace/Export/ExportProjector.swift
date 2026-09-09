@@ -139,7 +139,7 @@ struct ExportProjector {
                 }
                 let session = ExportRel.sessionPath(exportCandidate)
                 if ExportRel.isUnderExport(session),
-                   fileManager.fileExists(atPath: sessionURL.appendingPathComponent(session).path) {
+                   ExportRel.existingSessionFile(session, sessionURL: sessionURL) != nil {
                     return ExportRel.toExportRoot(session)
                 }
                 omitted.append(OmittedAsset(path: path, reason: "Not present under export/ after projection"))
