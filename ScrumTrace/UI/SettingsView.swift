@@ -11,7 +11,7 @@ struct SettingsView: View {
                         Text(kind.title).tag(kind)
                     }
                 }
-                .onChange(of: settings.provider) { _ in
+                .onChange(of: settings.provider) { _, _ in
                     settings.applyProviderDefaults()
                 }
                 TextField("Endpoint", text: $settings.baseURL)

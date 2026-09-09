@@ -60,11 +60,12 @@ final class AnnotationCanvas: NSView {
     }
 
     func snapshot() -> NSImage {
+        guard let rep = bitmapImageRepForCachingDisplay(in: bounds) else {
+            return sourceImage ?? NSImage(size: bounds.size)
+        }
+        cacheDisplay(in: bounds, to: rep)
         let image = NSImage(size: bounds.size)
-        image.lockFocus()
-        NSGraphicsContext.current?.imageInterpolation = .high
-        draw(bounds)
-        image.unlockFocus()
+        image.addRepresentation(rep)
         return image
     }
 
@@ -158,7 +159,9 @@ struct ShotNoteView: View {
             canvas.tool = tool
             canTalk = allowsNewCapture()
         }
-        .onChange(of: tool) { canvas.tool = tool }
+        .onChange(of: tool) { _, newValue in
+            canvas.tool = newValue
+        }
         .onReceive(NotificationCenter.default.publisher(for: .scrumTraceCaptureGate)) { _ in
             canTalk = allowsNewCapture()
             if !canTalk {

@@ -33,9 +33,18 @@ def test_export_rel_in_swift() -> None:
     zipper = (ROOT / "ScrumTrace" / "Export" / "SessionPackZipper.swift").read_text()
     assert "allowList" in zipper
     assert '"-@"' in zipper
+    models = (ROOT / "ScrumTrace" / "Storage" / "SessionModels.swift").read_text()
+    assert "func handoffPath" in models
     clip = (ROOT / "ScrumTrace" / "Slicing" / "ClipExporter.swift").read_text()
     assert "tightenExportClips" in clip
     assert "AVAssetExportPreset640x480" in clip
+    shot = (ROOT / "ScrumTrace" / "UI" / "ShotNoteWindow.swift").read_text()
+    assert "lockFocus" not in shot
+    assert "bitmapImageRepForCachingDisplay" in shot
+    jpeg = (ROOT / "ScrumTrace" / "AI" / "AIProviderProtocol.swift").read_text()
+    assert "lockFocus" not in jpeg
+    projector = (ROOT / "ScrumTrace" / "Export" / "ExportProjector.swift").read_text()
+    assert "lockFocus" not in projector
 
 
 def test_frame_ref_basename_resolves() -> None:

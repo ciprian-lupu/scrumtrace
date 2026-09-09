@@ -135,13 +135,41 @@ final class SessionController: ObservableObject {
         }
     }
 
-    /// Process is quitting: freeze every capture source before the run loop dies.
+    /// Process is quitting: freeze capture. Do not start Whisper/AI on a dying process.
     func haltCaptureForTermination() {
         guard isRecording else { return }
-        recorder?.freezeWriters()
         privacy.stop()
         sampler.isSuspended = true
-        stopRecording()
+        hudTimer?.invalidate()
+        hudTimer = nil
+        metadataTimer?.invalidate()
+        metadataTimer = nil
+        recorder?.freezeWriters()
+        persistInterruptedCapture()
+        let rec = recorder
+        recorder = nil
+        phase = .idle
+        isBusy = false
+        statusLine = "Stopped"
+        // Close the movie/WAV before the process is killed. Do not start Whisper/AI.
+        let lock = DispatchSemaphore(value: 0)
+        Task.detached {
+            try? await rec?.stop()
+            lock.signal()
+        }
+        _ = lock.wait(timeout: .now() + 5)
+    }
+
+    private func persistInterruptedCapture() {
+        guard var local = manifest else { return }
+        local.duration = DurationPair(
+            wallSeconds: clock.currentWallSeconds(),
+            mediaSeconds: clock.currentMediaSeconds()
+        )
+        local.pauses = clock.snapshotPauses()
+        try? vault.write(manifest: &local)
+        manifest = local
+        log(.stop, ["reason": "quit"])
     }
 
     private func startRecordingAsync() async {

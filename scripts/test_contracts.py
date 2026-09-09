@@ -192,14 +192,23 @@ def test_pause_privacy_and_metadata_gate() -> None:
     assert "sampleMetadataTick" in controller
     assert "Re-check after the 200 ms" in controller
     assert "haltCaptureForTermination" in controller
+    halt = controller.split("func haltCaptureForTermination")[1].split("private func startRecordingAsync")[0]
+    assert "stopRecording()" not in halt
+    assert "Task.detached" in halt
+    assert "persistInterruptedCapture" in halt
     app = (ROOT / "ScrumTrace" / "App" / "AppDelegate.swift").read_text()
     assert "haltCaptureForTermination" in app
     assert "height: 780" in app
+    menu = (ROOT / "ScrumTrace" / "UI" / "MenuBarController.swift").read_text()
+    quit_fn = menu.split("func quit()")[1].split("func openRecent")[0]
+    assert "stopRecording()" not in quit_fn
+    assert "terminate" in quit_fn
     log_fn = controller.split("private func log(")[1].split("private func flashStatus")[0]
     assert "case .pin, .url, .window" in log_fn
     agent = (ROOT / "ScrumTrace" / "Export" / "AgentContextRenderer.swift").read_text()
     assert "this export folder" in agent
-    assert "Never open `archive/`" in agent
+    assert "Never open the private capture folder" in agent
+    assert "handoffPath" in agent
     assert "Still auto-paused for a password manager" in controller
     assert "Stills and transcript excerpts" in controller
     assert "includesClipAudio: approved && capabilities.acceptsVideo" in controller
@@ -231,6 +240,13 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "capabilities.acceptsVideo" in settings
     models = (ROOT / "ScrumTrace" / "Storage" / "SessionModels.swift").read_text()
     assert "func needsReprompt" in models
+    assert "func handoffPath" in models
+    assert "enum TaskRanking" in models
+    assert "selectForPack" in processor
+    local = processor.split("func localReviewTasks")[1].split("func excerptMap")[0]
+    assert "selectForPack" in local
+    assert "Inspect the linked evidence only" in processor
+    assert "remain in archive/" not in processor
     assert "includesClipAudio != acceptsVideo" in models
     controller = (ROOT / "ScrumTrace" / "Processing" / "SessionController.swift").read_text()
     assert "needsReprompt" in controller
@@ -308,6 +324,14 @@ def test_phase45_clip_consent_and_budget() -> None:
     clock = (ROOT / "ScrumTrace" / "Capture" / "ClockSynchronizer.swift").read_text()
     assert "stoppedWall" in clock
     assert "func markRecordingStopped" in clock
+    shots_fn = brief_src.split("private func shots")[1].split("private func omittedHTML")[0]
+    assert "handoffPath" in shots_fn
+    google = (ROOT / "ScrumTrace" / "AI" / "GoogleClient.swift").read_text()
+    assert "var candidates: [Candidate]?" in google
+    assert "var content: Content?" in google
+    assert "var parts: [Part]?" in google
+    recorder_engine = recorder.split("func writeEngineBuffer")[1].split("func requestPermission")[0]
+    assert "buffer.frameLength" in recorder_engine
 
 
 def main() -> None:

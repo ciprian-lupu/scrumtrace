@@ -9,6 +9,42 @@ final class ContractTests: XCTestCase {
         XCTAssertEqual(ExportRel.sessionPath("archive/session.mp4"), "archive/session.mp4")
         XCTAssertTrue(ExportRel.isUnderExport("export/media/task-01/clip.mp4"))
         XCTAssertFalse(ExportRel.isUnderExport("archive/session.mp4"))
+        XCTAssertEqual(ExportRel.handoffPath("export/shots/001.jpg"), "shots/001.jpg")
+        XCTAssertNil(ExportRel.handoffPath("archive/session.mp4"))
+        XCTAssertNil(ExportRel.handoffPath("archive/shots/001.png"))
+    }
+
+    func testTaskRankingPrefersHumanShotsAndConfirmed() {
+        func task(
+            id: String,
+            status: TaskStatus,
+            confidence: Double,
+            evidence: [String]
+        ) -> TaskRecord {
+            TaskRecord(
+                taskId: id,
+                sourceSliceId: "slice-01",
+                kind: .bug,
+                status: status,
+                title: id,
+                observed: "x",
+                stated: "",
+                inferred: "",
+                agentInstructions: "inspect",
+                quotes: [],
+                evidenceMedia: evidence,
+                confidence: confidence
+            )
+        }
+        let keyword = task(id: "TASK-K", status: .confirmed, confidence: 0.99, evidence: ["media/keyword.mp4"])
+        let shot = task(id: "TASK-S", status: .needsReview, confidence: 0.2, evidence: ["shots/001.jpg"])
+        let extra = (1...8).map { i in
+            task(id: "TASK-X\(i)", status: .needsReview, confidence: 0.1, evidence: ["media/task-\(i)/clip.mp4"])
+        }
+        let selected = TaskRanking.selectForPack([keyword] + extra + [shot], limit: 8)
+        XCTAssertEqual(selected.count, 8)
+        XCTAssertEqual(selected.first?.title, "TASK-S")
+        XCTAssertTrue(selected.contains { $0.title == "TASK-K" })
     }
 
     func testQuoteMustOverlapTranscriptSegment() {

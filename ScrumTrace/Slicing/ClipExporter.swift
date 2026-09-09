@@ -96,6 +96,9 @@ struct ClipExporter {
             seconds: min(requested, max(0, mediaDuration - slice.startMedia)),
             preferredTimescale: 600
         )
+        guard CMTimeGetSeconds(duration) > 0.05 else {
+            throw SessionRecorderError.writerFailed("Clip time range is empty.")
+        }
         guard let session = AVAssetExportSession(asset: asset, presetName: AVAssetExportPreset1280x720) else {
             throw SessionRecorderError.writerFailed("AVAssetExportSession unavailable.")
         }

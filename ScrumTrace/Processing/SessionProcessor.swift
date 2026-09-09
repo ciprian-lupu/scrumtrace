@@ -496,13 +496,7 @@ final class SessionProcessor: @unchecked Sendable {
     }
 
     private func rankedTasks(_ tasks: [TaskRecord]) -> [TaskRecord] {
-        let kept = tasks.filter { $0.status != .dropped }
-        let limited = Array(kept.prefix(MediaBudget.maxTasks))
-        return limited.enumerated().map { index, task in
-            var copy = task
-            copy.taskId = String(format: "TASK-%02d", index + 1)
-            return copy
-        }
+        TaskRanking.selectForPack(tasks)
     }
 
     private func fallbackTask(shot: ShotRecord, slice: SliceRecord, error: Error?) -> TaskRecord {
@@ -515,7 +509,7 @@ final class SessionProcessor: @unchecked Sendable {
             observed: "Human-captured frame at t_media \(shot.tMedia)s.",
             stated: shot.note,
             inferred: error.map { "Analysis unavailable: \($0.localizedDescription)" } ?? "Requires manual review.",
-            agentInstructions: "[Requires Manual Review - API Offline] Inspect \(shot.annotatedPath ?? shot.rawPath).",
+            agentInstructions: "[Requires Manual Review - API Offline] Inspect the linked evidence only.",
             quotes: [],
             evidenceMedia: [shot.annotatedPath ?? shot.rawPath, slice.clipPath].compactMap { $0 },
             confidence: 0
@@ -550,7 +544,7 @@ final class SessionProcessor: @unchecked Sendable {
                     title: "Requires Manual Review - API Offline",
                     observed: "No provider upload was approved for this session.",
                     stated: "",
-                    inferred: "Local shots and clips remain in archive/. Inspect export/ after synthesis.",
+                    inferred: "Evaluation did not run. Local stills and clips stay on this Mac. Inspect this export folder after synthesis.",
                     agentInstructions: AgentInstructionTemplate.render(kind: .unknown, product: manifest.productContext),
                     quotes: [],
                     evidenceMedia: manifest.shots.map { $0.annotatedPath ?? $0.rawPath },
@@ -558,7 +552,7 @@ final class SessionProcessor: @unchecked Sendable {
                 )
             ]
         }
-        return manifest.shots.enumerated().map { index, shot in
+        let tasks = manifest.shots.enumerated().map { index, shot in
             TaskRecord(
                 taskId: String(format: "TASK-%02d", index + 1),
                 sourceSliceId: manifest.slices.first(where: { $0.associatedShotId == shot.id })?.sliceId ?? "slice-shot",
@@ -574,6 +568,7 @@ final class SessionProcessor: @unchecked Sendable {
                 confidence: 0
             )
         }
+        return TaskRanking.selectForPack(tasks)
     }
 
     private func excerptMap(manifest: SessionManifest, transcript: FullTranscript) -> [String: String] {

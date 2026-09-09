@@ -157,9 +157,8 @@ final class MenuBarController {
         NSApp.activate(ignoringOtherApps: true)
     }
     @objc private func quit() {
-        if controller.isRecording {
-            controller.stopRecording()
-        }
+        // applicationWillTerminate freezes writers. Do not start the
+        // transcription pipeline — that would run Whisper/AI on a dying process.
         NSApp.terminate(nil)
     }
     @objc private func openRecent(_ sender: NSMenuItem) {

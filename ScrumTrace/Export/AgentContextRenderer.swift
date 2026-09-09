@@ -5,7 +5,7 @@ struct AgentContextRenderer {
         var lines: [String] = []
         lines.append("# ScrumTrace session — \(manifest.sessionId)")
         lines.append("")
-        lines.append("Drop **this export folder** into a coding-agent workspace. Read this file first, then open the linked evidence. Do not guess facts that exist only in a screenshot or clip. Never open `archive/`.")
+        lines.append("Drop **this export folder** into a coding-agent workspace. Read this file first, then open the linked evidence. Do not guess facts that exist only in a screenshot or clip. Never open the private capture folder.")
         lines.append("")
         lines.append("## Product")
         lines.append("- App: \(manifest.productContext.appName)")
@@ -51,9 +51,11 @@ struct AgentContextRenderer {
         if !manifest.omitted.isEmpty {
             lines.append("")
             lines.append("## Omitted from this pack")
-            lines.append("These files stayed in the local archive. Do not assume they are here.")
+            lines.append("These files stayed on this Mac. Do not assume they are here.")
             for item in manifest.omitted {
-                lines.append("- `\(ExportRel.toExportRoot(item.path))` — \(item.reason)")
+                let rel = ExportRel.toExportRoot(item.path)
+                if rel.hasPrefix("archive/") { continue }
+                lines.append("- `\(rel)` — \(item.reason)")
             }
         }
         lines.append("")
@@ -89,11 +91,11 @@ struct AgentContextRenderer {
             }
         }
         lines.append("- Evidence:")
-        if task.evidenceMedia.isEmpty {
+        let linked = task.evidenceMedia.compactMap(ExportRel.handoffPath)
+        if linked.isEmpty {
             lines.append("  - _No evidence files remained in this pack._")
         } else {
-            for path in task.evidenceMedia {
-                let rel = ExportRel.toExportRoot(path)
+            for rel in linked {
                 if rel.hasSuffix(".png") || rel.hasSuffix(".jpg") || rel.hasSuffix(".jpeg") {
                     lines.append("  - ![](\(rel))")
                 } else {
@@ -107,8 +109,7 @@ struct AgentContextRenderer {
     private func displayPath(_ shot: ShotRecord) -> String? {
         let raw = shot.exportPath ?? shot.annotatedPath ?? (shot.rawPath.isEmpty ? nil : shot.rawPath)
         guard let raw else { return nil }
-        let rel = ExportRel.toExportRoot(raw)
-        if rel.hasPrefix("archive/") { return nil }
+        let rel = ExportRel.handoffPath(raw)
         return rel
     }
 

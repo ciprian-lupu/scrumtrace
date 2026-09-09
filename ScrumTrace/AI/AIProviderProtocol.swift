@@ -100,26 +100,42 @@ enum JSONExtractor {
 }
 
 enum ImageBase64 {
-    static func jpegPayload(url: URL, maxEdge: CGFloat = 1440) -> (mime: String, base64: String)? {
-        #if os(macOS)
-        guard let image = NSImage(contentsOf: url) else { return nil }
+    #if os(macOS)
+    static func jpegData(from image: NSImage, maxEdge: CGFloat, quality: CGFloat) -> Data? {
         let size = image.size
         let scale = min(1, maxEdge / max(size.width, size.height, 1))
-        let target = NSSize(width: size.width * scale, height: size.height * scale)
-        let bitmap = NSImage(size: target)
-        bitmap.lockFocus()
+        let width = max(1, Int((size.width * scale).rounded()))
+        let height = max(1, Int((size.height * scale).rounded()))
+        guard let rep = NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: width,
+            pixelsHigh: height,
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 0
+        ) else { return nil }
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+        NSGraphicsContext.current?.imageInterpolation = .high
         image.draw(
-            in: NSRect(origin: .zero, size: target),
+            in: NSRect(x: 0, y: 0, width: CGFloat(width), height: CGFloat(height)),
             from: NSRect(origin: .zero, size: size),
             operation: .copy,
             fraction: 1
         )
-        bitmap.unlockFocus()
-        guard let tiff = bitmap.tiffRepresentation,
-              let rep = NSBitmapImageRep(data: tiff),
-              let jpeg = rep.representation(using: .jpeg, properties: [.compressionFactor: 0.82]) else {
-            return nil
-        }
+        NSGraphicsContext.restoreGraphicsState()
+        return rep.representation(using: .jpeg, properties: [.compressionFactor: quality])
+    }
+    #endif
+
+    static func jpegPayload(url: URL, maxEdge: CGFloat = 1440) -> (mime: String, base64: String)? {
+        #if os(macOS)
+        guard let image = NSImage(contentsOf: url) else { return nil }
+        guard let jpeg = jpegData(from: image, maxEdge: maxEdge, quality: 0.82) else { return nil }
         return ("image/jpeg", jpeg.base64EncodedString())
         #else
         guard let data = try? Data(contentsOf: url) else { return nil }

@@ -29,6 +29,14 @@ enum ExportRel {
     static func isUnderExport(_ path: String) -> Bool {
         path.hasPrefix("export/") && !path.hasPrefix("export/archive")
     }
+
+    /// Paths agents and SESSION_BRIEF may link. Never `archive/`.
+    static func handoffPath(_ path: String) -> String? {
+        let rel = toExportRoot(path)
+        if rel.isEmpty { return nil }
+        if rel.hasPrefix("archive/") { return nil }
+        return rel
+    }
 }
 
 enum MediaBudget {
@@ -333,6 +341,44 @@ struct TaskRecord: Codable, Sendable, Identifiable, Hashable {
         quotes = try container.decodeIfPresent([QuoteRecord].self, forKey: .quotes) ?? []
         evidenceMedia = try container.decodeIfPresent([String].self, forKey: .evidenceMedia) ?? []
         confidence = try container.decodeIfPresent(Double.self, forKey: .confidence) ?? 0
+    }
+}
+
+/// D7: when the pack can only keep `maxTasks`, human shots and `confirmed` win.
+enum TaskRanking {
+    static func selectForPack(_ tasks: [TaskRecord], limit: Int = MediaBudget.maxTasks) -> [TaskRecord] {
+        let kept = tasks.filter { $0.status != .dropped }
+        let sorted = kept.sorted(by: moreImportant)
+        return Array(sorted.prefix(limit)).enumerated().map { index, task in
+            var copy = task
+            copy.taskId = String(format: "TASK-%02d", index + 1)
+            return copy
+        }
+    }
+
+    static func isShotBacked(_ task: TaskRecord) -> Bool {
+        task.evidenceMedia.contains { path in
+            path.lowercased().contains("shots/")
+        }
+    }
+
+    static func moreImportant(lhs: TaskRecord, rhs: TaskRecord) -> Bool {
+        let leftShot = isShotBacked(lhs)
+        let rightShot = isShotBacked(rhs)
+        if leftShot != rightShot { return leftShot }
+        let leftRank = statusRank(lhs.status)
+        let rightRank = statusRank(rhs.status)
+        if leftRank != rightRank { return leftRank > rightRank }
+        if lhs.confidence != rhs.confidence { return lhs.confidence > rhs.confidence }
+        return lhs.taskId < rhs.taskId
+    }
+
+    private static func statusRank(_ status: TaskStatus) -> Int {
+        switch status {
+        case .confirmed: return 2
+        case .needsReview: return 1
+        case .dropped: return 0
+        }
     }
 }
 

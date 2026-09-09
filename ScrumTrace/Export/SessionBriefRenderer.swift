@@ -81,8 +81,8 @@ struct SessionBriefRenderer {
     }
 
     private func taskCard(_ task: TaskRecord, excerpts: [String: String]) -> String {
-        let media = task.evidenceMedia.map { path -> String in
-            let rel = ExportRel.toExportRoot(path)
+        let media = task.evidenceMedia.compactMap { path -> String? in
+            guard let rel = ExportRel.handoffPath(path) else { return nil }
             if rel.hasSuffix(".mp4") {
                 return """
                 <video class="clip" controls preload="metadata" src="\(HTMLEscaper.escape(rel))"></video>
@@ -135,9 +135,7 @@ struct SessionBriefRenderer {
     private func shots(_ manifest: SessionManifest) -> String {
         let figures = manifest.shots.compactMap { shot -> String? in
             let raw = shot.exportPath ?? shot.annotatedPath ?? (shot.rawPath.isEmpty ? nil : shot.rawPath)
-            guard let raw else { return nil }
-            let path = ExportRel.toExportRoot(raw)
-            if path.hasPrefix("archive/") { return nil }
+            guard let raw, let path = ExportRel.handoffPath(raw) else { return nil }
             return """
             <figure>
               <a href="\(HTMLEscaper.escape(path))" data-lightbox>
@@ -155,13 +153,15 @@ struct SessionBriefRenderer {
 
     private func omittedHTML(_ manifest: SessionManifest) -> String {
         if manifest.omitted.isEmpty { return "" }
-        let items = manifest.omitted.map { item in
-            "<li><code>\(HTMLEscaper.escape(ExportRel.toExportRoot(item.path)))</code> — \(HTMLEscaper.escape(item.reason))</li>"
+        let items = manifest.omitted.compactMap { item -> String? in
+            let rel = ExportRel.toExportRoot(item.path)
+            if rel.hasPrefix("archive/") { return nil }
+            return "<li><code>\(HTMLEscaper.escape(rel))</code> — \(HTMLEscaper.escape(item.reason))</li>"
         }.joined()
         return """
         <section class="omitted">
           <h2>Omitted from this pack</h2>
-          <p>These files stayed in the local archive so the zip could stay at or under 35 MB.</p>
+          <p>These files stayed on this Mac so the zip could stay at or under 35 MB.</p>
           <ul>\(items)</ul>
         </section>
         """

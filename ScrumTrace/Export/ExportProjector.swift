@@ -218,26 +218,11 @@ struct ExportProjector {
     #if os(macOS)
     private func transcodeJPEG(from: URL, destRelative: String, sessionURL: URL) throws -> String? {
         guard let image = NSImage(contentsOf: from) else { return nil }
-        let size = image.size
-        let scale = min(1, CGFloat(MediaBudget.stillMaxWidth) / max(size.width, size.height, 1))
-        let target = NSSize(width: max(1, size.width * scale), height: max(1, size.height * scale))
-        let bitmap = NSImage(size: target)
-        bitmap.lockFocus()
-        image.draw(
-            in: NSRect(origin: .zero, size: target),
-            from: NSRect(origin: .zero, size: size),
-            operation: .copy,
-            fraction: 1
-        )
-        bitmap.unlockFocus()
-        guard let tiff = bitmap.tiffRepresentation,
-              let rep = NSBitmapImageRep(data: tiff),
-              let jpeg = rep.representation(
-                using: .jpeg,
-                properties: [.compressionFactor: MediaBudget.stillJPEGQuality]
-              ) else {
-            return nil
-        }
+        guard let jpeg = ImageBase64.jpegData(
+            from: image,
+            maxEdge: CGFloat(MediaBudget.stillMaxWidth),
+            quality: MediaBudget.stillJPEGQuality
+        ) else { return nil }
         let dest = sessionURL.appendingPathComponent(destRelative)
         try FileManager.default.createDirectory(at: dest.deletingLastPathComponent(), withIntermediateDirectories: true)
         if FileManager.default.fileExists(atPath: dest.path) {

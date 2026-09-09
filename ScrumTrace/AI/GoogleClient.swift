@@ -53,8 +53,9 @@ struct GoogleClient: AIProvider {
         let (data, response) = try await URLSession.shared.data(for: requestHTTP)
         try HTTPStatus.throwIfNeeded(response, data: data)
         let envelope = try JSONDecoder().decode(GoogleEnvelope.self, from: data)
-        let text = envelope.candidates
-            .flatMap(\.content.parts)
+        let text = (envelope.candidates ?? [])
+            .compactMap(\.content)
+            .flatMap { $0.parts ?? [] }
             .compactMap(\.text)
             .joined(separator: "\n")
         guard !text.isEmpty else { throw AIProviderError.emptyResponse }
@@ -66,9 +67,9 @@ private struct GoogleEnvelope: Decodable {
     struct Candidate: Decodable {
         struct Content: Decodable {
             struct Part: Decodable { var text: String? }
-            var parts: [Part]
+            var parts: [Part]?
         }
-        var content: Content
+        var content: Content?
     }
-    var candidates: [Candidate]
+    var candidates: [Candidate]?
 }

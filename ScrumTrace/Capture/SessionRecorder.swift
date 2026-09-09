@@ -5,13 +5,11 @@ import Foundation
 import ScreenCaptureKit
 
 enum SessionRecorderError: LocalizedError {
-    case notRecording
     case permissionDenied
     case writerFailed(String)
 
     var errorDescription: String? {
         switch self {
-        case .notRecording: return "Recorder is not running."
         case .permissionDenied: return "Screen Recording permission is required in System Settings."
         case .writerFailed(let message): return message
         }
@@ -34,8 +32,6 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
     private var engine: AVAudioEngine?
     private var paused = false
     private var started = false
-    private var firstVideoPTS: CMTime?
-    private var firstAudioPTS: CMTime?
     private var microphoneWav = false
 
     init(sessionURL: URL, clock: ClockSynchronizer) {
@@ -216,25 +212,30 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
     private func appendVideo(_ sampleBuffer: CMSampleBuffer) {
         guard !paused, started, CMSampleBufferDataIsReady(sampleBuffer) else { return }
         guard let writer, writer.status == .writing, let videoInput, videoInput.isReadyForMoreMediaData else { return }
-        guard let remapped = remappedBuffer(sampleBuffer, first: &firstVideoPTS) else { return }
+        guard let remapped = remappedBuffer(sampleBuffer) else { return }
         _ = videoInput.append(remapped)
     }
 
     private func appendAudioToMovie(_ sampleBuffer: CMSampleBuffer) {
         guard !paused, started, CMSampleBufferDataIsReady(sampleBuffer) else { return }
         if let writer, writer.status == .writing, let audioInput, audioInput.isReadyForMoreMediaData {
-            if let remapped = remappedBuffer(sampleBuffer, first: &firstAudioPTS) {
+            if let remapped = remappedBuffer(sampleBuffer) {
                 _ = audioInput.append(remapped)
             }
         }
     }
 
-    private func remappedBuffer(_ sampleBuffer: CMSampleBuffer, first: inout CMTime?) -> CMSampleBuffer? {
-        let sourcePTS = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
-        if first == nil { first = sourcePTS }
+    private func remappedBuffer(_ sampleBuffer: CMSampleBuffer) -> CMSampleBuffer? {
         let media = clock.mediaTime(forSampleBuffer: sampleBuffer)
+        let rawDuration = CMSampleBufferGetDuration(sampleBuffer)
+        let duration: CMTime
+        if rawDuration.flags.contains(.valid), CMTimeGetSeconds(rawDuration) > 0 {
+            duration = rawDuration
+        } else {
+            duration = CMTime(value: 1, timescale: 30)
+        }
         var timing = CMSampleTimingInfo(
-            duration: CMSampleBufferGetDuration(sampleBuffer),
+            duration: duration,
             presentationTimeStamp: media,
             decodeTimeStamp: .invalid
         )
@@ -258,14 +259,16 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         var asbd = asbdPtr.pointee
         guard let format = AVAudioFormat(streamDescription: &asbd) else { return }
         let frames = AVAudioFrameCount(CMSampleBufferGetNumSamples(sampleBuffer))
+        guard frames > 0 else { return }
         guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frames) else { return }
         buffer.frameLength = frames
-        CMSampleBufferCopyPCMDataIntoAudioBufferList(
+        let copied = CMSampleBufferCopyPCMDataIntoAudioBufferList(
             sampleBuffer,
             at: 0,
             frameCount: Int32(frames),
             into: buffer.mutableAudioBufferList
         )
+        guard copied == noErr else { return }
         let target = wavFile.processingFormat
         if buffer.format == target {
             try? wavFile.write(from: buffer)
@@ -287,7 +290,7 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             status.pointee = .haveData
             return buffer
         }
-        if error == nil {
+        if error == nil, converted.frameLength > 0 {
             try? wavFile.write(from: converted)
         }
     }
@@ -342,8 +345,6 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             AVLinearPCMIsBigEndianKey: false
         ]
         wavFile = try AVAudioFile(forWriting: wavURL, settings: wavSettings)
-        firstVideoPTS = nil
-        firstAudioPTS = nil
         paused = false
         started = false
     }
@@ -352,21 +353,21 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         let engine = AVAudioEngine()
         let input = engine.inputNode
         let format = input.outputFormat(forBus: 0)
-        input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, time in
+        input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
             guard let self else { return }
             self.writerQueue.async {
                 guard !self.paused, self.started else { return }
-                self.writeEngineBuffer(buffer, time: time)
+                self.writeEngineBuffer(buffer)
             }
         }
         try engine.start()
         self.engine = engine
     }
 
-    private func writeEngineBuffer(_ buffer: AVAudioPCMBuffer, time: AVAudioTime) {
+    private func writeEngineBuffer(_ buffer: AVAudioPCMBuffer) {
         guard !paused, started, let wavFile else { return }
-        let host = CMClockMakeHostTimeFromSystemUnits(time.hostTime)
-        _ = clock.mediaTime(forHostTime: host)
+        let frames = buffer.frameLength
+        guard frames > 0 else { return }
         let target = wavFile.processingFormat
         if buffer.format == target {
             try? wavFile.write(from: buffer)
@@ -376,7 +377,7 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             converter = AVAudioConverter(from: buffer.format, to: target)
         }
         guard let converter,
-              let converted = AVAudioPCMBuffer(pcmFormat: target, frameCapacity: buffer.frameCapacity) else { return }
+              let converted = AVAudioPCMBuffer(pcmFormat: target, frameCapacity: frames) else { return }
         var error: NSError?
         var consumed = false
         converter.convert(to: converted, error: &error) { _, status in
@@ -388,7 +389,7 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             status.pointee = .haveData
             return buffer
         }
-        if error == nil {
+        if error == nil, converted.frameLength > 0 {
             try? wavFile.write(from: converted)
         }
     }
