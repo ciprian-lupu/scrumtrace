@@ -1,5 +1,5 @@
-# ScrumTrace — Implementation Plan (Production-Ready Audited Specification)
-**Universal, Multimodal Meeting & Presentation Context Capture for AI Coding Agents**
+# ScrumTrace — Implementation Plan (Audited Specification)
+> **Status (2026-09-09):** Not Production-Ready. External REVISE re-review closed five remaining blockers in [`REVISE_CLOSURE.md`](./REVISE_CLOSURE.md). Phase -1 APPROVE (execute pretest). Phase 0–1 APPROVE only after Pause covers Shot / Hold-to-Talk / system audio. Phase 5–6 blocked on archive≠export + upload approval, measured media budget, real provider capabilities, and mandatory evidence validation.
 
 ---
 
