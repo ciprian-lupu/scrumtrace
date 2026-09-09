@@ -40,6 +40,22 @@ enum AIProviderError: LocalizedError {
             return "Could not decode provider JSON: \(message)"
         }
     }
+
+    /// Gate 5: after 401/403, remaining slices must not upload stills or transcript.
+    var isAuthFailure: Bool {
+        switch self {
+        case .missingAPIKey:
+            return true
+        case .httpStatus(let code, _):
+            return code == 401 || code == 403
+        case .invalidURL, .emptyResponse, .decoding:
+            return false
+        }
+    }
+
+    static func isAuthFailure(_ error: Error) -> Bool {
+        (error as? AIProviderError)?.isAuthFailure == true
+    }
 }
 
 enum ProviderWireMedia {
@@ -77,9 +93,13 @@ enum AIEngine {
 enum JSONExtractor {
     static func decodeCandidates(from text: String) throws -> CandidateEvaluationResponse {
         let trimmed = stripFences(text)
-        if let data = trimmed.data(using: .utf8),
-           let parsed = try? JSONDecoder().decode(CandidateEvaluationResponse.self, from: data) {
-            return parsed
+        if let data = trimmed.data(using: .utf8) {
+            if let parsed = try? JSONDecoder().decode(CandidateEvaluationResponse.self, from: data) {
+                return parsed
+            }
+            if let lossy = try? decodeLossy(from: data), !lossy.candidates.isEmpty {
+                return lossy
+            }
         }
         guard let start = trimmed.firstIndex(of: "{"),
               let end = trimmed.lastIndex(of: "}"),

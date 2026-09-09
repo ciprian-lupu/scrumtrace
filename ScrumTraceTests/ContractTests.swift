@@ -530,4 +530,14 @@ final class ContractTests: XCTestCase {
         XCTAssertNotNil(extraIdx)
         XCTAssertLessThan(extraIdx!, clipIdx!)
     }
+
+    func testAuthFailureStopsFurtherUploads() {
+        XCTAssertTrue(AIProviderError.httpStatus(401, "invalid").isAuthFailure)
+        XCTAssertTrue(AIProviderError.httpStatus(403, "forbidden").isAuthFailure)
+        XCTAssertTrue(AIProviderError.missingAPIKey.isAuthFailure)
+        XCTAssertFalse(AIProviderError.httpStatus(429, "rate").isAuthFailure)
+        XCTAssertFalse(AIProviderError.emptyResponse.isAuthFailure)
+        XCTAssertTrue(AIProviderError.isAuthFailure(AIProviderError.httpStatus(401, "")))
+        XCTAssertFalse(AIProviderError.isAuthFailure(AIProviderError.emptyResponse))
+    }
 }

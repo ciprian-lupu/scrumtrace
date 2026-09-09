@@ -10,6 +10,8 @@ final class SessionProcessor: @unchecked Sendable {
     private let briefRenderer = SessionBriefRenderer()
     private let agentRenderer = AgentContextRenderer()
     private let zipper = SessionPackZipper()
+    private let evalLock = NSLock()
+    private var evalAuthFailed = false
 
     init(vault: SessionVault, transcriber: WhisperTranscriber) {
         self.vault = vault
@@ -137,6 +139,7 @@ final class SessionProcessor: @unchecked Sendable {
                 manifest.pipelineStatus = .offlineFailed
                 try vault.write(manifest: &manifest)
             } else {
+                resetEvalAuthGate()
                 await onStatus(.evaluating, "Evaluating slices with the configured model")
                 manifest.pipelineStatus = .evaluating
                 let provider = AIEngine.make(configuration: configuration)
@@ -353,11 +356,14 @@ final class SessionProcessor: @unchecked Sendable {
         configuration: AIProviderConfiguration
     ) async -> (SliceRecord, [TaskRecord]) {
         var slice = slice
+        let shot = manifest.shots.first { $0.id == slice.associatedShotId }
+        if let aborted = abortedForAuth(slice: slice, shot: shot, product: manifest.productContext) {
+            return aborted
+        }
         var excerpt = TranscriptQuery.excerpt(from: transcript, start: slice.startMedia, end: slice.endMedia)
         if !configuration.acceptsText {
             excerpt = ""
         }
-        let shot = manifest.shots.first { $0.id == slice.associatedShotId }
         var images = slice.stills.map { sessionURL.appendingPathComponent($0) }
             .filter { FileManager.default.fileExists(atPath: $0.path) }
         if let shot {
@@ -377,7 +383,7 @@ final class SessionProcessor: @unchecked Sendable {
             mediaSent.append("transcript")
         }
         var clipURL: URL?
-        if configuration.acceptsVideo, let clip = slice.clipPath {
+        if ProviderWireMedia.willUploadClip(configuration: configuration), let clip = slice.clipPath {
             let url = sessionURL.appendingPathComponent(clip)
             if FileManager.default.fileExists(atPath: url.path) {
                 clipURL = url
@@ -387,10 +393,21 @@ final class SessionProcessor: @unchecked Sendable {
         // attach MP4, even when the internal request carries clipURL.
         slice.mediaSent = mediaSent
         let hasStill = !images.isEmpty
-        // No still + no video capability → needs_review, do not drop the slice.
-        if !configuration.acceptsVideo && !hasStill && excerpt.isEmpty && (shot?.note.isEmpty ?? true) {
+        // No still + no wired video upload → needs_review, do not drop the slice.
+        if !ProviderWireMedia.willUploadClip(configuration: configuration)
+            && !hasStill && excerpt.isEmpty && (shot?.note.isEmpty ?? true) {
             slice.analysisStatus = .skipped
-            return (slice, [fallbackOffline(slice: slice, error: AIProviderError.emptyResponse)])
+            return (
+                slice,
+                [fallbackOffline(
+                    slice: slice,
+                    error: AIProviderError.emptyResponse,
+                    product: manifest.productContext
+                )]
+            )
+        }
+        if let aborted = abortedForAuth(slice: slice, shot: shot, product: manifest.productContext) {
+            return aborted
         }
         let request = SliceEvaluationRequest(
             product: manifest.productContext,
@@ -403,7 +420,7 @@ final class SessionProcessor: @unchecked Sendable {
                 end: slice.endMedia
             ),
             imageURLs: images,
-            clipURL: configuration.acceptsVideo ? clipURL : nil
+            clipURL: clipURL
         )
         do {
             let response = try await provider.evaluate(request: request)
@@ -415,15 +432,18 @@ final class SessionProcessor: @unchecked Sendable {
                 product: manifest.productContext,
                 transcript: transcript,
                 sessionURL: sessionURL,
-                forceReview: !configuration.acceptsVideo && !hasStill
+                forceReview: !ProviderWireMedia.willUploadClip(configuration: configuration) && !hasStill
             )
             return (slice, tasks)
         } catch {
+            if AIProviderError.isAuthFailure(error) {
+                markEvalAuthFailed()
+            }
             slice.analysisStatus = .offlineFailed
             if let shot {
                 return (slice, [fallbackTask(shot: shot, slice: slice, error: error)])
             }
-            return (slice, [fallbackOffline(slice: slice, error: error)])
+            return (slice, [fallbackOffline(slice: slice, error: error, product: manifest.productContext)])
         }
     }
 
@@ -526,7 +546,7 @@ final class SessionProcessor: @unchecked Sendable {
         )
     }
 
-    private func fallbackOffline(slice: SliceRecord, error: Error) -> TaskRecord {
+    private func fallbackOffline(slice: SliceRecord, error: Error, product: ProductContext) -> TaskRecord {
         TaskRecord(
             taskId: "TASK-OFFLINE",
             sourceSliceId: slice.sliceId,
@@ -536,11 +556,47 @@ final class SessionProcessor: @unchecked Sendable {
             observed: "Slice \(slice.startMedia)s–\(slice.endMedia)s was not evaluated.",
             stated: "",
             inferred: error.localizedDescription,
-            agentInstructions: "[Requires Manual Review - API Offline]",
+            agentInstructions: "[Requires Manual Review - API Offline] \(AgentInstructionTemplate.render(kind: .unknown, product: product))",
             quotes: [],
             evidenceMedia: slice.stills + [slice.clipPath].compactMap { $0 },
             confidence: 0
         )
+    }
+
+    private func abortedForAuth(
+        slice: SliceRecord,
+        shot: ShotRecord?,
+        product: ProductContext
+    ) -> (SliceRecord, [TaskRecord])? {
+        guard evalAuthHasFailed() else { return nil }
+        var slice = slice
+        slice.analysisStatus = .offlineFailed
+        let skipped = AIProviderError.httpStatus(
+            401,
+            "Skipped remaining slices after provider authentication failed."
+        )
+        if let shot {
+            return (slice, [fallbackTask(shot: shot, slice: slice, error: skipped)])
+        }
+        return (slice, [fallbackOffline(slice: slice, error: skipped, product: product)])
+    }
+
+    private func resetEvalAuthGate() {
+        evalLock.lock()
+        evalAuthFailed = false
+        evalLock.unlock()
+    }
+
+    private func evalAuthHasFailed() -> Bool {
+        evalLock.lock()
+        defer { evalLock.unlock() }
+        return evalAuthFailed
+    }
+
+    private func markEvalAuthFailed() {
+        evalLock.lock()
+        evalAuthFailed = true
+        evalLock.unlock()
     }
 
     private func localReviewTasks(manifest: SessionManifest) -> [TaskRecord] {

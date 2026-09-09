@@ -398,6 +398,14 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "omittedHandoffPath" in agent
     brief_omit = brief_src.split("private func omittedHTML")[1].split("private static func clock")[0]
     assert "omittedHandoffPath" in brief_omit
+    assert "isAuthFailure" in protocol_src
+    assert "markEvalAuthFailed" in processor
+    assert "Skipped remaining slices after provider authentication failed." in processor
+    assert "willUploadClip(configuration: configuration)" in processor
+    google = (ROOT / "ScrumTrace" / "AI" / "GoogleClient.swift").read_text()
+    assert "x-goog-api-key" in google
+    assert "?key=" not in google
+    assert "AgentInstructionTemplate.render(kind: .unknown, product: product)" in processor
 
 
 def main() -> None:

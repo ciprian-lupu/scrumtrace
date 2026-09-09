@@ -9,7 +9,7 @@ struct GoogleClient: AIProvider {
         let key = configuration.apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !key.isEmpty else { throw AIProviderError.missingAPIKey }
         let root = configuration.baseURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        let path = "\(root)/v1beta/models/\(configuration.model):generateContent?key=\(key)"
+        let path = "\(root)/v1beta/models/\(configuration.model):generateContent"
         guard let url = URL(string: path) else {
             throw AIProviderError.invalidURL(configuration.baseURL)
         }
@@ -48,6 +48,7 @@ struct GoogleClient: AIProvider {
         requestHTTP.httpMethod = "POST"
         requestHTTP.timeoutInterval = 90
         requestHTTP.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        requestHTTP.setValue(key, forHTTPHeaderField: "x-goog-api-key")
         requestHTTP.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         let (data, response) = try await URLSession.shared.data(for: requestHTTP)
