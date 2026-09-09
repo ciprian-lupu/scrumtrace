@@ -190,6 +190,16 @@ def test_pause_privacy_and_metadata_gate() -> None:
     assert "pausedByPrivacy" in controller
     assert "isCurrentlyTripped" in controller
     assert "sampleMetadataTick" in controller
+    assert "Re-check after the 200 ms" in controller
+    assert "haltCaptureForTermination" in controller
+    app = (ROOT / "ScrumTrace" / "App" / "AppDelegate.swift").read_text()
+    assert "haltCaptureForTermination" in app
+    assert "height: 780" in app
+    log_fn = controller.split("private func log(")[1].split("private func flashStatus")[0]
+    assert "case .pin, .url, .window" in log_fn
+    agent = (ROOT / "ScrumTrace" / "Export" / "AgentContextRenderer.swift").read_text()
+    assert "this export folder" in agent
+    assert "Never open `archive/`" in agent
     assert "Still auto-paused for a password manager" in controller
     assert "Stills and transcript excerpts" in controller
     assert "includesClipAudio: approved && capabilities.acceptsVideo" in controller

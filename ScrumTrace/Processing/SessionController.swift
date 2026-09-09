@@ -135,6 +135,15 @@ final class SessionController: ObservableObject {
         }
     }
 
+    /// Process is quitting: freeze every capture source before the run loop dies.
+    func haltCaptureForTermination() {
+        guard isRecording else { return }
+        recorder?.freezeWriters()
+        privacy.stop()
+        sampler.isSuspended = true
+        stopRecording()
+    }
+
     private func startRecordingAsync() async {
         guard !isRecording, !isBusy else { return }
         lastError = nil
@@ -439,6 +448,8 @@ final class SessionController: ObservableObject {
     private func sampleMetadataTick() async {
         guard captureState.allowsNewCapture else { return }
         guard let meta = await sampler.sample() else { return }
+        // Re-check after the 200 ms AX wait: Pause can land while we were sampling (C1).
+        guard captureState.allowsNewCapture else { return }
         let signature = "\(meta.bundleIdentifier)|\(meta.windowTitle)|\(meta.url ?? "")"
         guard signature != lastMetaSignature else { return }
         lastMetaSignature = signature
@@ -450,6 +461,12 @@ final class SessionController: ObservableObject {
     }
 
     private func log(_ kind: SessionEventKind, _ payload: [String: String]) {
+        switch kind {
+        case .start, .stop, .pause, .resume, .shot, .privacyPause, .error:
+            break
+        case .pin, .url, .window:
+            guard captureState.allowsNewCapture else { return }
+        }
         guard let id = manifest?.sessionId else { return }
         let event = SessionEvent(
             tWall: clock.currentWallSeconds(),

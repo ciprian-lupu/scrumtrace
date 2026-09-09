@@ -5,7 +5,7 @@ struct AgentContextRenderer {
         var lines: [String] = []
         lines.append("# ScrumTrace session — \(manifest.sessionId)")
         lines.append("")
-        lines.append("Drop this folder into a coding-agent workspace. Read this file first, then open the linked evidence. Do not guess facts that exist only in a screenshot or clip.")
+        lines.append("Drop **this export folder** into a coding-agent workspace. Read this file first, then open the linked evidence. Do not guess facts that exist only in a screenshot or clip. Never open `archive/`.")
         lines.append("")
         lines.append("## Product")
         lines.append("- App: \(manifest.productContext.appName)")
@@ -114,6 +114,12 @@ struct AgentContextRenderer {
 
     private static func clock(_ seconds: TimeInterval) -> String {
         let total = Int(seconds.rounded())
-        return String(format: "%d:%02d", total / 60, total % 60)
+        let h = total / 3600
+        let m = (total % 3600) / 60
+        let s = total % 60
+        if h > 0 {
+            return String(format: "%d:%02d:%02d", h, m, s)
+        }
+        return String(format: "%d:%02d", m, s)
     }
 }
