@@ -70,7 +70,7 @@ enum PromptTemplates {
             parts.append("Human shot note:\n\(shotNote)")
         }
         if !windowContext.isEmpty {
-            parts.append("Window metadata:\n\(windowContext)")
+            parts.append(wrapUntrusted("Window metadata:\n\(windowContext)"))
         }
         parts.append("Still paths: \(slice.stills.joined(separator: ", "))")
         parts.append(wrapUntrusted("Transcript excerpt:\n\(transcript)"))

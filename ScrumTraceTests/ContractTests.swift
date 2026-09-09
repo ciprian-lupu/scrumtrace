@@ -320,4 +320,53 @@ final class ContractTests: XCTestCase {
         noVideo.acceptsVideo = false
         XCTAssertNil(ProviderWireMedia.mp4BodyURL(configuration: noVideo, request: request))
     }
+
+    func testKeywordTaskClipIsDroppedAfterExtraStills() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("scrumtrace-omit-\(UUID().uuidString)")
+        let media = root.appendingPathComponent("export/media/task-01")
+        let shots = root.appendingPathComponent("export/shots")
+        try FileManager.default.createDirectory(at: media, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: shots, withIntermediateDirectories: true)
+        try Data("clip".utf8).write(to: media.appendingPathComponent("clip.mp4"))
+        try Data("still".utf8).write(to: shots.appendingPathComponent("extra.jpg"))
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        var manifest = SessionManifest.makeNew(sessionId: "s", product: .empty)
+        manifest.slices = [
+            SliceRecord(
+                sliceId: "slice-01",
+                startMedia: 0,
+                endMedia: 20,
+                trigger: .keyword,
+                associatedShotId: nil,
+                clipPath: "media/task-01/clip.mp4",
+                exportClipPath: "media/task-01/clip.mp4",
+                stills: ["shots/extra.jpg"],
+                analysisStatus: .success,
+                score: 40
+            )
+        ]
+        manifest.tasks = [
+            TaskRecord(
+                taskId: "TASK-01",
+                sourceSliceId: "slice-01",
+                kind: .bug,
+                status: .confirmed,
+                title: "Ingest",
+                observed: "x",
+                stated: "",
+                inferred: "",
+                agentInstructions: "inspect",
+                quotes: [],
+                evidenceMedia: ["media/task-01/clip.mp4"],
+                confidence: 0.9
+            )
+        ]
+        let order = PackBudget.omissionOrder(manifest: manifest, sessionURL: root)
+        let clipIdx = order.firstIndex(of: "export/media/task-01/clip.mp4")
+        let extraIdx = order.firstIndex(of: "export/shots/extra.jpg")
+        XCTAssertNotNil(clipIdx)
+        XCTAssertNotNil(extraIdx)
+        XCTAssertLessThan(extraIdx!, clipIdx!)
+    }
 }

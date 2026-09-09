@@ -180,19 +180,10 @@ final class SessionProcessor: @unchecked Sendable {
             await exporter.tightenExportClips(sessionURL: sessionURL)
         }
         var zipResult = try zipper.zip(sessionURL: sessionURL, manifest: projection.manifest)
-        projection.manifest = PackBudget.stripOmitted(zipResult.omitted, from: projection.manifest)
-        projection.manifest.omitted = zipResult.omitted
-        try writeExportDocuments(
-            sessionURL: sessionURL,
-            projected: projection.manifest,
-            excerpts: excerpts,
-            projector: projector
-        )
-        try zipper.writeOmittedMarkdown(sessionURL: sessionURL, omitted: zipResult.omitted)
-        var zipBytes = try zipper.writeZip(sessionURL: sessionURL)
-        if zipBytes > MediaBudget.maxZipBytes {
-            zipResult = try zipper.zip(sessionURL: sessionURL, manifest: projection.manifest)
+        var zipBytes = 0
+        for pass in 0..<3 {
             projection.manifest = PackBudget.stripOmitted(zipResult.omitted, from: projection.manifest)
+            projection.manifest.omitted = zipResult.omitted
             try writeExportDocuments(
                 sessionURL: sessionURL,
                 projected: projection.manifest,
@@ -201,6 +192,11 @@ final class SessionProcessor: @unchecked Sendable {
             )
             try zipper.writeOmittedMarkdown(sessionURL: sessionURL, omitted: zipResult.omitted)
             zipBytes = try zipper.writeZip(sessionURL: sessionURL)
+            if zipBytes <= MediaBudget.maxZipBytes {
+                break
+            }
+            if pass == 2 { break }
+            zipResult = try zipper.zip(sessionURL: sessionURL, manifest: projection.manifest)
         }
         timing.zipBytes = zipBytes
         timing.omittedCount = zipResult.omitted.count

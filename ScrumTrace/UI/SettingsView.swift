@@ -36,12 +36,12 @@ struct SettingsView: View {
                 }
             }
             Section("Provider capabilities") {
-                Text("MVP backend: OpenAI-compatible. This adapter sends text and stills. It does not upload MP4.")
+                Text("MVP backend: OpenAI-compatible. Adapters send only what these flags allow. Shipped adapters do not upload MP4.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                LabeledContent("Text", value: "yes")
-                LabeledContent("Images", value: "yes")
-                LabeledContent("Video", value: "no")
+                LabeledContent("Text", value: capabilities.acceptsText ? "yes" : "no")
+                LabeledContent("Images", value: capabilities.acceptsImages ? "yes" : "no")
+                LabeledContent("Video", value: capabilities.acceptsVideo ? "yes" : "no")
             }
             Section("Speech") {
                 TextField("WhisperKit model", text: $settings.whisperModel)
@@ -71,5 +71,9 @@ struct SettingsView: View {
         .formStyle(.grouped)
         .frame(width: 520, height: 720)
         .padding()
+    }
+
+    private var capabilities: AIProviderConfiguration {
+        settings.providerConfiguration()
     }
 }

@@ -194,6 +194,17 @@ def test_phase45_clip_consent_and_budget() -> None:
     projector = (ROOT / "ScrumTrace" / "Export" / "ExportProjector.swift").read_text()
     assert "MediaBudget.maxStills" in projector
     assert "Over extra-still budget" in projector
+    zipper = (ROOT / "ScrumTrace" / "Export" / "SessionPackZipper.swift").read_text()
+    assert "!reservedClipSet.contains($0)" in zipper
+    keyword_block = zipper.split("Keyword-only clips")[1].split("let evidenceShotsNewestFirst")[0]
+    assert "reservedClipSet" in keyword_block
+    processor = (ROOT / "ScrumTrace" / "Processing" / "SessionProcessor.swift").read_text()
+    assert "for pass in 0..<3" in processor
+    prompts = (ROOT / "ScrumTrace" / "AI" / "PromptTemplates.swift").read_text()
+    assert "wrapUntrusted(\"Window metadata" in prompts
+    settings = (ROOT / "ScrumTrace" / "UI" / "SettingsView.swift").read_text()
+    assert "capabilities.acceptsText" in settings
+    assert "capabilities.acceptsVideo" in settings
     models = (ROOT / "ScrumTrace" / "Storage" / "SessionModels.swift").read_text()
     assert "func needsReprompt" in models
     assert "includesClipAudio != acceptsVideo" in models

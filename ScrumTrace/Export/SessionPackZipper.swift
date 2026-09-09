@@ -147,13 +147,6 @@ enum PackBudget {
 
     /// Lowest priority first. 35 MB wins: evidence media is last, never archive/.
     static func omissionOrder(manifest: SessionManifest, sessionURL: URL) -> [String] {
-        let keyword = manifest.slices
-            .filter { $0.trigger == .keyword }
-            .sorted { $0.score < $1.score }
-            .compactMap { $0.exportClipPath ?? $0.clipPath }
-            .map(ExportRel.sessionPath)
-            .filter(ExportRel.isUnderExport)
-
         let kept: Set<TaskStatus> = [.confirmed, .needsReview]
         let evidence = Set(
             manifest.tasks
@@ -170,6 +163,15 @@ enum PackBudget {
                 if ExportRel.isUnderExport(path) { reservedClips.append(path) }
             }
         }
+        let reservedClipSet = Set(reservedClips)
+
+        // Keyword-only clips — not the one clip reserved per kept task.
+        let keyword = manifest.slices
+            .filter { $0.trigger == .keyword }
+            .sorted { $0.score < $1.score }
+            .compactMap { $0.exportClipPath ?? $0.clipPath }
+            .map(ExportRel.sessionPath)
+            .filter { ExportRel.isUnderExport($0) && !reservedClipSet.contains($0) }
 
         let evidenceShotsNewestFirst = manifest.shots
             .sorted { $0.tMedia > $1.tMedia }
@@ -187,7 +189,6 @@ enum PackBudget {
             .map(ExportRel.sessionPath)
             .filter { ExportRel.isUnderExport($0) && !evidence.contains($0) }
 
-        let reservedClipSet = Set(reservedClips)
         let extraClips = manifest.slices
             .filter { $0.trigger != .keyword }
             .compactMap { $0.exportClipPath ?? $0.clipPath }
