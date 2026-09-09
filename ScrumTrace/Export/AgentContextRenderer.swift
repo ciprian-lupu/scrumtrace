@@ -78,7 +78,7 @@ struct AgentContextRenderer {
         lines.append("- Kind: `\(task.kind.rawValue)` · status: `\(task.status.rawValue)` · confidence: \(String(format: "%.2f", task.confidence))")
         lines.append("- Observed: \(PromptTemplates.wrapUntrustedInline(task.observed))")
         lines.append("- Stated: \(PromptTemplates.wrapUntrustedInline(task.stated))")
-        lines.append("- Inferred: \(task.inferred)")
+        lines.append("- Inferred: \(PromptTemplates.wrapUntrustedInline(task.inferred))")
         lines.append("- Agent instructions: \(task.agentInstructions)")
         if !task.quotes.isEmpty {
             lines.append("- Quotes:")

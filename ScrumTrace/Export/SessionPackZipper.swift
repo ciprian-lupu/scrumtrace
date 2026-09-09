@@ -19,8 +19,8 @@ struct SessionPackZipper {
         do {
             try runZip(
                 exportDir: exportDir,
-                zipURL: zipURL,
-                includeFullTranscript: manifest.includeFullTranscriptInZip
+                includeFullTranscript: manifest.includeFullTranscriptInZip,
+                sessionURL: sessionURL
             )
         } catch {
             omitted.append(OmittedAsset(path: "session-pack.zip", reason: error.localizedDescription))
@@ -43,8 +43,8 @@ struct SessionPackZipper {
             do {
                 try runZip(
                     exportDir: exportDir,
-                    zipURL: zipURL,
-                    includeFullTranscript: manifest.includeFullTranscriptInZip
+                    includeFullTranscript: manifest.includeFullTranscriptInZip,
+                    sessionURL: sessionURL
                 )
                 size = fileSize(zipURL)
             } catch {
@@ -66,8 +66,8 @@ struct SessionPackZipper {
         if omitted.contains(where: { !$0.path.isEmpty }) {
             try runZip(
                 exportDir: exportDir,
-                zipURL: zipURL,
-                includeFullTranscript: manifest.includeFullTranscriptInZip
+                includeFullTranscript: manifest.includeFullTranscriptInZip,
+                sessionURL: sessionURL
             )
             size = fileSize(zipURL)
         }
@@ -79,8 +79,8 @@ struct SessionPackZipper {
         let zipURL = sessionURL.appendingPathComponent(ScrumTracePath.packZip)
         try runZip(
             exportDir: exportDir,
-            zipURL: zipURL,
-            includeFullTranscript: includeFullTranscript
+            includeFullTranscript: includeFullTranscript,
+            sessionURL: sessionURL
         )
         return fileSize(zipURL)
     }
@@ -117,8 +117,15 @@ struct SessionPackZipper {
         (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? NSNumber)?.intValue ?? 0
     }
 
-    private func runZip(exportDir: URL, zipURL: URL, includeFullTranscript: Bool) throws {
-        try? FileManager.default.removeItem(at: zipURL)
+    private func runZip(exportDir: URL, includeFullTranscript: Bool, sessionURL: URL) throws {
+        let destRel = try ExportRel.prepareContainedWrite(
+            relative: ScrumTracePath.packZip,
+            sessionURL: sessionURL
+        )
+        let dest = sessionURL.appendingPathComponent(destRel)
+        if ExportRel.isContainedRegularFile(dest, sessionRoot: sessionURL) {
+            try FileManager.default.removeItem(at: dest)
+        }
         let members = PackBudget.allowList(
             exportDir: exportDir,
             includeFullTranscript: includeFullTranscript
@@ -131,7 +138,7 @@ struct SessionPackZipper {
         process.executableURL = URL(fileURLWithPath: "/usr/bin/zip")
         // `-y` stores a symlink as a link if one is ever listed; allowList still
         // omits links so zip cannot follow them into archive/ or another tree.
-        process.arguments = ["-q", "-y", zipURL.path, "-@"]
+        process.arguments = ["-q", "-y", dest.path, "-@"]
         let pipe = Pipe()
         process.standardInput = pipe
         try process.run()

@@ -34,6 +34,7 @@ def test_agent_context_uses_export_relative_paths() -> None:
     assert "export/shots" not in ctx
     assert "<untrusted_meeting_data>this does nothing, it should store the athlete</untrusted_meeting_data>" in ctx
     assert "<untrusted_meeting_data>Save athlete does not persist a valid form</untrusted_meeting_data>" in ctx
+    assert "<untrusted_meeting_data>Client validation or submit handler is not enabling Save after the date field is filled.</untrusted_meeting_data>" in ctx
     assert "1 pause" in ctx
     assert "1 pauses" not in ctx
 
@@ -389,6 +390,11 @@ def test_pipeline_timing_stays_in_archive() -> None:
     allow = (ROOT / "ScrumTrace" / "Export" / "SessionPackZipper.swift").read_text()
     assert "AGENT_CONTEXT.md" in allow
     assert "try? runZip" not in zipper
+    run_zip = zipper.split("func runZip")[1].split("enum PackBudget")[0]
+    assert "prepareContainedWrite" in run_zip
+    assert "ScrumTracePath.packZip" in run_zip
+    assert "isContainedRegularFile" in run_zip
+    assert "dest.path" in run_zip
     zip_fn = zipper.split("func zip(")[1].split("func writeZip")[0]
     assert "removeEscapingExportLinks" in zip_fn
     assert "try writeOmittedMarkdown" in zip_fn
@@ -458,6 +464,7 @@ def test_pause_privacy_and_metadata_gate() -> None:
     assert "omittedHandoffPath" in agent
     assert "wrapUntrustedInline" in agent
     assert "wrapUntrustedInline(task.title)" in agent
+    assert "wrapUntrustedInline(task.inferred)" in agent
     assert "pauseLabel" in agent
     assert "pauses.count) pauses" not in agent
     assert "Still auto-paused for a password manager" in controller
@@ -544,6 +551,9 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "stillCandidates" in models
     assert "scrumTraceSessionEnding" in models
     assert "selectForPack" in processor
+    fallback = processor.split("func fallbackTask")[1].split("func fallbackOffline")[0]
+    assert "AgentInstructionTemplate.render(kind: .bug, product: product)" in fallback
+    assert "Inspect the linked evidence only" not in fallback
     local = processor.split("func localReviewTasks")[1].split("func excerptMap")[0]
     assert "selectForPack" in local
     assert "refreshShotsFromDisk" in processor
@@ -571,7 +581,6 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "stillCandidates" in agent.split("func displayPath")[1]
     assert "handoffFileIfPresent" in agent.split("func displayPath")[1]
     assert "handoffFileIfPresent" in agent.split("private func taskBlock")[1].split("private func displayPath")[0]
-    assert "Inspect the linked evidence only" in processor
     assert "remain in archive/" not in processor
     assert "applyExportEvidence" in processor
     assert "manifest.tasks = projection.manifest.tasks" in processor

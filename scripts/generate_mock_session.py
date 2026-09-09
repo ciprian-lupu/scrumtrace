@@ -310,7 +310,7 @@ Drop **this export folder** into a coding-agent workspace. Read this file first,
 - Kind: `bug` · status: `confirmed`
 - Observed: <untrusted_meeting_data>Open `shots/001.annotated.png`. Read the Save control and the error banner in the image. The failure identity is visible only there.</untrusted_meeting_data>
 - Stated: <untrusted_meeting_data>this does nothing, it should store the athlete</untrusted_meeting_data>
-- Inferred: Client validation or submit handler is not enabling Save after the date field is filled.
+- Inferred: <untrusted_meeting_data>Client validation or submit handler is not enabling Save after the date field is filled.</untrusted_meeting_data>
 - Agent instructions: Inspect the Save control and form validation on the athlete create screen. Use only the linked evidence. Do not invent UI copy, error codes, or sequences that are not in the evidence.
 - Quotes:
   - presenter [t_media 184.1s–187.4s]: <untrusted_meeting_data>this does nothing, it should store the athlete</untrusted_meeting_data>
@@ -322,7 +322,7 @@ Drop **this export folder** into a coding-agent workspace. Read this file first,
 - Kind: `action_item` · status: `confirmed`
 - Observed: <untrusted_meeting_data>Play `media/task-02/clip.mp4`. The operator overlay shows the recovery order. The watermark and step list are in the clip, not in this markdown.</untrusted_meeting_data>
 - Stated: <untrusted_meeting_data>Walk through the recovery overlay, then we can ship the ingest hotfix.</untrusted_meeting_data>
-- Inferred: Ingest and live overlay share a sync flag that must be toggled before the worker restart.
+- Inferred: <untrusted_meeting_data>Ingest and live overlay share a sync flag that must be toggled before the worker restart.</untrusted_meeting_data>
 - Agent instructions: Inspect the ingest recovery overlay. Use only the linked clip. Do not invent UI copy, error codes, or sequences that are not in the evidence.
 - Evidence:
   - `media/task-02/clip.mp4`

@@ -438,7 +438,7 @@ final class SessionProcessor: @unchecked Sendable {
             }
             slice.analysisStatus = .offlineFailed
             if let shot {
-                return (slice, [fallbackTask(shot: shot, slice: slice, error: error)])
+                return (slice, [fallbackTask(shot: shot, slice: slice, error: error, product: manifest.productContext)])
             }
             return (slice, [fallbackOffline(slice: slice, error: error, product: manifest.productContext)])
         }
@@ -515,7 +515,7 @@ final class SessionProcessor: @unchecked Sendable {
             )
         }
         if let shot, out.isEmpty {
-            out.append(fallbackTask(shot: shot, slice: slice, error: nil))
+            out.append(fallbackTask(shot: shot, slice: slice, error: nil, product: product))
         }
         return out
     }
@@ -524,7 +524,7 @@ final class SessionProcessor: @unchecked Sendable {
         TaskRanking.selectForPack(tasks)
     }
 
-    private func fallbackTask(shot: ShotRecord, slice: SliceRecord, error: Error?) -> TaskRecord {
+    private func fallbackTask(shot: ShotRecord, slice: SliceRecord, error: Error?, product: ProductContext) -> TaskRecord {
         var evidence = slice.stills
         evidence.append(contentsOf: shot.stillCandidates)
         if let clip = slice.clipPath {
@@ -539,7 +539,7 @@ final class SessionProcessor: @unchecked Sendable {
             observed: "Human-captured frame at t_media \(shot.tMedia)s.",
             stated: shot.note,
             inferred: error.map { "Analysis unavailable: \($0.localizedDescription)" } ?? "Requires manual review.",
-            agentInstructions: "[Requires Manual Review - API Offline] Inspect the linked evidence only.",
+            agentInstructions: "[Requires Manual Review - API Offline] \(AgentInstructionTemplate.render(kind: .bug, product: product))",
             quotes: [],
             evidenceMedia: uniquedPaths(evidence),
             confidence: 0
@@ -604,7 +604,7 @@ final class SessionProcessor: @unchecked Sendable {
             "Skipped remaining slices after provider authentication failed."
         )
         if let shot {
-            return (slice, [fallbackTask(shot: shot, slice: slice, error: skipped)])
+            return (slice, [fallbackTask(shot: shot, slice: slice, error: skipped, product: product)])
         }
         return (slice, [fallbackOffline(slice: slice, error: skipped, product: product)])
     }
