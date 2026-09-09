@@ -536,7 +536,7 @@ def test_phase45_clip_consent_and_budget() -> None:
     projector = (ROOT / "ScrumTrace" / "Export" / "ExportProjector.swift").read_text()
     jpeg = projector.split("func transcodeJPEG")[1].split("func unreadableSource")[0]
     assert "containedRelative" in jpeg
-    assert "isContainedRegularFile" in jpeg
+    assert "isReadableSessionFile" in jpeg
     assert "isUnderExport" in jpeg
     assert "writeContainedData" in jpeg
     assert "jpeg.write(to:" not in jpeg
