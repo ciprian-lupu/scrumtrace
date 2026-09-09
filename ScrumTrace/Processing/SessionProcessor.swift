@@ -672,7 +672,13 @@ final class SessionProcessor: @unchecked Sendable {
     }
 
     private func localReviewTasks(manifest: SessionManifest) -> [TaskRecord] {
+        let prefix = "[Requires Manual Review - API Offline] "
         if manifest.shots.isEmpty {
+            let evidence = uniquedPaths(
+                manifest.slices.flatMap { slice in
+                    slice.stills + [slice.clipPath].compactMap { $0 }
+                }
+            )
             return [
                 TaskRecord(
                     taskId: "TASK-01",
@@ -683,9 +689,9 @@ final class SessionProcessor: @unchecked Sendable {
                     observed: "No provider upload was approved for this session.",
                     stated: "",
                     inferred: "Evaluation did not run. Local stills and clips stay on this Mac. Inspect this export folder after synthesis.",
-                    agentInstructions: AgentInstructionTemplate.render(kind: .unknown, product: manifest.productContext),
+                    agentInstructions: prefix + AgentInstructionTemplate.render(kind: .unknown, product: manifest.productContext),
                     quotes: [],
-                    evidenceMedia: manifest.shots.flatMap(\.stillCandidates),
+                    evidenceMedia: evidence,
                     confidence: 0
                 )
             ]
@@ -700,7 +706,7 @@ final class SessionProcessor: @unchecked Sendable {
                 observed: "Human-captured frame at t_media \(shot.tMedia)s.",
                 stated: shot.note,
                 inferred: "Provider evaluation skipped.",
-                agentInstructions: AgentInstructionTemplate.render(kind: .bug, product: manifest.productContext),
+                agentInstructions: prefix + AgentInstructionTemplate.render(kind: .bug, product: manifest.productContext),
                 quotes: [],
                 evidenceMedia: shot.stillCandidates,
                 confidence: 0

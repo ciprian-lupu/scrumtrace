@@ -669,8 +669,15 @@ def test_phase45_clip_consent_and_budget() -> None:
     fallback = processor.split("func fallbackTask")[1].split("func fallbackOffline")[0]
     assert "AgentInstructionTemplate.render(kind: .bug, product: product)" in fallback
     assert "Inspect the linked evidence only" not in fallback
-    local = processor.split("func localReviewTasks")[1].split("func excerptMap")[0]
+    local = processor.split("func localReviewTasks")[1].split("func refreshShotsFromDisk")[0]
     assert "selectForPack" in local
+    assert "[Requires Manual Review - API Offline]" in local
+    assert "slice.stills" in local
+    assert "clipPath" in local
+    assert "uniquedPaths" in local
+    assert "AgentInstructionTemplate.render(kind: .unknown, product: manifest.productContext)" in local
+    fallback_offline = processor.split("func fallbackOffline")[1].split("func shotsLinked")[0]
+    assert "[Requires Manual Review - API Offline]" in fallback_offline
     assert "refreshShotsFromDisk" in processor
     slicer = (ROOT / "ScrumTrace" / "Slicing" / "MeetingSlicer.swift").read_text()
     assert "shot.stillCandidates" in slicer
