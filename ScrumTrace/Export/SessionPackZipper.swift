@@ -180,6 +180,7 @@ enum PackBudget {
         for case let file as URL in enumerator {
             if (try? file.resourceValues(forKeys: [linkKey]).isSymbolicLink) == true {
                 links.append(file)
+                enumerator.skipDescendants()
             }
         }
         for link in links.reversed() {
@@ -224,6 +225,10 @@ enum PackBudget {
                 options: [.skipsHiddenFiles]
             ) else { continue }
             for case let url as URL in enumerator {
+                if (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+                    enumerator.skipDescendants()
+                    continue
+                }
                 if url.lastPathComponent == "session-pack.zip" { continue }
                 if let member = ExportRel.containedExportMember(file: url, exportDir: exportDir) {
                     out.append(member)
@@ -350,6 +355,10 @@ enum PackBudget {
         ) else { return [] }
         var out: [String] = []
         for case let url as URL in enumerator {
+            if (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+                enumerator.skipDescendants()
+                continue
+            }
             if isProtected(url.lastPathComponent) { continue }
             guard let exportRel = ExportRel.containedExportMember(file: url, exportDir: exportDir) else {
                 continue

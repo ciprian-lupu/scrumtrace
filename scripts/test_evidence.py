@@ -34,6 +34,11 @@ def test_quote_window() -> None:
     capture = controller.split("private func captureShot")[1].split("private func finishShot")[0]
     assert "writeContainedData(png, relative: rawPath" in capture
     assert "try? png.write(to: rawURL)" not in capture
+    snap = capture.index("ScreenSnap.capture")
+    assert capture.find("allowsNewCapture", snap) != -1
+    sampler = (ROOT / "ScrumTrace" / "Capture" / "MetadataSampler.swift").read_text()
+    sample_fn = sampler.split("func sample(")[1].split("private func readFrontmost")[0]
+    assert sample_fn.count("isSuspended") >= 3
     finish = controller.split("private func finishShot")[1].split("private func privacyPause")[0]
     assert "Could not write the annotated Shot" in finish
     assert "try? png.write" not in finish
@@ -77,6 +82,8 @@ def test_export_rel_in_swift() -> None:
     rewrite = projector.split("func rewriteEvidence")[1].split("func copyStill")[0]
     assert "ExportRel.handoffPath" in rewrite
     assert 'path.hasPrefix("export/")' not in rewrite
+    transcode = projector.split("func transcodeJPEG")[1]
+    assert "isReadableSessionFile" in transcode
 
 
 def test_frame_ref_basename_resolves() -> None:
@@ -115,6 +122,9 @@ def test_frame_ref_basename_resolves() -> None:
     validator = (ROOT / "ScrumTrace" / "AI" / "EvidenceValidator.swift").read_text()
     first_match = validator.split("static func firstMatch")[1]
     assert "isSymbolicLink" in first_match
+    assert "skipDescendants" in first_match
+    assert "unfollowedRelative" in first_match
+    assert "existingSessionFile" in first_match
     assert "sessionRoot: sessionURL" in first_match
     assert "replacingOccurrences(of: prefix" not in first_match
     resolve = validator.split("static func resolvePath")[1].split("static func existingPaths")[0]
@@ -125,6 +135,7 @@ def test_frame_ref_basename_resolves() -> None:
     eval_slice = processor.split("private func evaluateSlice")[1].split("private func tasks(")[0]
     assert "existingSessionFile" in eval_slice
     assert "fileExists(atPath: url.path), seenImage" not in eval_slice
+    assert "sessionURL: sessionURL" in eval_slice.split("SliceEvaluationRequest")[1]
     assert "unknown task kind" in validator
     assert "decision is not keep" in validator
     assert "existingSessionFile" in validator

@@ -302,7 +302,7 @@ final class SessionProcessor: @unchecked Sendable {
         if wavExists {
             do {
                 let speaker = layout.microphoneWav ? "room" : "system"
-                let wavTranscript = try await transcriber.transcribeFile(at: wav)
+                let wavTranscript = try await transcriber.transcribeFile(at: wav, sessionURL: sessionURL)
                 passes.append(TranscriptQuery.SourcePass(speaker: speaker, transcript: wavTranscript))
             } catch {
                 // Keep shots/clips; Retry Analysis can transcribe again.
@@ -310,7 +310,7 @@ final class SessionProcessor: @unchecked Sendable {
         }
         if layout.shouldTranscribeMovie(wavExists: wavExists, movieExists: movieExists) {
             do {
-                let movieTranscript = try await transcriber.transcribeMovieAudio(at: movie)
+                let movieTranscript = try await transcriber.transcribeMovieAudio(at: movie, sessionURL: sessionURL)
                 passes.append(TranscriptQuery.SourcePass(speaker: "system", transcript: movieTranscript))
             } catch {
                 // Movie audio is optional when the WAV pass already produced segments.
@@ -416,7 +416,8 @@ final class SessionProcessor: @unchecked Sendable {
                 end: slice.endMedia
             ),
             imageURLs: images,
-            clipURL: clipURL
+            clipURL: clipURL,
+            sessionURL: sessionURL
         )
         do {
             let response = try await provider.evaluate(request: request)
@@ -574,7 +575,9 @@ final class SessionProcessor: @unchecked Sendable {
             append(manifest.shots.first { $0.id == id })
         }
         for still in slice.stills {
-            append(manifest.shots.first { $0.rawPath == still || $0.annotatedPath == still })
+            append(manifest.shots.first { shot in
+                shot.stillCandidates.contains(still) || shot.rawPath == still || shot.annotatedPath == still
+            })
         }
         return out
     }

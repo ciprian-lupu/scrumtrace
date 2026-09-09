@@ -67,6 +67,10 @@ struct ClipExporter {
         ) else { return }
         var files: [URL] = []
         for case let url as URL in enumerator {
+            if (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+                enumerator.skipDescendants()
+                continue
+            }
             guard url.pathExtension.lowercased() == "mp4" else { continue }
             guard ExportRel.containedExportMember(file: url, exportDir: exportDir) != nil else { continue }
             files.append(url)

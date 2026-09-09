@@ -17,6 +17,8 @@ struct SliceEvaluationRequest: Sendable {
     var imageURLs: [URL]
     /// Present when the slice has a clip on disk. Adapters must not upload it unless `accepts_video`.
     var clipURL: URL?
+    /// Session root used to refuse stills whose path walks a planted symlink.
+    var sessionURL: URL
 }
 
 enum AIProviderError: LocalizedError {
@@ -182,13 +184,14 @@ enum ImageBase64 {
     }
     #endif
 
-    static func jpegPayload(url: URL, maxEdge: CGFloat = 1440) -> (mime: String, base64: String)? {
+    static func jpegPayload(url: URL, sessionRoot: URL, maxEdge: CGFloat = 1440) -> (mime: String, base64: String)? {
         if (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
             return nil
         }
         if ExportRel.parentIsSymbolicLink(url) {
             return nil
         }
+        guard ExportRel.isReadableSessionFile(url, sessionRoot: sessionRoot) else { return nil }
         #if os(macOS)
         guard let image = NSImage(contentsOf: url) else { return nil }
         guard let jpeg = jpegData(from: image, maxEdge: maxEdge, quality: 0.82) else { return nil }

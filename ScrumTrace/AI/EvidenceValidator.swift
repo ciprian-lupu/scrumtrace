@@ -142,13 +142,16 @@ enum EvidenceValidator {
         ) else { return nil }
         for case let url as URL in enumerator {
             if (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+                enumerator.skipDescendants()
                 continue
             }
             guard (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true else { continue }
             if url.lastPathComponent == name || url.deletingPathExtension().lastPathComponent == stem {
-                if let relative = ExportRel.containedRelative(url, sessionRoot: sessionURL) {
-                    return relative
+                guard let rel = ExportRel.unfollowedRelative(url, sessionRoot: sessionURL),
+                      let existing = ExportRel.existingSessionFile(rel, sessionURL: sessionURL) else {
+                    continue
                 }
+                return existing
             }
         }
         return nil

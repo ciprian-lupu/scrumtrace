@@ -744,7 +744,8 @@ final class ContractTests: XCTestCase {
             shotNote: "",
             windowContext: "",
             imageURLs: [],
-            clipURL: URL(fileURLWithPath: "/tmp/clip.mp4")
+            clipURL: URL(fileURLWithPath: "/tmp/clip.mp4"),
+            sessionURL: URL(fileURLWithPath: "/tmp/scrumtrace-session")
         )
         XCTAssertNil(ProviderWireMedia.mp4BodyURL(configuration: configuration, request: request))
         XCTAssertFalse(ProviderWireMedia.willUploadClip(configuration: configuration))
@@ -1126,5 +1127,41 @@ final class ContractTests: XCTestCase {
             ]
         )
         XCTAssertEqual(html, "HEADBug {{OMITTED_HTML}} hereMIDOMITTED-BLOCKTAIL")
+    }
+
+    func testReadableSessionFileRejectsNestedPathThroughArchiveDirectoryLink() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "st-readable-\(UUID().uuidString)"
+        )
+        let exportShots = root.appendingPathComponent("export/shots")
+        try FileManager.default.createDirectory(at: exportShots, withIntermediateDirectories: true)
+        try Data("export-still").write(to: exportShots.appendingPathComponent("001.png"))
+        try FileManager.default.createSymbolicLink(
+            at: root.appendingPathComponent("archive"),
+            withDestinationURL: root.appendingPathComponent("export")
+        )
+        defer { try? FileManager.default.removeItem(at: root) }
+        let throughLink = root.appendingPathComponent("archive/shots/001.png")
+        XCTAssertEqual(
+            ExportRel.unfollowedRelative(throughLink, sessionRoot: root),
+            "archive/shots/001.png"
+        )
+        XCTAssertFalse(ExportRel.isReadableSessionFile(throughLink, sessionRoot: root))
+        XCTAssertNil(ExportRel.existingSessionFile("archive/shots/001.png", sessionURL: root))
+        XCTAssertTrue(ExportRel.containsSymlinkComponent("archive/shots/001.png", sessionURL: root))
+
+        let realRoot = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "st-readable-real-\(UUID().uuidString)"
+        )
+        let shots = realRoot.appendingPathComponent("archive/shots")
+        try FileManager.default.createDirectory(at: shots, withIntermediateDirectories: true)
+        let png = shots.appendingPathComponent("001.png")
+        try Data("raw").write(to: png)
+        defer { try? FileManager.default.removeItem(at: realRoot) }
+        XCTAssertTrue(ExportRel.isReadableSessionFile(png, sessionRoot: realRoot))
+        XCTAssertEqual(
+            ExportRel.unfollowedRelative(png, sessionRoot: realRoot),
+            "archive/shots/001.png"
+        )
     }
 }

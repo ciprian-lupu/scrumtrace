@@ -141,6 +141,9 @@ def test_zipper_never_deletes_archive() -> None:
     assert "if includeFullTranscript" in allow
     assert "containedExportMember" in allow
     assert "removeEscapingExportLinks" in allow
+    assert "skipDescendants" in allow
+    remove_links = zipper.split("static func removeEscapingExportLinks")[1].split("static func allowList")[0]
+    assert "skipDescendants" in remove_links
     assert "replacingOccurrences(of: prefix" not in allow
     leftover = zipper.split("static func exportMediaSessionPaths")[1].split("private static func uniqued")[0]
     assert "containedExportMember" in leftover
@@ -178,6 +181,7 @@ def test_clip_exporter_macos14() -> None:
     assert "dropLast" in tighten
     assert "files.dropLast" in tighten
     assert "containedExportMember" in tighten
+    assert "skipDescendants" in tighten
     assert "existingSessionFile" in clip
     assert "clip_path escaped" in clip
     assert "clip_path is not a working or export clip" in clip
@@ -342,6 +346,9 @@ def test_dual_transcript_merge_wired() -> None:
     assert "openai_whisper-large-v3-turbo" in speech
     assert "Refusing to transcribe a symbolic link" in speech
     assert "parentIsSymbolicLink" in speech
+    assert "isReadableSessionFile" in speech
+    assert "transcribeFile(at url: URL, sessionURL: URL? = nil)" in speech
+    assert "transcribeMovieAudio(at movie: URL, sessionURL: URL)" in speech
     processor = (ROOT / "ScrumTrace" / "Processing" / "SessionProcessor.swift").read_text()
     assert "shouldTranscribeMovie" in processor
     assert "transcribeMovieAudio" in processor
@@ -565,6 +572,10 @@ def test_phase45_clip_consent_and_budget() -> None:
     payload = protocol_src.split("func jpegPayload")[1]
     assert "isSymbolicLink" in payload
     assert "parentIsSymbolicLink" in payload
+    assert "isReadableSessionFile" in payload
+    assert "sessionRoot: request.sessionURL" in openai
+    assert "sessionRoot: request.sessionURL" in anthropic
+    assert "sessionRoot: request.sessionURL" in google
     assert "mp4BodyURL" in openai
     assert "mp4BodyURL" in anthropic
     assert "mp4BodyURL" in google
@@ -583,12 +594,16 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "if last.stills.isEmpty" not in slicer
     processor = (ROOT / "ScrumTrace" / "Processing" / "SessionProcessor.swift").read_text()
     assert "shotsLinked" in processor
+    linked = processor.split("func shotsLinked")[1].split("private func uniquedPaths")[0]
+    assert "stillCandidates" in linked
     append = processor.split("func appendImage")[1].split("if let shot")[0]
     assert "existingSessionFile" in append
     assert "fileExists(atPath: url.path)" not in append
     transcribe = processor.split("private func transcribe(")[1].split("private func loadTranscript")[0]
     assert "existingSessionFile(ScrumTracePath.audioWav" in transcribe
     assert "existingSessionFile(ScrumTracePath.sessionMovie" in transcribe
+    assert "transcribeFile(at: wav, sessionURL: sessionURL)" in transcribe
+    assert "transcribeMovieAudio(at: movie, sessionURL: sessionURL)" in transcribe
     load_tr = processor.split("private func loadTranscript")[1].split("private func evaluateSlice")[0]
     assert "existingSessionFile(ScrumTracePath.fullTranscript" in load_tr
     models = (ROOT / "ScrumTrace" / "Storage" / "SessionModels.swift").read_text()
@@ -708,6 +723,11 @@ def test_write_contained_data_refuses_directory_symlinks() -> None:
     assert "isContainedRegularFile" in write_fn
     rel = models.split("static func containedRelative(_ path: String, sessionURL: URL)")[1].split("static func existingSessionFile")[0]
     assert "isSymbolicLink" in rel
+    assert "func unfollowedRelative" in models
+    assert "func isReadableSessionFile" in models
+    readable = models.split("static func isReadableSessionFile")[1].split("static func isContainedRegularFile")[0]
+    assert "unfollowedRelative" in readable
+    assert "existingSessionFile" in readable
     processor = (ROOT / "ScrumTrace" / "Processing" / "SessionProcessor.swift").read_text()
     whisper_write = processor.split("transcript.sessionId = sessionId")[1].split("timing.whisperWallSeconds")[0]
     assert "writeContainedData" in whisper_write

@@ -38,7 +38,12 @@ final class MetadataSampler: @unchecked Sendable {
                     once.resume(continuation, nil)
                     return
                 }
-                once.resume(continuation, self.readFrontmost())
+                let meta = self.readFrontmost()
+                if self.isSuspended {
+                    once.resume(continuation, nil)
+                    return
+                }
+                once.resume(continuation, meta)
             }
             queue.asyncAfter(deadline: .now() + .milliseconds(Int(timeoutMs))) {
                 once.resume(continuation, nil)

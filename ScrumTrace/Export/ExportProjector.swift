@@ -261,7 +261,7 @@ struct ExportProjector {
 
     #if os(macOS)
     private func transcodeJPEG(from: URL, destRelative: String, sessionURL: URL) throws -> String? {
-        guard ExportRel.isContainedRegularFile(from, sessionRoot: sessionURL),
+        guard ExportRel.isReadableSessionFile(from, sessionRoot: sessionURL),
               let destRel = ExportRel.containedRelative(destRelative, sessionURL: sessionURL),
               ExportRel.isUnderExport(destRel) else {
             return nil

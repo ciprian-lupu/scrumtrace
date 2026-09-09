@@ -386,6 +386,8 @@ final class SessionController: ObservableObject {
             lastError = "Could not capture the display."
             return
         }
+        // Pause can land during CGDisplayCreateImage. Do not persist that frame (C1).
+        guard captureState.allowsNewCapture else { return }
         let index = vault.nextShotIndex(sessionId: manifest.sessionId)
         let stem = String(format: "%03d", index)
         let rawPath = "\(ScrumTracePath.shots)/\(stem).png"

@@ -124,6 +124,25 @@ enum ExportRel {
         return relative
     }
 
+    /// Session-relative path from the URL's own components. Does not follow
+    /// planted `archive/` or `shots/` directory links.
+    static func unfollowedRelative(_ file: URL, sessionRoot: URL) -> String? {
+        let root = sessionRoot.standardizedFileURL.path
+        let filePath = file.standardizedFileURL.path
+        guard filePath == root || filePath.hasPrefix(root + "/") else { return nil }
+        let rest = String(filePath.dropFirst(root.count))
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        guard !rest.isEmpty else { return nil }
+        return normalizedComponents(rest)?.joined(separator: "/")
+    }
+
+    /// Readable only when every path component under the session folder is a
+    /// real directory or file — not a symlink to `export/` or another tree.
+    static func isReadableSessionFile(_ file: URL, sessionRoot: URL) -> Bool {
+        guard let rel = unfollowedRelative(file, sessionRoot: sessionRoot) else { return false }
+        return existingSessionFile(rel, sessionURL: sessionRoot) != nil
+    }
+
     /// Regular file whose resolved target stays under `sessionRoot`. Symlinks are
     /// rejected so later reads cannot follow a link out of the session folder.
     static func isContainedRegularFile(_ file: URL, sessionRoot: URL) -> Bool {

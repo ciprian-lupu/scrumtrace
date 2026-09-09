@@ -58,8 +58,8 @@ final class WhisperTranscriber: @unchecked Sendable {
         }
     }
 
-    func transcribeFile(at url: URL) async throws -> FullTranscript {
-        try Self.refuseSymlinkMedia(url)
+    func transcribeFile(at url: URL, sessionURL: URL? = nil) async throws -> FullTranscript {
+        try Self.refuseSymlinkMedia(url, sessionRoot: sessionURL)
         let local = lockKit()
         guard let local else {
             throw NSError(
@@ -96,8 +96,9 @@ final class WhisperTranscriber: @unchecked Sendable {
     }
 
     /// System audio lives in `archive/session.mp4`. Extract AAC, then fall back to the movie path.
-    func transcribeMovieAudio(at movie: URL) async throws -> FullTranscript {
-        try Self.refuseSymlinkMedia(movie)
+    /// Temp AAC is not under the session folder — do not pass `sessionURL` into that transcribe.
+    func transcribeMovieAudio(at movie: URL, sessionURL: URL) async throws -> FullTranscript {
+        try Self.refuseSymlinkMedia(movie, sessionRoot: sessionURL)
         let dest = FileManager.default.temporaryDirectory.appendingPathComponent(
             "scrumtrace-system-audio-\(UUID().uuidString).m4a"
         )
@@ -107,7 +108,7 @@ final class WhisperTranscriber: @unchecked Sendable {
             return try await transcribeFile(at: dest)
         } catch {
             try? FileManager.default.removeItem(at: dest)
-            return try await transcribeFile(at: movie)
+            return try await transcribeFile(at: movie, sessionURL: sessionURL)
         }
     }
 
@@ -141,9 +142,16 @@ final class WhisperTranscriber: @unchecked Sendable {
         return kit
     }
 
-    private static func refuseSymlinkMedia(_ url: URL) throws {
+    private static func refuseSymlinkMedia(_ url: URL, sessionRoot: URL? = nil) throws {
         if (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true
             || ExportRel.parentIsSymbolicLink(url) {
+            throw NSError(
+                domain: "ScrumTrace",
+                code: 4,
+                userInfo: [NSLocalizedDescriptionKey: "Refusing to transcribe a symbolic link."]
+            )
+        }
+        if let sessionRoot, !ExportRel.isReadableSessionFile(url, sessionRoot: sessionRoot) {
             throw NSError(
                 domain: "ScrumTrace",
                 code: 4,

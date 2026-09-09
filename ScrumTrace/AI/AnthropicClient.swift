@@ -27,7 +27,7 @@ struct AnthropicClient: AIProvider {
         ]
         if configuration.acceptsImages {
             for imageURL in request.imageURLs.prefix(4) {
-                if let payload = ImageBase64.jpegPayload(url: imageURL) {
+                if let payload = ImageBase64.jpegPayload(url: imageURL, sessionRoot: request.sessionURL) {
                     content.append([
                         "type": "image",
                         "source": [
