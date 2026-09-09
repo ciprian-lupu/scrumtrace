@@ -84,7 +84,7 @@ struct AgentContextRenderer {
             lines.append("- Quotes:")
             for quote in task.quotes {
                 lines.append(
-                    "  - \(quote.speaker) [t_media \(String(format: "%.1f", quote.tMediaStart))s–\(String(format: "%.1f", quote.tMediaEnd))s]: \(PromptTemplates.wrapUntrustedInline(quote.text))"
+                    "  - \(PromptTemplates.wrapUntrustedInline(quote.speaker)) [t_media \(String(format: "%.1f", quote.tMediaStart))s–\(String(format: "%.1f", quote.tMediaEnd))s]: \(PromptTemplates.wrapUntrustedInline(quote.text))"
                 )
             }
         }

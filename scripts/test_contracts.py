@@ -39,6 +39,11 @@ def test_agent_context_uses_export_relative_paths() -> None:
     assert "1 pauses" not in ctx
     assert "<untrusted_meeting_data>AthleteTracker</untrusted_meeting_data>" in ctx
     assert "<untrusted_meeting_data>https://github.com/acme/athlete-app</untrusted_meeting_data>" in ctx
+    assert "<untrusted_meeting_data>Next.js, Tailwind, PostgreSQL</untrusted_meeting_data>" in ctx
+    assert "<untrusted_meeting_data>presenter</untrusted_meeting_data>" in ctx
+    assert "Never open the private capture folder" in ctx
+    prompt = (ROOT / "samples" / "mock-session" / "export" / "AGENT_PROMPT.txt").read_text()
+    assert "<untrusted_meeting_data>presenter</untrusted_meeting_data>" in prompt
 
 
 def test_retired_anthropic_ids() -> None:
@@ -468,7 +473,11 @@ def test_pipeline_timing_stays_in_archive() -> None:
     assert "fileExists(atPath: url.path)" not in drop
     recorder = (ROOT / "ScrumTrace" / "Capture" / "SessionRecorder.swift").read_text()
     assert "writerQueue.sync" in recorder
-    pause_fn = recorder.split("func setPaused")[1].split("func stop")[0]
+    assert recorder.count("sampleHandlerQueue: writerQueue") >= 3
+    assert "addStreamOutput(self, type: .screen, sampleHandlerQueue: writerQueue)" in recorder
+    assert "addStreamOutput(self, type: .audio, sampleHandlerQueue: writerQueue)" in recorder
+    assert "addStreamOutput(self, type: .microphone, sampleHandlerQueue: writerQueue)" in recorder
+    pause_fn = recorder.split("func setPaused")[1].split("func freezeWriters")[0]
     assert "writerQueue.sync" in pause_fn
     assert "writerQueue.async" not in pause_fn
     speech = (ROOT / "ScrumTrace" / "Speech" / "WhisperTranscriber.swift").read_text()
@@ -533,6 +542,8 @@ def test_pause_privacy_and_metadata_gate() -> None:
     assert "wrapUntrustedInline(manifest.productContext.appName)" in agent
     assert "wrapUntrustedInline(manifest.productContext.repoURL)" in agent
     assert "wrapUntrustedInline(manifest.productContext.techStack)" in agent
+    assert "wrapUntrustedInline(quote.speaker)" in agent
+    assert "wrapUntrustedInline(quote.text)" in agent
     assert "pauseLabel" in agent
     assert "pauses.count) pauses" not in agent
     privacy = (ROOT / "ScrumTrace" / "Capture" / "PrivacyGuard.swift").read_text()
@@ -832,6 +843,16 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "isAuthFailure" in protocol_src
     assert "markEvalAuthFailed" in processor
     assert "Skipped remaining slices after provider authentication failed." in processor
+    eval_loop = processor.split("let toRun =")[1].split("manifest.slices = updatedSlices.sorted")[0]
+    assert "withTaskGroup" not in eval_loop
+    assert "for slice in toRun" in eval_loop
+    assert "await self.evaluateSlice" in eval_loop
+    assert "try vault.write(manifest: &manifest)" in eval_loop
+    assert "let remaining = toRun.filter" in eval_loop
+    eval_slice = processor.split("private func evaluateSlice")[1].split("private func tasks(")[0]
+    assert eval_slice.count("abortedForAuth") >= 3
+    assert eval_slice.rfind("abortedForAuth") < eval_slice.find("provider.evaluate")
+    assert "readContainedData(url, sessionRoot: sessionURL)" in eval_slice
     assert "willUploadClip(configuration: configuration)" in processor
     assert "includeFullTranscript: projection.manifest.includeFullTranscriptInZip" in processor
     google = (ROOT / "ScrumTrace" / "AI" / "GoogleClient.swift").read_text()

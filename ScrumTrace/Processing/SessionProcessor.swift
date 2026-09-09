@@ -141,32 +141,24 @@ final class SessionProcessor: @unchecked Sendable {
                     $0.analysisStatus == .success
                 }
                 let toRun = manifest.slices.filter { $0.analysisStatus != .success }
-                await withTaskGroup(of: (SliceRecord, [TaskRecord]).self) { group in
-                    var inflight = 0
-                    for slice in toRun {
-                        group.addTask {
-                            await self.evaluateSlice(
-                                slice: slice,
-                                manifest: manifest,
-                                transcript: transcript,
-                                sessionURL: sessionURL,
-                                provider: provider,
-                                configuration: configuration
-                            )
-                        }
-                        inflight += 1
-                        if inflight >= 3 {
-                            if let result = await group.next() {
-                                updatedSlices.append(result.0)
-                                tasks.append(contentsOf: result.1)
-                                inflight -= 1
-                            }
-                        }
-                    }
-                    for await result in group {
-                        updatedSlices.append(result.0)
-                        tasks.append(contentsOf: result.1)
-                    }
+                // Serial: a 401 must not leave other slices uploading stills (Gate 5).
+                // Persist after each slice so a crash does not re-upload successes (D14).
+                for slice in toRun {
+                    let result = await self.evaluateSlice(
+                        slice: slice,
+                        manifest: manifest,
+                        transcript: transcript,
+                        sessionURL: sessionURL,
+                        provider: provider,
+                        configuration: configuration
+                    )
+                    updatedSlices.append(result.0)
+                    tasks.append(contentsOf: result.1)
+                    let done = Set(updatedSlices.map(\.sliceId))
+                    let remaining = toRun.filter { !done.contains($0.sliceId) }
+                    manifest.slices = (updatedSlices + remaining).sorted { $0.sliceId < $1.sliceId }
+                    manifest.tasks = rankedTasks(tasks)
+                    try vault.write(manifest: &manifest)
                 }
                 manifest.slices = updatedSlices.sorted { $0.sliceId < $1.sliceId }
                 manifest.tasks = rankedTasks(tasks)
@@ -378,6 +370,12 @@ final class SessionProcessor: @unchecked Sendable {
         }
         if !configuration.acceptsImages {
             images = []
+        } else {
+            // media_sent is what actually leaves the Mac (C4). Skip stills
+            // jpegPayload cannot openat-read (planted link, too large, missing).
+            images = images.filter { url in
+                ExportRel.readContainedData(url, sessionRoot: sessionURL) != nil
+            }
         }
         var mediaSent: [String] = []
         if configuration.acceptsImages && !images.isEmpty {
@@ -426,6 +424,9 @@ final class SessionProcessor: @unchecked Sendable {
             clipURL: clipURL,
             sessionURL: sessionURL
         )
+        if let aborted = abortedForAuth(slice: slice, shot: shot, product: manifest.productContext) {
+            return aborted
+        }
         do {
             let response = try await provider.evaluate(request: request)
             slice.analysisStatus = .success
