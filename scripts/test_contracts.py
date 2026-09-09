@@ -145,6 +145,9 @@ def test_dual_transcript_merge_wired() -> None:
     assert "func merge" in speech
     assert "func transcribeMovieAudio" in speech
     assert "AVAssetExportPresetAppleM4A" in speech
+    assert "wordTimestamps: true" in speech
+    assert "whisperKitModelName" in speech
+    assert "openai_whisper-large-v3-turbo" in speech
     processor = (ROOT / "ScrumTrace" / "Processing" / "SessionProcessor.swift").read_text()
     assert "shouldTranscribeMovie" in processor
     assert "transcribeMovieAudio" in processor

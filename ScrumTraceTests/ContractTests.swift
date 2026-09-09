@@ -17,6 +17,21 @@ final class ContractTests: XCTestCase {
         XCTAssertFalse(ExportRel.omittedHandoffPath("archive/session.mp4").hasPrefix("archive/"))
     }
 
+    func testWhisperKitModelNamePrefixesShortAlias() {
+        XCTAssertEqual(
+            WhisperTranscriber.whisperKitModelName("large-v3-turbo"),
+            "openai_whisper-large-v3-turbo"
+        )
+        XCTAssertEqual(
+            WhisperTranscriber.whisperKitModelName("openai_whisper-large-v3-turbo"),
+            "openai_whisper-large-v3-turbo"
+        )
+        XCTAssertEqual(
+            WhisperTranscriber.whisperKitModelName(""),
+            "openai_whisper-large-v3-turbo"
+        )
+    }
+
     func testTaskRankingPrefersHumanShotsAndConfirmed() {
         func task(
             id: String,

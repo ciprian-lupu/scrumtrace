@@ -31,7 +31,7 @@ final class WhisperTranscriber: @unchecked Sendable {
         }
         work = Task {
             let config = WhisperKitConfig(
-                model: model,
+                model: Self.whisperKitModelName(model),
                 verbose: false,
                 logLevel: .error,
                 prewarm: true,
@@ -67,7 +67,8 @@ final class WhisperTranscriber: @unchecked Sendable {
                 userInfo: [NSLocalizedDescriptionKey: "Whisper model is not loaded yet."]
             )
         }
-        let results = try await local.transcribe(audioPath: url.path)
+        let options = DecodingOptions(wordTimestamps: true)
+        let results = try await local.transcribe(audioPath: url.path, decodeOptions: options)
         var segments: [TranscriptSegment] = []
         for result in results {
             for segment in result.segments {
@@ -136,6 +137,18 @@ final class WhisperTranscriber: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         return kit
+    }
+
+    /// Spec model is `large-v3-turbo`; WhisperKit downloads `openai_whisper-large-v3-turbo`.
+    static func whisperKitModelName(_ requested: String) -> String {
+        let trimmed = requested.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            return "openai_whisper-large-v3-turbo"
+        }
+        if trimmed.hasPrefix("openai_whisper-") || trimmed.hasPrefix("distil-whisper_") {
+            return trimmed
+        }
+        return "openai_whisper-\(trimmed)"
     }
 }
 
