@@ -130,6 +130,26 @@ final class ContractTests: XCTestCase {
         XCTAssertEqual(loaded.pipelineStatus, .completed)
     }
 
+    func testMoveIntoSessionReplacesDestSymlinkWithoutFollowing() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("st-move-\(UUID().uuidString)")
+        let export = root.appendingPathComponent("export")
+        let archive = root.appendingPathComponent("archive")
+        try FileManager.default.createDirectory(at: export, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: archive, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let secret = archive.appendingPathComponent("session.mp4")
+        try Data("MASTER".utf8).write(to: secret)
+        let planted = export.appendingPathComponent("session-pack.zip")
+        try FileManager.default.createSymbolicLink(at: planted, withDestinationURL: secret)
+        let temp = FileManager.default.temporaryDirectory.appendingPathComponent("st-move-src-\(UUID().uuidString).zip")
+        defer { try? FileManager.default.removeItem(at: temp) }
+        try Data("ZIPBYTES".utf8).write(to: temp)
+        try ExportRel.moveIntoSession(from: temp, relative: "export/session-pack.zip", sessionURL: root)
+        XCTAssertEqual(try String(contentsOf: secret, encoding: .utf8), "MASTER")
+        XCTAssertEqual(try String(contentsOf: planted, encoding: .utf8), "ZIPBYTES")
+        XCTAssertNotEqual((try planted.resourceValues(forKeys: [.isSymbolicLinkKey])).isSymbolicLink, true)
+    }
+
     func testIsAllowedClipDestRejectsMasterMovie() {
         XCTAssertTrue(ExportRel.isAllowedClipDest("archive/media-work/task-01/clip.mp4"))
         XCTAssertTrue(ExportRel.isAllowedClipDest("export/media/task-01/clip.mp4"))

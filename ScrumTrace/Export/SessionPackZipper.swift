@@ -118,11 +118,6 @@ struct SessionPackZipper {
             relative: ScrumTracePath.packZip,
             sessionURL: sessionURL
         )
-        let dest = sessionURL.appendingPathComponent(destRel)
-        try ExportRel.removeItemIfRegularFile(dest, sessionRoot: sessionURL)
-        if (try? dest.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
-            throw SessionRecorderError.writerFailed("Pack zip dest escaped the session folder.")
-        }
         let members = PackBudget.allowList(
             exportDir: exportDir,
             includeFullTranscript: includeFullTranscript
@@ -130,12 +125,18 @@ struct SessionPackZipper {
         guard !members.isEmpty else {
             throw SessionRecorderError.writerFailed("export/ allow-list is empty; nothing to zip.")
         }
+        let temp = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "scrumtrace-zip-\(UUID().uuidString).zip"
+        )
+        try? FileManager.default.removeItem(at: temp)
         let process = Process()
         process.currentDirectoryURL = exportDir
         process.executableURL = URL(fileURLWithPath: "/usr/bin/zip")
         // `-y` stores a symlink as a link if one is ever listed; allowList still
         // omits links so zip cannot follow them into archive/ or another tree.
-        process.arguments = ["-q", "-y", dest.path, "-@"]
+        // Zip into temp, then moveIntoSession, so `/usr/bin/zip` cannot follow a
+        // planted pack dest into the master movie.
+        process.arguments = ["-q", "-y", temp.path, "-@"]
         let pipe = Pipe()
         process.standardInput = pipe
         try process.run()
@@ -145,7 +146,14 @@ struct SessionPackZipper {
         try pipe.fileHandleForWriting.close()
         process.waitUntilExit()
         guard process.terminationStatus == 0 else {
+            try? FileManager.default.removeItem(at: temp)
             throw SessionRecorderError.writerFailed("zip failed with status \(process.terminationStatus).")
+        }
+        do {
+            try ExportRel.moveIntoSession(from: temp, relative: destRel, sessionURL: sessionURL)
+        } catch {
+            try? FileManager.default.removeItem(at: temp)
+            throw error
         }
     }
 }

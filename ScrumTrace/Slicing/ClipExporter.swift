@@ -32,10 +32,9 @@ struct ClipExporter {
         } catch {
             throw SessionRecorderError.writerFailed("Slice clip_path escaped the session folder.")
         }
-        let clipURL = sessionURL.appendingPathComponent(prepared)
         try await reencode(
             source: source,
-            destination: clipURL,
+            destRelative: prepared,
             slice: slice,
             mediaDuration: mediaDuration,
             sessionURL: sessionURL
@@ -144,22 +143,28 @@ struct ClipExporter {
 
     private func reencode(
         source: URL,
-        destination: URL,
+        destRelative: String,
         slice: SliceRecord,
         mediaDuration: TimeInterval,
         sessionURL: URL
     ) async throws {
-        try ExportRel.removeItemIfRegularFile(destination, sessionRoot: sessionURL)
-        if (try? destination.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
-            throw SessionRecorderError.writerFailed("Slice clip_path escaped the session folder.")
-        }
+        let temp = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "scrumtrace-clip-\(UUID().uuidString).mp4"
+        )
+        try? FileManager.default.removeItem(at: temp)
         let range = try clipTimeRange(slice: slice, mediaDuration: mediaDuration)
         let asset = AVURLAsset(url: source)
         do {
-            try await writeMainProfileClip(asset: asset, destination: destination, timeRange: range)
+            try await writeMainProfileClip(asset: asset, destination: temp, timeRange: range)
         } catch {
-            try ExportRel.removeItemIfRegularFile(destination, sessionRoot: sessionURL)
-            try await exportPresetClip(asset: asset, destination: destination, timeRange: range)
+            try? FileManager.default.removeItem(at: temp)
+            try await exportPresetClip(asset: asset, destination: temp, timeRange: range)
+        }
+        do {
+            try ExportRel.moveIntoSession(from: temp, relative: destRelative, sessionURL: sessionURL)
+        } catch {
+            try? FileManager.default.removeItem(at: temp)
+            throw error
         }
     }
 

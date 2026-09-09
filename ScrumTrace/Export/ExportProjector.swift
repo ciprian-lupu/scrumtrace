@@ -322,12 +322,10 @@ struct ExportProjector {
         }
         let from = sessionURL.appendingPathComponent(fromRel)
         let dest = sessionURL.appendingPathComponent(prepared)
+        try ExportRel.removeItemIfRegularFile(dest, sessionRoot: sessionURL)
         if (try? dest.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
             omitted.append(OmittedAsset(path: destRelative, reason: "Copy destination escaped export/"))
             return nil
-        }
-        if ExportRel.isContainedRegularFile(dest, sessionRoot: sessionURL) {
-            try FileManager.default.removeItem(at: dest)
         }
         try FileManager.default.copyItem(at: from, to: dest)
         return prepared

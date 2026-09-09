@@ -209,7 +209,9 @@ def test_clip_exporter_macos14() -> None:
     assert "clipVideoBitrate" in clip
     assert "AVVideoProfileLevelH264MainAutoLevel" in clip
     reencode = clip.split("func reencode")[1].split("func clipTimeRange")[0]
-    assert "removeItemIfRegularFile(destination, sessionRoot: sessionURL)" in reencode
+    assert "moveIntoSession" in reencode
+    assert "scrumtrace-clip" in reencode
+    assert "temporaryDirectory" in reencode
     assert "try? FileManager.default.removeItem(at: destination)" not in reencode
     assert "sessionURL: URL" in reencode
     assert "writeMainProfileClip" in clip
@@ -397,9 +399,11 @@ def test_pipeline_timing_stays_in_archive() -> None:
     run_zip = zipper.split("func runZip")[1].split("enum PackBudget")[0]
     assert "prepareContainedWrite" in run_zip
     assert "ScrumTracePath.packZip" in run_zip
-    assert "removeItemIfRegularFile" in run_zip
-    assert "isSymbolicLink" in run_zip
-    assert "dest.path" in run_zip
+    assert "moveIntoSession" in run_zip
+    assert "scrumtrace-zip" in run_zip
+    assert "temporaryDirectory" in run_zip
+    assert "temp.path" in run_zip
+    assert "dest.path" not in run_zip
     zip_fn = zipper.split("func zip(")[1].split("func writeZip")[0]
     assert "removeEscapingExportLinks" in zip_fn
     assert "try writeOmittedMarkdown" in zip_fn
@@ -577,7 +581,7 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "fromRelative" in still_fn
     copy_if = projector.split("func copyIfPresent")[1]
     assert "existingSessionFile" in copy_if
-    assert "isContainedRegularFile" in copy_if
+    assert "removeItemIfRegularFile" in copy_if
     assert "isUnderExport(destSession)" in copy_if
     assert "prepareContainedWrite" in copy_if
     assert "fileExists(atPath:" not in copy_if
@@ -756,10 +760,12 @@ def test_write_contained_data_refuses_directory_symlinks() -> None:
     assert "isContainedRegularFile" in write_fn
     assert "removeItemIfRegularFile" in write_fn
     assert "replaceItemAt" not in write_fn
-    assert "moveItem(at: tmp, to: dest)" in write_fn
+    assert "moveIntoSession" in write_fn
+    assert "moveItem(at: temp, to: dest)" in write_fn
     assert "temporaryDirectory" in write_fn
     assert "scrumtrace-write" in write_fn
     assert "static func removeItemIfRegularFile" in models
+    assert "static func moveIntoSession" in models
     rel = models.split("static func containedRelative(_ path: String, sessionURL: URL)")[1].split("static func existingSessionFile")[0]
     assert "isSymbolicLink" in rel
     assert "func unfollowedRelative" in models

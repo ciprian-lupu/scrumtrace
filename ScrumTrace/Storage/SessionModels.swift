@@ -254,8 +254,6 @@ enum ExportRel {
     /// `.write-tmp` next to the dest would otherwise be enumerable into the zip
     /// allow-list.
     static func writeContainedData(_ data: Data, relative: String, sessionURL: URL) throws {
-        let destRel = try prepareContainedWrite(relative: relative, sessionURL: sessionURL)
-        let dest = sessionURL.appendingPathComponent(destRel)
         let tmp = FileManager.default.temporaryDirectory.appendingPathComponent(
             "scrumtrace-write-\(UUID().uuidString)"
         )
@@ -264,15 +262,27 @@ enum ExportRel {
         }
         do {
             try data.write(to: tmp, options: .atomic)
-            try removeItemIfRegularFile(dest, sessionRoot: sessionURL)
-            if (try? dest.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
-                throw SessionVaultError.writeFailed(relative)
-            }
-            try FileManager.default.moveItem(at: tmp, to: dest)
+            try moveIntoSession(from: tmp, relative: relative, sessionURL: sessionURL)
         } catch {
             try? FileManager.default.removeItem(at: tmp)
             throw error
         }
+    }
+
+    /// Move a temp file onto a session-relative path. Unlinks a dest symlink
+    /// (the link inode) then `moveItem` — never an exchange API that follows
+    /// a planted `export/session-pack.zip` into `archive/session.mp4`.
+    static func moveIntoSession(from temp: URL, relative: String, sessionURL: URL) throws {
+        if (try? temp.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+            throw SessionVaultError.writeFailed(relative)
+        }
+        let destRel = try prepareContainedWrite(relative: relative, sessionURL: sessionURL)
+        let dest = sessionURL.appendingPathComponent(destRel)
+        try removeItemIfRegularFile(dest, sessionRoot: sessionURL)
+        if (try? dest.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+            throw SessionVaultError.writeFailed(relative)
+        }
+        try FileManager.default.moveItem(at: temp, to: dest)
         guard isContainedRegularFile(dest, sessionRoot: sessionURL) else {
             try? removeItemIfRegularFile(dest, sessionRoot: sessionURL)
             throw SessionVaultError.writeFailed(relative)
