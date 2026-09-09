@@ -23,6 +23,7 @@ enum SessionRecorderError: LocalizedError {
 final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sendable {
     let clock: ClockSynchronizer
     private let sessionURL: URL
+    private static let writerKey = DispatchSpecificKey<UInt8>()
     private let writerQueue = DispatchQueue(label: "com.str8minds.ScrumTrace.writer")
     private var stream: SCStream?
     private var writer: AVAssetWriter?
@@ -39,10 +40,20 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         self.sessionURL = sessionURL
         self.clock = clock
         super.init()
+        writerQueue.setSpecific(key: Self.writerKey, value: 1)
+    }
+
+    /// Mic-tap `async` blocks retain `self`. If that block is the last retain,
+    /// `deinit` runs on `writerQueue` and `sync` would deadlock.
+    private func syncWriter<T>(_ body: () throws -> T) rethrows -> T {
+        if DispatchQueue.getSpecific(key: Self.writerKey) != nil {
+            return try body()
+        }
+        return try writerQueue.sync(execute: body)
     }
 
     var isPaused: Bool {
-        writerQueue.sync { paused }
+        syncWriter { paused }
     }
 
     func start(shouldPauseCapture: @escaping () -> Bool = { false }) async throws {
@@ -58,7 +69,7 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
 
         clock.markRecordingStarted()
         // DispatchQueue.sync is synchronous — `await` here does not compile.
-        try writerQueue.sync {
+        try syncWriter {
             try self.prepareWriters(width: size.width, height: size.height)
         }
 
@@ -103,7 +114,7 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             // first SCStream buffer: a credential app that was already front
             // (or that appeared during the permission sheet) must not hit disk.
             let pauseNow = shouldPauseCapture()
-            writerQueue.sync {
+            syncWriter {
                 self.microphoneWav = mic
                 self.stream = stream
                 self.started = true
@@ -140,7 +151,7 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
     /// tap and cancel writers so a discarded recorder cannot keep capturing.
     private func abortFailedStart() async {
         clock.markRecordingStopped()
-        let snapshot = writerQueue.sync { () -> (stream: SCStream?, engine: AVAudioEngine?) in
+        let snapshot = syncWriter { () -> (stream: SCStream?, engine: AVAudioEngine?) in
             self.started = false
             self.paused = true
             let stream = self.stream
@@ -153,7 +164,7 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             try? await live.stopCapture()
         }
         snapshot.engine?.stop()
-        writerQueue.sync {
+        syncWriter {
             self.videoInput?.markAsFinished()
             self.audioInput?.markAsFinished()
             self.wavFile = nil
@@ -169,7 +180,7 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
     func setPaused(_ next: Bool) {
         // sync: Pause must apply before the next SCStream/mic buffer on this queue.
         // async left a window where paused samples were still appended (C1).
-        writerQueue.sync {
+        syncWriter {
             guard self.paused != next else { return }
             self.paused = next
             if next {
@@ -182,7 +193,7 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
 
     /// Drop every capture source immediately without opening a Pause interval.
     func freezeWriters() {
-        writerQueue.sync {
+        syncWriter {
             self.paused = true
             self.started = false
             self.clock.markRecordingStopped()
@@ -190,7 +201,7 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
     }
 
     func stop() async throws {
-        let snapshot = writerQueue.sync { () -> (stream: SCStream?, mic: Bool, engine: AVAudioEngine?) in
+        let snapshot = syncWriter { () -> (stream: SCStream?, mic: Bool, engine: AVAudioEngine?) in
             // Freeze t_wall / t_media at Stop so finishWriting is not counted,
             // and do not resume writers if the user stopped while paused (C1).
             self.clock.markRecordingStopped()
@@ -422,7 +433,7 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             }
         }
         try engine.start()
-        writerQueue.sync {
+        syncWriter {
             self.engine = engine
         }
     }
@@ -504,5 +515,30 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         }
         // Mic is optional: deny → system-audio WAV only. Screen permission is required.
         _ = await AVCaptureDevice.requestAccess(for: .audio)
+    }
+
+    deinit {
+        let snapshot = syncWriter { () -> (stream: SCStream?, engine: AVAudioEngine?) in
+            self.paused = true
+            self.started = false
+            let stream = self.stream
+            self.stream = nil
+            let engine = self.engine
+            self.engine = nil
+            self.wavFile = nil
+            if let writer = self.writer, writer.status == .writing || writer.status == .unknown {
+                writer.cancelWriting()
+            }
+            self.writer = nil
+            self.videoInput = nil
+            self.audioInput = nil
+            return (stream, engine)
+        }
+        snapshot.engine?.stop()
+        if let live = snapshot.stream {
+            Task.detached {
+                try? await live.stopCapture()
+            }
+        }
     }
 }

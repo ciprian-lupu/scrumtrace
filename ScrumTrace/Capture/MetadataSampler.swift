@@ -83,6 +83,7 @@ final class MetadataSampler: @unchecked Sendable {
             if let url = Self.documentURL(from: windowElement) {
                 if isSuspended { return nil }
                 let bundle = NSWorkspaceFallback.frontmost()?.bundleIdentifier ?? ""
+                if isSuspended { return nil }
                 return WindowMetadata(
                     appName: (titleRef as? String) ?? "App",
                     windowTitle: windowTitle,
@@ -92,10 +93,12 @@ final class MetadataSampler: @unchecked Sendable {
             }
         }
         if isSuspended { return nil }
+        let fallbackApp = NSWorkspaceFallback.frontmost()
+        if isSuspended { return nil }
         return WindowMetadata(
             appName: (titleRef as? String) ?? "App",
             windowTitle: windowTitle,
-            bundleIdentifier: NSWorkspaceFallback.frontmost()?.bundleIdentifier ?? "",
+            bundleIdentifier: fallbackApp?.bundleIdentifier ?? "",
             url: nil
         )
     }

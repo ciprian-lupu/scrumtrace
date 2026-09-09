@@ -90,6 +90,7 @@ final class SessionController: ObservableObject {
             phase = .recording
             statusLine = "Recording"
             log(.resume, [:])
+            persistLivePipelineStatus()
             NotificationCenter.default.post(name: .scrumTraceCaptureGate, object: CaptureSessionState.recording)
         } else {
             pausedByPrivacy = false
@@ -98,6 +99,7 @@ final class SessionController: ObservableObject {
             phase = .paused
             statusLine = "Paused — nothing is written"
             log(.pause, [:])
+            persistLivePipelineStatus()
             NotificationCenter.default.post(name: .scrumTraceCaptureGate, object: CaptureSessionState.paused)
         }
     }
@@ -247,7 +249,7 @@ final class SessionController: ObservableObject {
                 statusLine = "Recording"
             }
             if var local = manifest {
-                local.pipelineStatus = .recording
+                local.pipelineStatus = phase
                 try? vault.write(manifest: &local)
                 manifest = local
             }
@@ -585,6 +587,7 @@ final class SessionController: ObservableObject {
         phase = .paused
         statusLine = "Auto-paused for \(bundle)"
         log(.privacyPause, ["bundle": bundle])
+        persistLivePipelineStatus()
         NotificationCenter.default.post(name: .scrumTraceCaptureGate, object: CaptureSessionState.paused)
     }
 
@@ -598,6 +601,7 @@ final class SessionController: ObservableObject {
             phase = .recording
             statusLine = "Recording"
             log(.resume, ["reason": "privacy_clear"])
+            persistLivePipelineStatus()
             NotificationCenter.default.post(name: .scrumTraceCaptureGate, object: CaptureSessionState.recording)
             return
         }
@@ -665,6 +669,19 @@ final class SessionController: ObservableObject {
         case .pin, .url, .window:
             return captureState.allowsNewCapture
         }
+    }
+
+    /// Recent menu reads disk. Pause must not leave `pipeline_status: recording`
+    /// while the HUD already follows a paused writer (privacy freeze).
+    private func persistLivePipelineStatus() {
+        guard var local = manifest else { return }
+        if isRecording {
+            local.pipelineStatus = captureState == .paused ? .paused : .recording
+        } else {
+            local.pipelineStatus = phase
+        }
+        try? vault.write(manifest: &local)
+        manifest = local
     }
 
     private func flashStatus() {

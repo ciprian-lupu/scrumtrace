@@ -420,7 +420,7 @@ def test_audio_split_and_brief_loader() -> None:
     tap = recorder.split("func startMicrophoneFallback")[1].split("func copyPCM")[0]
     assert "copyPCM(buffer)" in tap
     assert "writeEngineBuffer(buffer)" not in tap
-    assert "writerQueue.sync" in tap
+    assert "syncWriter" in tap
     assert "self.engine = engine" in tap
     brief = (ROOT / "ScrumTrace" / "Export" / "SessionBriefRenderer.swift").read_text()
     assert "Export/Resources" in brief
@@ -522,7 +522,7 @@ def test_pipeline_timing_stays_in_archive() -> None:
     assert "addStreamOutput(self, type: .audio, sampleHandlerQueue: writerQueue)" in recorder
     assert "addStreamOutput(self, type: .microphone, sampleHandlerQueue: writerQueue)" in recorder
     pause_fn = recorder.split("func setPaused")[1].split("func freezeWriters")[0]
-    assert "writerQueue.sync" in pause_fn
+    assert "syncWriter" in pause_fn
     assert "writerQueue.async" not in pause_fn
     speech = (ROOT / "ScrumTrace" / "Speech" / "WhisperTranscriber.swift").read_text()
     assert "temporaryDirectory" in speech
@@ -539,7 +539,8 @@ def test_pipeline_timing_stays_in_archive() -> None:
     assert read_fn.count("isSuspended") >= 3
     assert "if isSuspended { return nil }" in read_fn
     assert "let fallback = NSWorkspaceFallback.frontmost()" in read_fn
-    assert read_fn.rfind("isSuspended") > read_fn.find("NSWorkspaceFallback.frontmost")
+    assert "let fallbackApp = NSWorkspaceFallback.frontmost()" in read_fn
+    assert read_fn.rfind("isSuspended") > read_fn.rfind("NSWorkspaceFallback.frontmost")
     icons = ROOT / "ScrumTrace" / "Assets.xcassets" / "AppIcon.appiconset"
     for name in ("icon_16.png", "icon_32.png", "icon_64.png", "icon_128.png", "icon_256.png", "icon_512.png", "icon_1024.png"):
         assert (icons / name).is_file(), name
@@ -552,8 +553,9 @@ def test_pipeline_timing_stays_in_archive() -> None:
     assert "requestTrust(prompt: true)" in start_rec
     assert "clock.reset()" in start_rec
     assert "captureFreeze.attach(nil)" in start_rec
-    assert "pipelineStatus = .recording" in start_rec
-    assert start_rec.index("try await recorder.start(") < start_rec.index("pipelineStatus = .recording")
+    assert "pipelineStatus = phase" in start_rec
+    assert start_rec.index("try await recorder.start(") < start_rec.index("pipelineStatus = phase")
+    assert "persistLivePipelineStatus" in controller
     assert "shouldPauseCapture" in start_rec
     assert "currentCredentialApp" in start_rec
     assert start_rec.index("shouldPauseCapture") < start_rec.index("privacy.start()")
@@ -632,6 +634,11 @@ def test_pause_privacy_and_metadata_gate() -> None:
     assert "captureState == .paused" not in resume_ok
     assert "currentCredentialApp" in resume_ok
     assert toggle.index("isCurrentlyTripped") < toggle.index("currentCredentialApp")
+    assert "persistLivePipelineStatus" in toggle
+    persist_live = controller.split("func persistLivePipelineStatus")[1].split("func flashStatus")[0]
+    assert "captureState == .paused" in persist_live
+    assert "try? vault.write" in persist_live
+    assert "pipelineStatus = .idle" not in persist_live
     assert "Stills and transcript excerpts" in controller
     assert "clip audio will leave this Mac" in controller
     assert "and clip video will leave this Mac" not in controller
@@ -941,6 +948,14 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "snapshot.engine?.stop()" in abort_start
     assert "cancelWriting" in abort_start
     assert "markRecordingStopped" in abort_start
+    deinit_fn = recorder.split("deinit {")[1]
+    assert "cancelWriting" in deinit_fn
+    assert "snapshot.engine?.stop()" in deinit_fn
+    assert "stopCapture" in deinit_fn
+    assert "self.started = false" in deinit_fn
+    assert "syncWriter" in deinit_fn
+    assert "DispatchSpecificKey" in recorder
+    assert "getSpecific(key:" in recorder
     assert "try await writerQueue.sync" not in recorder
     assert "evenCaptureSize" in start_fn
     assert "prepareWriters(width:" in start_fn
