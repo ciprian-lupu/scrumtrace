@@ -17,6 +17,9 @@ struct HUDView: View {
             Text(SessionController.clock(controller.mediaElapsed))
                 .font(.system(size: 13, weight: .semibold, design: .monospaced))
                 .foregroundStyle(Color(red: 0.97, green: 0.93, blue: 0.86))
+            Text("w \(SessionController.clock(controller.wallElapsed))")
+                .font(.system(size: 9, weight: .medium, design: .monospaced))
+                .foregroundStyle(Color(red: 0.97, green: 0.93, blue: 0.86).opacity(0.45))
             Divider().frame(height: 16)
             if controller.isBusy {
                 Text(controller.statusLine)
@@ -62,7 +65,7 @@ final class RecordingHUDWindow: NSPanel {
 
     init(controller: SessionController) {
         super.init(
-            contentRect: NSRect(x: 0, y: 0, width: 560, height: 44),
+            contentRect: NSRect(x: 0, y: 0, width: 580, height: 50),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
@@ -96,7 +99,7 @@ final class RecordingHUDWindow: NSPanel {
     private func positionOnActiveScreen() {
         let screen = NSScreen.main ?? NSScreen.screens.first
         guard let frame = screen?.visibleFrame else { return }
-        let size = NSSize(width: 560, height: 46)
+        let size = NSSize(width: 580, height: 52)
         setFrame(
             NSRect(
                 x: frame.midX - size.width / 2,

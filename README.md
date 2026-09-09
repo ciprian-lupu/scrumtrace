@@ -9,6 +9,7 @@ The working spec is [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) (contracts 
 - Native Swift menu-bar app (`com.str8minds.ScrumTrace`, sandbox off)
 - Pause gate shared by screen, system audio, microphone, metadata, Shot, and Hold-to-Talk
 - WhisperKit transcribes the room-mic WAV **and** system audio in `archive/session.mp4`, then merges on `t_media`
+- Gate 3/6 timings written to `archive/pipeline-timing.json` (never in the export zip)
 - Session disk layout: `archive/` (private) vs `export/` (handoff, export-relative paths)
 - Measured 35 MB `session-pack.zip` with `OMITTED.md` when the cap drops files
 - Pluggable AI adapters behind one internal contract (MVP: OpenAI-compatible + JSON Schema)

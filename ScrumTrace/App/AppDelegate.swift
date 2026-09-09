@@ -1,5 +1,6 @@
 #if os(macOS)
 import AppKit
+import ApplicationServices
 import SwiftUI
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -16,6 +17,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menuBar = MenuBarController(controller: controller, hud: hud)
         hotkeys = HotkeyManager(controller: controller)
         hotkeys?.register()
+        MetadataSampler.requestTrust()
     }
 
     func applicationWillTerminate(_ notification: Notification) {

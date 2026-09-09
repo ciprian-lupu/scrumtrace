@@ -57,6 +57,7 @@ Model on disk: `openai_whisper-large-v3-turbo` / Settings value: `_`
 |---|---|---|---|
 | 5 min 16 kHz mono (target, not a guarantee) |  |  | |
 | Dual pass: room WAV + movie system audio merged |  |  | `sources` in `full_transcript.json`: `_` |
+| `archive/pipeline-timing.json` whisper_wall_seconds |  |  | Never copied into `export/` |
 
 ---
 
@@ -91,7 +92,7 @@ Working media in `archive/media-work/` may exceed 35 MB.
 |---|---|
 | Finder reveals **`export/`**, not `archive/` |  |
 | Zip built from allow-list (no session-root minus exclusions) |  |
-| Measured `session-pack.zip` ≤ 35 MB | `_` bytes |
+| Measured `session-pack.zip` ≤ 35 MB | `_` bytes from `archive/pipeline-timing.json` |
 | `OMITTED.md` present iff anything was dropped |  |
 | Remaining paths in `AGENT_CONTEXT.md` exist |  |
 | `SESSION_BRIEF.html` escapes `& < > "` |  |

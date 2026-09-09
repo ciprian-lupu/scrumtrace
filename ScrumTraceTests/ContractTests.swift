@@ -146,4 +146,20 @@ final class ContractTests: XCTestCase {
         XCTAssertTrue(merged.segments.contains { $0.text == "restart ingest-worker" })
         XCTAssertEqual(merged.segments.filter { EvidenceValidator.normalize($0.text) == "this does nothing" }.count, 1)
     }
+
+    func testPipelineTimingRoundTrip() throws {
+        let timing = PipelineTiming(
+            whisperWallSeconds: 12.5,
+            whisperSources: ["room", "system"],
+            zipBytes: 1_048_576,
+            omittedCount: 2
+        )
+        let data = try JSONEncoder().encode(timing)
+        let decoded = try JSONDecoder().decode(PipelineTiming.self, from: data)
+        XCTAssertEqual(decoded.whisperWallSeconds, 12.5)
+        XCTAssertEqual(decoded.whisperSources, ["room", "system"])
+        XCTAssertEqual(decoded.zipBytes, 1_048_576)
+        XCTAssertEqual(decoded.omittedCount, 2)
+        XCTAssertTrue(String(data: data, encoding: .utf8)?.contains("whisper_wall_seconds") == true)
+    }
 }

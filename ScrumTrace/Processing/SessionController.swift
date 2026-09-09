@@ -143,6 +143,10 @@ final class SessionController: ObservableObject {
             sampler.isSuspended = false
             startTimer()
             log(.start, [:])
+            let model = settings.whisperModel
+            Task {
+                try? await transcriber.prepare(model: model)
+            }
         } catch {
             lastError = error.localizedDescription
             statusLine = error.localizedDescription
@@ -287,6 +291,7 @@ final class SessionController: ObservableObject {
         shotWindow = ShotNoteWindow(
             screenshot: image,
             transcriber: transcriber,
+            whisperModel: settings.whisperModel,
             allowsNewCapture: { [weak self] in
                 self?.captureState.allowsNewCapture == true
             }

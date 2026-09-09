@@ -26,14 +26,20 @@ final class SessionProcessor: @unchecked Sendable {
         var manifest = try vault.loadManifest(id: sessionId)
         let sessionURL = vault.sessionURL(id: sessionId)
 
+        var timing = PipelineTiming.load(sessionURL: sessionURL) ?? PipelineTiming()
+
         if !manifest.hasCompleted(.transcribing) {
             await onStatus(.transcribing, "Transcribing locally with WhisperKit")
             manifest.pipelineStatus = .transcribing
             try vault.write(manifest: &manifest)
+            let whisperStarted = Date()
             var transcript = try await transcribe(sessionURL: sessionURL, model: whisperModel)
             transcript.sessionId = sessionId
             let data = try JSONEncoder().encode(transcript)
             try data.write(to: sessionURL.appendingPathComponent(ScrumTracePath.fullTranscript))
+            timing.whisperWallSeconds = Date().timeIntervalSince(whisperStarted)
+            timing.whisperSources = transcript.sources ?? []
+            try timing.write(sessionURL: sessionURL)
             manifest.markCompleted(.transcribing)
             try vault.write(manifest: &manifest)
         }
@@ -176,8 +182,8 @@ final class SessionProcessor: @unchecked Sendable {
             projector: projector
         )
         try zipper.writeOmittedMarkdown(sessionURL: sessionURL, omitted: zipResult.omitted)
-        let measured = try zipper.writeZip(sessionURL: sessionURL)
-        if measured > MediaBudget.maxZipBytes {
+        var zipBytes = try zipper.writeZip(sessionURL: sessionURL)
+        if zipBytes > MediaBudget.maxZipBytes {
             zipResult = try zipper.zip(sessionURL: sessionURL, manifest: projection.manifest)
             projection.manifest = PackBudget.stripOmitted(zipResult.omitted, from: projection.manifest)
             try writeExportDocuments(
@@ -187,8 +193,11 @@ final class SessionProcessor: @unchecked Sendable {
                 projector: projector
             )
             try zipper.writeOmittedMarkdown(sessionURL: sessionURL, omitted: zipResult.omitted)
-            _ = try zipper.writeZip(sessionURL: sessionURL)
+            zipBytes = try zipper.writeZip(sessionURL: sessionURL)
         }
+        timing.zipBytes = zipBytes
+        timing.omittedCount = zipResult.omitted.count
+        try timing.write(sessionURL: sessionURL)
         manifest.omitted = zipResult.omitted
         manifest.markCompleted(.synthesizing)
         manifest.pipelineStatus = manifest.slices.contains(where: { $0.analysisStatus == .offlineFailed })

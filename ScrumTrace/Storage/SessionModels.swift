@@ -445,6 +445,48 @@ struct CaptureAudioLayout: Codable, Sendable, Hashable {
     }
 }
 
+/// Gate 3 / Gate 6 measurements. Archive-only — never on the export allow-list.
+struct PipelineTiming: Codable, Sendable, Hashable {
+    var whisperWallSeconds: TimeInterval?
+    var whisperSources: [String]
+    var zipBytes: Int?
+    var omittedCount: Int
+
+    enum CodingKeys: String, CodingKey {
+        case whisperWallSeconds = "whisper_wall_seconds"
+        case whisperSources = "whisper_sources"
+        case zipBytes = "zip_bytes"
+        case omittedCount = "omitted_count"
+    }
+
+    init(
+        whisperWallSeconds: TimeInterval? = nil,
+        whisperSources: [String] = [],
+        zipBytes: Int? = nil,
+        omittedCount: Int = 0
+    ) {
+        self.whisperWallSeconds = whisperWallSeconds
+        self.whisperSources = whisperSources
+        self.zipBytes = zipBytes
+        self.omittedCount = omittedCount
+    }
+
+    static func load(sessionURL: URL) -> PipelineTiming? {
+        let url = sessionURL.appendingPathComponent(ScrumTracePath.pipelineTiming)
+        guard let data = try? Data(contentsOf: url) else { return nil }
+        return try? JSONDecoder().decode(PipelineTiming.self, from: data)
+    }
+
+    func write(sessionURL: URL) throws {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        try encoder.encode(self).write(
+            to: sessionURL.appendingPathComponent(ScrumTracePath.pipelineTiming),
+            options: .atomic
+        )
+    }
+}
+
 struct WindowMetadata: Sendable, Hashable {
     var appName: String
     var windowTitle: String
@@ -567,6 +609,7 @@ enum ScrumTracePath {
     static let sessionMovie = "archive/session.mp4"
     static let audioWav = "archive/audio.wav"
     static let captureLayout = "archive/capture-layout.json"
+    static let pipelineTiming = "archive/pipeline-timing.json"
     static let fullTranscript = "archive/full_transcript.json"
     static let events = "archive/events.jsonl"
 }

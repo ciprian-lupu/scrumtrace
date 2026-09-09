@@ -348,5 +348,7 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
                 throw SessionRecorderError.permissionDenied
             }
         }
+        // Mic is optional: deny → system-audio WAV only. Screen permission is required.
+        _ = await AVCaptureDevice.requestAccess(for: .audio)
     }
 }

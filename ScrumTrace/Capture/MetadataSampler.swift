@@ -10,26 +10,24 @@ final class MetadataSampler: @unchecked Sendable {
     private let queue = DispatchQueue(label: "com.str8minds.ScrumTrace.metadata", qos: .userInitiated)
     var isSuspended = false
 
-    func sample(timeoutMs: UInt64 = MediaBudget.metadataSampleTimeoutMs) async -> WindowMetadata? {
-        if isSuspended { return nil }
-        await withTaskGroup(of: WindowMetadata?.self) { group in
-            group.addTask {
-                await self.blockingSample()
-            }
-            group.addTask {
-                try? await Task.sleep(nanoseconds: timeoutMs * 1_000_000)
-                return nil
-            }
-            let first = await group.next() ?? nil
-            group.cancelAll()
-            return first
-        }
+    static func requestTrust() {
+        let prompt = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
+        _ = AXIsProcessTrustedWithOptions([prompt: true] as CFDictionary)
     }
 
-    private func blockingSample() async -> WindowMetadata? {
-        await withCheckedContinuation { continuation in
+    func sample(timeoutMs: UInt64 = MediaBudget.metadataSampleTimeoutMs) async -> WindowMetadata? {
+        if isSuspended { return nil }
+        return await withCheckedContinuation { continuation in
+            let once = ResumeOnce<WindowMetadata?>()
             queue.async {
-                continuation.resume(returning: self.readFrontmost())
+                if self.isSuspended {
+                    once.resume(continuation, nil)
+                    return
+                }
+                once.resume(continuation, self.readFrontmost())
+            }
+            queue.asyncAfter(deadline: .now() + .milliseconds(Int(timeoutMs))) {
+                once.resume(continuation, nil)
             }
         }
     }
@@ -91,6 +89,20 @@ final class MetadataSampler: @unchecked Sendable {
             return text
         }
         return nil
+    }
+}
+
+/// AX queries must not resume the HUD continuation twice (result vs 200 ms timeout).
+private final class ResumeOnce<T>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var resumed = false
+
+    func resume(_ continuation: CheckedContinuation<T, Never>, _ value: T) {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !resumed else { return }
+        resumed = true
+        continuation.resume(returning: value)
     }
 }
 

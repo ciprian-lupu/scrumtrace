@@ -148,6 +148,29 @@ def test_dual_transcript_merge_wired() -> None:
     assert "func windowContext" in vault
 
 
+def test_pipeline_timing_stays_in_archive() -> None:
+    zipper = (ROOT / "ScrumTrace" / "Export" / "SessionPackZipper.swift").read_text()
+    models = (ROOT / "ScrumTrace" / "Storage" / "SessionModels.swift").read_text()
+    processor = (ROOT / "ScrumTrace" / "Processing" / "SessionProcessor.swift").read_text()
+    assert "pipeline-timing.json" in models
+    assert "whisper_wall_seconds" in models
+    assert "PipelineTiming" in processor
+    assert "pipeline-timing.json" not in zipper
+    allow = (ROOT / "ScrumTrace" / "Export" / "SessionPackZipper.swift").read_text()
+    assert "AGENT_CONTEXT.md" in allow
+    recorder = (ROOT / "ScrumTrace" / "Capture" / "SessionRecorder.swift").read_text()
+    assert "AVCaptureDevice.requestAccess(for: .audio)" in recorder
+    sampler = (ROOT / "ScrumTrace" / "Capture" / "MetadataSampler.swift").read_text()
+    assert "ResumeOnce" in sampler
+    assert "requestTrust" in sampler
+    app = (ROOT / "ScrumTrace" / "App" / "AppDelegate.swift").read_text()
+    assert "MetadataSampler.requestTrust" in app
+    controller = (ROOT / "ScrumTrace" / "Processing" / "SessionController.swift").read_text()
+    assert "transcriber.prepare" in controller
+    hud = (ROOT / "ScrumTrace" / "UI" / "RecordingHUDWindow.swift").read_text()
+    assert "wallElapsed" in hud
+
+
 def main() -> None:
     test_export_has_no_archive_and_no_tokens()
     test_agent_context_uses_export_relative_paths()
@@ -161,6 +184,7 @@ def main() -> None:
     test_retry_failed_slices_and_pins()
     test_audio_split_and_brief_loader()
     test_dual_transcript_merge_wired()
+    test_pipeline_timing_stays_in_archive()
     print("contract tests ok")
 
 

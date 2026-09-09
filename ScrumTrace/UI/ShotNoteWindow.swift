@@ -106,6 +106,7 @@ final class AnnotationCanvas: NSView {
 struct ShotNoteView: View {
     let screenshot: NSImage
     let transcriber: WhisperTranscriber
+    var whisperModel: String = "large-v3-turbo"
     var allowsNewCapture: () -> Bool = { true }
     let onSave: (String, NSImage, ShotSource) -> Void
 
@@ -204,6 +205,7 @@ struct ShotNoteView: View {
             recorder = nil
         }
         guard live else { return }
+        try? await transcriber.prepare(model: whisperModel)
         if let text = try? await transcriber.transcribeVoiceNote(at: url), !text.isEmpty {
             note = note.isEmpty ? text : "\(note) \(text)"
             source = note.isEmpty ? .voice : .mixed
@@ -248,6 +250,7 @@ final class ShotNoteWindow: NSPanel {
     init(
         screenshot: NSImage,
         transcriber: WhisperTranscriber,
+        whisperModel: String = "large-v3-turbo",
         allowsNewCapture: @escaping () -> Bool = { true },
         onSave: @escaping (String, NSImage, ShotSource) -> Void
     ) {
@@ -264,6 +267,7 @@ final class ShotNoteWindow: NSPanel {
         let root = ShotNoteView(
             screenshot: screenshot,
             transcriber: transcriber,
+            whisperModel: whisperModel,
             allowsNewCapture: allowsNewCapture,
             onSave: { [weak self] note, image, source in
                 onSave(note, image, source)

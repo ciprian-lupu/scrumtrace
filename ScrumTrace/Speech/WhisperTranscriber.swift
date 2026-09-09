@@ -7,22 +7,49 @@ import WhisperKit
 final class WhisperTranscriber: @unchecked Sendable {
     private var kit: WhisperKit?
     private let lock = NSLock()
+    private var preparing: Task<Void, Error>?
     private(set) var isReady = false
 
     func prepare(model: String = "large-v3-turbo") async throws {
-        let config = WhisperKitConfig(
-            model: model,
-            verbose: false,
-            logLevel: .error,
-            prewarm: true,
-            load: true,
-            download: true
-        )
-        let loaded = try await WhisperKit(config)
+        let work: Task<Void, Error>
         lock.lock()
-        kit = loaded
-        isReady = true
+        if isReady {
+            lock.unlock()
+            return
+        }
+        if let preparing {
+            work = preparing
+            lock.unlock()
+            try await work.value
+            return
+        }
+        work = Task {
+            let config = WhisperKitConfig(
+                model: model,
+                verbose: false,
+                logLevel: .error,
+                prewarm: true,
+                load: true,
+                download: true
+            )
+            let loaded = try await WhisperKit(config)
+            self.lock.lock()
+            self.kit = loaded
+            self.isReady = true
+            self.lock.unlock()
+        }
+        preparing = work
         lock.unlock()
+        do {
+            try await work.value
+        } catch {
+            lock.lock()
+            if !isReady {
+                preparing = nil
+            }
+            lock.unlock()
+            throw error
+        }
     }
 
     func transcribeFile(at url: URL) async throws -> FullTranscript {
