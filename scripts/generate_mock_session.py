@@ -113,7 +113,7 @@ def fill_brief(tasks_html: str, shots_html: str, timeline_html: str) -> str:
         "{{CREATED_AT}}": "2026-09-09T15:30:00Z",
         "{{MEDIA_DURATION}}": "27:00",
         "{{WALL_DURATION}}": "27:15",
-        "{{PAUSE_COUNT}}": "1",
+        "{{PAUSE_COUNT}}": "1 pause",
         "{{PRODUCT_NAME}}": "AthleteTracker",
         "{{REPO_URL}}": "https://github.com/acme/athlete-app",
         "{{TECH_STACK}}": "Next.js, Tailwind, PostgreSQL",

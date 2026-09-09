@@ -60,7 +60,7 @@ struct SessionBriefRenderer {
             "{{CREATED_AT}}": ISO8601DateFormatter().string(from: manifest.createdAt),
             "{{MEDIA_DURATION}}": Self.clock(manifest.duration.mediaSeconds),
             "{{WALL_DURATION}}": Self.clock(manifest.duration.wallSeconds),
-            "{{PAUSE_COUNT}}": "\(manifest.pauses.count)",
+            "{{PAUSE_COUNT}}": manifest.pauses.count == 1 ? "1 pause" : "\(manifest.pauses.count) pauses",
             "{{PRODUCT_NAME}}": HTMLEscaper.escape(manifest.productContext.appName),
             "{{REPO_URL}}": HTMLEscaper.escape(manifest.productContext.repoURL),
             "{{TECH_STACK}}": HTMLEscaper.escape(manifest.productContext.techStack),
@@ -198,7 +198,7 @@ struct SessionBriefRenderer {
           <div class="meta">
             <span>t_media {{MEDIA_DURATION}}</span>
             <span>wall {{WALL_DURATION}}</span>
-            <span>{{PAUSE_COUNT}} pauses</span>
+            <span>{{PAUSE_COUNT}}</span>
             <span>{{CONFIRMED_COUNT}} confirmed</span>
             <span>{{REVIEW_COUNT}} review</span>
           </div>

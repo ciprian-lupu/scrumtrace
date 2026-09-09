@@ -104,6 +104,8 @@ def test_brief_shell_tokens_are_filled() -> None:
         assert token in gen, f"generate_mock_session.py missing {token}"
     html = (ROOT / "samples" / "mock-session" / "export" / "SESSION_BRIEF.html").read_text()
     assert "{{" not in html
+    assert "1 pause" in html
+    assert "1 pauses" not in html
 
 
 def test_mock_clip_ffprobe() -> None:

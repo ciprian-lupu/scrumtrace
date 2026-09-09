@@ -246,6 +246,11 @@ def test_pause_privacy_and_metadata_gate() -> None:
     assert "includesClipAudio: approved && uploadsClip" in controller
     assert "willUploadClip" in controller
     assert "Clip video and the master movie are not uploaded" in controller
+    assert "NSApp.activate" in controller.split("func requestUploadConsent")[1].split("private func captureShot")[0]
+    capture = controller.split("private func captureShot")[1].split("private func finishShot")[0]
+    assert "shots.append(record)" in capture
+    finish = controller.split("private func finishShot")[1].split("private func privacyPause")[0]
+    assert "firstIndex(where: { $0.id == stored.id })" in finish
     clock = (ROOT / "ScrumTrace" / "Capture" / "ClockSynchronizer.swift").read_text()
     assert "CMSyncConvertTime" in clock
     privacy = (ROOT / "ScrumTrace" / "Capture" / "PrivacyGuard.swift").read_text()

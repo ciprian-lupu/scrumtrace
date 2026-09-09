@@ -308,6 +308,7 @@ final class SessionController: ObservableObject {
 
     private func requestUploadConsent() -> UploadConsent {
         #if os(macOS)
+        NSApp.activate(ignoringOtherApps: true)
         let alert = NSAlert()
         alert.messageText = "Send stills and transcript excerpts off this Mac?"
         let capabilities = settings.providerConfiguration()
@@ -343,7 +344,7 @@ final class SessionController: ObservableObject {
     }
 
     private func captureShot() async {
-        guard let sessionURL, var manifest else { return }
+        guard let sessionURL, let manifest else { return }
         suppressHUD = true
         NotificationCenter.default.post(name: .scrumTraceHUDSuppress, object: nil)
         await Task.yield()
@@ -367,12 +368,6 @@ final class SessionController: ObservableObject {
               let rep = NSBitmapImageRep(data: tiff),
               let png = rep.representation(using: .png, properties: [:]) else { return }
         try? png.write(to: rawURL)
-        let meta = await sampler.sample()
-        if let url = meta?.url {
-            log(.url, ["url": url, "title": meta?.windowTitle ?? ""])
-        } else if let meta {
-            log(.window, ["app": meta.appName, "title": meta.windowTitle])
-        }
         let record = ShotRecord(
             id: String(format: "shot-%03d", index),
             tMedia: media,
@@ -381,6 +376,25 @@ final class SessionController: ObservableObject {
             note: "",
             source: .typed
         )
+        // Persist the raw frame immediately so Stop/Quit cannot drop an unsaved Shot window.
+        if var local = manifest {
+            if let idx = local.shots.firstIndex(where: { $0.id == record.id }) {
+                local.shots[idx] = record
+            } else {
+                local.shots.append(record)
+            }
+            try? vault.write(manifest: &local)
+            self.manifest = local
+        }
+        let meta = await sampler.sample()
+        // Re-check after the 200 ms AX wait: Pause can land while we were sampling (C1).
+        if captureState.allowsNewCapture {
+            if let url = meta?.url {
+                log(.url, ["url": url, "title": meta?.windowTitle ?? ""])
+            } else if let meta {
+                log(.window, ["app": meta.appName, "title": meta.windowTitle])
+            }
+        }
         shotWindow = ShotNoteWindow(
             screenshot: image,
             transcriber: transcriber,
@@ -430,7 +444,11 @@ final class SessionController: ObservableObject {
         stored.note = note
         stored.source = source
         stored.annotatedPath = annotatedPath
-        manifest.shots.append(stored)
+        if let idx = manifest.shots.firstIndex(where: { $0.id == stored.id }) {
+            manifest.shots[idx] = stored
+        } else {
+            manifest.shots.append(stored)
+        }
         try? vault.write(manifest: &manifest)
         self.manifest = manifest
         log(.shot, ["id": stored.id, "note": note])
