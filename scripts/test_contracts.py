@@ -145,7 +145,7 @@ def test_zipper_never_deletes_archive() -> None:
     assert "containedExportMember" in leftover
     assert "replacingOccurrences(of: prefix" not in leftover
     models = (ROOT / "ScrumTrace" / "Storage" / "SessionModels.swift").read_text()
-    member = models.split("static func containedExportMember")[1].split("enum MediaBudget")[0]
+    member = models.split("static func containedExportMember")[1].split("static func handoffFileIfPresent")[0]
     assert "isSymbolicLink" in member
     assert "containedRelative" in member
     body = member.split("{", 1)[1]
