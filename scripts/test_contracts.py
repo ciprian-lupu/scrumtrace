@@ -655,8 +655,10 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "fromRelative" in still_fn
     copy_if = projector.split("func copyIfPresent")[1]
     assert "existingSessionFile" in copy_if
-    assert "readContainedData" in copy_if
-    assert "writeContainedData" in copy_if
+    assert "copyContainedToTemporaryFile" in copy_if
+    assert "moveIntoSession" in copy_if
+    assert "readContainedData" not in copy_if
+    assert "writeContainedData" not in copy_if
     assert "isUnderExport(destSession)" in copy_if
     assert "prepareContainedWrite" in copy_if
     assert "copyItem(at: from, to: dest)" not in copy_if

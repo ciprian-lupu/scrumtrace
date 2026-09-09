@@ -322,14 +322,25 @@ struct ExportProjector {
             return nil
         }
         let from = sessionURL.appendingPathComponent(fromRel)
-        guard ExportRel.isReadableSessionFile(from, sessionRoot: sessionURL),
-              let bytes = ExportRel.readContainedData(relative: fromRel, sessionURL: sessionURL) else {
+        guard ExportRel.isReadableSessionFile(from, sessionRoot: sessionURL) else {
+            omitted.append(unreadableSource(fromRelative, sessionURL: sessionURL))
+            return nil
+        }
+        let temp: URL
+        do {
+            temp = try ExportRel.copyContainedToTemporaryFile(
+                relative: fromRel,
+                sessionURL: sessionURL,
+                prefix: "scrumtrace-export-copy"
+            )
+        } catch {
             omitted.append(unreadableSource(fromRelative, sessionURL: sessionURL))
             return nil
         }
         do {
-            try ExportRel.writeContainedData(bytes, relative: prepared, sessionURL: sessionURL)
+            try ExportRel.moveIntoSession(from: temp, relative: prepared, sessionURL: sessionURL)
         } catch {
+            try? FileManager.default.removeItem(at: temp)
             omitted.append(OmittedAsset(path: destRelative, reason: "Copy destination escaped export/"))
             return nil
         }
