@@ -391,7 +391,8 @@ final class SessionController: ObservableObject {
         let rawPath = "\(ScrumTracePath.shots)/\(stem).png"
         let annotatedPath = "\(ScrumTracePath.shots)/\(stem).annotated.png"
         let rawURL = sessionURL.appendingPathComponent(rawPath)
-        guard ExportRel.containedRelative(rawPath, sessionURL: sessionURL) != nil else {
+        guard ExportRel.containedRelative(rawPath, sessionURL: sessionURL) != nil,
+              !ExportRel.parentIsSymbolicLink(rawURL) else {
             lastError = "Could not write the Shot PNG."
             return
         }
@@ -467,11 +468,12 @@ final class SessionController: ObservableObject {
         annotatedPath: String
     ) {
         guard let sessionURL, var manifest else { return }
-        guard ExportRel.containedRelative(annotatedPath, sessionURL: sessionURL) != nil else {
+        let url = sessionURL.appendingPathComponent(annotatedPath)
+        guard ExportRel.containedRelative(annotatedPath, sessionURL: sessionURL) != nil,
+              !ExportRel.parentIsSymbolicLink(url) else {
             lastError = "Could not write the annotated Shot."
             return
         }
-        let url = sessionURL.appendingPathComponent(annotatedPath)
         if let tiff = annotated.tiffRepresentation,
            let rep = NSBitmapImageRep(data: tiff),
            let png = rep.representation(using: .png, properties: [:]) {
@@ -492,8 +494,11 @@ final class SessionController: ObservableObject {
             "note": note,
             "source": source.rawValue
         ]
-        let jsonURL = sessionURL.appendingPathComponent("\(ScrumTracePath.shots)/\(stemFrom(record.id)).json")
-        if let data = try? JSONSerialization.data(withJSONObject: json, options: [.prettyPrinted]) {
+        let jsonRel = "\(ScrumTracePath.shots)/\(stemFrom(record.id)).json"
+        let jsonURL = sessionURL.appendingPathComponent(jsonRel)
+        if ExportRel.containedRelative(jsonRel, sessionURL: sessionURL) != nil,
+           !ExportRel.parentIsSymbolicLink(jsonURL),
+           let data = try? JSONSerialization.data(withJSONObject: json, options: [.prettyPrinted]) {
             do {
                 try data.write(to: jsonURL, options: .atomic)
             } catch {

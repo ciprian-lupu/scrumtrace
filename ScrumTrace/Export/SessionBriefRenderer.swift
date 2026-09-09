@@ -37,7 +37,7 @@ enum HTMLEscaper {
 }
 
 struct SessionBriefRenderer {
-    func render(manifest: SessionManifest, excerpts: [String: String]) -> String {
+    func render(manifest: SessionManifest, excerpts: [String: String], sessionURL: URL) -> String {
         var shell = BriefTemplateLoader.text("brief.shell", ext: "html")
         if shell.isEmpty {
             shell = Self.fallbackShell
@@ -64,10 +64,10 @@ struct SessionBriefRenderer {
             "{{PRODUCT_NAME}}": HTMLEscaper.escape(manifest.productContext.appName),
             "{{REPO_URL}}": HTMLEscaper.escape(manifest.productContext.repoURL),
             "{{TECH_STACK}}": HTMLEscaper.escape(manifest.productContext.techStack),
-            "{{TASKS_HTML}}": confirmed.map { taskCard($0, excerpts: excerpts) }.joined(),
-            "{{NEEDS_REVIEW_HTML}}": review.isEmpty ? "" : review.map { taskCard($0, excerpts: excerpts) }.joined(),
+            "{{TASKS_HTML}}": confirmed.map { taskCard($0, excerpts: excerpts, sessionURL: sessionURL) }.joined(),
+            "{{NEEDS_REVIEW_HTML}}": review.isEmpty ? "" : review.map { taskCard($0, excerpts: excerpts, sessionURL: sessionURL) }.joined(),
             "{{TIMELINE_HTML}}": timeline(manifest),
-            "{{SHOTS_HTML}}": shots(manifest),
+            "{{SHOTS_HTML}}": shots(manifest, sessionURL: sessionURL),
             "{{TRANSCRIPT_HTML}}": transcriptHTML(manifest: manifest, excerpts: excerpts),
             "{{CONFIRMED_COUNT}}": "\(confirmed.count)",
             "{{REVIEW_COUNT}}": "\(review.count)",
@@ -101,9 +101,9 @@ struct SessionBriefRenderer {
         return output
     }
 
-    private func taskCard(_ task: TaskRecord, excerpts: [String: String]) -> String {
+    private func taskCard(_ task: TaskRecord, excerpts: [String: String], sessionURL: URL) -> String {
         let media = task.evidenceMedia.compactMap { path -> String? in
-            guard let rel = ExportRel.handoffPath(path) else { return nil }
+            guard let rel = ExportRel.handoffFileIfPresent(path, sessionURL: sessionURL) else { return nil }
             if rel.hasSuffix(".mp4") {
                 return """
                 <video class="clip" controls preload="metadata" src="\(HTMLEscaper.escape(rel))"></video>
@@ -167,11 +167,11 @@ struct SessionBriefRenderer {
         return "<div class=\"ruler\">\(pauses)\(marks)</div>"
     }
 
-    private func shots(_ manifest: SessionManifest) -> String {
+    private func shots(_ manifest: SessionManifest, sessionURL: URL) -> String {
         let figures = manifest.shots.compactMap { shot -> String? in
             var path: String?
             for candidate in [shot.exportPath].compactMap({ $0 }) + shot.stillCandidates {
-                if let rel = ExportRel.handoffPath(candidate) {
+                if let rel = ExportRel.handoffFileIfPresent(candidate, sessionURL: sessionURL) {
                     path = rel
                     break
                 }

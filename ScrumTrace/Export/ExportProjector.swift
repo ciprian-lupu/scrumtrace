@@ -200,7 +200,11 @@ struct ExportProjector {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         encoder.dateEncodingStrategy = .iso8601
-        try encoder.encode(manifest).write(to: sessionURL.appendingPathComponent(ScrumTracePath.exportManifest))
+        let data = try encoder.encode(manifest)
+        guard let text = String(data: data, encoding: .utf8) else {
+            throw SessionVaultError.writeFailed(ScrumTracePath.exportManifest)
+        }
+        try ExportRel.writeExportText(text, relative: ScrumTracePath.exportManifest, sessionURL: sessionURL)
     }
 
     private func rewriteEvidence(_ path: String) -> String? {

@@ -161,6 +161,9 @@ final class SessionVault: @unchecked Sendable {
     func nextShotIndex(sessionId: String) -> Int {
         guard Self.isValidSessionId(sessionId) else { return 1 }
         let shots = sessionURL(id: sessionId).appendingPathComponent(ScrumTracePath.shots)
+        if (try? shots.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+            return 1
+        }
         let names = (try? fileManager.contentsOfDirectory(atPath: shots.path)) ?? []
         let numbers = names.compactMap { name -> Int? in
             let stem = (name as NSString).deletingPathExtension

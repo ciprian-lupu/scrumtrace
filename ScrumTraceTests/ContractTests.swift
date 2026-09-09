@@ -26,6 +26,48 @@ final class ContractTests: XCTestCase {
         XCTAssertNil(ExportRel.normalizedComponents("export/foo/../../.."))
     }
 
+    func testHandoffFileIfPresentRequiresExportRegularFile() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("st-handoff-\(UUID().uuidString)")
+        let shots = root.appendingPathComponent("export/shots")
+        try FileManager.default.createDirectory(at: shots, withIntermediateDirectories: true)
+        try Data("jpg").write(to: shots.appendingPathComponent("001.jpg"))
+        defer { try? FileManager.default.removeItem(at: root) }
+        XCTAssertEqual(
+            ExportRel.handoffFileIfPresent("export/shots/001.jpg", sessionURL: root),
+            "shots/001.jpg"
+        )
+        XCTAssertNil(ExportRel.handoffFileIfPresent("export/shots/missing.jpg", sessionURL: root))
+        XCTAssertNil(ExportRel.handoffFileIfPresent("archive/session.mp4", sessionURL: root))
+        let outside = FileManager.default.temporaryDirectory.appendingPathComponent("st-handoff-secret-\(UUID().uuidString)")
+        try Data("secret").write(to: outside)
+        defer { try? FileManager.default.removeItem(at: outside) }
+        try FileManager.default.createSymbolicLink(
+            at: shots.appendingPathComponent("leak.jpg"),
+            withDestinationURL: outside
+        )
+        XCTAssertNil(ExportRel.handoffFileIfPresent("export/shots/leak.jpg", sessionURL: root))
+    }
+
+    func testWriteExportTextReplacesSymlinkInsteadOfFollowing() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("st-write-export-\(UUID().uuidString)")
+        let export = root.appendingPathComponent("export")
+        let archive = root.appendingPathComponent("archive")
+        try FileManager.default.createDirectory(at: export, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: archive, withIntermediateDirectories: true)
+        let secret = archive.appendingPathComponent("session.mp4")
+        try Data("MASTER").write(to: secret)
+        let dest = export.appendingPathComponent("AGENT_CONTEXT.md")
+        try FileManager.default.createSymbolicLink(at: dest, withDestinationURL: secret)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try ExportRel.writeExportText("# ctx\n", relative: "export/AGENT_CONTEXT.md", sessionURL: root)
+        XCTAssertEqual(try String(contentsOf: dest, encoding: .utf8), "# ctx\n")
+        XCTAssertNotEqual(
+            (try? dest.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) ?? false,
+            true
+        )
+        XCTAssertEqual(try String(contentsOf: secret, encoding: .utf8), "MASTER")
+    }
+
     func testSessionIdRejectsPathTraversal() {
         XCTAssertTrue(SessionVault.isValidSessionId("2026-09-09-1530-abc123"))
         XCTAssertFalse(SessionVault.isValidSessionId("../Movies"))

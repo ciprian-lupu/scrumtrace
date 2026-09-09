@@ -275,24 +275,12 @@ final class SessionProcessor: @unchecked Sendable {
         PackBudget.removeEscapingExportLinks(
             exportDir: sessionURL.appendingPathComponent(ScrumTracePath.export)
         )
-        let markdown = agentRenderer.render(manifest: projected)
-        let prompt = agentRenderer.prompt(manifest: projected)
-        let html = briefRenderer.render(manifest: projected, excerpts: excerpts)
-        try markdown.write(
-            to: sessionURL.appendingPathComponent(ScrumTracePath.agentContext),
-            atomically: true,
-            encoding: .utf8
-        )
-        try prompt.write(
-            to: sessionURL.appendingPathComponent(ScrumTracePath.agentPrompt),
-            atomically: true,
-            encoding: .utf8
-        )
-        try html.write(
-            to: sessionURL.appendingPathComponent(ScrumTracePath.sessionBrief),
-            atomically: true,
-            encoding: .utf8
-        )
+        let markdown = agentRenderer.render(manifest: projected, sessionURL: sessionURL)
+        let prompt = agentRenderer.prompt(manifest: projected, sessionURL: sessionURL)
+        let html = briefRenderer.render(manifest: projected, excerpts: excerpts, sessionURL: sessionURL)
+        try ExportRel.writeExportText(markdown, relative: ScrumTracePath.agentContext, sessionURL: sessionURL)
+        try ExportRel.writeExportText(prompt, relative: ScrumTracePath.agentPrompt, sessionURL: sessionURL)
+        try ExportRel.writeExportText(html, relative: ScrumTracePath.sessionBrief, sessionURL: sessionURL)
         try projector.writeProjectionManifest(projected, sessionURL: sessionURL)
     }
 

@@ -248,6 +248,8 @@ def test_retry_failed_slices_and_pins() -> None:
     assert "isValidSessionId" in vault
     assert "invalid-session-id" in vault
     assert "isContainedRegularFile" in vault
+    next_shot = vault.split("func nextShotIndex")[1].split("func loadPinTimes")[0]
+    assert "isSymbolicLink" in next_shot
     events_fn = vault.split("private func events")[1].split("func revealInFinder")[0]
     assert "isContainedRegularFile" in events_fn
     append = vault.split("func appendEvent")[1].split("func recentSessions")[0]
@@ -269,6 +271,7 @@ def test_retry_failed_slices_and_pins() -> None:
     assert "try? vault.write(manifest: &local)" not in capture
     assert "annotatedPath: nil" in capture
     assert "containedRelative(rawPath" in capture
+    assert "parentIsSymbolicLink" in capture
     finish = controller.split("private func finishShot")[1].split("private func privacyPause")[0]
     assert "try? vault.write" not in finish
     assert "catalog write failed" in finish
@@ -276,6 +279,7 @@ def test_retry_failed_slices_and_pins() -> None:
     assert "try? data.write" not in finish
     assert "options: .atomic" in finish
     assert "containedRelative(annotatedPath" in finish
+    assert "parentIsSymbolicLink" in finish
     stop = controller.split("func stopRecordingAsync")[1].split("func runProcessor")[0]
     assert stop.index("freezeWriters") < stop.index('phase = .transcribing')
     assert "scrumTraceSessionEnding" in stop
@@ -408,6 +412,7 @@ def test_pause_privacy_and_metadata_gate() -> None:
     assert "this export folder" in agent
     assert "Never open the private capture folder" in agent
     assert "handoffPath" in agent
+    assert "handoffFileIfPresent" in agent
     assert "wrapUntrustedInline" in agent
     assert "pauseLabel" in agent
     assert "pauses.count) pauses" not in agent
@@ -489,6 +494,8 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "func needsReprompt" in models
     assert "func handoffPath" in models
     assert "func omittedHandoffPath" in models
+    assert "func handoffFileIfPresent" in models
+    assert "func writeExportText" in models
     assert "enum TaskRanking" in models
     assert "stillCandidates" in models
     assert "scrumTraceSessionEnding" in models
@@ -511,6 +518,8 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "hasPrefix(prefix)" not in copy_if
     agent = (ROOT / "ScrumTrace" / "Export" / "AgentContextRenderer.swift").read_text()
     assert "stillCandidates" in agent.split("func displayPath")[1]
+    assert "handoffFileIfPresent" in agent.split("func displayPath")[1]
+    assert "handoffFileIfPresent" in agent.split("private func taskBlock")[1].split("private func displayPath")[0]
     assert "Inspect the linked evidence only" in processor
     assert "remain in archive/" not in processor
     assert "applyExportEvidence" in processor
@@ -568,6 +577,7 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "writeExportDocuments" in processor.split("Docs first")[1].split("var zipResult")[0]
     docs = processor.split("func writeExportDocuments")[1].split("private func transcribe")[0]
     assert "removeEscapingExportLinks" in docs
+    assert "writeExportText" in docs
     zipper_over = zipper.split("if size > MediaBudget.maxZipBytes")[1].split("func writeZip")[0]
     assert "throw" not in zipper_over
     assert "Pack still" in zipper_over
@@ -628,7 +638,7 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "stoppedWall" in clock
     assert "func markRecordingStopped" in clock
     shots_fn = brief_src.split("private func shots")[1].split("private func omittedHTML")[0]
-    assert "handoffPath" in shots_fn
+    assert "handoffFileIfPresent" in shots_fn
     google = (ROOT / "ScrumTrace" / "AI" / "GoogleClient.swift").read_text()
     assert "var candidates: [Candidate]?" in google
     assert "var content: Content?" in google

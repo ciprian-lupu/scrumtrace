@@ -55,6 +55,8 @@ def test_export_rel_in_swift() -> None:
     models = (ROOT / "ScrumTrace" / "Storage" / "SessionModels.swift").read_text()
     assert "func handoffPath" in models
     assert "func omittedHandoffPath" in models
+    assert "func handoffFileIfPresent" in models
+    assert "func writeExportText" in models
     clip = (ROOT / "ScrumTrace" / "Slicing" / "ClipExporter.swift").read_text()
     assert "tightenExportClips" in clip
     assert "containedExportMember" in clip

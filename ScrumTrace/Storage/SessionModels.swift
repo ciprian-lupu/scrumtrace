@@ -133,6 +133,41 @@ enum ExportRel {
         if comps.contains("archive") { return nil }
         return rel
     }
+
+    /// Gate 6: AGENT_CONTEXT / SESSION_BRIEF may only link a file that exists
+    /// under `export/` as a regular file after projection and omit.
+    static func handoffFileIfPresent(_ path: String, sessionURL: URL) -> String? {
+        guard let rel = handoffPath(path) else { return nil }
+        guard existingSessionFile(sessionPath(rel), sessionURL: sessionURL) != nil else { return nil }
+        return rel
+    }
+
+    /// Write UTF-8 into `export/`. A planted symlink at the dest is deleted first
+    /// so the write cannot follow into `archive/` or overwrite a sibling via a link.
+    static func writeExportText(_ text: String, relative: String, sessionURL: URL) throws {
+        let session = sessionPath(relative)
+        guard isUnderExport(session), let parts = normalizedComponents(session) else {
+            throw SessionVaultError.writeFailed(relative)
+        }
+        let url = sessionURL.appendingPathComponent(parts.joined(separator: "/"))
+        if (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+            try FileManager.default.removeItem(at: url)
+        }
+        guard let destRel = containedRelative(session, sessionURL: sessionURL),
+              isUnderExport(destRel) else {
+            throw SessionVaultError.writeFailed(relative)
+        }
+        try text.write(
+            to: sessionURL.appendingPathComponent(destRel),
+            atomically: true,
+            encoding: .utf8
+        )
+    }
+
+    static func parentIsSymbolicLink(_ file: URL) -> Bool {
+        let parent = file.deletingLastPathComponent()
+        return (try? parent.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true
+    }
 }
 
 enum MediaBudget {
