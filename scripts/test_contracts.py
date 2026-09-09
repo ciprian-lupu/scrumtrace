@@ -355,6 +355,9 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "{{TIMELINE_HTML}}" in fallback
     assert "{{SHOTS_HTML}}" in fallback
     assert "data-lightbox" in brief.split("let fallbackJS")[1]
+    js = (ROOT / "ScrumTrace" / "Export" / "Resources" / "brief.js").read_text()
+    assert 'box.setAttribute("aria-label", img.alt)' in js
+    assert "box.focus()" in js
     prompts = (ROOT / "ScrumTrace" / "AI" / "PromptTemplates.swift").read_text()
     assert 'wrapUntrusted("Human shot note' in prompts
     pbx = (ROOT / "ScrumTrace.xcodeproj" / "project.pbxproj").read_text()

@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 
@@ -109,7 +110,6 @@ def test_brief_shell_tokens_are_filled() -> None:
 
 
 def test_mock_clip_ffprobe() -> None:
-    import json
     import subprocess
 
     clip = ROOT / "samples" / "mock-session" / "export" / "media" / "task-02" / "clip.mp4"
@@ -138,6 +138,24 @@ def test_mock_clip_ffprobe() -> None:
     assert int(stream["height"]) == 720
     duration = float(data["format"]["duration"])
     assert 15.0 <= duration <= 17.0, duration
+    audio = subprocess.check_output(
+        [
+            "ffprobe",
+            "-v",
+            "error",
+            "-select_streams",
+            "a:0",
+            "-show_entries",
+            "stream=codec_name",
+            "-of",
+            "json",
+            str(clip),
+        ],
+        text=True,
+    )
+    audio_data = json.loads(audio)
+    assert audio_data["streams"], "clip is missing an AAC track"
+    assert audio_data["streams"][0]["codec_name"] == "aac"
 
 
 def test_mock_agent_context_paths_exist() -> None:
@@ -147,6 +165,15 @@ def test_mock_agent_context_paths_exist() -> None:
         assert (export / rel).is_file(), f"missing {rel}"
     for rel in re.findall(r"`(media/[^`]+)`", ctx):
         assert (export / rel).is_file(), f"missing {rel}"
+    html = (export / "SESSION_BRIEF.html").read_text()
+    for rel in re.findall(r'(?:src|href)="([^"]+)"', html):
+        if rel.startswith("http://") or rel.startswith("https://") or rel.startswith("#"):
+            continue
+        assert (export / rel).is_file(), f"SESSION_BRIEF missing {rel}"
+    manifest = json.loads((export / "session.manifest.json").read_text())
+    for task in manifest.get("tasks", []):
+        for rel in task.get("evidence_media", []):
+            assert (export / rel).is_file(), f"manifest missing {rel}"
 
 
 def test_mock_pack_zip_is_export_only() -> None:

@@ -80,9 +80,8 @@ def still_from_video_script(path: Path) -> None:
 def write_clip(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     fontfile = str(FONT_SANS if FONT_SANS.exists() else FONT_UI)
-    filter_complex = (
-        "color=c=0x10140f:s=1280x720:d=16:r=30[bg];"
-        "[bg]drawtext=fontfile={font}:fontsize=42:fontcolor=0xe8dcc8:x=64:y=80:text='Ingest recovery',"
+    vf = (
+        "drawtext=fontfile={font}:fontsize=42:fontcolor=0xe8dcc8:x=64:y=80:text='Ingest recovery',"
         "drawtext=fontfile={font}:fontsize=28:fontcolor=0xf4efe3:x=64:y=220:enable='lt(t,5)':"
         "text='1. Enable TRACE_SYNC in Remote Config',"
         "drawtext=fontfile={font}:fontsize=28:fontcolor=0xf4efe3:x=64:y=220:enable='gte(t,5)*lt(t,10)':"
@@ -92,9 +91,16 @@ def write_clip(path: Path) -> None:
     ).format(font=fontfile, token=VIDEO_TOKEN)
     subprocess.run(
         [
-            "ffmpeg", "-y", "-filter_complex", filter_complex,
+            "ffmpeg", "-y",
+            "-f", "lavfi", "-i", "color=c=0x10140f:s=1280x720:d=16:r=30",
+            "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo",
+            "-vf", vf,
             "-c:v", "libx264", "-pix_fmt", "yuv420p", "-profile:v", "main",
-            "-b:v", "1200k", "-t", "16", str(path),
+            "-b:v", "1200k",
+            "-c:a", "aac", "-b:a", "96k",
+            "-shortest",
+            "-t", "16",
+            str(path),
         ],
         check=True,
         capture_output=True,

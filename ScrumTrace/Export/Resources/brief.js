@@ -4,6 +4,7 @@
   box.setAttribute("role", "dialog");
   box.setAttribute("aria-modal", "true");
   box.setAttribute("aria-label", "Screenshot");
+  box.setAttribute("tabindex", "-1");
   box.innerHTML = "<img alt=''>";
   document.body.appendChild(box);
   const img = box.querySelector("img");
@@ -11,6 +12,7 @@
     box.classList.remove("open");
     img.removeAttribute("src");
     img.alt = "";
+    box.setAttribute("aria-label", "Screenshot");
   };
   box.addEventListener("click", close);
   document.addEventListener("keydown", (event) => {
@@ -28,7 +30,9 @@
         (thumb && thumb.getAttribute("alt")) ||
         (link.textContent || "").trim() ||
         "Screenshot";
+      box.setAttribute("aria-label", img.alt);
       box.classList.add("open");
+      box.focus();
     });
   });
 })();
