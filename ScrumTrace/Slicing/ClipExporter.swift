@@ -106,6 +106,9 @@ struct ClipExporter {
         session.outputFileType = .mp4
         session.shouldOptimizeForNetworkUse = true
         session.timeRange = CMTimeRange(start: start, duration: duration)
+        let seconds = max(CMTimeGetSeconds(duration), 1)
+        let bytesPerSecond = Double(MediaBudget.clipVideoBitrate + MediaBudget.clipAudioBitrate) / 8.0
+        session.fileLengthLimit = Int64(bytesPerSecond * seconds * 1.25)
         // macOS 14: exportAsynchronously. Do not call the later export-to-as API.
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             session.exportAsynchronously {

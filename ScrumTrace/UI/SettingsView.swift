@@ -17,8 +17,11 @@ struct SettingsView: View {
                 TextField("Endpoint", text: $settings.baseURL)
                 TextField("Model", text: $settings.model)
                 if settings.provider == .anthropic {
+                    Text("Documented Messages models: claude-sonnet-5, claude-opus-5, claude-haiku-4-5. Retired claude-3-5 and claude-3-7 ids are refused.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                     if settings.model.isEmpty {
-                        Text("Anthropic stays off until you set a currently documented Messages model. Do not use retired claude-3-5 or claude-3-7 ids.")
+                        Text("Anthropic stays off until you set a currently documented Messages model.")
                             .font(.caption)
                             .foregroundStyle(.red)
                     } else if AIProviderConfiguration.isRetiredAnthropic(settings.model) {

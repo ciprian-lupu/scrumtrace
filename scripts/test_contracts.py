@@ -37,6 +37,11 @@ def test_retired_anthropic_ids() -> None:
     settings = (ROOT / "ScrumTrace" / "App" / "AppSettings.swift").read_text()
     assert "claude-3-5" in settings
     assert "claude-3-7" in settings
+    assert "claude-sonnet-5" in settings
+    ui = (ROOT / "ScrumTrace" / "UI" / "SettingsView.swift").read_text()
+    assert "claude-sonnet-5" in ui
+    assert "claude-opus-5" in ui
+    assert "claude-haiku-4-5" in ui
     processor = (ROOT / "ScrumTrace" / "Processing" / "SessionProcessor.swift").read_text()
     assert "isRetiredAnthropic" in processor
 
@@ -79,6 +84,8 @@ def test_clip_exporter_macos14() -> None:
     assert "AVAssetExportPreset1280x720" in clip
     assert "tightenExportClips" in clip
     assert "AVAssetExportPreset640x480" in clip
+    assert "fileLengthLimit" in clip
+    assert "clipVideoBitrate" in clip
 
 
 def test_handoff_log_names_mp4_tools() -> None:

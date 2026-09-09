@@ -19,7 +19,7 @@ enum AIProviderKind: String, Codable, CaseIterable, Identifiable, Sendable {
     var defaultModel: String {
         switch self {
         case .openaiCompatible: return "gpt-4o"
-        case .anthropic: return "" // Set a currently documented Messages API model in Settings. Do not use retired 3.5 / 3.7 IDs.
+        case .anthropic: return "claude-sonnet-5"
         case .google: return "gemini-2.5-flash"
         }
     }
