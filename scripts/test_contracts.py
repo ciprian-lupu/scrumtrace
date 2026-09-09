@@ -245,6 +245,11 @@ def test_pause_gate_hold_to_talk() -> None:
     assert "holdingTalk = true" in start_talk
     assert start_talk.index("guard let rec") < start_talk.index("holdingTalk = true")
     assert start_talk.index("guard rec.record()") < start_talk.index("holdingTalk = true")
+    assert start_talk.index("recorder = rec") < start_talk.index("guard rec.record()")
+    assert start_talk.index("holdingTalk = true") < start_talk.index("abortTalk()")
+    abort = shot.split("private func abortTalk()")[1].split("private func stopTalk")[0]
+    assert "guard holdingTalk else { return }" not in abort
+    assert "removeItem(at: url)" in abort
     hud = (ROOT / "ScrumTrace" / "UI" / "RecordingHUDWindow.swift").read_text()
     assert "allowsNewCapture" in hud
 
