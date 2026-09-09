@@ -303,7 +303,8 @@ final class SessionController: ObservableObject {
         guard let sessionURL, var manifest else { return }
         suppressHUD = true
         NotificationCenter.default.post(name: .scrumTraceHUDSuppress, object: nil)
-        try? await Task.sleep(nanoseconds: 50_000_000)
+        await Task.yield()
+        try? await Task.sleep(nanoseconds: 100_000_000)
         defer {
             suppressHUD = false
             NotificationCenter.default.post(name: .scrumTraceHUDSuppress, object: nil)

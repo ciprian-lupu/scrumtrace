@@ -152,6 +152,7 @@ blockquote {
   background: rgba(240, 163, 94, 0.05);
 }
 .spk { display: block; font-family: "IBM Plex Mono", monospace; font-size: 11px; color: var(--amber); margin-bottom: 4px; }
+.when { display: block; font-family: "IBM Plex Mono", monospace; font-size: 10px; color: var(--muted); margin-bottom: 6px; }
 .evidence { display: grid; grid-template-columns: 1.2fr 0.8fr; gap: 12px; margin-top: 12px; }
 .clip { width: 100%; border-radius: 12px; background: #000; }
 .still img, figure img { width: 100%; border-radius: 12px; display: block; }
@@ -246,7 +247,7 @@ figcaption { font-family: "IBM Plex Mono", monospace; font-size: 11px; color: va
         <div><dt>Inferred</dt><dd>Client validation or submit handler is not enabling Save after the date field is filled.</dd></div>
       </dl>
       <p class="agent">Inspect the Save control and form validation on the athlete create screen. Ground claims in the linked evidence only.</p>
-      <blockquote><span class="spk">presenter</span>this does nothing, it should store the athlete</blockquote>
+      <blockquote><span class="spk">presenter</span><span class="when">t_media 3:04–3:07</span>this does nothing, it should store the athlete</blockquote>
       <div class="evidence">
         <a class="still" href="shots/001.annotated.png" data-lightbox><img src="shots/001.annotated.png" alt="Save control"></a>
       </div>

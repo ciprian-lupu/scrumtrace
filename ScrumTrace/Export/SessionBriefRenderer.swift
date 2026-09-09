@@ -95,7 +95,8 @@ struct SessionBriefRenderer {
             """
         }.joined()
         let quotes = task.quotes.map { quote in
-            "<blockquote><span class=\"spk\">\(HTMLEscaper.escape(quote.speaker))</span>\(HTMLEscaper.escape(quote.text))</blockquote>"
+            let when = "t_media \(Self.clock(quote.tMediaStart))–\(Self.clock(quote.tMediaEnd))"
+            return "<blockquote><span class=\"spk\">\(HTMLEscaper.escape(quote.speaker))</span><span class=\"when\">\(HTMLEscaper.escape(when))</span>\(HTMLEscaper.escape(quote.text))</blockquote>"
         }.joined()
         return """
         <article class="take" id="\(HTMLEscaper.escape(task.taskId))" data-status="\(task.status.rawValue)">
@@ -254,6 +255,8 @@ struct SessionBriefRenderer {
     .lightbox { position: fixed; inset: 0; background: rgba(6,5,4,.92); display: none; place-items: center; z-index: 20; padding: 24px; }
     .lightbox.open { display: grid; }
     .lightbox img { max-width: min(92vw, 1400px); max-height: 92vh; }
+    .spk { display: block; font-size: 11px; color: #f0a35e; }
+    .when { display: block; font-size: 10px; opacity: 0.6; margin-bottom: 6px; }
     @media (max-width: 860px) { .epistemic { grid-template-columns: 1fr; } }
     """
 

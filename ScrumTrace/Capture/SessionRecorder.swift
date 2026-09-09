@@ -90,9 +90,11 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             try startMicrophoneFallback()
             microphoneWav = true
         }
+        writerQueue.sync {
+            self.stream = stream
+            self.started = true
+        }
         try await stream.startCapture()
-        self.stream = stream
-        started = true
     }
 
     func setPaused(_ next: Bool) {
@@ -110,11 +112,16 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
     }
 
     func stop() async throws {
-        writerQueue.sync { self.paused = true }
-        if let stream {
-            try await stream.stopCapture()
+        let live = writerQueue.sync { () -> SCStream? in
+            self.paused = true
+            self.started = false
+            let captured = self.stream
+            self.stream = nil
+            return captured
         }
-        stream = nil
+        if let live {
+            try await live.stopCapture()
+        }
         engine?.stop()
         engine = nil
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
@@ -131,7 +138,6 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
                 continuation.resume()
             }
         }
-        started = false
         let layout = CaptureAudioLayout(
             microphoneWav: microphoneWav,
             systemAudioInMovie: true

@@ -271,8 +271,18 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "suppressHUD" in controller
     recorder = (ROOT / "ScrumTrace" / "Capture" / "SessionRecorder.swift").read_text()
     assert "withCheckedContinuation" in recorder
-    gen = (ROOT / "scripts" / "generate_mock_session.py").read_text()
-    assert '"-@"' in gen
+    assert "100_000_000" in controller
+    assert "scrumtrace-note-" in shot
+    brief_src = (ROOT / "ScrumTrace" / "Export" / "SessionBriefRenderer.swift").read_text()
+    assert "t_media" in brief_src.split("task.quotes.map")[1].split("return \"\"\"")[0]
+    models = (ROOT / "ScrumTrace" / "Storage" / "SessionModels.swift").read_text()
+    task_decode = models.split("struct TaskRecord")[1].split("struct CandidateRecord")[0]
+    assert "decodeIfPresent([QuoteRecord]" in task_decode
+    recorder = (ROOT / "ScrumTrace" / "Capture" / "SessionRecorder.swift").read_text()
+    start_fn = recorder.split("func start()")[1].split("func setPaused")[0]
+    assert "self.started = true" in start_fn
+    assert "startCapture" in start_fn
+    assert start_fn.index("self.started = true") < start_fn.index("startCapture")
 
 
 def main() -> None:

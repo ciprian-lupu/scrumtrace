@@ -146,6 +146,7 @@ blockquote {
   background: rgba(240, 163, 94, 0.05);
 }
 .spk { display: block; font-family: "IBM Plex Mono", monospace; font-size: 11px; color: var(--amber); margin-bottom: 4px; }
+.when { display: block; font-family: "IBM Plex Mono", monospace; font-size: 10px; color: var(--muted); margin-bottom: 6px; }
 .evidence { display: grid; grid-template-columns: 1.2fr 0.8fr; gap: 12px; margin-top: 12px; }
 .clip { width: 100%; border-radius: 12px; background: #000; }
 .still img, figure img { width: 100%; border-radius: 12px; display: block; }

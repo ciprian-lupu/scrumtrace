@@ -290,6 +290,50 @@ struct TaskRecord: Codable, Sendable, Identifiable, Hashable {
         case evidenceMedia = "evidence_media"
         case confidence
     }
+
+    init(
+        taskId: String,
+        sourceSliceId: String,
+        kind: TaskKind,
+        status: TaskStatus,
+        title: String,
+        observed: String,
+        stated: String,
+        inferred: String,
+        agentInstructions: String,
+        quotes: [QuoteRecord],
+        evidenceMedia: [String],
+        confidence: Double
+    ) {
+        self.taskId = taskId
+        self.sourceSliceId = sourceSliceId
+        self.kind = kind
+        self.status = status
+        self.title = title
+        self.observed = observed
+        self.stated = stated
+        self.inferred = inferred
+        self.agentInstructions = agentInstructions
+        self.quotes = quotes
+        self.evidenceMedia = evidenceMedia
+        self.confidence = confidence
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        taskId = try container.decode(String.self, forKey: .taskId)
+        sourceSliceId = try container.decode(String.self, forKey: .sourceSliceId)
+        kind = try container.decode(TaskKind.self, forKey: .kind)
+        status = try container.decode(TaskStatus.self, forKey: .status)
+        title = try container.decode(String.self, forKey: .title)
+        observed = try container.decodeIfPresent(String.self, forKey: .observed) ?? ""
+        stated = try container.decodeIfPresent(String.self, forKey: .stated) ?? ""
+        inferred = try container.decodeIfPresent(String.self, forKey: .inferred) ?? ""
+        agentInstructions = try container.decodeIfPresent(String.self, forKey: .agentInstructions) ?? ""
+        quotes = try container.decodeIfPresent([QuoteRecord].self, forKey: .quotes) ?? []
+        evidenceMedia = try container.decodeIfPresent([String].self, forKey: .evidenceMedia) ?? []
+        confidence = try container.decodeIfPresent(Double.self, forKey: .confidence) ?? 0
+    }
 }
 
 struct CandidateRecord: Codable, Sendable, Hashable {

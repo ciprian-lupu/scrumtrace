@@ -163,7 +163,7 @@ def main() -> None:
         <div><dt>Inferred</dt><dd>Client validation or submit handler is not enabling Save after the date field is filled.</dd></div>
       </dl>
       <p class="agent">Inspect the Save control and form validation on the athlete create screen. Ground claims in the linked evidence only.</p>
-      <blockquote><span class="spk">presenter</span>this does nothing, it should store the athlete</blockquote>
+      <blockquote><span class="spk">presenter</span><span class="when">t_media 3:04–3:07</span>this does nothing, it should store the athlete</blockquote>
       <div class="evidence">
         <a class="still" href="shots/001.annotated.png" data-lightbox><img src="shots/001.annotated.png" alt="Save control"></a>
       </div>
@@ -215,6 +215,8 @@ Drop **this export folder** into a coding-agent workspace. Read this file first,
 - Stated: "this does nothing, it should store the athlete"
 - Inferred: Client validation or submit handler is not enabling Save after the date field is filled.
 - Agent instructions: Inspect the Save control and form validation on the athlete create screen. Use only the linked evidence. Do not invent UI copy, error codes, or sequences that are not in the evidence.
+- Quotes:
+  - presenter [t_media 184.1s–187.4s]: "this does nothing, it should store the athlete"
 - Evidence:
   - ![](shots/001.annotated.png)
   - ![](shots/001.png)
@@ -297,6 +299,14 @@ All timestamps are `t_media`. Canonical session files are not in this folder. So
                 "stated": "this does nothing, it should store the athlete",
                 "inferred": "Client validation is not enabling Save after the date field is filled.",
                 "agent_instructions": "Inspect the Save control and form validation. Ground claims in the linked evidence only.",
+                "quotes": [
+                    {
+                        "speaker": "presenter",
+                        "text": "this does nothing, it should store the athlete",
+                        "t_media_start": 184.1,
+                        "t_media_end": 187.4,
+                    }
+                ],
                 "evidence_media": ["shots/001.annotated.png", "shots/001.png"],
             },
             {

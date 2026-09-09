@@ -83,7 +83,9 @@ struct AgentContextRenderer {
         if !task.quotes.isEmpty {
             lines.append("- Quotes:")
             for quote in task.quotes {
-                lines.append("  - \(quote.speaker): \"\(quote.text)\"")
+                lines.append(
+                    "  - \(quote.speaker) [t_media \(String(format: "%.1f", quote.tMediaStart))s–\(String(format: "%.1f", quote.tMediaEnd))s]: \"\(quote.text)\""
+                )
             }
         }
         lines.append("- Evidence:")

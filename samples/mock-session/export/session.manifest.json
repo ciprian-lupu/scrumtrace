@@ -65,6 +65,14 @@
       "stated": "this does nothing, it should store the athlete",
       "inferred": "Client validation is not enabling Save after the date field is filled.",
       "agent_instructions": "Inspect the Save control and form validation. Ground claims in the linked evidence only.",
+      "quotes": [
+        {
+          "speaker": "presenter",
+          "text": "this does nothing, it should store the athlete",
+          "t_media_start": 184.1,
+          "t_media_end": 187.4
+        }
+      ],
       "evidence_media": [
         "shots/001.annotated.png",
         "shots/001.png"

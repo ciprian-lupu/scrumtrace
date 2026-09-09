@@ -171,7 +171,9 @@ struct ShotNoteView: View {
         guard !holdingTalk else { return }
         guard allowsNewCapture() else { return }
         holdingTalk = true
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("scrumtrace-note.wav")
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "scrumtrace-note-\(UUID().uuidString).wav"
+        )
         try? FileManager.default.removeItem(at: url)
         let settings: [String: Any] = [
             AVFormatIDKey: kAudioFormatLinearPCM,

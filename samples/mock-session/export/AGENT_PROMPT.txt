@@ -20,6 +20,8 @@ Drop **this export folder** into a coding-agent workspace. Read this file first,
 - Stated: "this does nothing, it should store the athlete"
 - Inferred: Client validation or submit handler is not enabling Save after the date field is filled.
 - Agent instructions: Inspect the Save control and form validation on the athlete create screen. Use only the linked evidence. Do not invent UI copy, error codes, or sequences that are not in the evidence.
+- Quotes:
+  - presenter [t_media 184.1s–187.4s]: "this does nothing, it should store the athlete"
 - Evidence:
   - ![](shots/001.annotated.png)
   - ![](shots/001.png)
