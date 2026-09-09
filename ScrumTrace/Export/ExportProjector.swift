@@ -321,13 +321,18 @@ struct ExportProjector {
             return nil
         }
         let from = sessionURL.appendingPathComponent(fromRel)
-        let dest = sessionURL.appendingPathComponent(prepared)
-        try ExportRel.removeItemIfRegularFile(dest, sessionRoot: sessionURL)
-        if (try? dest.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+        let temp = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "scrumtrace-copy-\(UUID().uuidString)"
+        )
+        try? FileManager.default.removeItem(at: temp)
+        do {
+            try FileManager.default.copyItem(at: from, to: temp)
+            try ExportRel.moveIntoSession(from: temp, relative: prepared, sessionURL: sessionURL)
+        } catch {
+            try? FileManager.default.removeItem(at: temp)
             omitted.append(OmittedAsset(path: destRelative, reason: "Copy destination escaped export/"))
             return nil
         }
-        try FileManager.default.copyItem(at: from, to: dest)
         return prepared
     }
 }
