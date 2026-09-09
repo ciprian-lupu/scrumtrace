@@ -85,6 +85,16 @@ def test_html_escaper_order() -> None:
     amp = renderer.find('replacingOccurrences(of: "&"')
     lt = renderer.find('replacingOccurrences(of: "<"')
     assert 0 <= amp < lt, "escape & before <"
+    assert "func httpHref" in renderer
+    assert 'scheme == "http"' in renderer
+    assert 'scheme == "https"' in renderer
+    assert 'return "#"' in renderer
+    assert "{{REPO_HREF}}" in renderer
+    shell = (ROOT / "ScrumTrace" / "Export" / "Resources" / "brief.shell.html").read_text()
+    assert 'href="{{REPO_HREF}}"' in shell
+    assert 'href="{{REPO_URL}}"' not in shell
+    gen = (ROOT / "scripts" / "generate_mock_session.py").read_text()
+    assert '"{{REPO_HREF}}"' in gen
     render_fn = renderer.split("func render")[1].split("func taskCard")[0]
     assert "applyReplacements" in render_fn
     assert "replacingOccurrences(of: token" not in render_fn
@@ -297,6 +307,15 @@ def test_pause_gate_hold_to_talk() -> None:
     persist = shot.split("func persist()")[1].split("func startTalk()")[0]
     assert "abortTalk()" in persist
     assert "guard !saved else { return }" in persist
+    gate = shot.split("func applyCaptureGate")[1].split("func persist()")[0]
+    assert "posted?.allowsNewCapture" in gate
+    assert "abortTalk()" in gate
+    assert "Thread.isMainThread" in gate
+    stop_talk = shot.split("func stopTalk()")[1].split("struct ShotNoteView")[0]
+    assert "guard live, !saved" in stop_talk
+    assert "guard allowsNewCapture(), !saved" in stop_talk
+    assert "guard !saved else { return }" in stop_talk
+    assert "notification.object as? CaptureSessionState" in shot
     hud = (ROOT / "ScrumTrace" / "UI" / "RecordingHUDWindow.swift").read_text()
     assert "allowsNewCapture" in hud
 
@@ -566,6 +585,17 @@ def test_pause_privacy_and_metadata_gate() -> None:
     tick = privacy.split("func tick()")[1].split("func currentCredentialApp")[0]
     assert "freezeCapture?()" in tick
     assert tick.index("freezeCapture") < tick.index("onTrip")
+    freeze_fn = privacy.split("final class CaptureFreeze")[1].split("func freeze()")[1]
+    assert "scrumTraceCaptureGate" in freeze_fn
+    assert "setPaused(true)" in freeze_fn
+    assert freeze_fn.index("setPaused(true)") < freeze_fn.index("scrumTraceCaptureGate")
+    toggle = controller.split("func togglePause()")[1].split("func pin()")[0]
+    assert "captureState == .paused" in toggle
+    assert "phase == .paused" not in toggle
+    assert toggle.index("captureState == .paused") < toggle.index("isCurrentlyTripped")
+    resume_ok = controller.split("var canResumeFromPause")[1].split("func openShot")[0]
+    assert "phase == .paused" in resume_ok
+    assert "captureState == .paused" not in resume_ok
     assert "Stills and transcript excerpts" in controller
     assert "clip audio will leave this Mac" in controller
     assert "and clip video will leave this Mac" not in controller
@@ -675,6 +705,9 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "slice.stills" in local
     assert "clipPath" in local
     assert "uniquedPaths" in local
+    assert "shot.stillCandidates" in local
+    assert "slice?.stills" in local
+    assert "slice?.clipPath" in local
     assert "AgentInstructionTemplate.render(kind: .unknown, product: manifest.productContext)" in local
     fallback_offline = processor.split("func fallbackOffline")[1].split("func shotsLinked")[0]
     assert "[Requires Manual Review - API Offline]" in fallback_offline

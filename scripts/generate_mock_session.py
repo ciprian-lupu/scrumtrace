@@ -124,6 +124,7 @@ def fill_brief(tasks_html: str, shots_html: str, timeline_html: str) -> str:
         "{{PAUSE_COUNT}}": "1 pause",
         "{{PRODUCT_NAME}}": "AthleteTracker",
         "{{REPO_URL}}": "https://github.com/acme/athlete-app",
+        "{{REPO_HREF}}": "https://github.com/acme/athlete-app",
         "{{TECH_STACK}}": "Next.js, Tailwind, PostgreSQL",
         "{{TASKS_HTML}}": tasks_html,
         "{{NEEDS_REVIEW_HTML}}": "",

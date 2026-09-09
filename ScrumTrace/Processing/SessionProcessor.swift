@@ -697,9 +697,10 @@ final class SessionProcessor: @unchecked Sendable {
             ]
         }
         let tasks = manifest.shots.enumerated().map { index, shot in
+            let slice = manifest.slices.first(where: { $0.associatedShotId == shot.id })
             TaskRecord(
                 taskId: String(format: "TASK-%02d", index + 1),
-                sourceSliceId: manifest.slices.first(where: { $0.associatedShotId == shot.id })?.sliceId ?? "slice-shot",
+                sourceSliceId: slice?.sliceId ?? "slice-shot",
                 kind: .bug,
                 status: .needsReview,
                 title: shot.note.isEmpty ? "Human shot requires review" : shot.note,
@@ -708,7 +709,9 @@ final class SessionProcessor: @unchecked Sendable {
                 inferred: "Provider evaluation skipped.",
                 agentInstructions: prefix + AgentInstructionTemplate.render(kind: .bug, product: manifest.productContext),
                 quotes: [],
-                evidenceMedia: shot.stillCandidates,
+                evidenceMedia: uniquedPaths(
+                    shot.stillCandidates + (slice?.stills ?? []) + [slice?.clipPath].compactMap { $0 }
+                ),
                 confidence: 0
             )
         }

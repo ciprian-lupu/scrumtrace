@@ -76,7 +76,10 @@ final class SessionController: ObservableObject {
 
     func togglePause() {
         guard isRecording else { return }
-        if phase == .paused {
+        // Follow the writer, not `phase`. Privacy freeze pauses the recorder
+        // before MainActor sets `.paused`; Opt+⌘P must not take the Pause
+        // branch and clear `pausedByPrivacy` (C1).
+        if captureState == .paused {
             if privacy.isCurrentlyTripped {
                 statusLine = "Still auto-paused for a password manager"
                 return

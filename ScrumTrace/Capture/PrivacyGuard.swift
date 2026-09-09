@@ -125,5 +125,11 @@ final class CaptureFreeze: @unchecked Sendable {
         lock.unlock()
         rec?.setPaused(true)
         sampler.isSuspended = true
+        // Hold-to-Talk observers run on this queue (`queue: nil`) and abort
+        // before the MainActor HUD hop (C1).
+        NotificationCenter.default.post(
+            name: .scrumTraceCaptureGate,
+            object: CaptureSessionState.paused
+        )
     }
 }

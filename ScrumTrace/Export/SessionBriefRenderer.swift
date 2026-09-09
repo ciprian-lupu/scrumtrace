@@ -34,6 +34,17 @@ enum HTMLEscaper {
             .replacingOccurrences(of: ">", with: "&gt;")
             .replacingOccurrences(of: "\"", with: "&quot;")
     }
+
+    /// `href` only. Product repo is user-typed; `javascript:` / `data:` must not run.
+    static func httpHref(_ raw: String) -> String {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let url = URL(string: trimmed),
+              let scheme = url.scheme?.lowercased(),
+              scheme == "http" || scheme == "https" else {
+            return "#"
+        }
+        return escape(trimmed)
+    }
 }
 
 struct SessionBriefRenderer {
@@ -63,6 +74,7 @@ struct SessionBriefRenderer {
             "{{PAUSE_COUNT}}": manifest.pauses.count == 1 ? "1 pause" : "\(manifest.pauses.count) pauses",
             "{{PRODUCT_NAME}}": HTMLEscaper.escape(manifest.productContext.appName),
             "{{REPO_URL}}": HTMLEscaper.escape(manifest.productContext.repoURL),
+            "{{REPO_HREF}}": HTMLEscaper.httpHref(manifest.productContext.repoURL),
             "{{TECH_STACK}}": HTMLEscaper.escape(manifest.productContext.techStack),
             "{{TASKS_HTML}}": confirmed.map { taskCard($0, excerpts: excerpts, sessionURL: sessionURL) }.joined(),
             "{{NEEDS_REVIEW_HTML}}": review.isEmpty ? "" : review.map { taskCard($0, excerpts: excerpts, sessionURL: sessionURL) }.joined(),
@@ -246,7 +258,7 @@ struct SessionBriefRenderer {
           <div class="meta">
             <span>{{PRODUCT_NAME}}</span>
             <span>{{TECH_STACK}}</span>
-            <a href="{{REPO_URL}}">{{REPO_URL}}</a>
+            <a href="{{REPO_HREF}}">{{REPO_URL}}</a>
             <span>{{CREATED_AT}}</span>
           </div>
         </header>

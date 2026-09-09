@@ -137,10 +137,23 @@ final class ShotTalkState: ObservableObject {
         canvas.sourceImage = screenshot
     }
 
-    func applyCaptureGate() {
-        canTalk = allowsNewCapture()
-        if !canTalk {
+    func applyCaptureGate(_ posted: CaptureSessionState? = nil) {
+        // Privacy freeze posts from a background queue. Prefer the posted
+        // gate so we do not read MainActor `phase` off-thread (C1).
+        let allowed = posted?.allowsNewCapture ?? allowsNewCapture()
+        if !allowed {
             abortTalk()
+        }
+        if Thread.isMainThread {
+            canTalk = allowed
+        } else {
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.canTalk = allowed
+                if !allowed {
+                    self.abortTalk()
+                }
+            }
         }
     }
 
@@ -206,9 +219,11 @@ final class ShotTalkState: ObservableObject {
             try? FileManager.default.removeItem(at: url)
             recorder = nil
         }
-        guard live else { return }
+        guard live, !saved else { return }
         try? await transcriber.prepare(model: whisperModel)
+        guard allowsNewCapture(), !saved else { return }
         if let text = try? await transcriber.transcribeVoiceNote(at: url), !text.isEmpty {
+            guard !saved else { return }
             let hadText = !note.isEmpty
             note = hadText ? "\(note) \(text)" : text
             source = hadText ? .mixed : .voice
@@ -262,8 +277,8 @@ struct ShotNoteView: View {
         .onChange(of: session.tool) { _, newValue in
             session.canvas.tool = newValue
         }
-        .onReceive(NotificationCenter.default.publisher(for: .scrumTraceCaptureGate)) { _ in
-            session.applyCaptureGate()
+        .onReceive(NotificationCenter.default.publisher(for: .scrumTraceCaptureGate)) { notification in
+            session.applyCaptureGate(notification.object as? CaptureSessionState)
         }
         .onReceive(NotificationCenter.default.publisher(for: .scrumTraceSessionEnding)) { _ in
             session.persist()
@@ -356,8 +371,8 @@ final class ShotNoteWindow: NSPanel {
                 forName: .scrumTraceCaptureGate,
                 object: nil,
                 queue: nil
-            ) { [weak talk] _ in
-                talk?.applyCaptureGate()
+            ) { [weak talk] notification in
+                talk?.applyCaptureGate(notification.object as? CaptureSessionState)
             }
         )
         observers.append(
