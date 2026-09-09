@@ -43,6 +43,9 @@ final class SessionController: ObservableObject {
                 self?.privacyResume()
             }
         }
+        if let recent = vault.recentSessions(limit: 1).first {
+            lastSessionId = recent.sessionId
+        }
     }
 
     var isRecording: Bool {
@@ -180,9 +183,11 @@ final class SessionController: ObservableObject {
                     try vault.write(manifest: &local)
                 }
             }
+            let storedPins = vault.loadPinTimes(sessionId: sessionId)
+            let pins = Self.mergePins(pinTimes, storedPins)
             let result = try await processor?.process(
                 sessionId: sessionId,
-                pinTimes: pinTimes,
+                pinTimes: pins,
                 configuration: settings.providerConfiguration(),
                 whisperModel: settings.whisperModel,
                 onStatus: { [weak self] status, line in
@@ -372,6 +377,18 @@ final class SessionController: ObservableObject {
         let m = total / 60
         let s = total % 60
         return String(format: "%02d:%02d", m, s)
+    }
+
+    static func mergePins(_ live: [TimeInterval], _ stored: [TimeInterval]) -> [TimeInterval] {
+        var seen = Set<String>()
+        var out: [TimeInterval] = []
+        for value in live + stored {
+            let key = String(format: "%.2f", value)
+            if seen.insert(key).inserted {
+                out.append(value)
+            }
+        }
+        return out.sorted()
     }
 
     private func stemFrom(_ shotId: String) -> String {

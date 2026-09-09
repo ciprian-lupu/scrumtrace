@@ -94,6 +94,17 @@ def test_pause_gate_hold_to_talk() -> None:
     assert "allowsNewCapture" in hud
 
 
+def test_retry_failed_slices_and_pins() -> None:
+    processor = (ROOT / "ScrumTrace" / "Processing" / "SessionProcessor.swift").read_text()
+    assert "needsEvaluate" in processor
+    assert "offlineFailed" in processor
+    assert "API key missing" in processor
+    vault = (ROOT / "ScrumTrace" / "Storage" / "SessionVault.swift").read_text()
+    assert "loadPinTimes" in vault
+    controller = (ROOT / "ScrumTrace" / "Processing" / "SessionController.swift").read_text()
+    assert "mergePins" in controller
+
+
 def main() -> None:
     test_export_has_no_archive_and_no_tokens()
     test_agent_context_uses_export_relative_paths()
@@ -104,6 +115,7 @@ def main() -> None:
     test_clip_exporter_macos14()
     test_handoff_log_names_mp4_tools()
     test_pause_gate_hold_to_talk()
+    test_retry_failed_slices_and_pins()
     print("contract tests ok")
 
 

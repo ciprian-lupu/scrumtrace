@@ -66,7 +66,12 @@ final class SessionProcessor: @unchecked Sendable {
             try vault.write(manifest: &manifest)
         }
 
-        if !manifest.hasCompleted(.evaluating) {
+        let needsEvaluate = !manifest.hasCompleted(.evaluating)
+            || manifest.slices.contains { $0.analysisStatus == .offlineFailed || $0.analysisStatus == .pending }
+            || (manifest.uploadConsent.approved
+                && manifest.slices.contains { $0.analysisStatus == .skipped })
+
+        if needsEvaluate {
             if !manifest.uploadConsent.approved {
                 await onStatus(.evaluating, "Upload not approved — local export only")
                 manifest.tasks = localReviewTasks(manifest: manifest)
@@ -86,15 +91,31 @@ final class SessionProcessor: @unchecked Sendable {
                 }
                 manifest.markCompleted(.evaluating)
                 try vault.write(manifest: &manifest)
+            } else if configuration.apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                await onStatus(.evaluating, "API key missing — local export only")
+                manifest.tasks = localReviewTasks(manifest: manifest)
+                for index in manifest.slices.indices {
+                    if manifest.slices[index].analysisStatus != .success {
+                        manifest.slices[index].analysisStatus = .offlineFailed
+                    }
+                }
+                manifest.markCompleted(.evaluating)
+                manifest.pipelineStatus = .offlineFailed
+                try vault.write(manifest: &manifest)
             } else {
                 await onStatus(.evaluating, "Evaluating slices with the configured model")
                 manifest.pipelineStatus = .evaluating
                 let provider = AIEngine.make(configuration: configuration)
-                var tasks: [TaskRecord] = []
-                var updatedSlices: [SliceRecord] = []
+                var tasks = manifest.tasks.filter { task in
+                    manifest.slices.first { $0.sliceId == task.sourceSliceId }?.analysisStatus == .success
+                }
+                var updatedSlices: [SliceRecord] = manifest.slices.filter {
+                    $0.analysisStatus == .success
+                }
+                let toRun = manifest.slices.filter { $0.analysisStatus != .success }
                 await withTaskGroup(of: (SliceRecord, [TaskRecord]).self) { group in
                     var inflight = 0
-                    for slice in manifest.slices {
+                    for slice in toRun {
                         group.addTask {
                             await self.evaluateSlice(
                                 slice: slice,

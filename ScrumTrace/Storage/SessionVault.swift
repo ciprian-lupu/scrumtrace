@@ -136,6 +136,17 @@ final class SessionVault: @unchecked Sendable {
         return (numbers.max() ?? 0) + 1
     }
 
+    func loadPinTimes(sessionId: String) -> [TimeInterval] {
+        let url = sessionURL(id: sessionId).appendingPathComponent(ScrumTracePath.events)
+        guard let text = try? String(contentsOf: url, encoding: .utf8) else { return [] }
+        return text.split(whereSeparator: \.isNewline).compactMap { line in
+            guard let data = line.data(using: .utf8),
+                  let event = try? decoder.decode(SessionEvent.self, from: data),
+                  event.kind == .pin else { return nil }
+            return event.tMedia
+        }
+    }
+
     func revealInFinder(sessionId: String) {
         #if os(macOS)
         NSWorkspace.shared.activateFileViewerSelecting([sessionURL(id: sessionId).appendingPathComponent(ScrumTracePath.export)])

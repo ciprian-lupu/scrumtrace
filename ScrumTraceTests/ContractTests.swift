@@ -99,4 +99,11 @@ final class ContractTests: XCTestCase {
         XCTAssertEqual(stripped.tasks[0].status, .needsReview)
         XCTAssertTrue(stripped.tasks[0].evidenceMedia.isEmpty)
     }
+
+    func testMergePinsDedupesHundredths() {
+        XCTAssertEqual(
+            SessionController.mergePins([10.0, 30.0], [10.004, 20.0]),
+            [10.0, 20.0, 30.0]
+        )
+    }
 }
