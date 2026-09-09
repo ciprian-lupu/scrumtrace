@@ -25,6 +25,18 @@ def test_quote_window() -> None:
     segments = [(10.0, 14.0, "this does nothing it should store the athlete")]
     assert quote_matches("this does nothing", 10.5, 13.0, segments)
     assert not quote_matches("invented passphrase", 10.5, 13.0, segments)
+    validator = (ROOT / "ScrumTrace" / "AI" / "EvidenceValidator.swift").read_text()
+    confirm = validator.split("static func canConfirm")[1].split("static func applyExportEvidence")[0]
+    assert "quote outside slice window" in confirm
+    assert "quote times are inverted" in confirm
+    assert "quote not found in transcript window" in confirm
+    controller = (ROOT / "ScrumTrace" / "Processing" / "SessionController.swift").read_text()
+    capture = controller.split("private func captureShot")[1].split("private func finishShot")[0]
+    assert "try png.write(to: rawURL)" in capture
+    assert "try? png.write(to: rawURL)" not in capture
+    finish = controller.split("private func finishShot")[1].split("private func privacyPause")[0]
+    assert "Could not write the annotated Shot" in finish
+    assert "try? png.write" not in finish
 
 
 def test_export_rel_in_swift() -> None:

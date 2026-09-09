@@ -366,8 +366,17 @@ final class SessionController: ObservableObject {
         let rawURL = sessionURL.appendingPathComponent(rawPath)
         guard let tiff = image.tiffRepresentation,
               let rep = NSBitmapImageRep(data: tiff),
-              let png = rep.representation(using: .png, properties: [:]) else { return }
-        try? png.write(to: rawURL)
+              let png = rep.representation(using: .png, properties: [:]) else {
+            lastError = "Could not encode the Shot PNG."
+            return
+        }
+        do {
+            try png.write(to: rawURL)
+        } catch {
+            lastError = error.localizedDescription
+            statusLine = "Could not write the Shot PNG."
+            return
+        }
         let record = ShotRecord(
             id: String(format: "shot-%03d", index),
             tMedia: media,
@@ -428,7 +437,16 @@ final class SessionController: ObservableObject {
         if let tiff = annotated.tiffRepresentation,
            let rep = NSBitmapImageRep(data: tiff),
            let png = rep.representation(using: .png, properties: [:]) {
-            try? png.write(to: url)
+            do {
+                try png.write(to: url)
+            } catch {
+                lastError = error.localizedDescription
+                statusLine = "Could not write the annotated Shot."
+                return
+            }
+        } else {
+            lastError = "Could not encode the annotated Shot."
+            return
         }
         let json: [String: Any] = [
             "id": record.id,

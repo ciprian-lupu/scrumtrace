@@ -301,8 +301,11 @@ def test_pause_privacy_and_metadata_gate() -> None:
     assert "NSApp.activate" in controller.split("func requestUploadConsent")[1].split("private func captureShot")[0]
     capture = controller.split("private func captureShot")[1].split("private func finishShot")[0]
     assert "shots.append(record)" in capture
+    assert "try png.write(to: rawURL)" in capture
+    assert "Could not write the Shot PNG" in capture
     finish = controller.split("private func finishShot")[1].split("private func privacyPause")[0]
     assert "firstIndex(where: { $0.id == stored.id })" in finish
+    assert "Could not write the annotated Shot" in finish
     clock = (ROOT / "ScrumTrace" / "Capture" / "ClockSynchronizer.swift").read_text()
     assert "CMSyncConvertTime" in clock
     privacy = (ROOT / "ScrumTrace" / "Capture" / "PrivacyGuard.swift").read_text()

@@ -86,8 +86,17 @@ enum EvidenceValidator {
         if frames.isEmpty {
             issues.append(EvidenceIssue(reason: "no valid frame_references on disk"))
         }
-        for quote in candidate.quotes where !quoteMatchesTranscript(quote, transcript: transcript) {
-            issues.append(EvidenceIssue(reason: "quote not found in transcript window"))
+        for quote in candidate.quotes {
+            if quote.tMediaStart > quote.tMediaEnd {
+                issues.append(EvidenceIssue(reason: "quote times are inverted"))
+                continue
+            }
+            if quote.tMediaEnd < slice.startMedia || quote.tMediaStart > slice.endMedia {
+                issues.append(EvidenceIssue(reason: "quote outside slice window"))
+            }
+            if !quoteMatchesTranscript(quote, transcript: transcript) {
+                issues.append(EvidenceIssue(reason: "quote not found in transcript window"))
+            }
         }
         if slice.sliceId.isEmpty {
             issues.append(EvidenceIssue(reason: "missing source_slice_id"))

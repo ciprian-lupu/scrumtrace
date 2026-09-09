@@ -104,6 +104,93 @@ final class ContractTests: XCTestCase {
         XCTAssertFalse(EvidenceValidator.quoteMatchesTranscript(missing, transcript: transcript))
     }
 
+    func testCanConfirmRejectsQuoteOutsideSliceWindow() {
+        let transcript = FullTranscript(
+            sessionId: "s",
+            language: "en",
+            segments: [
+                TranscriptSegment(
+                    start: 10,
+                    end: 14,
+                    text: "this does nothing it should store the athlete",
+                    speaker: nil,
+                    words: []
+                ),
+                TranscriptSegment(
+                    start: 400,
+                    end: 404,
+                    text: "this does nothing it should store the athlete",
+                    speaker: nil,
+                    words: []
+                )
+            ]
+        )
+        let slice = SliceRecord(
+            sliceId: "slice-01",
+            startMedia: 0,
+            endMedia: 20,
+            trigger: .shot,
+            associatedShotId: nil,
+            clipPath: nil,
+            stills: ["archive/shots/001.png"],
+            analysisStatus: .success,
+            score: 1
+        )
+        let far = CandidateRecord(
+            decision: .keep,
+            confidence: 0.9,
+            kind: .bug,
+            title: "Save",
+            observed: "button is gray",
+            stated: "it should store",
+            inferred: "validation",
+            agentInstructionsDraft: "draft",
+            quotes: [
+                QuoteRecord(
+                    speaker: "presenter",
+                    text: "this does nothing",
+                    tMediaStart: 400,
+                    tMediaEnd: 403
+                )
+            ],
+            frameReferences: ["archive/shots/001.png"]
+        )
+        let inverted = CandidateRecord(
+            decision: .keep,
+            confidence: 0.9,
+            kind: .bug,
+            title: "Save",
+            observed: "button is gray",
+            stated: "it should store",
+            inferred: "validation",
+            agentInstructionsDraft: "draft",
+            quotes: [
+                QuoteRecord(
+                    speaker: "presenter",
+                    text: "this does nothing",
+                    tMediaStart: 13,
+                    tMediaEnd: 10.5
+                )
+            ],
+            frameReferences: ["archive/shots/001.png"]
+        )
+        let farIssues = EvidenceValidator.canConfirm(
+            candidate: far,
+            slice: slice,
+            transcript: transcript,
+            sessionURL: URL(fileURLWithPath: "/tmp")
+        )
+        XCTAssertTrue(farIssues.contains { $0.reason == "quote outside slice window" })
+        let invertedIssues = EvidenceValidator.canConfirm(
+            candidate: inverted,
+            slice: slice,
+            transcript: transcript,
+            sessionURL: URL(fileURLWithPath: "/tmp")
+        )
+        XCTAssertTrue(invertedIssues.contains { $0.reason == "quote times are inverted" })
+        XCTAssertFalse(invertedIssues.contains { $0.reason == "quote outside slice window" })
+    }
+
     func testInferredCopiedIntoObservedBlocksConfirm() {
         let candidate = CandidateRecord(
             decision: .keep,
