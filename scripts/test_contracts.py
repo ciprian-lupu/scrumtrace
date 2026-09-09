@@ -316,9 +316,14 @@ def test_pause_gate_hold_to_talk() -> None:
     assert "abortTalk()" in gate
     assert "Thread.isMainThread" in gate
     stop_talk = shot.split("func stopTalk()")[1].split("struct ShotNoteView")[0]
-    assert "guard live, !saved" in stop_talk
-    assert "guard allowsNewCapture(), !saved" in stop_talk
-    assert "guard !saved else { return }" in stop_talk
+    assert "guard live, !saved" not in stop_talk
+    assert "guard allowsNewCapture(), !saved" not in stop_talk
+    assert "guard live else { return }" in stop_talk
+    assert "recorder = nil" in stop_talk
+    assert stop_talk.index("recorder = nil") < stop_talk.index("transcribeVoiceNote")
+    assert stop_talk.index("recorder = nil") < stop_talk.index("transcriber.prepare")
+    assert "if saved" in stop_talk
+    assert "onSave(note, canvas.snapshot(), source)" in stop_talk
     assert "notification.object as? CaptureSessionState" in shot
     hud = (ROOT / "ScrumTrace" / "UI" / "RecordingHUDWindow.swift").read_text()
     assert "allowsNewCapture" in hud

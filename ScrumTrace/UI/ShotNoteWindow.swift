@@ -214,19 +214,23 @@ final class ShotTalkState: ObservableObject {
         let live = allowsNewCapture()
         holdingTalk = false
         recorder?.stop()
-        guard let url = recorder?.url else { return }
-        defer {
-            try? FileManager.default.removeItem(at: url)
-            recorder = nil
-        }
-        guard live, !saved else { return }
+        let url = recorder?.url
+        // Detach before transcribe so persist()/abortTalk cannot delete the WAV
+        // while Whisper is reading it (C1: finish the pre-pause annotation).
+        recorder = nil
+        guard let url else { return }
+        defer { try? FileManager.default.removeItem(at: url) }
+        // Pause after release is not a new capture. Still transcribe audio
+        // recorded while the gate was open.
+        guard live else { return }
         try? await transcriber.prepare(model: whisperModel)
-        guard allowsNewCapture(), !saved else { return }
         if let text = try? await transcriber.transcribeVoiceNote(at: url), !text.isEmpty {
-            guard !saved else { return }
             let hadText = !note.isEmpty
             note = hadText ? "\(note) \(text)" : text
             source = hadText ? .mixed : .voice
+            if saved {
+                onSave(note, canvas.snapshot(), source)
+            }
         }
     }
 }
