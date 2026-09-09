@@ -24,7 +24,9 @@ struct SessionPackZipper {
             )
         } catch {
             omitted.append(OmittedAsset(path: "session-pack.zip", reason: error.localizedDescription))
-            return Result(zipURL: zipURL, byteCount: fileSize(zipURL), omitted: uniquedOmitted(omitted))
+            let listed = uniquedOmitted(omitted)
+            try writeOmittedMarkdown(sessionURL: sessionURL, omitted: listed)
+            return Result(zipURL: zipURL, byteCount: fileSize(zipURL), omitted: listed)
         }
         var size = fileSize(zipURL)
 

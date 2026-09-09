@@ -110,10 +110,10 @@ final class SessionVault: @unchecked Sendable {
         if (try? session.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
             throw SessionVaultError.sessionMissing(id)
         }
-        let url = session.appendingPathComponent(ScrumTracePath.manifest)
-        guard ExportRel.isContainedRegularFile(url, sessionRoot: session) else {
+        guard ExportRel.existingSessionFile(ScrumTracePath.manifest, sessionURL: session) != nil else {
             throw SessionVaultError.sessionMissing(id)
         }
+        let url = session.appendingPathComponent(ScrumTracePath.manifest)
         let data = try Data(contentsOf: url)
         return try decoder.decode(SessionManifest.self, from: data)
     }

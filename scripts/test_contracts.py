@@ -409,7 +409,7 @@ def test_pipeline_timing_stays_in_archive() -> None:
     assert "dest.path" not in run_zip
     zip_fn = zipper.split("func zip(")[1].split("func writeZip")[0]
     assert "removeEscapingExportLinks" in zip_fn
-    assert "try writeOmittedMarkdown" in zip_fn
+    assert zip_fn.count("try writeOmittedMarkdown") >= 2
     assert "try runZip" in zip_fn
     drop = zipper.split("for path in dropList")[1].split("if size > MediaBudget.maxZipBytes")[0]
     assert "isContainedRegularFile" in drop
@@ -806,6 +806,8 @@ def test_write_contained_data_refuses_directory_symlinks() -> None:
     assert "writeFailed(\"session folder\")" in write_man
     load_fn = vault.split("func loadManifest")[1].split("func write(manifest")[0]
     assert "isSymbolicLink" in load_fn
+    assert "existingSessionFile(ScrumTracePath.manifest" in load_fn
+    assert "isContainedRegularFile" not in load_fn
     create_fn = vault.split("func createSession")[1].split("func loadManifest")[0]
     assert "isSymbolicLink" in create_fn
     assert create_fn.count("isSymbolicLink") >= 2
