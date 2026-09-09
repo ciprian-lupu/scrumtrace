@@ -67,6 +67,9 @@ def test_export_rel_in_swift() -> None:
     assert "tightenExportClips" in clip
     assert "containedExportMember" in clip
     assert "existingSessionFile" in clip
+    assert "copyContainedToTemporaryFile" in clip
+    assert "extractStill(source: movieCopy" in clip
+    assert "extractStill(source: source" not in clip
     assert "AVAssetExportPreset640x480" in clip
     assert "AVVideoProfileLevelH264MainAutoLevel" in clip
     assert "writeMainProfileClip" in clip

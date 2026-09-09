@@ -1,6 +1,14 @@
 import Darwin
 import Foundation
 
+@_silgen_name("fcopyfile")
+private func scrumtraceFcopyfile(
+    _ from: Int32,
+    _ to: Int32,
+    _ state: UnsafeMutableRawPointer?,
+    _ flags: UInt32
+) -> Int32
+
 extension Notification.Name {
     static let scrumTraceCaptureGate = Notification.Name("ScrumTrace.captureGate")
     static let scrumTraceHUDSuppress = Notification.Name("ScrumTrace.hudSuppress")
@@ -356,7 +364,27 @@ enum ExportRel {
     static func readContainedData(relative: String, sessionURL: URL) -> Data? {
         guard isUsableSessionRoot(sessionURL) else { return nil }
         guard isUnderSession(relative), let parts = normalizedComponents(relative) else { return nil }
-        return openatRead(parts: parts, root: sessionURL)
+        guard let fd = openatFile(parts: parts, root: sessionURL) else { return nil }
+        defer { Darwin.close(fd) }
+        var info = stat()
+        guard Darwin.fstat(fd, &info) == 0 else { return nil }
+        guard (info.st_mode & S_IFMT) == S_IFREG else { return nil }
+        let size = Int(info.st_size)
+        guard size >= 0, size <= 256 * 1024 * 1024 else { return nil }
+        if size == 0 { return Data() }
+        var data = Data(count: size)
+        let filled = data.withUnsafeMutableBytes { buf -> Int in
+            guard let base = buf.baseAddress else { return -1 }
+            var offset = 0
+            while offset < size {
+                let n = Darwin.read(fd, base.advanced(by: offset), size - offset)
+                if n <= 0 { return n == 0 ? offset : -1 }
+                offset += Int(n)
+            }
+            return offset
+        }
+        guard filled == size else { return nil }
+        return data
     }
 
     static func readContainedData(_ file: URL, sessionRoot: URL) -> Data? {
@@ -364,18 +392,62 @@ enum ExportRel {
         return readContainedData(relative: rel, sessionURL: sessionRoot)
     }
 
-    private static func openatRead(parts: [String], root: URL) -> Data? {
+    /// Copy a contained session file to a unique temp URL using `fcopyfile` on an
+    /// `O_NOFOLLOW` fd. Whisper / AVAsset still need a path, but it must not be a
+    /// planted `archive/` link.
+    static func copyContainedToTemporaryFile(
+        relative: String,
+        sessionURL: URL,
+        prefix: String
+    ) throws -> URL {
+        guard isUsableSessionRoot(sessionURL) else {
+            throw SessionVaultError.writeFailed(relative)
+        }
+        guard isUnderSession(relative), let parts = normalizedComponents(relative) else {
+            throw SessionVaultError.writeFailed(relative)
+        }
+        var suffix = ""
+        if let last = parts.last {
+            let ext = URL(fileURLWithPath: last).pathExtension
+            if !ext.isEmpty {
+                suffix = ".\(ext)"
+            }
+        }
+        let dest = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "\(prefix)-\(UUID().uuidString)\(suffix)"
+        )
+        if (try? dest.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+            try FileManager.default.removeItem(at: dest)
+        }
+        let destFd = dest.withUnsafeFileSystemRepresentation { ptr -> Int32 in
+            guard let ptr else { return -1 }
+            return Darwin.open(ptr, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0o600)
+        }
+        guard destFd >= 0 else {
+            throw SessionVaultError.writeFailed(relative)
+        }
+        defer { Darwin.close(destFd) }
+        guard let srcFd = openatFile(parts: parts, root: sessionURL) else {
+            try? FileManager.default.removeItem(at: dest)
+            throw SessionVaultError.writeFailed(relative)
+        }
+        defer { Darwin.close(srcFd) }
+        // COPYFILE_DATA (1 << 3): copy file bytes only, no xattrs.
+        if scrumtraceFcopyfile(srcFd, destFd, nil, 1 << 3) != 0 {
+            try? FileManager.default.removeItem(at: dest)
+            throw SessionVaultError.writeFailed(relative)
+        }
+        return dest
+    }
+
+    /// Open a contained regular file with `O_NOFOLLOW` on every component. Caller closes.
+    private static func openatFile(parts: [String], root: URL) -> Int32? {
         let rootFd = root.withUnsafeFileSystemRepresentation { ptr -> Int32 in
             guard let ptr else { return -1 }
             return Darwin.open(ptr, O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW)
         }
         guard rootFd >= 0 else { return nil }
         var dirFd = rootFd
-        defer {
-            if dirFd >= 0 {
-                Darwin.close(dirFd)
-            }
-        }
         for (index, part) in parts.enumerated() {
             let isLast = index == parts.count - 1
             let flags: Int32 = isLast
@@ -384,32 +456,19 @@ enum ExportRel {
             let next = part.withCString { name in
                 Darwin.openat(dirFd, name, flags)
             }
+            Darwin.close(dirFd)
             guard next >= 0 else { return nil }
             if isLast {
-                defer { Darwin.close(next) }
                 var info = stat()
-                guard Darwin.fstat(next, &info) == 0 else { return nil }
-                guard (info.st_mode & S_IFMT) == S_IFREG else { return nil }
-                let size = Int(info.st_size)
-                guard size >= 0, size <= 256 * 1024 * 1024 else { return nil }
-                if size == 0 { return Data() }
-                var data = Data(count: size)
-                let filled = data.withUnsafeMutableBytes { buf -> Int in
-                    guard let base = buf.baseAddress else { return -1 }
-                    var offset = 0
-                    while offset < size {
-                        let n = Darwin.read(next, base.advanced(by: offset), size - offset)
-                        if n <= 0 { return n == 0 ? offset : -1 }
-                        offset += Int(n)
-                    }
-                    return offset
+                guard Darwin.fstat(next, &info) == 0, (info.st_mode & S_IFMT) == S_IFREG else {
+                    Darwin.close(next)
+                    return nil
                 }
-                guard filled == size else { return nil }
-                return data
+                return next
             }
-            Darwin.close(dirFd)
             dirFd = next
         }
+        Darwin.close(dirFd)
         return nil
     }
 }

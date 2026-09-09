@@ -10,9 +10,15 @@ struct SessionPackZipper {
     /// Zip is built from `export/` only. Files are deleted from export (not archive)
     /// in spec priority until the measured zip is ≤ 35 MB.
     func zip(sessionURL: URL, manifest: SessionManifest) throws -> Result {
+        guard ExportRel.isUsableSessionRoot(sessionURL) else {
+            throw SessionRecorderError.writerFailed("session folder")
+        }
         let exportDir = sessionURL.appendingPathComponent(ScrumTracePath.export)
         PackBudget.removeEscapingExportLinks(exportDir: exportDir)
         try FileManager.default.createDirectory(at: exportDir, withIntermediateDirectories: true)
+        if (try? exportDir.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+            throw SessionRecorderError.writerFailed("export/ is a symbolic link.")
+        }
         let zipURL = sessionURL.appendingPathComponent(ScrumTracePath.packZip)
         var omitted = uniquedOmitted(manifest.omitted)
 
@@ -77,6 +83,9 @@ struct SessionPackZipper {
     }
 
     func writeZip(sessionURL: URL, includeFullTranscript: Bool = false) throws -> Int {
+        guard ExportRel.isUsableSessionRoot(sessionURL) else {
+            throw SessionRecorderError.writerFailed("session folder")
+        }
         let exportDir = sessionURL.appendingPathComponent(ScrumTracePath.export)
         let zipURL = sessionURL.appendingPathComponent(ScrumTracePath.packZip)
         try runZip(

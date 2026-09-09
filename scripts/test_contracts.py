@@ -198,14 +198,24 @@ def test_clip_exporter_macos14() -> None:
     assert "sessionURL: sessionURL" in tighten
     tighten_file = clip.split("func tighten(file")[1].split("func reencode")[0]
     assert "temporaryDirectory" in tighten_file
-    assert "writeContainedData" in tighten_file
+    assert "copyContainedToTemporaryFile" in tighten_file
+    assert "moveIntoSession" in tighten_file
+    assert "writeContainedData" not in tighten_file
+    assert "Data(contentsOf: temp)" not in tighten_file
+    assert "AVURLAsset(url: work)" in tighten_file
+    assert "AVURLAsset(url: url)" not in tighten_file
     assert "isAllowedClipDest" in tighten_file
     assert "isReadableSessionFile" in tighten_file
     assert "scrumtrace-tighten" in tighten_file
     assert "replaceItemAt" not in tighten_file
     assert "existingSessionFile" in clip
     export_fn = clip.split("func export(")[1].split("func tightenExportClips")[0]
+    assert "isUsableSessionRoot" in export_fn
     assert "isReadableSessionFile" in export_fn
+    assert "copyContainedToTemporaryFile" in export_fn
+    assert "extractStill(source: movieCopy" in export_fn
+    assert "extractStill(source: source" not in export_fn
+    assert "reencode(\n            source: movieCopy" in export_fn or "source: movieCopy" in export_fn
     assert "clip_path escaped" in clip
     assert "clip_path is not a working or export clip" in clip
     assert "isAllowedClipDest" in clip
@@ -397,6 +407,16 @@ def test_dual_transcript_merge_wired() -> None:
     assert "isReadableSessionFile" in speech
     assert "transcribeFile(at url: URL, sessionURL: URL? = nil)" in speech
     assert "transcribeMovieAudio(at movie: URL, sessionURL: URL)" in speech
+    assert "copyContainedToTemporaryFile" in speech
+    assert "scrumtrace-whisper" in speech
+    transcribe_file = speech.split("func transcribeFile")[1].split("func transcribeVoiceNote")[0]
+    assert "copyContainedToTemporaryFile" in transcribe_file
+    movie_audio = speech.split("func transcribeMovieAudio")[1].split("func extractAudio")[0]
+    assert "copyContainedToTemporaryFile" in movie_audio
+    assert "scrumtrace-movie" in movie_audio
+    assert "transcribeFile(at: movieCopy)" in movie_audio
+    assert "transcribeFile(at: movie," not in movie_audio
+    assert "transcribeFile(at: movie)" not in movie_audio
     processor = (ROOT / "ScrumTrace" / "Processing" / "SessionProcessor.swift").read_text()
     assert "shouldTranscribeMovie" in processor
     assert "transcribeMovieAudio" in processor
@@ -430,9 +450,14 @@ def test_pipeline_timing_stays_in_archive() -> None:
     assert "temp.path" in run_zip
     assert "dest.path" not in run_zip
     zip_fn = zipper.split("func zip(")[1].split("func writeZip")[0]
+    assert "isUsableSessionRoot" in zip_fn
     assert "removeEscapingExportLinks" in zip_fn
+    assert 'export/ is a symbolic link' in zip_fn
+    assert zip_fn.index("createDirectory") < zip_fn.index("is a symbolic link")
     assert zip_fn.count("try writeOmittedMarkdown") >= 2
     assert "try runZip" in zip_fn
+    write_zip = zipper.split("func writeZip")[1].split("func writeOmittedMarkdown")[0]
+    assert "isUsableSessionRoot" in write_zip
     drop = zipper.split("for path in dropList")[1].split("if size > MediaBudget.maxZipBytes")[0]
     assert "isContainedRegularFile" in drop
     assert "isSymbolicLink" in drop
@@ -583,6 +608,9 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "wrapUntrustedInline(product.appName)" in eval_prompt
     assert "wrapUntrustedInline(product.repoURL)" in eval_prompt
     assert "wrapUntrustedInline(product.techStack)" in eval_prompt
+    template = prompts.split("enum AgentInstructionTemplate")[1].split("enum PromptTemplates")[0]
+    assert "wrapUntrustedInline(product.appName)" in template
+    assert "the product" in template
     processor = (ROOT / "ScrumTrace" / "Processing" / "SessionProcessor.swift").read_text()
     assert "wrapUntrustedInline(draft)" in processor
     brief = (ROOT / "ScrumTrace" / "Export" / "SessionBriefRenderer.swift").read_text()
@@ -812,11 +840,22 @@ def test_write_contained_data_refuses_directory_symlinks() -> None:
     assert "func prepareContainedWrite" in models
     assert "func writeContainedData" in models
     assert "func readContainedData" in models
+    assert "func copyContainedToTemporaryFile" in models
+    assert "scrumtraceFcopyfile" in models
+    assert "O_EXCL" in models
     read_fn = models.split("static func readContainedData(relative:")[1].split("static func readContainedData(_ file")[0]
-    assert "openatRead" in models
+    assert "openatFile" in read_fn
+    assert "openatFile" in models
+    assert "openatRead" not in models
     assert "O_NOFOLLOW" in models
     assert "openat" in models
     assert "O_DIRECTORY" in models
+    copy_fn = models.split("static func copyContainedToTemporaryFile")[1].split("private static func openatFile")[0]
+    assert "openatFile" in copy_fn
+    assert "O_EXCL" in copy_fn
+    assert "scrumtraceFcopyfile" in copy_fn
+    assert "pathExtension" in copy_fn
+    assert "O_NOFOLLOW" in models.split("private static func openatFile")[1]
     prepare = models.split("static func prepareContainedWrite")[1].split("static func writeContainedData")[0]
     assert "isSymbolicLink" in prepare
     assert "createDirectory" in prepare
@@ -855,6 +894,8 @@ def test_write_contained_data_refuses_directory_symlinks() -> None:
     assert "isAllowedClipDest" in export_fn
     assert export_fn.index("isAllowedClipDest") < export_fn.index("prepareContainedWrite")
     assert "writeContainedData(jpeg, relative: stillRelative" in export_fn
+    assert "copyContainedToTemporaryFile" in export_fn
+    assert "extractStill(source: movieCopy" in export_fn
     vault = (ROOT / "ScrumTrace" / "Storage" / "SessionVault.swift").read_text()
     write_man = vault.split("func write(manifest")[1].split("func appendEvent")[0]
     assert "writeContainedData" in write_man

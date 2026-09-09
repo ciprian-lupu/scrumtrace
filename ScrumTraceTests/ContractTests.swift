@@ -136,6 +136,69 @@ final class ContractTests: XCTestCase {
         XCTAssertNil(ExportRel.readContainedData(relative: "archive/full_transcript.json", sessionURL: root))
     }
 
+    func testCopyContainedToTemporaryFileCopiesRegularFile() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("st-copy-ok-\(UUID().uuidString)")
+        let archive = root.appendingPathComponent("archive")
+        try FileManager.default.createDirectory(at: archive, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let payload = Data("wav-bytes".utf8)
+        try ExportRel.writeContainedData(payload, relative: "archive/audio.wav", sessionURL: root)
+        let copy = try ExportRel.copyContainedToTemporaryFile(
+            relative: "archive/audio.wav",
+            sessionURL: root,
+            prefix: "scrumtrace-copy-test"
+        )
+        defer { try? FileManager.default.removeItem(at: copy) }
+        XCTAssertEqual(try Data(contentsOf: copy), payload)
+        XCTAssertEqual(copy.pathExtension, "wav")
+        XCTAssertEqual(
+            ExportRel.readContainedData(relative: "archive/audio.wav", sessionURL: root),
+            payload
+        )
+    }
+
+    func testCopyContainedToTemporaryFileRefusesDestSymlink() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("st-copy-link-\(UUID().uuidString)")
+        let archive = root.appendingPathComponent("archive")
+        try FileManager.default.createDirectory(at: archive, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let secret = FileManager.default.temporaryDirectory.appendingPathComponent("secret-copy-\(UUID().uuidString).wav")
+        try Data("outside".utf8).write(to: secret)
+        defer { try? FileManager.default.removeItem(at: secret) }
+        try FileManager.default.createSymbolicLink(
+            at: archive.appendingPathComponent("audio.wav"),
+            withDestinationURL: secret
+        )
+        XCTAssertThrowsError(
+            try ExportRel.copyContainedToTemporaryFile(
+                relative: "archive/audio.wav",
+                sessionURL: root,
+                prefix: "scrumtrace-copy-test"
+            )
+        )
+        XCTAssertEqual(try String(contentsOf: secret, encoding: .utf8), "outside")
+    }
+
+    func testCopyContainedToTemporaryFileRefusesArchiveDirectorySymlink() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("st-copy-dirlink-\(UUID().uuidString)")
+        let export = root.appendingPathComponent("export")
+        try FileManager.default.createDirectory(at: export, withIntermediateDirectories: true)
+        try Data("inside".utf8).write(to: export.appendingPathComponent("audio.wav"))
+        try FileManager.default.createSymbolicLink(
+            at: root.appendingPathComponent("archive"),
+            withDestinationURL: export
+        )
+        defer { try? FileManager.default.removeItem(at: root) }
+        XCTAssertThrowsError(
+            try ExportRel.copyContainedToTemporaryFile(
+                relative: "archive/audio.wav",
+                sessionURL: root,
+                prefix: "scrumtrace-copy-test"
+            )
+        )
+        XCTAssertEqual(try String(contentsOf: export.appendingPathComponent("audio.wav"), encoding: .utf8), "inside")
+    }
+
     func testRemoveItemIfRegularFileUnlinksDestSymlinkWithoutFollowing() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("st-rm-\(UUID().uuidString)")
         let export = root.appendingPathComponent("export")

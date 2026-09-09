@@ -12,11 +12,25 @@ struct ClipExporter {
         slice: SliceRecord,
         mediaDuration: TimeInterval
     ) async throws -> SliceRecord {
+        guard ExportRel.isUsableSessionRoot(sessionURL) else {
+            throw SessionRecorderError.writerFailed("session.mp4 is missing.")
+        }
         let source = sessionURL.appendingPathComponent(ScrumTracePath.sessionMovie)
         guard ExportRel.existingSessionFile(ScrumTracePath.sessionMovie, sessionURL: sessionURL) != nil,
               ExportRel.isReadableSessionFile(source, sessionRoot: sessionURL) else {
             throw SessionRecorderError.writerFailed("session.mp4 is missing.")
         }
+        let movieCopy: URL
+        do {
+            movieCopy = try ExportRel.copyContainedToTemporaryFile(
+                relative: ScrumTracePath.sessionMovie,
+                sessionURL: sessionURL,
+                prefix: "scrumtrace-movie"
+            )
+        } catch {
+            throw SessionRecorderError.writerFailed("session.mp4 is missing.")
+        }
+        defer { try? FileManager.default.removeItem(at: movieCopy) }
         guard let relativeClip = slice.clipPath else {
             throw SessionRecorderError.writerFailed("Slice is missing clip_path.")
         }
@@ -34,7 +48,7 @@ struct ClipExporter {
             throw SessionRecorderError.writerFailed("Slice clip_path escaped the session folder.")
         }
         try await reencode(
-            source: source,
+            source: movieCopy,
             destRelative: prepared,
             slice: slice,
             mediaDuration: mediaDuration,
@@ -51,7 +65,7 @@ struct ClipExporter {
             return updated
         }
         do {
-            let jpeg = try await extractStill(source: source, at: (slice.startMedia + slice.endMedia) / 2)
+            let jpeg = try await extractStill(source: movieCopy, at: (slice.startMedia + slice.endMedia) / 2)
             try ExportRel.writeContainedData(jpeg, relative: stillRelative, sessionURL: sessionURL)
             if !updated.stills.contains(stillRelative) {
                 updated.stills.insert(stillRelative, at: 0)
@@ -98,11 +112,23 @@ struct ClipExporter {
     /// Encode into the system temp folder so a leftover UUID.mp4 cannot
     /// land in `export/media/` and enter the zip allow-list (C3).
     private func tighten(file url: URL, sessionURL: URL) async throws {
+        guard ExportRel.isUsableSessionRoot(sessionURL) else { return }
         guard let rel = ExportRel.unfollowedRelative(url, sessionRoot: sessionURL),
               ExportRel.isAllowedClipDest(rel),
               ExportRel.isReadableSessionFile(url, sessionRoot: sessionURL) else {
             return
         }
+        let work: URL
+        do {
+            work = try ExportRel.copyContainedToTemporaryFile(
+                relative: rel,
+                sessionURL: sessionURL,
+                prefix: "scrumtrace-tighten-src"
+            )
+        } catch {
+            return
+        }
+        defer { try? FileManager.default.removeItem(at: work) }
         let presets = [AVAssetExportPreset640x480, AVAssetExportPresetLowQuality]
         for preset in presets {
             let before = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? NSNumber)?.intValue ?? 0
@@ -110,7 +136,7 @@ struct ClipExporter {
                 "scrumtrace-tighten-\(UUID().uuidString).mp4"
             )
             try? FileManager.default.removeItem(at: temp)
-            let asset = AVURLAsset(url: url)
+            let asset = AVURLAsset(url: work)
             guard let session = AVAssetExportSession(asset: asset, presetName: preset) else { continue }
             session.outputURL = temp
             session.outputFileType = .mp4
@@ -129,9 +155,7 @@ struct ClipExporter {
             let after = (try? FileManager.default.attributesOfItem(atPath: temp.path)[.size] as? NSNumber)?.intValue ?? before
             if after < before {
                 do {
-                    let data = try Data(contentsOf: temp)
-                    try FileManager.default.removeItem(at: temp)
-                    try ExportRel.writeContainedData(data, relative: rel, sessionURL: sessionURL)
+                    try ExportRel.moveIntoSession(from: temp, relative: rel, sessionURL: sessionURL)
                     return
                 } catch {
                     try? FileManager.default.removeItem(at: temp)

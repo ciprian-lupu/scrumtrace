@@ -60,6 +60,23 @@ final class WhisperTranscriber: @unchecked Sendable {
 
     func transcribeFile(at url: URL, sessionURL: URL? = nil) async throws -> FullTranscript {
         try Self.refuseSymlinkMedia(url, sessionRoot: sessionURL)
+        var work = url
+        var copied: URL?
+        if let sessionURL,
+           let rel = ExportRel.unfollowedRelative(url, sessionRoot: sessionURL) {
+            let temp = try ExportRel.copyContainedToTemporaryFile(
+                relative: rel,
+                sessionURL: sessionURL,
+                prefix: "scrumtrace-whisper"
+            )
+            copied = temp
+            work = temp
+        }
+        defer {
+            if let copied {
+                try? FileManager.default.removeItem(at: copied)
+            }
+        }
         let local = lockKit()
         guard let local else {
             throw NSError(
@@ -69,7 +86,7 @@ final class WhisperTranscriber: @unchecked Sendable {
             )
         }
         let options = DecodingOptions(wordTimestamps: true)
-        let results = try await local.transcribe(audioPath: url.path, decodeOptions: options)
+        let results = try await local.transcribe(audioPath: work.path, decodeOptions: options)
         var segments: [TranscriptSegment] = []
         for result in results {
             for segment in result.segments {
@@ -99,16 +116,22 @@ final class WhisperTranscriber: @unchecked Sendable {
     /// Temp AAC is not under the session folder — do not pass `sessionURL` into that transcribe.
     func transcribeMovieAudio(at movie: URL, sessionURL: URL) async throws -> FullTranscript {
         try Self.refuseSymlinkMedia(movie, sessionRoot: sessionURL)
+        let movieCopy = try ExportRel.copyContainedToTemporaryFile(
+            relative: ScrumTracePath.sessionMovie,
+            sessionURL: sessionURL,
+            prefix: "scrumtrace-movie"
+        )
+        defer { try? FileManager.default.removeItem(at: movieCopy) }
         let dest = FileManager.default.temporaryDirectory.appendingPathComponent(
             "scrumtrace-system-audio-\(UUID().uuidString).m4a"
         )
         do {
-            try await extractAudio(from: movie, to: dest)
+            try await extractAudio(from: movieCopy, to: dest)
             defer { try? FileManager.default.removeItem(at: dest) }
             return try await transcribeFile(at: dest)
         } catch {
             try? FileManager.default.removeItem(at: dest)
-            return try await transcribeFile(at: movie, sessionURL: sessionURL)
+            return try await transcribeFile(at: movieCopy)
         }
     }
 
