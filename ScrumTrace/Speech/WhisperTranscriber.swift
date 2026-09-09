@@ -59,6 +59,13 @@ final class WhisperTranscriber: @unchecked Sendable {
     }
 
     func transcribeFile(at url: URL) async throws -> FullTranscript {
+        if (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+            throw NSError(
+                domain: "ScrumTrace",
+                code: 4,
+                userInfo: [NSLocalizedDescriptionKey: "Refusing to transcribe a symbolic link."]
+            )
+        }
         let local = lockKit()
         guard let local else {
             throw NSError(
@@ -96,6 +103,13 @@ final class WhisperTranscriber: @unchecked Sendable {
 
     /// System audio lives in `archive/session.mp4`. Extract AAC, then fall back to the movie path.
     func transcribeMovieAudio(at movie: URL) async throws -> FullTranscript {
+        if (try? movie.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+            throw NSError(
+                domain: "ScrumTrace",
+                code: 4,
+                userInfo: [NSLocalizedDescriptionKey: "Refusing to transcribe a symbolic link."]
+            )
+        }
         let dest = FileManager.default.temporaryDirectory.appendingPathComponent(
             "scrumtrace-system-audio-\(UUID().uuidString).m4a"
         )

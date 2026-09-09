@@ -214,7 +214,7 @@ final class SessionProcessor: @unchecked Sendable {
             zipResult.omitted.append(
                 OmittedAsset(path: "session-pack.zip", reason: "zip failed: \(error.localizedDescription)")
             )
-            try? zipper.writeOmittedMarkdown(sessionURL: sessionURL, omitted: zipResult.omitted)
+            try zipper.writeOmittedMarkdown(sessionURL: sessionURL, omitted: zipResult.omitted)
         }
         var zipBytes = zipResult.byteCount
         for pass in 0..<3 {

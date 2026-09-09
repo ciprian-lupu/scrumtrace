@@ -161,6 +161,8 @@ def test_zipper_never_deletes_archive() -> None:
     dropped = omit_fn.split("return uniqued")[1].split(".filter")[0]
     assert "keyword + extraStills + extraShots + leftover + extraClips" in dropped
     assert "extraClips + extraShots" not in dropped
+    assert "isContainedRegularFile" in omit_fn
+    assert "fileExists(atPath: sessionURL.appendingPathComponent($0).path)" not in omit_fn
 
 
 def test_clip_exporter_macos14() -> None:
@@ -326,6 +328,7 @@ def test_dual_transcript_merge_wired() -> None:
     assert "wordTimestamps: true" in speech
     assert "whisperKitModelName" in speech
     assert "openai_whisper-large-v3-turbo" in speech
+    assert "Refusing to transcribe a symbolic link" in speech
     processor = (ROOT / "ScrumTrace" / "Processing" / "SessionProcessor.swift").read_text()
     assert "shouldTranscribeMovie" in processor
     assert "transcribeMovieAudio" in processor
@@ -354,6 +357,10 @@ def test_pipeline_timing_stays_in_archive() -> None:
     assert "removeEscapingExportLinks" in zip_fn
     assert "try writeOmittedMarkdown" in zip_fn
     assert "try runZip" in zip_fn
+    drop = zipper.split("for path in dropList")[1].split("if size > MediaBudget.maxZipBytes")[0]
+    assert "isContainedRegularFile" in drop
+    assert "isSymbolicLink" in drop
+    assert "fileExists(atPath: url.path)" not in drop
     recorder = (ROOT / "ScrumTrace" / "Capture" / "SessionRecorder.swift").read_text()
     assert "writerQueue.sync" in recorder
     pause_fn = recorder.split("func setPaused")[1].split("func stop")[0]
@@ -534,6 +541,8 @@ def test_phase45_clip_consent_and_budget() -> None:
     anthropic = (ROOT / "ScrumTrace" / "AI" / "AnthropicClient.swift").read_text()
     google = (ROOT / "ScrumTrace" / "AI" / "GoogleClient.swift").read_text()
     protocol_src = (ROOT / "ScrumTrace" / "AI" / "AIProviderProtocol.swift").read_text()
+    payload = protocol_src.split("func jpegPayload")[1]
+    assert "isSymbolicLink" in payload
     assert "mp4BodyURL" in openai
     assert "mp4BodyURL" in anthropic
     assert "mp4BodyURL" in google
@@ -574,6 +583,9 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "tasks = []" in retry_block
     assert "vault.write" in retry_block
     assert "zip failed" in processor
+    zip_fail = processor.split("zipResult = try zipper.zip")[1].split("var zipBytes")[0]
+    assert "try zipper.writeOmittedMarkdown" in zip_fail
+    assert "try? zipper.writeOmittedMarkdown" not in zip_fail
     assert "writeExportDocuments" in processor.split("Docs first")[1].split("var zipResult")[0]
     docs = processor.split("func writeExportDocuments")[1].split("private func transcribe")[0]
     assert "removeEscapingExportLinks" in docs

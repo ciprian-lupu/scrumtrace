@@ -33,7 +33,11 @@ struct SessionPackZipper {
             guard ExportRel.isUnderExport(path) else { continue }
             if PackBudget.isProtected(path) { continue }
             let url = sessionURL.appendingPathComponent(path)
-            guard FileManager.default.fileExists(atPath: url.path) else { continue }
+            if (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+                try? FileManager.default.removeItem(at: url)
+                continue
+            }
+            guard ExportRel.isContainedRegularFile(url, sessionRoot: sessionURL) else { continue }
             try? FileManager.default.removeItem(at: url)
             omitted.append(OmittedAsset(path: ExportRel.toExportRoot(path), reason: "Pack over 35 MB; dropped by priority"))
             do {
@@ -289,7 +293,7 @@ enum PackBudget {
         return uniqued(
             keyword + extraStills + extraShots + leftover + extraClips + evidenceClipsDrop + evidenceStillsDrop
         )
-        .filter { FileManager.default.fileExists(atPath: sessionURL.appendingPathComponent($0).path) }
+        .filter { ExportRel.isContainedRegularFile(sessionURL.appendingPathComponent($0), sessionRoot: sessionURL) }
         .filter { ExportRel.isUnderExport($0) && !isProtected($0) }
     }
 

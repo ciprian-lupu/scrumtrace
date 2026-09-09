@@ -183,6 +183,9 @@ enum ImageBase64 {
     #endif
 
     static func jpegPayload(url: URL, maxEdge: CGFloat = 1440) -> (mime: String, base64: String)? {
+        if (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+            return nil
+        }
         #if os(macOS)
         guard let image = NSImage(contentsOf: url) else { return nil }
         guard let jpeg = jpegData(from: image, maxEdge: maxEdge, quality: 0.82) else { return nil }
