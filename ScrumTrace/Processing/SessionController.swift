@@ -33,11 +33,15 @@ final class SessionController: ObservableObject {
     private var shotWindow: ShotNoteWindow?
     private var pausedByPrivacy = false
     private var lastMetaSignature = ""
+    private let captureFreeze: CaptureFreeze
 
     init(settings: AppSettings = .shared, vault: SessionVault = SessionVault()) {
         self.settings = settings
         self.vault = vault
         self.processor = SessionProcessor(vault: vault, transcriber: transcriber)
+        let freeze = CaptureFreeze(sampler: sampler)
+        self.captureFreeze = freeze
+        privacy.freezeCapture = { freeze.freeze() }
         privacy.onTrip = { [weak self] bundle in
             Task { @MainActor in
                 self?.privacyPause(bundle: bundle)
@@ -106,7 +110,12 @@ final class SessionController: ObservableObject {
     }
 
     var captureState: CaptureSessionState {
-        phase == .paused ? .paused : (phase == .recording ? .recording : .paused)
+        // Privacy freeze can pause the recorder on a background queue before
+        // MainActor updates `phase`. Shot/Pin/Hold-to-Talk must follow the writer.
+        if recorder?.isPaused == true {
+            return .paused
+        }
+        return phase == .paused ? .paused : (phase == .recording ? .recording : .paused)
     }
 
     var canResumeFromPause: Bool {
@@ -156,6 +165,7 @@ final class SessionController: ObservableObject {
         persistInterruptedCapture()
         let rec = recorder
         recorder = nil
+        captureFreeze.attach(nil)
         phase = .idle
         isBusy = false
         statusLine = "Stopped"
@@ -202,7 +212,13 @@ final class SessionController: ObservableObject {
             clock.reset()
             MetadataSampler.requestTrust(prompt: true)
             let recorder = SessionRecorder(sessionURL: created.url, clock: clock)
-            try await recorder.start()
+            captureFreeze.attach(recorder)
+            do {
+                try await recorder.start()
+            } catch {
+                captureFreeze.attach(nil)
+                throw error
+            }
             self.recorder = recorder
             phase = .recording
             statusLine = "Recording"
@@ -263,6 +279,7 @@ final class SessionController: ObservableObject {
             statusLine = "Session manifest missing after stop"
         }
         recorder = nil
+        captureFreeze.attach(nil)
     }
 
     private func runProcessor(sessionId: String) async {

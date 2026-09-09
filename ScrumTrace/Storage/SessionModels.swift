@@ -874,7 +874,8 @@ struct CaptureAudioLayout: Codable, Sendable, Hashable {
             return .both
         }
         let url = sessionURL.appendingPathComponent(ScrumTracePath.captureLayout)
-        guard let data = try? Data(contentsOf: url),
+        guard ExportRel.isReadableSessionFile(url, sessionRoot: sessionURL),
+              let data = try? Data(contentsOf: url),
               let layout = try? JSONDecoder().decode(CaptureAudioLayout.self, from: data) else {
             return .both
         }
@@ -931,7 +932,8 @@ struct PipelineTiming: Codable, Sendable, Hashable {
             return nil
         }
         let url = sessionURL.appendingPathComponent(ScrumTracePath.pipelineTiming)
-        guard let data = try? Data(contentsOf: url) else { return nil }
+        guard ExportRel.isReadableSessionFile(url, sessionRoot: sessionURL),
+              let data = try? Data(contentsOf: url) else { return nil }
         return try? JSONDecoder().decode(PipelineTiming.self, from: data)
     }
 

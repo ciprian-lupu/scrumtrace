@@ -8,9 +8,9 @@ struct AgentContextRenderer {
         lines.append("Drop **this export folder** into a coding-agent workspace. Read this file first, then open the linked evidence. Do not guess facts that exist only in a screenshot or clip. Never open the private capture folder.")
         lines.append("")
         lines.append("## Product")
-        lines.append("- App: \(manifest.productContext.appName)")
-        lines.append("- Repo: \(manifest.productContext.repoURL)")
-        lines.append("- Stack: \(manifest.productContext.techStack)")
+        lines.append("- App: \(PromptTemplates.wrapUntrustedInline(manifest.productContext.appName))")
+        lines.append("- Repo: \(PromptTemplates.wrapUntrustedInline(manifest.productContext.repoURL))")
+        lines.append("- Stack: \(PromptTemplates.wrapUntrustedInline(manifest.productContext.techStack))")
         lines.append("- Media duration: \(Self.clock(manifest.duration.mediaSeconds)) (wall \(Self.clock(manifest.duration.wallSeconds)), \(Self.pauseLabel(manifest.pauses.count)))")
         lines.append("")
         let confirmed = manifest.tasks.filter { $0.status == .confirmed }

@@ -321,6 +321,10 @@ struct ExportProjector {
             return nil
         }
         let from = sessionURL.appendingPathComponent(fromRel)
+        guard ExportRel.isReadableSessionFile(from, sessionRoot: sessionURL) else {
+            omitted.append(unreadableSource(fromRelative, sessionURL: sessionURL))
+            return nil
+        }
         let temp = FileManager.default.temporaryDirectory.appendingPathComponent(
             "scrumtrace-copy-\(UUID().uuidString)"
         )

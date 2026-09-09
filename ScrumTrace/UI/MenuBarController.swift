@@ -37,7 +37,7 @@ final class MenuBarController {
             let symbol: String
             if controller.isBusy {
                 symbol = "gearshape.circle.fill"
-            } else if controller.phase == .paused {
+            } else if controller.captureState == .paused {
                 symbol = "pause.circle.fill"
             } else if controller.isRecording {
                 symbol = "record.circle.fill"
@@ -49,7 +49,7 @@ final class MenuBarController {
         // Do not include statusLine — rebuilding the menu closes it. Update the
         // disabled status item in place while processing.
         let signature = [
-            controller.phase == .paused ? "paused" : "live",
+            controller.captureState == .paused ? "paused" : "live",
             controller.isRecording ? "1" : "0",
             controller.lastSessionId ?? "",
             controller.isBusy ? "1" : "0",
@@ -68,10 +68,10 @@ final class MenuBarController {
         let menu = NSMenu()
         if controller.isRecording {
             let pauseItem = actionItem(
-                controller.phase == .paused ? "Resume" : "Pause",
+                controller.captureState == .paused ? "Resume" : "Pause",
                 #selector(pause)
             )
-            if controller.phase == .paused {
+            if controller.captureState == .paused {
                 pauseItem.isEnabled = controller.canResumeFromPause
             }
             menu.addItem(pauseItem)

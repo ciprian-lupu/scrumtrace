@@ -330,7 +330,8 @@ final class SessionProcessor: @unchecked Sendable {
             return FullTranscript(sessionId: sessionId, language: "en", segments: [])
         }
         let url = sessionURL.appendingPathComponent(ScrumTracePath.fullTranscript)
-        guard let data = try? Data(contentsOf: url),
+        guard ExportRel.isReadableSessionFile(url, sessionRoot: sessionURL),
+              let data = try? Data(contentsOf: url),
               let transcript = try? JSONDecoder().decode(FullTranscript.self, from: data) else {
             return FullTranscript(sessionId: sessionId, language: "en", segments: [])
         }

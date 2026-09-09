@@ -126,6 +126,9 @@ final class SessionVault: @unchecked Sendable {
             throw SessionVaultError.sessionMissing(id)
         }
         let url = session.appendingPathComponent(ScrumTracePath.manifest)
+        guard ExportRel.isReadableSessionFile(url, sessionRoot: session) else {
+            throw SessionVaultError.sessionMissing(id)
+        }
         let data = try Data(contentsOf: url)
         return try decoder.decode(SessionManifest.self, from: data)
     }
@@ -246,7 +249,8 @@ final class SessionVault: @unchecked Sendable {
             return []
         }
         let url = session.appendingPathComponent(ScrumTracePath.events)
-        guard ExportRel.isContainedRegularFile(url, sessionRoot: session) else { return [] }
+        guard ExportRel.isContainedRegularFile(url, sessionRoot: session),
+              ExportRel.isReadableSessionFile(url, sessionRoot: session) else { return [] }
         guard let text = try? String(contentsOf: url, encoding: .utf8) else { return [] }
         return text.split(whereSeparator: \.isNewline).compactMap { line in
             guard let data = line.data(using: .utf8) else { return nil }

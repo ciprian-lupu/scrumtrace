@@ -152,7 +152,7 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
     }
 
     func stop() async throws {
-        let live = writerQueue.sync { () -> SCStream? in
+        let snapshot = writerQueue.sync { () -> (stream: SCStream?, mic: Bool) in
             // Freeze t_wall / t_media at Stop so finishWriting is not counted,
             // and do not resume writers if the user stopped while paused (C1).
             self.clock.markRecordingStopped()
@@ -160,9 +160,9 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             self.started = false
             let captured = self.stream
             self.stream = nil
-            return captured
+            return (captured, self.microphoneWav)
         }
-        if let live {
+        if let live = snapshot.stream {
             try await live.stopCapture()
         }
         engine?.stop()
@@ -182,7 +182,7 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             }
         }
         let layout = CaptureAudioLayout(
-            microphoneWav: microphoneWav,
+            microphoneWav: snapshot.mic,
             systemAudioInMovie: true
         )
         try layout.write(sessionURL: sessionURL)

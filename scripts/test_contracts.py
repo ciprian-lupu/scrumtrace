@@ -37,6 +37,8 @@ def test_agent_context_uses_export_relative_paths() -> None:
     assert "<untrusted_meeting_data>Client validation or submit handler is not enabling Save after the date field is filled.</untrusted_meeting_data>" in ctx
     assert "1 pause" in ctx
     assert "1 pauses" not in ctx
+    assert "<untrusted_meeting_data>AthleteTracker</untrusted_meeting_data>" in ctx
+    assert "<untrusted_meeting_data>https://github.com/acme/athlete-app</untrusted_meeting_data>" in ctx
 
 
 def test_retired_anthropic_ids() -> None:
@@ -253,15 +255,21 @@ def test_pause_gate_hold_to_talk() -> None:
     assert "fullScreenAuxiliary" in shot
     assert "becomesKeyOnlyIfNeeded" in shot
     assert "canBecomeMain" in shot
-    start_talk = shot.split("private func startTalk()")[1].split("private func abortTalk()")[0]
+    assert "addObserver" in shot
+    assert "queue: nil" in shot
+    assert "class ShotTalkState" in shot
+    start_talk = shot.split("func startTalk()")[1].split("func abortTalk()")[0]
     assert "holdingTalk = true" in start_talk
     assert start_talk.index("guard let rec") < start_talk.index("holdingTalk = true")
     assert start_talk.index("guard rec.record()") < start_talk.index("holdingTalk = true")
     assert start_talk.index("recorder = rec") < start_talk.index("guard rec.record()")
     assert start_talk.index("holdingTalk = true") < start_talk.index("abortTalk()")
-    abort = shot.split("private func abortTalk()")[1].split("private func stopTalk")[0]
+    abort = shot.split("func abortTalk()")[1].split("func stopTalk")[0]
     assert "guard holdingTalk else { return }" not in abort
     assert "removeItem(at: url)" in abort
+    persist = shot.split("func persist()")[1].split("func startTalk()")[0]
+    assert "abortTalk()" in persist
+    assert "guard !saved else { return }" in persist
     hud = (ROOT / "ScrumTrace" / "UI" / "RecordingHUDWindow.swift").read_text()
     assert "allowsNewCapture" in hud
 
@@ -296,6 +304,7 @@ def test_retry_failed_slices_and_pins() -> None:
     assert ".probe" not in next_shot
     events_fn = vault.split("private func events")[1].split("func revealInFinder")[0]
     assert "isContainedRegularFile" in events_fn
+    assert "isReadableSessionFile" in events_fn
     append = vault.split("func appendEvent")[1].split("func recentSessions")[0]
     assert "isSymbolicLink" in append
     assert "isContainedRegularFile" in append
@@ -341,6 +350,10 @@ def test_audio_split_and_brief_loader() -> None:
     assert "CaptureAudioLayout" in recorder
     assert "try layout.write" in recorder
     assert "try? layout.write" not in recorder
+    stop_rec = recorder.split("func stop() async throws")[1].split("func stream(")[0]
+    assert "self.microphoneWav" in stop_rec
+    assert "snapshot.mic" in stop_rec
+    assert "microphoneWav: microphoneWav" not in stop_rec
     assert "guard !paused, started else { return }" in recorder
     assert "func copyPCM" in recorder
     tap = recorder.split("func startMicrophoneFallback")[1].split("func copyPCM")[0]
@@ -359,9 +372,8 @@ def test_audio_split_and_brief_loader() -> None:
     shot = (ROOT / "ScrumTrace" / "UI" / "ShotNoteWindow.swift").read_text()
     assert "abortTalk" in shot
     # ShotNoteView.body must close before startTalk (compile error if the brace is missing).
-    body = shot.index("var body: some View")
-    start_talk = shot.index("private func startTalk()")
-    assert shot[body:start_talk].count("{") == shot[body:start_talk].count("}")
+    body = shot.split("struct ShotNoteView")[1].split("struct CanvasHost")[0]
+    assert body.count("{") == body.count("}")
 
 
 def test_dual_transcript_merge_wired() -> None:
@@ -481,9 +493,19 @@ def test_pause_privacy_and_metadata_gate() -> None:
     assert "wrapUntrustedInline" in agent
     assert "wrapUntrustedInline(task.title)" in agent
     assert "wrapUntrustedInline(task.inferred)" in agent
+    assert "wrapUntrustedInline(manifest.productContext.appName)" in agent
+    assert "wrapUntrustedInline(manifest.productContext.repoURL)" in agent
+    assert "wrapUntrustedInline(manifest.productContext.techStack)" in agent
     assert "pauseLabel" in agent
     assert "pauses.count) pauses" not in agent
+    privacy = (ROOT / "ScrumTrace" / "Capture" / "PrivacyGuard.swift").read_text()
     assert "Still auto-paused for a password manager" in controller
+    assert "recorder?.isPaused == true" in controller
+    assert "captureFreeze.attach" in controller
+    assert "freezeCapture" in privacy
+    tick = privacy.split("func tick()")[1].split("func currentCredentialApp")[0]
+    assert "freezeCapture?()" in tick
+    assert tick.index("freezeCapture") < tick.index("onTrip")
     assert "Stills and transcript excerpts" in controller
     assert "clip audio will leave this Mac" in controller
     assert "and clip video will leave this Mac" not in controller
@@ -505,6 +527,8 @@ def test_pause_privacy_and_metadata_gate() -> None:
     assert "canResumeFromPause" in controller
     assert "canResumeFromPause" in hud
     assert "canResumeFromPause" in menu
+    assert "gatePaused" in hud
+    assert "captureState == .paused" in menu
     assert "org.keepassxc.KeePassXC" in privacy
     assert "me.proton.Pass" in privacy
     assert 'contains("protonpass")' in privacy
@@ -598,6 +622,7 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "isUnderExport(destSession)" in copy_if
     assert "prepareContainedWrite" in copy_if
     assert "copyItem(at: from, to: dest)" not in copy_if
+    assert "isReadableSessionFile" in copy_if
     assert "fileExists(atPath:" not in copy_if
     assert "hasPrefix(prefix)" not in copy_if
     agent = (ROOT / "ScrumTrace" / "Export" / "AgentContextRenderer.swift").read_text()
@@ -654,9 +679,13 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "transcribeMovieAudio(at: movie, sessionURL: sessionURL)" in transcribe
     load_tr = processor.split("private func loadTranscript")[1].split("private func evaluateSlice")[0]
     assert "existingSessionFile(ScrumTracePath.fullTranscript" in load_tr
+    assert "isReadableSessionFile" in load_tr
     models = (ROOT / "ScrumTrace" / "Storage" / "SessionModels.swift").read_text()
     layout_load = models.split("static func load(sessionURL: URL) -> CaptureAudioLayout")[1].split("func write(sessionURL")[0]
     assert "existingSessionFile(ScrumTracePath.captureLayout" in layout_load
+    assert "isReadableSessionFile" in layout_load
+    timing_load = models.split("static func load(sessionURL: URL) -> PipelineTiming?")[1].split("func write(sessionURL")[0]
+    assert "isReadableSessionFile" in timing_load
     shot = (ROOT / "ScrumTrace" / "UI" / "ShotNoteWindow.swift").read_text()
     assert "let hadText = !note.isEmpty" in shot
     processor = (ROOT / "ScrumTrace" / "Processing" / "SessionProcessor.swift").read_text()
@@ -816,6 +845,7 @@ def test_write_contained_data_refuses_directory_symlinks() -> None:
     load_fn = vault.split("func loadManifest")[1].split("func write(manifest")[0]
     assert "isSymbolicLink" in load_fn
     assert "existingSessionFile(ScrumTracePath.manifest" in load_fn
+    assert "isReadableSessionFile" in load_fn
     assert "isContainedRegularFile" not in load_fn
     assert "isUsableSessionRoot(rootURL)" in load_fn
     create_fn = vault.split("func createSession")[1].split("func loadManifest")[0]

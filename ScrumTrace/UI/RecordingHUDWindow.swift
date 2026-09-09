@@ -11,9 +11,9 @@ struct HUDView: View {
             Circle()
                 .fill(dotColor)
                 .frame(width: 9, height: 9)
-                .shadow(color: Color.red.opacity(controller.phase == .recording ? 0.8 : 0), radius: 6)
-                .scaleEffect(controller.phase == .recording ? 1.15 : 1)
-                .animation(.easeInOut(duration: 0.7).repeatForever(autoreverses: true), value: controller.phase == .recording)
+                .shadow(color: Color.red.opacity(isLiveRecording ? 0.8 : 0), radius: 6)
+                .scaleEffect(isLiveRecording ? 1.15 : 1)
+                .animation(.easeInOut(duration: 0.7).repeatForever(autoreverses: true), value: isLiveRecording)
             Text(SessionController.clock(controller.mediaElapsed))
                 .font(.system(size: 13, weight: .semibold, design: .monospaced))
                 .foregroundStyle(Color(red: 0.97, green: 0.93, blue: 0.86))
@@ -30,9 +30,9 @@ struct HUDView: View {
                 hudButton("Shot", action: controller.openShot, enabled: controller.captureState.allowsNewCapture)
                 hudButton("Pin", action: controller.pin, enabled: controller.captureState.allowsNewCapture)
                 hudButton(
-                    controller.phase == .paused ? "Resume" : "Pause",
+                    gatePaused ? "Resume" : "Pause",
                     action: controller.togglePause,
-                    enabled: controller.phase != .paused || controller.canResumeFromPause
+                    enabled: !gatePaused || controller.canResumeFromPause
                 )
                 hudButton("Stop", action: controller.stopRecording)
             }
@@ -43,11 +43,19 @@ struct HUDView: View {
         .overlay(Capsule().strokeBorder(Color.white.opacity(0.12), lineWidth: 1))
     }
 
+    private var gatePaused: Bool {
+        controller.captureState == .paused
+    }
+
+    private var isLiveRecording: Bool {
+        controller.phase == .recording && !gatePaused
+    }
+
     private var dotColor: Color {
         if controller.isBusy {
             return Color(red: 0.42, green: 0.62, blue: 0.88)
         }
-        if controller.phase == .paused {
+        if gatePaused {
             return Color(red: 0.94, green: 0.64, blue: 0.22)
         }
         return Color(red: 0.89, green: 0.23, blue: 0.18)

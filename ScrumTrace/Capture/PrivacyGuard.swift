@@ -30,6 +30,8 @@ final class PrivacyGuard: @unchecked Sendable {
     private(set) var isTripped = false
     var onTrip: ((String) -> Void)?
     var onClear: (() -> Void)?
+    /// Called on the privacy timer queue. Must pause capture without waiting for MainActor.
+    var freezeCapture: (() -> Void)?
 
     var isCurrentlyTripped: Bool {
         lock.lock()
@@ -63,6 +65,9 @@ final class PrivacyGuard: @unchecked Sendable {
         if let match {
             isTripped = true
             lock.unlock()
+            // Pause writers and metadata on this queue. The MainActor hop for HUD
+            // must not leave a window where Shot/Pin still see `.recording`.
+            freezeCapture?()
             if !wasTripped {
                 onTrip?(match)
             }
@@ -94,5 +99,31 @@ final class PrivacyGuard: @unchecked Sendable {
         #else
         return nil
         #endif
+    }
+}
+
+/// Pauses the live recorder from a background privacy tick (C1). SessionController
+/// `phase` updates later on MainActor; `SessionRecorder.isPaused` is the live gate.
+final class CaptureFreeze: @unchecked Sendable {
+    private let lock = NSLock()
+    private weak var recorder: SessionRecorder?
+    private let sampler: MetadataSampler
+
+    init(sampler: MetadataSampler) {
+        self.sampler = sampler
+    }
+
+    func attach(_ recorder: SessionRecorder?) {
+        lock.lock()
+        self.recorder = recorder
+        lock.unlock()
+    }
+
+    func freeze() {
+        lock.lock()
+        let rec = recorder
+        lock.unlock()
+        rec?.setPaused(true)
+        sampler.isSuspended = true
     }
 }

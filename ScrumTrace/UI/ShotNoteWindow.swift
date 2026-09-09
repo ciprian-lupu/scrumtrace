@@ -1,4 +1,5 @@
 import AVFoundation
+import Combine
 import SwiftUI
 #if os(macOS)
 import AppKit
@@ -104,80 +105,61 @@ final class AnnotationCanvas: NSView {
     }
 }
 
-struct ShotNoteView: View {
+/// Note / Hold-to-Talk state lives on a class so Pause and Stop observers can
+/// abort and persist on the posting thread (C1). SwiftUI `onReceive` can hop.
+final class ShotTalkState: ObservableObject {
+    @Published var tool: DrawTool = .rectangle
+    @Published var note = ""
+    @Published var holdingTalk = false
+    @Published var canTalk = true
+    @Published var source: ShotSource = .typed
+    let canvas = AnnotationCanvas()
     let screenshot: NSImage
     let transcriber: WhisperTranscriber
-    var whisperModel: String = "large-v3-turbo"
-    var allowsNewCapture: () -> Bool = { true }
-    let onSave: (String, NSImage, ShotSource) -> Void
+    var whisperModel: String
+    var allowsNewCapture: () -> Bool
+    var onSave: (String, NSImage, ShotSource) -> Void
+    var recorder: AVAudioRecorder?
+    private var saved = false
 
-    @State private var tool: DrawTool = .rectangle
-    @State private var note = ""
-    @State private var holdingTalk = false
-    @State private var canTalk = true
-    @State private var recorder: AVAudioRecorder?
-    @State private var source: ShotSource = .typed
-    private let canvas = AnnotationCanvas()
+    init(
+        screenshot: NSImage,
+        transcriber: WhisperTranscriber,
+        whisperModel: String,
+        allowsNewCapture: @escaping () -> Bool,
+        onSave: @escaping (String, NSImage, ShotSource) -> Void
+    ) {
+        self.screenshot = screenshot
+        self.transcriber = transcriber
+        self.whisperModel = whisperModel
+        self.allowsNewCapture = allowsNewCapture
+        self.onSave = onSave
+        canvas.sourceImage = screenshot
+    }
 
-    var body: some View {
-        VStack(spacing: 10) {
-            HStack {
-                Text("Shot note")
-                    .font(.headline)
-                Spacer()
-                Picker("Tool", selection: $tool) {
-                    Text("Box").tag(DrawTool.rectangle)
-                    Text("Arrow").tag(DrawTool.arrow)
-                    Text("Pen").tag(DrawTool.pen)
-                }
-                .pickerStyle(.segmented)
-                .frame(maxWidth: 240)
-            }
-            CanvasHost(canvas: canvas, screenshot: screenshot, tool: tool)
-                .frame(minHeight: 280)
-                .clipShape(RoundedRectangle(cornerRadius: 8))
-            TextField("What should an agent notice here?", text: $note, axis: .vertical)
-                .textFieldStyle(.roundedBorder)
-                .lineLimit(2...4)
-            HStack {
-                Button(holdingTalk ? "Release to transcribe" : (canTalk ? "Hold to talk" : "Hold to talk (paused)")) {}
-                    .disabled(!canTalk)
-                    .simultaneousGesture(
-                        DragGesture(minimumDistance: 0)
-                            .onChanged { _ in startTalk() }
-                            .onEnded { _ in Task { await stopTalk() } }
-                    )
-                Spacer()
-                Button("Save") { save() }
-                    .keyboardShortcut(.defaultAction)
-            }
-        }
-        .padding(14)
-        .frame(width: 720, height: 520)
-        .onAppear {
-            canvas.sourceImage = screenshot
-            canvas.tool = tool
-            canTalk = allowsNewCapture()
-        }
-        .onChange(of: tool) { _, newValue in
-            canvas.tool = newValue
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .scrumTraceCaptureGate)) { _ in
-            canTalk = allowsNewCapture()
-            if !canTalk {
-                abortTalk()
-            }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .scrumTraceSessionEnding)) { _ in
-            abortTalk()
-            save()
-        }
-        .onDisappear {
+    func applyCaptureGate() {
+        canTalk = allowsNewCapture()
+        if !canTalk {
             abortTalk()
         }
     }
 
-    private func startTalk() {
+    func persist() {
+        abortTalk()
+        guard !saved else { return }
+        saved = true
+        let resolved: ShotSource
+        if source == .voice && !note.isEmpty {
+            resolved = .voice
+        } else if source == .mixed {
+            resolved = .mixed
+        } else {
+            resolved = .typed
+        }
+        onSave(note, canvas.snapshot(), resolved)
+    }
+
+    func startTalk() {
         guard !holdingTalk, recorder == nil else { return }
         guard allowsNewCapture() else { return }
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(
@@ -205,7 +187,7 @@ struct ShotNoteView: View {
         }
     }
 
-    private func abortTalk() {
+    func abortTalk() {
         holdingTalk = false
         recorder?.stop()
         if let url = recorder?.url {
@@ -214,7 +196,7 @@ struct ShotNoteView: View {
         recorder = nil
     }
 
-    private func stopTalk() async {
+    func stopTalk() async {
         guard holdingTalk else { return }
         let live = allowsNewCapture()
         holdingTalk = false
@@ -232,18 +214,79 @@ struct ShotNoteView: View {
             source = hadText ? .mixed : .voice
         }
     }
+}
+
+struct ShotNoteView: View {
+    @ObservedObject var session: ShotTalkState
+
+    var body: some View {
+        VStack(spacing: 10) {
+            HStack {
+                Text("Shot note")
+                    .font(.headline)
+                Spacer()
+                Picker("Tool", selection: $session.tool) {
+                    Text("Box").tag(DrawTool.rectangle)
+                    Text("Arrow").tag(DrawTool.arrow)
+                    Text("Pen").tag(DrawTool.pen)
+                }
+                .pickerStyle(.segmented)
+                .frame(maxWidth: 240)
+            }
+            CanvasHost(canvas: session.canvas, screenshot: session.screenshot, tool: session.tool)
+                .frame(minHeight: 280)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+            TextField("What should an agent notice here?", text: $session.note, axis: .vertical)
+                .textFieldStyle(.roundedBorder)
+                .lineLimit(2...4)
+            HStack {
+                Button(session.holdingTalk ? "Release to transcribe" : (session.canTalk ? "Hold to talk" : "Hold to talk (paused)")) {}
+                    .disabled(!session.canTalk)
+                    .simultaneousGesture(
+                        DragGesture(minimumDistance: 0)
+                            .onChanged { _ in startTalk() }
+                            .onEnded { _ in Task { await stopTalk() } }
+                    )
+                Spacer()
+                Button("Save") { save() }
+                    .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(14)
+        .frame(width: 720, height: 520)
+        .onAppear {
+            session.canvas.sourceImage = session.screenshot
+            session.canvas.tool = session.tool
+            session.canTalk = session.allowsNewCapture()
+        }
+        .onChange(of: session.tool) { _, newValue in
+            session.canvas.tool = newValue
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .scrumTraceCaptureGate)) { _ in
+            session.applyCaptureGate()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .scrumTraceSessionEnding)) { _ in
+            session.persist()
+        }
+        .onDisappear {
+            abortTalk()
+        }
+    }
+
+    private func startTalk() {
+        session.startTalk()
+    }
+
+    private func abortTalk() {
+        session.abortTalk()
+    }
+
+    private func stopTalk() async {
+        await session.stopTalk()
+    }
 
     private func save() {
-        let image = canvas.snapshot()
-        let resolved: ShotSource
-        if source == .voice && !note.isEmpty {
-            resolved = .voice
-        } else if source == .mixed {
-            resolved = .mixed
-        } else {
-            resolved = .typed
-        }
-        onSave(note, image, resolved)
+        session.persist()
     }
 }
 
@@ -267,6 +310,8 @@ struct CanvasHost: NSViewRepresentable {
 
 final class ShotNoteWindow: NSPanel {
     private var hosting: NSHostingView<ShotNoteView>?
+    private let talk: ShotTalkState
+    private var observers: [NSObjectProtocol] = []
 
     init(
         screenshot: NSImage,
@@ -275,12 +320,24 @@ final class ShotNoteWindow: NSPanel {
         allowsNewCapture: @escaping () -> Bool = { true },
         onSave: @escaping (String, NSImage, ShotSource) -> Void
     ) {
+        let talk = ShotTalkState(
+            screenshot: screenshot,
+            transcriber: transcriber,
+            whisperModel: whisperModel,
+            allowsNewCapture: allowsNewCapture,
+            onSave: { _, _, _ in }
+        )
+        self.talk = talk
         super.init(
             contentRect: NSRect(x: 0, y: 0, width: 740, height: 540),
             styleMask: [.titled, .closable, .nonactivatingPanel],
             backing: .buffered,
             defer: false
         )
+        talk.onSave = { [weak self] note, image, source in
+            onSave(note, image, source)
+            self?.orderOut(nil)
+        }
         title = "ScrumTrace shot"
         isFloatingPanel = true
         level = .modalPanel
@@ -288,19 +345,34 @@ final class ShotNoteWindow: NSPanel {
         becomesKeyOnlyIfNeeded = true
         animationBehavior = .none
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-        let root = ShotNoteView(
-            screenshot: screenshot,
-            transcriber: transcriber,
-            whisperModel: whisperModel,
-            allowsNewCapture: allowsNewCapture,
-            onSave: { [weak self] note, image, source in
-                onSave(note, image, source)
-                self?.orderOut(nil)
-            }
-        )
+        let root = ShotNoteView(session: talk)
         let view = NSHostingView(rootView: root)
         contentView = view
         hosting = view
+        // queue: nil — run on the posting thread so Stop/Quit persist the
+        // annotation before persistInterruptedCapture (C1).
+        observers.append(
+            NotificationCenter.default.addObserver(
+                forName: .scrumTraceCaptureGate,
+                object: nil,
+                queue: nil
+            ) { [weak talk] _ in
+                talk?.applyCaptureGate()
+            }
+        )
+        observers.append(
+            NotificationCenter.default.addObserver(
+                forName: .scrumTraceSessionEnding,
+                object: nil,
+                queue: nil
+            ) { [weak talk] _ in
+                talk?.persist()
+            }
+        )
+    }
+
+    deinit {
+        observers.forEach { NotificationCenter.default.removeObserver($0) }
     }
 
     func show() {
