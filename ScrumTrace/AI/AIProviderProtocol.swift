@@ -43,11 +43,19 @@ enum AIProviderError: LocalizedError {
 }
 
 enum ProviderWireMedia {
+    /// Shipped adapters have no MP4 mapping. Stay false until a client returns a body URL.
+    static let adaptersUploadVideo = false
+
+    /// What actually leaves the Mac: capability flag **and** a wired adapter mapping.
+    static func willUploadClip(configuration: AIProviderConfiguration) -> Bool {
+        configuration.acceptsVideo && adaptersUploadVideo
+    }
+
     /// Clip file bytes that may be placed on the HTTP body.
     /// Always nil unless `accepts_video` is true **and** the adapter has an MP4
     /// mapping. Shipped adapters have none — they send stills + transcript only.
     static func mp4BodyURL(configuration: AIProviderConfiguration, request: SliceEvaluationRequest) -> URL? {
-        guard configuration.acceptsVideo else { return nil }
+        guard willUploadClip(configuration: configuration) else { return nil }
         guard request.clipURL != nil else { return nil }
         return nil
     }

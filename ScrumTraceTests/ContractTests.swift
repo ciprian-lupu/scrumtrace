@@ -370,9 +370,72 @@ final class ContractTests: XCTestCase {
             clipURL: URL(fileURLWithPath: "/tmp/clip.mp4")
         )
         XCTAssertNil(ProviderWireMedia.mp4BodyURL(configuration: configuration, request: request))
+        XCTAssertFalse(ProviderWireMedia.willUploadClip(configuration: configuration))
+        XCTAssertFalse(ProviderWireMedia.adaptersUploadVideo)
         var noVideo = configuration
         noVideo.acceptsVideo = false
         XCTAssertNil(ProviderWireMedia.mp4BodyURL(configuration: noVideo, request: request))
+        XCTAssertFalse(ProviderWireMedia.willUploadClip(configuration: noVideo))
+    }
+
+    func testApplyExportEvidenceDemotesConfirmedWithoutExportFile() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("scrumtrace-export-ev-\(UUID().uuidString)")
+        let shots = root.appendingPathComponent("export/shots")
+        try FileManager.default.createDirectory(at: shots, withIntermediateDirectories: true)
+        try Data("jpg".utf8).write(to: shots.appendingPathComponent("001.jpg"))
+        defer { try? FileManager.default.removeItem(at: root) }
+        let kept = TaskRecord(
+            taskId: "TASK-01",
+            sourceSliceId: "slice-01",
+            kind: .bug,
+            status: .confirmed,
+            title: "Save",
+            observed: "x",
+            stated: "",
+            inferred: "",
+            agentInstructions: "inspect",
+            quotes: [],
+            evidenceMedia: ["shots/001.jpg"],
+            confidence: 0.9
+        )
+        let missing = TaskRecord(
+            taskId: "TASK-02",
+            sourceSliceId: "slice-02",
+            kind: .bug,
+            status: .confirmed,
+            title: "Missing still",
+            observed: "x",
+            stated: "",
+            inferred: "",
+            agentInstructions: "inspect",
+            quotes: [],
+            evidenceMedia: ["shots/missing.jpg"],
+            confidence: 0.9
+        )
+        let archiveOnly = TaskRecord(
+            taskId: "TASK-03",
+            sourceSliceId: "slice-03",
+            kind: .bug,
+            status: .confirmed,
+            title: "Archive only",
+            observed: "x",
+            stated: "",
+            inferred: "",
+            agentInstructions: "inspect",
+            quotes: [],
+            evidenceMedia: ["archive/shots/001.png"],
+            confidence: 0.9
+        )
+        let applied = EvidenceValidator.applyExportEvidence(
+            tasks: [kept, missing, archiveOnly],
+            sessionURL: root
+        )
+        XCTAssertEqual(applied[0].status, .confirmed)
+        XCTAssertEqual(applied[0].evidenceMedia, ["shots/001.jpg"])
+        XCTAssertEqual(applied[1].status, .needsReview)
+        XCTAssertTrue(applied[1].evidenceMedia.isEmpty)
+        XCTAssertEqual(applied[2].status, .needsReview)
+        XCTAssertTrue(applied[2].evidenceMedia.isEmpty)
     }
 
     func testKeywordTaskClipIsDroppedAfterExtraStills() throws {

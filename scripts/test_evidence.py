@@ -86,6 +86,7 @@ def test_frame_ref_basename_resolves() -> None:
 
     validator = (ROOT / "ScrumTrace" / "AI" / "EvidenceValidator.swift").read_text()
     assert "func resolvePath" in validator
+    assert "func applyExportEvidence" in validator
     assert "archive/shots/" in validator
     slicer = (ROOT / "ScrumTrace" / "Slicing" / "MeetingSlicer.swift").read_text()
     assert "clipMaxDuration" in slicer

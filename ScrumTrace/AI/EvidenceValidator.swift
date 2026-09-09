@@ -93,6 +93,26 @@ enum EvidenceValidator {
         return issues
     }
 
+    /// C5: after projection/omit, `confirmed` requires a real file under `export/`.
+    static func applyExportEvidence(tasks: [TaskRecord], sessionURL: URL) -> [TaskRecord] {
+        tasks.map { task in
+            var copy = task
+            copy.evidenceMedia = task.evidenceMedia.filter { path in
+                exportFileExists(path, sessionURL: sessionURL)
+            }
+            if copy.status == .confirmed && copy.evidenceMedia.isEmpty {
+                copy.status = .needsReview
+            }
+            return copy
+        }
+    }
+
+    static func exportFileExists(_ path: String, sessionURL: URL) -> Bool {
+        let session = ExportRel.sessionPath(path)
+        guard ExportRel.isUnderExport(session) else { return false }
+        return FileManager.default.fileExists(atPath: sessionURL.appendingPathComponent(session).path)
+    }
+
     private static func firstMatch(name: String, stem: String, in root: URL, sessionURL: URL) -> String? {
         guard let enumerator = FileManager.default.enumerator(
             at: root,

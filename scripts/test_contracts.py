@@ -241,7 +241,9 @@ def test_pause_privacy_and_metadata_gate() -> None:
     assert "handoffPath" in agent
     assert "Still auto-paused for a password manager" in controller
     assert "Stills and transcript excerpts" in controller
-    assert "includesClipAudio: approved && capabilities.acceptsVideo" in controller
+    assert "includesClipAudio: approved && uploadsClip" in controller
+    assert "willUploadClip" in controller
+    assert "Clip video and the master movie are not uploaded" in controller
     clock = (ROOT / "ScrumTrace" / "Capture" / "ClockSynchronizer.swift").read_text()
     assert "CMSyncConvertTime" in clock
     privacy = (ROOT / "ScrumTrace" / "Capture" / "PrivacyGuard.swift").read_text()
@@ -278,6 +280,8 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "selectForPack" in local
     assert "Inspect the linked evidence only" in processor
     assert "remain in archive/" not in processor
+    assert "applyExportEvidence" in processor
+    assert "manifest.tasks = projection.manifest.tasks" in processor
     assert "includesClipAudio != acceptsVideo" in models
     controller = (ROOT / "ScrumTrace" / "Processing" / "SessionController.swift").read_text()
     assert "needsReprompt" in controller
@@ -292,6 +296,8 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "mp4BodyURL" in anthropic
     assert "mp4BodyURL" in google
     assert "func mp4BodyURL" in protocol_src
+    assert "willUploadClip" in protocol_src
+    assert "adaptersUploadVideo" in protocol_src
     assert 'mediaSent.append("video")' not in processor
     assert "Data(contentsOf: request.clipURL" not in openai
     assert "Data(contentsOf: request.clipURL" not in anthropic

@@ -702,7 +702,9 @@ struct UploadConsent: Codable, Sendable, Hashable {
     )
 
     /// D15: Retry does not re-prompt unless this session never asked, the
-    /// destination changed, or the payload kind (clip video vs stills-only) changed.
+    /// destination changed, or the payload kind (clip bytes vs stills-only) changed.
+    /// `acceptsVideo` is the **actual** clip-upload capability (`willUploadClip`),
+    /// not the settings flag alone.
     func needsReprompt(provider: String, endpoint: String, model: String, acceptsVideo: Bool) -> Bool {
         let neverAsked = self.provider.isEmpty && self.endpoint.isEmpty && self.model.isEmpty
         if neverAsked {

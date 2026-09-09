@@ -194,6 +194,10 @@ final class SessionProcessor: @unchecked Sendable {
             manifest: manifest,
             includeFullTranscript: manifest.includeFullTranscriptInZip
         )
+        projection.manifest.tasks = EvidenceValidator.applyExportEvidence(
+            tasks: projection.manifest.tasks,
+            sessionURL: sessionURL
+        )
         manifest.omitted = projection.omitted
         // Docs first: a zip failure must not skip SESSION_BRIEF.html / AGENT_CONTEXT.md.
         try writeExportDocuments(
@@ -224,6 +228,10 @@ final class SessionProcessor: @unchecked Sendable {
         for pass in 0..<3 {
             projection.manifest = PackBudget.stripOmitted(zipResult.omitted, from: projection.manifest)
             projection.manifest.omitted = zipResult.omitted
+            projection.manifest.tasks = EvidenceValidator.applyExportEvidence(
+                tasks: projection.manifest.tasks,
+                sessionURL: sessionURL
+            )
             do {
                 try writeExportDocuments(
                     sessionURL: sessionURL,
@@ -251,6 +259,8 @@ final class SessionProcessor: @unchecked Sendable {
         timing.omittedCount = zipResult.omitted.count
         try timing.write(sessionURL: sessionURL)
         manifest.omitted = zipResult.omitted
+        // C5: canonical SoT must not keep `confirmed` after export evidence was dropped.
+        manifest.tasks = projection.manifest.tasks
         manifest.markCompleted(.synthesizing)
         manifest.pipelineStatus = manifest.slices.contains(where: { $0.analysisStatus == .offlineFailed })
             ? .offlineFailed

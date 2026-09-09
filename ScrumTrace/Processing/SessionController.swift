@@ -254,7 +254,7 @@ final class SessionController: ObservableObject {
                     provider: settings.provider.rawValue,
                     endpoint: settings.baseURL,
                     model: settings.model,
-                    acceptsVideo: capabilities.acceptsVideo
+                    acceptsVideo: ProviderWireMedia.willUploadClip(configuration: capabilities)
                 ) {
                     let previous = local.uploadConsent
                     let askedBefore = !previous.provider.isEmpty
@@ -307,11 +307,12 @@ final class SessionController: ObservableObject {
         let alert = NSAlert()
         alert.messageText = "Send stills and transcript excerpts off this Mac?"
         let capabilities = settings.providerConfiguration()
+        let uploadsClip = ProviderWireMedia.willUploadClip(configuration: capabilities)
         let payload: String
-        if capabilities.acceptsVideo {
+        if uploadsClip {
             payload = "Stills, transcript excerpts, and clip video will leave this Mac."
         } else {
-            payload = "Stills and transcript excerpts will leave this Mac. The master movie is not uploaded."
+            payload = "Stills and transcript excerpts will leave this Mac. Clip video and the master movie are not uploaded."
         }
         alert.informativeText = """
         Destination: \(settings.provider.title)
@@ -329,7 +330,7 @@ final class SessionController: ObservableObject {
             provider: settings.provider.rawValue,
             endpoint: settings.baseURL,
             model: settings.model,
-            includesClipAudio: approved && capabilities.acceptsVideo,
+            includesClipAudio: approved && uploadsClip,
             includesStills: approved
         )
         #else
