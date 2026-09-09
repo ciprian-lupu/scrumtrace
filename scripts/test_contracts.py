@@ -72,6 +72,34 @@ def test_html_escaper_order() -> None:
     amp = renderer.find('replacingOccurrences(of: "&"')
     lt = renderer.find('replacingOccurrences(of: "<"')
     assert 0 <= amp < lt, "escape & before <"
+    render_fn = renderer.split("func render")[1].split("func taskCard")[0]
+    assert "applyReplacements" in render_fn
+    assert "replacingOccurrences(of: token" not in render_fn
+    models = (ROOT / "ScrumTrace" / "Storage" / "SessionModels.swift").read_text()
+    assert "normalizedComponents" in models
+    assert 'part == ".."' in models
+    gen = (ROOT / "scripts" / "generate_mock_session.py").read_text()
+    assert "def fill_template" in gen
+    assert "html.replace(key, value)" not in gen
+
+
+def test_brief_template_does_not_rescan_values() -> None:
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "generate_mock_session", ROOT / "scripts" / "generate_mock_session.py"
+    )
+    assert spec and spec.loader
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    html = mod.fill_template(
+        "HEAD{{TASKS_HTML}}MID{{OMITTED_HTML}}TAIL",
+        {
+            "{{TASKS_HTML}}": "Bug {{OMITTED_HTML}} here",
+            "{{OMITTED_HTML}}": "OMITTED-BLOCK",
+        },
+    )
+    assert html == "HEADBug {{OMITTED_HTML}} hereMIDOMITTED-BLOCKTAIL"
 
 
 def test_zipper_never_deletes_archive() -> None:
@@ -451,6 +479,7 @@ def main() -> None:
     test_retired_anthropic_ids()
     test_json_schema_uses_standard_types()
     test_html_escaper_order()
+    test_brief_template_does_not_rescan_values()
     test_zipper_never_deletes_archive()
     test_clip_exporter_macos14()
     test_handoff_log_names_mp4_tools()

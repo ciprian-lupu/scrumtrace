@@ -8,43 +8,69 @@ extension Notification.Name {
 /// Paths agents see are relative to `export/` (`shots/…`, `media/…`).
 enum ExportRel {
     static func toExportRoot(_ path: String) -> String {
-        var value = path
-        if value.hasPrefix("./") {
-            value = String(value.dropFirst(2))
+        guard let parts = normalizedComponents(path) else { return "" }
+        if parts.first == "export" {
+            return parts.dropFirst().joined(separator: "/")
         }
-        if value.hasPrefix("export/") {
-            return String(value.dropFirst("export/".count))
-        }
-        return value
+        return parts.joined(separator: "/")
     }
 
     /// Session-root path used for file I/O. Never rewrites `archive/` into `export/`.
     static func sessionPath(_ path: String) -> String {
-        if path.hasPrefix("export/") || path.hasPrefix("archive/") {
-            return path
+        guard let parts = normalizedComponents(path) else { return "invalid" }
+        if parts.first == "export" || parts.first == "archive" {
+            return parts.joined(separator: "/")
         }
-        return "export/\(toExportRoot(path))"
+        return (["export"] + parts).joined(separator: "/")
     }
 
     static func isUnderExport(_ path: String) -> Bool {
-        path.hasPrefix("export/") && !path.hasPrefix("export/archive")
+        guard let parts = normalizedComponents(path) else { return false }
+        return parts.first == "export" && parts.count >= 2 && parts[1] != "archive"
     }
 
-    /// Paths agents and SESSION_BRIEF may link. Never `archive/`.
+    /// Paths agents and SESSION_BRIEF may link. Never `archive/`, never `..`.
     static func handoffPath(_ path: String) -> String? {
-        let rel = toExportRoot(path)
-        if rel.isEmpty { return nil }
-        if rel.hasPrefix("archive/") { return nil }
-        return rel
+        let session = sessionPath(path)
+        guard isUnderExport(session) else { return nil }
+        let rel = toExportRoot(session)
+        return rel.isEmpty ? nil : rel
     }
 
     /// Omitted-asset labels in `export/`. Strip `archive/` so the pack never names that folder.
     static func omittedHandoffPath(_ path: String) -> String {
-        let rel = toExportRoot(path)
-        if rel.hasPrefix("archive/") {
-            return String(rel.dropFirst("archive/".count))
+        guard let parts = normalizedComponents(path) else { return "omitted" }
+        var rest = parts
+        if rest.first == "export" {
+            rest = Array(rest.dropFirst())
         }
-        return rel
+        if rest.first == "archive" {
+            rest = Array(rest.dropFirst())
+        }
+        return rest.joined(separator: "/")
+    }
+
+    /// Collapse `.` / `..` and reject absolute paths that escape the session root.
+    static func normalizedComponents(_ path: String) -> [String]? {
+        var value = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        if value.hasPrefix("./") {
+            value = String(value.dropFirst(2))
+        }
+        if value.hasPrefix("/") || value.hasPrefix("~") || value.contains("://") {
+            return nil
+        }
+        var stack: [String] = []
+        for part in value.split(separator: "/", omittingEmptySubsequences: true) {
+            if part == "." { continue }
+            if part == ".." {
+                if stack.isEmpty { return nil }
+                stack.removeLast()
+                continue
+            }
+            if part.contains("\\") { return nil }
+            stack.append(String(part))
+        }
+        return stack.isEmpty ? nil : stack
     }
 }
 

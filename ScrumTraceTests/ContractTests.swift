@@ -15,6 +15,15 @@ final class ContractTests: XCTestCase {
         XCTAssertEqual(ExportRel.omittedHandoffPath("archive/shots/001.png"), "shots/001.png")
         XCTAssertEqual(ExportRel.omittedHandoffPath("export/media/task-01/clip.mp4"), "media/task-01/clip.mp4")
         XCTAssertFalse(ExportRel.omittedHandoffPath("archive/session.mp4").hasPrefix("archive/"))
+        XCTAssertFalse(ExportRel.isUnderExport("export/../archive/session.mp4"))
+        XCTAssertFalse(ExportRel.isUnderExport("export/../../etc/passwd"))
+        XCTAssertNil(ExportRel.handoffPath("export/../archive/session.mp4"))
+        XCTAssertNil(ExportRel.handoffPath("export/../../etc/passwd"))
+        XCTAssertNil(ExportRel.handoffPath("/tmp/shots/001.jpg"))
+        XCTAssertEqual(ExportRel.sessionPath("export/../shots/001.jpg"), "export/shots/001.jpg")
+        XCTAssertEqual(ExportRel.handoffPath("export/../shots/001.jpg"), "shots/001.jpg")
+        XCTAssertEqual(ExportRel.sessionPath("export/../archive/session.mp4"), "archive/session.mp4")
+        XCTAssertNil(ExportRel.normalizedComponents("export/foo/../../.."))
     }
 
     func testWhisperKitModelNamePrefixesShortAlias() {
@@ -670,5 +679,16 @@ final class ContractTests: XCTestCase {
             sessionURL: root
         )
         XCTAssertFalse(keepIssues.contains { $0.reason == "decision is not keep" })
+    }
+
+    func testBriefDoesNotExpandTokensInsideTaskText() {
+        let html = SessionBriefRenderer.applyReplacements(
+            "HEAD{{TASKS_HTML}}MID{{OMITTED_HTML}}TAIL",
+            [
+                "{{TASKS_HTML}}": "Bug {{OMITTED_HTML}} here",
+                "{{OMITTED_HTML}}": "OMITTED-BLOCK"
+            ]
+        )
+        XCTAssertEqual(html, "HEADBug {{OMITTED_HTML}} hereMIDOMITTED-BLOCKTAIL")
     }
 }

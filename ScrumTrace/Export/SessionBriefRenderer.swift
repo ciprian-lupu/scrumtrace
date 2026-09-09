@@ -73,11 +73,32 @@ struct SessionBriefRenderer {
             "{{REVIEW_COUNT}}": "\(review.count)",
             "{{OMITTED_HTML}}": omittedHTML(manifest)
         ]
-        var html = shell
-        for (token, value) in replacements {
-            html = html.replacingOccurrences(of: token, with: value)
+        return Self.applyReplacements(shell, replacements)
+    }
+
+    /// Fill shell tokens only. Do not rescan substituted task/transcript text
+    /// or a model string containing `{{OMITTED_HTML}}` would inject pack HTML.
+    static func applyReplacements(_ shell: String, _ replacements: [String: String]) -> String {
+        var output = ""
+        var index = shell.startIndex
+        while index < shell.endIndex {
+            if shell[index] == "{",
+               shell.distance(from: index, to: shell.endIndex) >= 2 {
+                let second = shell.index(after: index)
+                if shell[second] == "{",
+                   let close = shell[shell.index(after: second)...].range(of: "}}") {
+                    let token = String(shell[index..<close.upperBound])
+                    if let value = replacements[token] {
+                        output.append(value)
+                        index = close.upperBound
+                        continue
+                    }
+                }
+            }
+            output.append(shell[index])
+            index = shell.index(after: index)
         }
-        return html
+        return output
     }
 
     private func taskCard(_ task: TaskRecord, excerpts: [String: String]) -> String {

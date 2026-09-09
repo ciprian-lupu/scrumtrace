@@ -132,10 +132,25 @@ def fill_brief(tasks_html: str, shots_html: str, timeline_html: str) -> str:
         "{{REVIEW_COUNT}}": "0",
         "{{OMITTED_HTML}}": "",
     }
-    html = shell
-    for key, value in replacements.items():
-        html = html.replace(key, value)
-    return html
+    return fill_template(shell, replacements)
+
+
+def fill_template(shell: str, replacements: dict[str, str]) -> str:
+    """Replace {{TOKENS}} in the shell only; do not rescan substituted values."""
+    out: list[str] = []
+    i = 0
+    while i < len(shell):
+        if shell.startswith("{{", i):
+            close = shell.find("}}", i + 2)
+            if close != -1:
+                token = shell[i : close + 2]
+                if token in replacements:
+                    out.append(replacements[token])
+                    i = close + 2
+                    continue
+        out.append(shell[i])
+        i += 1
+    return "".join(out)
 
 
 def main() -> None:
