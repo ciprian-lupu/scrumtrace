@@ -25,11 +25,14 @@ final class SessionProcessor: @unchecked Sendable {
         whisperModel: String,
         onStatus: @escaping @MainActor (PipelineStatus, String) -> Void
     ) async throws -> SessionManifest {
-        var manifest = try vault.loadManifest(id: sessionId)
         let sessionURL = vault.sessionURL(id: sessionId)
+        guard ExportRel.isUsableSessionRoot(sessionURL) else {
+            throw SessionVaultError.sessionMissing(sessionId)
+        }
         if (try? sessionURL.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
             throw SessionVaultError.sessionMissing(sessionId)
         }
+        var manifest = try vault.loadManifest(id: sessionId)
 
         var timing = PipelineTiming.load(sessionURL: sessionURL) ?? PipelineTiming()
 

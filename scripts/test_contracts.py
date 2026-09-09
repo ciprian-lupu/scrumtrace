@@ -458,6 +458,10 @@ def test_pipeline_timing_stays_in_archive() -> None:
     assert "try runZip" in zip_fn
     write_zip = zipper.split("func writeZip")[1].split("func writeOmittedMarkdown")[0]
     assert "isUsableSessionRoot" in write_zip
+    assert "removeEscapingExportLinks" in write_zip
+    assert "createDirectory" in write_zip
+    assert "export/ is a symbolic link" in write_zip
+    assert write_zip.index("createDirectory") < write_zip.index("is a symbolic link")
     drop = zipper.split("for path in dropList")[1].split("if size > MediaBudget.maxZipBytes")[0]
     assert "isContainedRegularFile" in drop
     assert "isSymbolicLink" in drop
@@ -857,6 +861,7 @@ def test_write_contained_data_refuses_directory_symlinks() -> None:
     assert "O_EXCL" in copy_fn
     assert "scrumtraceFcopyfile" in copy_fn
     assert "pathExtension" in copy_fn
+    assert "Darwin.fsync" in copy_fn
     assert "O_NOFOLLOW" in models.split("private static func openatFile")[1]
     prepare = models.split("static func prepareContainedWrite")[1].split("static func writeContainedData")[0]
     assert "isSymbolicLink" in prepare
@@ -907,6 +912,7 @@ def test_write_contained_data_refuses_directory_symlinks() -> None:
     assert "replaceItemAt" not in write_man
     assert "FileHandle" not in write_man
     assert "isUsableSessionRoot(rootURL)" in write_man
+    assert "isUsableSessionRoot(dir)" in write_man
     assert "writeFailed(\"session folder\")" in write_man
     load_fn = vault.split("func loadManifest")[1].split("func write(manifest")[0]
     assert "isSymbolicLink" in load_fn
@@ -915,19 +921,24 @@ def test_write_contained_data_refuses_directory_symlinks() -> None:
     assert "Data(contentsOf:" not in load_fn
     assert "isContainedRegularFile" not in load_fn
     assert "isUsableSessionRoot(rootURL)" in load_fn
+    assert "isUsableSessionRoot(session)" in load_fn
     create_fn = vault.split("func createSession")[1].split("func loadManifest")[0]
     assert "isSymbolicLink" in create_fn
     assert create_fn.count("isSymbolicLink") >= 2
     assert "isUsableSessionRoot(rootURL)" in create_fn
     process_head = processor.split("func process(")[1].split("var timing")[0]
+    assert "isUsableSessionRoot" in process_head
     assert "isSymbolicLink" in process_head
+    assert process_head.index("isUsableSessionRoot") < process_head.index("loadManifest")
     append_ev = vault.split("func appendEvent")[1].split("func recentSessions")[0]
     assert "fileExists(atPath: url.path)" not in append_ev
     assert "isContainedRegularFile" in append_ev
     assert "writeContainedData" in append_ev
     assert "FileHandle" not in append_ev
     assert "isUsableSessionRoot(rootURL)" in append_ev
+    assert "isUsableSessionRoot(session)" in append_ev
     assert "containsSymlinkComponent" in vault.split("func nextShotIndex")[1].split("func loadPinTimes")[0]
+    assert "isUsableSessionRoot(session)" in vault.split("func nextShotIndex")[1].split("func loadPinTimes")[0]
     under = models.split("static func isUnderSession")[1].split("static func isUsableSessionRoot")[0]
     assert "ScrumTracePath.manifest" in under
     assert "func isUsableSessionRoot" in models
@@ -950,6 +961,7 @@ def test_write_contained_data_refuses_directory_symlinks() -> None:
     assert "isUsableSessionRoot(rootURL)" in recent
     reveal = vault.split("func revealInFinder")[1].split("private static let folderStamp")[0]
     assert "isUsableSessionRoot(rootURL)" in reveal
+    assert "isUsableSessionRoot(session)" in reveal
 
 
 def main() -> None:

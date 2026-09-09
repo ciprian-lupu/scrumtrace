@@ -446,6 +446,10 @@ enum ExportRel {
             try? FileManager.default.removeItem(at: dest)
             throw SessionVaultError.writeFailed(relative)
         }
+        guard Darwin.fsync(destFd) == 0 else {
+            try? FileManager.default.removeItem(at: dest)
+            throw SessionVaultError.writeFailed(relative)
+        }
         return dest
     }
 

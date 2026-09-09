@@ -87,6 +87,11 @@ struct SessionPackZipper {
             throw SessionRecorderError.writerFailed("session folder")
         }
         let exportDir = sessionURL.appendingPathComponent(ScrumTracePath.export)
+        PackBudget.removeEscapingExportLinks(exportDir: exportDir)
+        try FileManager.default.createDirectory(at: exportDir, withIntermediateDirectories: true)
+        if (try? exportDir.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+            throw SessionRecorderError.writerFailed("export/ is a symbolic link.")
+        }
         let zipURL = sessionURL.appendingPathComponent(ScrumTracePath.packZip)
         try runZip(
             exportDir: exportDir,

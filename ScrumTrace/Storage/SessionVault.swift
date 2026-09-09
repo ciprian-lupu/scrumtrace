@@ -119,6 +119,9 @@ final class SessionVault: @unchecked Sendable {
             throw SessionVaultError.sessionMissing(id)
         }
         let session = sessionURL(id: id)
+        guard ExportRel.isUsableSessionRoot(session) else {
+            throw SessionVaultError.sessionMissing(id)
+        }
         if (try? session.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
             throw SessionVaultError.sessionMissing(id)
         }
@@ -142,10 +145,16 @@ final class SessionVault: @unchecked Sendable {
             throw SessionVaultError.writeFailed("sessions folder")
         }
         let dir = sessionURL(id: manifest.sessionId)
+        guard ExportRel.isUsableSessionRoot(dir) else {
+            throw SessionVaultError.writeFailed("session folder")
+        }
         if (try? dir.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
             throw SessionVaultError.writeFailed("session folder")
         }
         try fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
+        guard ExportRel.isUsableSessionRoot(dir) else {
+            throw SessionVaultError.writeFailed("session folder")
+        }
         if (try? dir.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
             throw SessionVaultError.writeFailed("session folder")
         }
@@ -165,6 +174,9 @@ final class SessionVault: @unchecked Sendable {
             throw SessionVaultError.writeFailed("sessions folder")
         }
         let session = sessionURL(id: sessionId)
+        guard ExportRel.isUsableSessionRoot(session) else {
+            throw SessionVaultError.writeFailed("session folder")
+        }
         if (try? session.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
             throw SessionVaultError.writeFailed("session folder")
         }
@@ -200,6 +212,7 @@ final class SessionVault: @unchecked Sendable {
         guard Self.isValidSessionId(sessionId) else { return 1 }
         guard ExportRel.isUsableSessionRoot(rootURL) else { return 1 }
         let session = sessionURL(id: sessionId)
+        guard ExportRel.isUsableSessionRoot(session) else { return 1 }
         if (try? session.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
             return 1
         }
@@ -247,6 +260,7 @@ final class SessionVault: @unchecked Sendable {
         guard Self.isValidSessionId(sessionId) else { return [] }
         guard ExportRel.isUsableSessionRoot(rootURL) else { return [] }
         let session = sessionURL(id: sessionId)
+        guard ExportRel.isUsableSessionRoot(session) else { return [] }
         if (try? session.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
             return []
         }
@@ -266,6 +280,7 @@ final class SessionVault: @unchecked Sendable {
         guard Self.isValidSessionId(sessionId) else { return }
         guard ExportRel.isUsableSessionRoot(rootURL) else { return }
         let session = sessionURL(id: sessionId)
+        guard ExportRel.isUsableSessionRoot(session) else { return }
         if (try? session.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
             return
         }
