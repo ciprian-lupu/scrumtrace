@@ -161,7 +161,7 @@ def test_zipper_never_deletes_archive() -> None:
     assert "removeItem(at: export)" in projector.split("func resetExportTree")[1].split("func writeProjectionManifest")[0]
     reset = projector.split("func resetExportTree")[1].split("func writeProjectionManifest")[0]
     assert "isSymbolicLink" in reset
-    assert "fileExists(atPath: export.path)" in reset
+    assert "fileExists(atPath: export.path, isDirectory:" in reset
     omit_md = zipper.split("func writeOmittedMarkdown")[1].split("private func uniquedOmitted")[0]
     assert "omittedHandoffPath" in omit_md
     assert "writeExportText" in omit_md
