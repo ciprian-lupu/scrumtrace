@@ -157,7 +157,9 @@ final class SessionProcessor: @unchecked Sendable {
                     let done = Set(updatedSlices.map(\.sliceId))
                     let remaining = toRun.filter { !done.contains($0.sliceId) }
                     manifest.slices = (updatedSlices + remaining).sorted { $0.sliceId < $1.sliceId }
-                    manifest.tasks = rankedTasks(tasks)
+                    // Keep the full candidate list on disk. Rank only after every
+                    // slice so a crash cannot drop extras that later ranking needs.
+                    manifest.tasks = tasks
                     try vault.write(manifest: &manifest)
                 }
                 manifest.slices = updatedSlices.sorted { $0.sliceId < $1.sliceId }

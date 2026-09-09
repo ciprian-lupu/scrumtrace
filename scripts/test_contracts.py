@@ -858,6 +858,8 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "await self.evaluateSlice" in eval_loop
     assert "try vault.write(manifest: &manifest)" in eval_loop
     assert "let remaining = toRun.filter" in eval_loop
+    assert "rankedTasks" not in eval_loop
+    assert "manifest.tasks = tasks" in eval_loop
     eval_slice = processor.split("private func evaluateSlice")[1].split("private func tasks(")[0]
     assert eval_slice.count("abortedForAuth") >= 3
     assert eval_slice.rfind("abortedForAuth") < eval_slice.find("provider.evaluate")
