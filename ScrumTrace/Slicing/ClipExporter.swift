@@ -30,6 +30,7 @@ struct ClipExporter {
         try await reencode(source: source, destination: clipURL, slice: slice, mediaDuration: mediaDuration)
 
         var updated = slice
+        updated.clipPath = containedClip
         let stillRelative = containedClip
             .replacingOccurrences(of: "/clip.mp4", with: "/shot-1.jpg")
         let stillURL = sessionURL.appendingPathComponent(stillRelative)
