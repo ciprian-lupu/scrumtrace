@@ -301,6 +301,49 @@ final class ContractTests: XCTestCase {
         )
     }
 
+    func testMergeLiveCatalogKeepsMemoryShotsWhenDiskIsStale() {
+        var disk = SessionManifest.makeNew(sessionId: "s", product: .empty)
+        disk.shots = [
+            ShotRecord(
+                id: "shot-001",
+                tMedia: 10,
+                rawPath: "archive/shots/001.png",
+                annotatedPath: nil,
+                note: "",
+                source: .typed
+            )
+        ]
+        disk.duration = DurationPair(wallSeconds: 1, mediaSeconds: 1)
+        var memory = disk
+        memory.shots = [
+            ShotRecord(
+                id: "shot-001",
+                tMedia: 10,
+                rawPath: "archive/shots/001.png",
+                annotatedPath: "archive/shots/001.annotated.png",
+                note: "Save is dead",
+                source: .voice
+            ),
+            ShotRecord(
+                id: "shot-002",
+                tMedia: 20,
+                rawPath: "archive/shots/002.png",
+                annotatedPath: "archive/shots/002.annotated.png",
+                note: "clip watermark",
+                source: .typed
+            )
+        ]
+        memory.duration = DurationPair(wallSeconds: 40, mediaSeconds: 30)
+        memory.pauses = [PauseInterval(pauseWall: 5, resumeWall: 15)]
+        let merged = SessionController.mergeLiveCatalog(disk: disk, memory: memory)
+        XCTAssertEqual(merged.shots.count, 2)
+        XCTAssertEqual(merged.shots[0].note, "Save is dead")
+        XCTAssertEqual(merged.shots[0].annotatedPath, "archive/shots/001.annotated.png")
+        XCTAssertEqual(merged.shots[1].id, "shot-002")
+        XCTAssertEqual(merged.duration.mediaSeconds, 30)
+        XCTAssertEqual(merged.pauses.count, 1)
+    }
+
     func testShouldTranscribeMovieAvoidsDuplicatingSystemWav() {
         let both = CaptureAudioLayout.both
         XCTAssertTrue(both.shouldTranscribeMovie(wavExists: true, movieExists: true))

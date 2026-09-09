@@ -110,33 +110,18 @@ final class SessionProcessor: @unchecked Sendable {
         if needsEvaluate {
             if !manifest.uploadConsent.approved {
                 await onStatus(.evaluating, "Upload not approved — local export only")
-                manifest.tasks = localReviewTasks(manifest: manifest)
-                for index in manifest.slices.indices {
-                    manifest.slices[index].analysisStatus = .skipped
-                }
-                manifest.markCompleted(.evaluating)
+                abandonEvaluate(manifest: &manifest, failedStatus: .skipped, markOffline: false)
                 try vault.write(manifest: &manifest)
             } else if configuration.kind == .anthropic && (
                 configuration.model.isEmpty
                     || AIProviderConfiguration.isRetiredAnthropic(configuration.model)
             ) {
                 await onStatus(.evaluating, "Anthropic model missing or retired — local export only")
-                manifest.tasks = localReviewTasks(manifest: manifest)
-                for index in manifest.slices.indices {
-                    manifest.slices[index].analysisStatus = .skipped
-                }
-                manifest.markCompleted(.evaluating)
+                abandonEvaluate(manifest: &manifest, failedStatus: .skipped, markOffline: false)
                 try vault.write(manifest: &manifest)
             } else if configuration.apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 await onStatus(.evaluating, "API key missing — local export only")
-                manifest.tasks = localReviewTasks(manifest: manifest)
-                for index in manifest.slices.indices {
-                    if manifest.slices[index].analysisStatus != .success {
-                        manifest.slices[index].analysisStatus = .offlineFailed
-                    }
-                }
-                manifest.markCompleted(.evaluating)
-                manifest.pipelineStatus = .offlineFailed
+                abandonEvaluate(manifest: &manifest, failedStatus: .offlineFailed, markOffline: true)
                 try vault.write(manifest: &manifest)
             } else {
                 resetEvalAuthGate()
@@ -639,6 +624,29 @@ final class SessionProcessor: @unchecked Sendable {
         evalLock.lock()
         evalAuthFailed = true
         evalLock.unlock()
+    }
+
+    /// D14: a denied retry or missing key must not erase slices that already evaluated.
+    private func abandonEvaluate(
+        manifest: inout SessionManifest,
+        failedStatus: SliceAnalysisStatus,
+        markOffline: Bool
+    ) {
+        let kept = manifest.tasks.filter { task in
+            manifest.slices.first { $0.sliceId == task.sourceSliceId }?.analysisStatus == .success
+        }
+        for index in manifest.slices.indices where manifest.slices[index].analysisStatus != .success {
+            manifest.slices[index].analysisStatus = failedStatus
+        }
+        if kept.isEmpty {
+            manifest.tasks = localReviewTasks(manifest: manifest)
+        } else {
+            manifest.tasks = rankedTasks(kept)
+        }
+        manifest.markCompleted(.evaluating)
+        if markOffline {
+            manifest.pipelineStatus = .offlineFailed
+        }
     }
 
     private func localReviewTasks(manifest: SessionManifest) -> [TaskRecord] {

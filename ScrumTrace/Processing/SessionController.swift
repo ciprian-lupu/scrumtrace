@@ -236,7 +236,12 @@ final class SessionController: ObservableObject {
         )
         local?.pauses = clock.snapshotPauses()
         if var local {
-            try? vault.write(manifest: &local)
+            do {
+                try vault.write(manifest: &local)
+            } catch {
+                lastError = error.localizedDescription
+                statusLine = "Could not persist session catalog; Stop still continues with in-memory shots."
+            }
             manifest = local
             log(.stop, [:])
             await runProcessor(sessionId: local.sessionId)
@@ -251,7 +256,15 @@ final class SessionController: ObservableObject {
     private func runProcessor(sessionId: String) async {
         isBusy = true
         do {
-            if var local = try? vault.loadManifest(id: sessionId) {
+            var local = try? vault.loadManifest(id: sessionId)
+            if let memory = manifest, memory.sessionId == sessionId {
+                if let disk = local {
+                    local = Self.mergeLiveCatalog(disk: disk, memory: memory)
+                } else {
+                    local = memory
+                }
+            }
+            if var local {
                 local.includeFullTranscriptInZip = settings.includeFullTranscriptInZip
                 let capabilities = settings.providerConfiguration()
                 if local.uploadConsent.needsReprompt(
@@ -279,6 +292,7 @@ final class SessionController: ObservableObject {
                     }
                 }
                 try vault.write(manifest: &local)
+                manifest = local
             }
             let storedPins = vault.loadPinTimes(sessionId: sessionId)
             let pins = Self.mergePins(pinTimes, storedPins)
@@ -392,7 +406,12 @@ final class SessionController: ObservableObject {
             } else {
                 local.shots.append(record)
             }
-            try? vault.write(manifest: &local)
+            do {
+                try vault.write(manifest: &local)
+            } catch {
+                lastError = error.localizedDescription
+                statusLine = "Shot frame captured; catalog write failed. Save still."
+            }
             self.manifest = local
         }
         let meta = await sampler.sample()
@@ -467,10 +486,16 @@ final class SessionController: ObservableObject {
         } else {
             manifest.shots.append(stored)
         }
-        try? vault.write(manifest: &manifest)
         self.manifest = manifest
+        do {
+            try vault.write(manifest: &manifest)
+            lastError = nil
+            statusLine = "Shot \(stored.id) saved"
+        } catch {
+            lastError = error.localizedDescription
+            statusLine = "Shot annotated; catalog write failed. Stop still keeps this Shot."
+        }
         log(.shot, ["id": stored.id, "note": note])
-        statusLine = "Shot \(stored.id) saved"
         shotWindow = nil
     }
 
@@ -574,6 +599,21 @@ final class SessionController: ObservableObject {
             }
         }
         return out.sorted()
+    }
+
+    /// Disk catalog can lag a failed `vault.write` during Shot. Prefer in-memory shots.
+    static func mergeLiveCatalog(disk: SessionManifest, memory: SessionManifest) -> SessionManifest {
+        var local = disk
+        for shot in memory.shots {
+            if let idx = local.shots.firstIndex(where: { $0.id == shot.id }) {
+                local.shots[idx] = shot
+            } else {
+                local.shots.append(shot)
+            }
+        }
+        local.duration = memory.duration
+        local.pauses = memory.pauses
+        return local
     }
 
     private func stemFrom(_ shotId: String) -> String {

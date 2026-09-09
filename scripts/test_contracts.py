@@ -171,10 +171,31 @@ def test_retry_failed_slices_and_pins() -> None:
     assert "needsEvaluate" in processor
     assert "offlineFailed" in processor
     assert "API key missing" in processor
+    assert "func abandonEvaluate" in processor
+    abandon = processor.split("func abandonEvaluate")[1].split("func localReviewTasks")[0]
+    assert "analysisStatus != .success" in abandon
+    assert "rankedTasks(kept)" in abandon
+    assert "localReviewTasks" in abandon
+    denied = processor.split("Upload not approved")[1].split("Anthropic model missing")[0]
+    assert "abandonEvaluate" in denied
+    assert "analysisStatus = .skipped" not in denied
+    retired = processor.split("Anthropic model missing")[1].split("API key missing")[0]
+    assert "abandonEvaluate" in retired
+    assert "analysisStatus = .skipped" not in retired
+    empty_key = processor.split("API key missing")[1].split("resetEvalAuthGate")[0]
+    assert "abandonEvaluate" in empty_key
+    assert "localReviewTasks(manifest: manifest)" not in empty_key
     vault = (ROOT / "ScrumTrace" / "Storage" / "SessionVault.swift").read_text()
     assert "loadPinTimes" in vault
     controller = (ROOT / "ScrumTrace" / "Processing" / "SessionController.swift").read_text()
     assert "mergePins" in controller
+    assert "mergeLiveCatalog" in controller
+    capture = controller.split("private func captureShot")[1].split("private func finishShot")[0]
+    assert "try? vault.write(manifest: &local)" not in capture
+    finish = controller.split("private func finishShot")[1].split("private func privacyPause")[0]
+    assert "try? vault.write" not in finish
+    assert "catalog write failed" in finish
+    assert "self.manifest = manifest" in finish
 
 
 def test_audio_split_and_brief_loader() -> None:
