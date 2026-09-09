@@ -46,6 +46,11 @@ def test_export_rel_in_swift() -> None:
     zipper = (ROOT / "ScrumTrace" / "Export" / "SessionPackZipper.swift").read_text()
     assert "allowList" in zipper
     assert '"-@"' in zipper
+    assert "containedExportMember" in zipper
+    assert '"-y"' in zipper
+    models = (ROOT / "ScrumTrace" / "Storage" / "SessionModels.swift").read_text()
+    assert "func containedExportMember" in models
+    assert "isSymbolicLink" in models
     models = (ROOT / "ScrumTrace" / "Storage" / "SessionModels.swift").read_text()
     assert "func handoffPath" in models
     assert "func omittedHandoffPath" in models

@@ -109,9 +109,21 @@ def test_zipper_never_deletes_archive() -> None:
     assert "allowList" in zipper
     assert '"-@"' in zipper
     assert "archive/session.mp4" not in zipper
+    assert '"-y"' in zipper
     allow = zipper.split("static func allowList")[1].split("static func omissionOrder")[0]
     assert "includeFullTranscript" in allow
     assert "if includeFullTranscript" in allow
+    assert "containedExportMember" in allow
+    assert "replacingOccurrences(of: prefix" not in allow
+    leftover = zipper.split("static func exportMediaSessionPaths")[1].split("private static func uniqued")[0]
+    assert "containedExportMember" in leftover
+    assert "replacingOccurrences(of: prefix" not in leftover
+    models = (ROOT / "ScrumTrace" / "Storage" / "SessionModels.swift").read_text()
+    member = models.split("static func containedExportMember")[1].split("enum MediaBudget")[0]
+    assert "isSymbolicLink" in member
+    assert "containedRelative" in member
+    body = member.split("{", 1)[1]
+    assert "isUnderExport" not in body
     projector = (ROOT / "ScrumTrace" / "Export" / "ExportProjector.swift").read_text()
     project_fn = projector.split("func project")[1].split("var omitted")[0]
     assert "resetExportTree" in project_fn
@@ -436,6 +448,7 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "containedRelative" in jpeg
     copy_if = projector.split("func copyIfPresent")[1]
     assert "containedRelative" in copy_if
+    assert "resolvingSymlinksInPath" in copy_if
     agent = (ROOT / "ScrumTrace" / "Export" / "AgentContextRenderer.swift").read_text()
     assert "stillCandidates" in agent.split("func displayPath")[1]
     assert "Inspect the linked evidence only" in processor

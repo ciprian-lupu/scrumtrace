@@ -96,6 +96,33 @@ enum ExportRel {
         guard FileManager.default.fileExists(atPath: url.path) else { return nil }
         return relative
     }
+
+    /// Resolved file relative to `root` when the target stays inside that folder.
+    static func containedRelative(_ file: URL, sessionRoot: URL) -> String? {
+        let root = sessionRoot.resolvingSymlinksInPath().standardizedFileURL
+        let resolved = file.resolvingSymlinksInPath().standardizedFileURL
+        let rootPath = root.path
+        guard resolved.path == rootPath || resolved.path.hasPrefix(rootPath + "/") else { return nil }
+        let rest = String(resolved.path.dropFirst(rootPath.count))
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        guard !rest.isEmpty else { return nil }
+        return normalizedComponents(rest)?.joined(separator: "/")
+    }
+
+    /// Zip member relative to `exportDir`. Rejects symlinks and files whose resolved
+    /// path sits outside that folder so `/usr/bin/zip` cannot follow a link into
+    /// `archive/` or another tree. Members are export-relative (`shots/001.jpg`);
+    /// the folder need not be named `export/`.
+    static func containedExportMember(file: URL, exportDir: URL) -> String? {
+        let keys: Set<URLResourceKey> = [.isSymbolicLinkKey, .isRegularFileKey]
+        let values = try? file.resourceValues(forKeys: keys)
+        if values?.isSymbolicLink == true { return nil }
+        guard values?.isRegularFile == true else { return nil }
+        guard let rel = containedRelative(file, sessionRoot: exportDir) else { return nil }
+        let comps = rel.split(separator: "/").map(String.init)
+        if comps.contains("archive") { return nil }
+        return rel
+    }
 }
 
 enum MediaBudget {

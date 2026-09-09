@@ -301,7 +301,9 @@ struct ExportProjector {
         if fileManager.fileExists(atPath: to.path) {
             try fileManager.removeItem(at: to)
         }
-        try fileManager.copyItem(at: from, to: to)
+        // Copy the resolved file so a contained symlink becomes a regular export
+        // member instead of a link zip would follow.
+        try fileManager.copyItem(at: from.resolvingSymlinksInPath(), to: to)
         return toRel
     }
 }

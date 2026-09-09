@@ -12,6 +12,58 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
 MAX_ZIP = 35 * 1024 * 1024
+NAMED_DOCS = (
+    "AGENT_CONTEXT.md",
+    "SESSION_BRIEF.html",
+    "AGENT_PROMPT.txt",
+    "session.manifest.json",
+    "OMITTED.md",
+)
+
+
+def contained_export_member(file: Path, export_dir: Path) -> str | None:
+    if file.is_symlink() or not file.is_file():
+        return None
+    export_root = export_dir.resolve()
+    try:
+        rel = file.resolve().relative_to(export_root)
+    except ValueError:
+        return None
+    parts = [part for part in rel.as_posix().split("/") if part]
+    if not parts or ".." in parts or "archive" in parts:
+        return None
+    return "/".join(parts)
+
+
+def allow_list(export_dir: Path, include_full_transcript: bool = False) -> list[str]:
+    out: list[str] = []
+    for name in NAMED_DOCS:
+        member = contained_export_member(export_dir / name, export_dir)
+        if member:
+            out.append(member)
+    if include_full_transcript:
+        member = contained_export_member(export_dir / "full_transcript.json", export_dir)
+        if member:
+            out.append(member)
+    for folder in ("shots", "media"):
+        root = export_dir / folder
+        if not root.is_dir():
+            continue
+        for path in root.rglob("*"):
+            member = contained_export_member(path, export_dir)
+            if member:
+                out.append(member)
+    return sorted(out)
+
+
+def zip_allow_list(export_dir: Path, dest: Path, members: list[str]) -> None:
+    dest.unlink(missing_ok=True)
+    with zipfile.ZipFile(dest, "w", zipfile.ZIP_STORED) as zf:
+        for member in members:
+            path = export_dir / member
+            if path.is_symlink():
+                raise AssertionError(f"allow-list followed symlink {member}")
+            zf.write(path, member)
 
 
 def zip_export(src: Path, dest: Path) -> int:
@@ -112,6 +164,34 @@ def main() -> int:
         remaining_ctx = "shots/001.jpg"
         assert (src / remaining_ctx).is_file()
         print("pack budget 8 clips / 20 shots: ok", size, "omitted", len(omitted))
+
+    with tempfile.TemporaryDirectory() as tmp:
+        export = Path(tmp) / "pack-root"
+        export.mkdir()
+        (export / "shots").mkdir()
+        (export / "media").mkdir()
+        (export / "AGENT_CONTEXT.md").write_text("# ctx\n", encoding="utf-8")
+        (export / "shots" / "ok.png").write_bytes(b"still")
+        secret = Path(tmp) / "outside.mp4"
+        secret.write_bytes(b"ARCHIVE-LEAK")
+        (export / "media" / "leak.mp4").symlink_to(secret)
+        (export / "AGENT_PROMPT.txt").symlink_to(secret)
+        members = allow_list(export)
+        assert "shots/ok.png" in members, members
+        assert "AGENT_CONTEXT.md" in members, members
+        assert "media/leak.mp4" not in members, members
+        assert "AGENT_PROMPT.txt" not in members
+        dest = Path(tmp) / "pack.zip"
+        zip_allow_list(export, dest, members)
+        with zipfile.ZipFile(dest) as zf:
+            names = set(zf.namelist())
+            assert "shots/ok.png" in names
+            assert "media/leak.mp4" not in names
+            assert "AGENT_PROMPT.txt" not in names
+            for info in zf.infolist():
+                data = zf.read(info)
+                assert b"ARCHIVE-LEAK" not in data, info.filename
+        print("pack budget symlink escape: ok", members)
     return 0
 
 

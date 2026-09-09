@@ -117,7 +117,9 @@ struct SessionPackZipper {
         let process = Process()
         process.currentDirectoryURL = exportDir
         process.executableURL = URL(fileURLWithPath: "/usr/bin/zip")
-        process.arguments = ["-q", zipURL.path, "-@"]
+        // `-y` stores a symlink as a link if one is ever listed; allowList still
+        // omits links so zip cannot follow them into archive/ or another tree.
+        process.arguments = ["-q", "-y", zipURL.path, "-@"]
         let pipe = Pipe()
         process.standardInput = pipe
         try process.run()
@@ -148,6 +150,7 @@ enum PackBudget {
 
     /// Explicit members under `export/` — never the session root, never `archive/`.
     /// `full_transcript.json` is only listed when the user opted it into the pack.
+    /// Membership is resolved-path containment, not a string prefix strip.
     static func allowList(exportDir: URL, includeFullTranscript: Bool = false) -> [String] {
         let named = [
             "AGENT_CONTEXT.md",
@@ -158,28 +161,33 @@ enum PackBudget {
         ]
         var out: [String] = []
         for name in named {
-            if FileManager.default.fileExists(atPath: exportDir.appendingPathComponent(name).path) {
-                out.append(name)
+            if let member = ExportRel.containedExportMember(
+                file: exportDir.appendingPathComponent(name),
+                exportDir: exportDir
+            ) {
+                out.append(member)
             }
         }
         if includeFullTranscript {
-            let transcript = "full_transcript.json"
-            if FileManager.default.fileExists(atPath: exportDir.appendingPathComponent(transcript).path) {
-                out.append(transcript)
+            if let member = ExportRel.containedExportMember(
+                file: exportDir.appendingPathComponent("full_transcript.json"),
+                exportDir: exportDir
+            ) {
+                out.append(member)
             }
         }
-        let prefix = exportDir.path.hasSuffix("/") ? exportDir.path : exportDir.path + "/"
         for folder in ["shots", "media"] {
             let root = exportDir.appendingPathComponent(folder)
             guard let enumerator = FileManager.default.enumerator(
                 at: root,
-                includingPropertiesForKeys: [.isRegularFileKey],
+                includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey],
                 options: [.skipsHiddenFiles]
             ) else { continue }
             for case let url as URL in enumerator {
-                guard (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true else { continue }
                 if url.lastPathComponent == "session-pack.zip" { continue }
-                out.append(url.path.replacingOccurrences(of: prefix, with: ""))
+                if let member = ExportRel.containedExportMember(file: url, exportDir: exportDir) {
+                    out.append(member)
+                }
             }
         }
         return out.sorted()
@@ -294,21 +302,21 @@ enum PackBudget {
     }
 
     static func exportMediaSessionPaths(sessionURL: URL) -> [String] {
-        let root = sessionURL.appendingPathComponent(ScrumTracePath.export)
+        let exportDir = sessionURL.appendingPathComponent(ScrumTracePath.export)
         guard let enumerator = FileManager.default.enumerator(
-            at: root,
-            includingPropertiesForKeys: [.isRegularFileKey],
+            at: exportDir,
+            includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey],
             options: [.skipsHiddenFiles]
         ) else { return [] }
-        let prefix = sessionURL.path.hasSuffix("/") ? sessionURL.path : sessionURL.path + "/"
         var out: [String] = []
         for case let url as URL in enumerator {
-            guard (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true else { continue }
             if isProtected(url.lastPathComponent) { continue }
-            let rel = url.path.replacingOccurrences(of: prefix, with: "")
+            guard let exportRel = ExportRel.containedExportMember(file: url, exportDir: exportDir) else {
+                continue
+            }
             let ext = url.pathExtension.lowercased()
             if ["png", "jpg", "jpeg", "mp4", "wav", "webp", "json"].contains(ext) {
-                out.append(rel)
+                out.append(ExportRel.sessionPath(exportRel))
             }
         }
         return out.sorted()

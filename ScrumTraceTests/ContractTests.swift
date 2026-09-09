@@ -829,6 +829,58 @@ final class ContractTests: XCTestCase {
         XCTAssertTrue(PackBudget.allowList(exportDir: export, includeFullTranscript: true).contains("full_transcript.json"))
     }
 
+    func testAllowListSkipsSymlinkEscape() throws {
+        let export = FileManager.default.temporaryDirectory.appendingPathComponent("scrumtrace-allow-link-\(UUID().uuidString)")
+        let shots = export.appendingPathComponent("shots")
+        let media = export.appendingPathComponent("media")
+        try FileManager.default.createDirectory(at: shots, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: media, withIntermediateDirectories: true)
+        try Data("still").write(to: shots.appendingPathComponent("ok.png"))
+        try Data("# ctx\n").write(to: export.appendingPathComponent("AGENT_CONTEXT.md"))
+        let outside = FileManager.default.temporaryDirectory.appendingPathComponent("scrumtrace-zip-secret-\(UUID().uuidString)")
+        try Data("ARCHIVE-LEAK").write(to: outside)
+        defer {
+            try? FileManager.default.removeItem(at: export)
+            try? FileManager.default.removeItem(at: outside)
+        }
+        try FileManager.default.createSymbolicLink(
+            at: media.appendingPathComponent("leak.mp4"),
+            withDestinationURL: outside
+        )
+        try FileManager.default.createSymbolicLink(
+            at: export.appendingPathComponent("AGENT_PROMPT.txt"),
+            withDestinationURL: outside
+        )
+        let members = PackBudget.allowList(exportDir: export, includeFullTranscript: false)
+        XCTAssertTrue(members.contains("shots/ok.png"))
+        XCTAssertTrue(members.contains("AGENT_CONTEXT.md"))
+        XCTAssertFalse(members.contains("media/leak.mp4"))
+        XCTAssertFalse(members.contains("AGENT_PROMPT.txt"))
+        XCTAssertFalse(members.contains(where: { $0.contains("..") }))
+        XCTAssertNil(ExportRel.containedExportMember(
+            file: media.appendingPathComponent("leak.mp4"),
+            exportDir: export
+        ))
+        XCTAssertEqual(
+            ExportRel.containedExportMember(file: shots.appendingPathComponent("ok.png"), exportDir: export),
+            "shots/ok.png"
+        )
+
+        let session = FileManager.default.temporaryDirectory.appendingPathComponent("scrumtrace-leftover-\(UUID().uuidString)")
+        let exportUnderSession = session.appendingPathComponent("export")
+        try FileManager.default.createDirectory(at: exportUnderSession.appendingPathComponent("shots"), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: exportUnderSession.appendingPathComponent("media"), withIntermediateDirectories: true)
+        try Data("still").write(to: exportUnderSession.appendingPathComponent("shots/ok.png"))
+        try FileManager.default.createSymbolicLink(
+            at: exportUnderSession.appendingPathComponent("media/leak.mp4"),
+            withDestinationURL: outside
+        )
+        defer { try? FileManager.default.removeItem(at: session) }
+        let leftover = PackBudget.exportMediaSessionPaths(sessionURL: session)
+        XCTAssertTrue(leftover.contains("export/shots/ok.png"))
+        XCTAssertFalse(leftover.contains("export/media/leak.mp4"))
+    }
+
     func testCanConfirmRequiresKeepDecision() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("scrumtrace-keep-\(UUID().uuidString)")
         let shots = root.appendingPathComponent("export/shots")
