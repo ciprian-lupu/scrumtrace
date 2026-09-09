@@ -145,6 +145,9 @@ def test_clip_exporter_macos14() -> None:
     tighten = clip.split("func tightenExportClips")[1].split("func tighten(file")[0]
     assert "dropLast" in tighten
     assert "files.dropLast" in tighten
+    assert "containedExportMember" in tighten
+    assert "existingSessionFile" in clip
+    assert "clip_path escaped" in clip
     assert "AVAssetExportPreset640x480" in clip
     assert "fileLengthLimit" in clip
     assert "clipVideoBitrate" in clip

@@ -723,6 +723,12 @@ final class ContractTests: XCTestCase {
         XCTAssertNil(ExportRel.existingSessionFile("archive/shots/001.png", sessionURL: root))
         XCTAssertNil(ExportRel.containedRelative("archive/shots/001.png", sessionURL: root))
         XCTAssertNil(ExportRel.containedRelative(shots.appendingPathComponent("001.png"), sessionRoot: root))
+        let archive = root.appendingPathComponent("archive")
+        try FileManager.default.createSymbolicLink(
+            at: archive.appendingPathComponent("session.mp4"),
+            withDestinationURL: outside
+        )
+        XCTAssertNil(ExportRel.existingSessionFile("archive/session.mp4", sessionURL: root))
     }
 
     func testResolvePathSkipsSymlinkTrapAndFindsRealStill() throws {

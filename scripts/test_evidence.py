@@ -56,6 +56,8 @@ def test_export_rel_in_swift() -> None:
     assert "func omittedHandoffPath" in models
     clip = (ROOT / "ScrumTrace" / "Slicing" / "ClipExporter.swift").read_text()
     assert "tightenExportClips" in clip
+    assert "containedExportMember" in clip
+    assert "existingSessionFile" in clip
     assert "AVAssetExportPreset640x480" in clip
     assert "AVVideoProfileLevelH264MainAutoLevel" in clip
     assert "writeMainProfileClip" in clip

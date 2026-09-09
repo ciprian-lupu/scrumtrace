@@ -13,13 +13,16 @@ struct ClipExporter {
         mediaDuration: TimeInterval
     ) async throws -> SliceRecord {
         let source = sessionURL.appendingPathComponent(ScrumTracePath.sessionMovie)
-        guard FileManager.default.fileExists(atPath: source.path) else {
+        guard ExportRel.existingSessionFile(ScrumTracePath.sessionMovie, sessionURL: sessionURL) != nil else {
             throw SessionRecorderError.writerFailed("session.mp4 is missing.")
         }
         guard let relativeClip = slice.clipPath else {
             throw SessionRecorderError.writerFailed("Slice is missing clip_path.")
         }
-        let clipURL = sessionURL.appendingPathComponent(relativeClip)
+        guard let containedClip = ExportRel.containedRelative(relativeClip, sessionURL: sessionURL) else {
+            throw SessionRecorderError.writerFailed("Slice clip_path escaped the session folder.")
+        }
+        let clipURL = sessionURL.appendingPathComponent(containedClip)
         try FileManager.default.createDirectory(
             at: clipURL.deletingLastPathComponent(),
             withIntermediateDirectories: true
@@ -27,9 +30,12 @@ struct ClipExporter {
         try await reencode(source: source, destination: clipURL, slice: slice, mediaDuration: mediaDuration)
 
         var updated = slice
-        let stillRelative = relativeClip
+        let stillRelative = containedClip
             .replacingOccurrences(of: "/clip.mp4", with: "/shot-1.jpg")
         let stillURL = sessionURL.appendingPathComponent(stillRelative)
+        guard ExportRel.containedRelative(stillRelative, sessionURL: sessionURL) != nil else {
+            return updated
+        }
         do {
             try await extractStill(source: source, at: (slice.startMedia + slice.endMedia) / 2, to: stillURL)
             if !updated.stills.contains(stillRelative) {
@@ -43,15 +49,17 @@ struct ClipExporter {
 
     /// Spec C3: if the measured pack is over 35 MB, encode harder before omitting.
     func tightenExportClips(sessionURL: URL) async {
+        let exportDir = sessionURL.appendingPathComponent(ScrumTracePath.export)
         let media = sessionURL.appendingPathComponent(ScrumTracePath.media)
         guard let enumerator = FileManager.default.enumerator(
             at: media,
-            includingPropertiesForKeys: [.isRegularFileKey],
+            includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey],
             options: [.skipsHiddenFiles]
         ) else { return }
         var files: [URL] = []
         for case let url as URL in enumerator {
             guard url.pathExtension.lowercased() == "mp4" else { continue }
+            guard ExportRel.containedExportMember(file: url, exportDir: exportDir) != nil else { continue }
             files.append(url)
         }
         files.sort { lhs, rhs in
