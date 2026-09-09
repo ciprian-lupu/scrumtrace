@@ -90,6 +90,20 @@ def test_clip_exporter_macos14() -> None:
     assert "AVAssetExportPreset640x480" in clip
     assert "fileLengthLimit" in clip
     assert "clipVideoBitrate" in clip
+    assert "AVVideoProfileLevelH264MainAutoLevel" in clip
+    assert "writeMainProfileClip" in clip
+    assert "loadTracks(withMediaType:" in clip
+    assert "asset.tracks(withMediaType:" not in clip
+    assert "ClipResumeOnce" in clip
+    assert "shouldOptimizeForNetworkUse = true" in clip
+    writer = clip.split("func writeMainProfileClip")[1].split("func exportPresetClip")[0]
+    assert "AVVideoProfileLevelH264MainAutoLevel" in writer
+    assert "clipWidth" in writer
+    assert "clipHeight" in writer
+    assert "clipAudioBitrate" in clip
+    assert "image(at:" in clip
+    assert "generateCGImagesAsynchronously" not in clip
+    assert "copyCGImage" not in clip
 
 
 def test_handoff_log_names_mp4_tools() -> None:

@@ -73,8 +73,10 @@ enum CaptureSessionState: String, Codable, Sendable {
 
     var allowsNewCapture: Bool {
         switch self {
-        case .recording: return true
-        case .paused: return false
+        case .recording:
+            return true
+        case .paused:
+            return false
         }
     }
 }

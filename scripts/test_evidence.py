@@ -39,6 +39,8 @@ def test_export_rel_in_swift() -> None:
     clip = (ROOT / "ScrumTrace" / "Slicing" / "ClipExporter.swift").read_text()
     assert "tightenExportClips" in clip
     assert "AVAssetExportPreset640x480" in clip
+    assert "AVVideoProfileLevelH264MainAutoLevel" in clip
+    assert "writeMainProfileClip" in clip
     shot = (ROOT / "ScrumTrace" / "UI" / "ShotNoteWindow.swift").read_text()
     assert "lockFocus" not in shot
     assert "bitmapImageRepForCachingDisplay" in shot

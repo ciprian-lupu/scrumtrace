@@ -93,7 +93,6 @@ final class HotkeyManager {
             case .pause:
                 self?.controller?.togglePause()
             }
-            // Action is a frozen Swift enum; a new case is a compile error here.
         }
         return noErr
     }
