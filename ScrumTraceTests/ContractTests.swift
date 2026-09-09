@@ -1164,4 +1164,50 @@ final class ContractTests: XCTestCase {
             "archive/shots/001.png"
         )
     }
+
+    func testResetExportTreeUnlinksExportSymlinkWithoutDeletingArchive() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "st-export-link-\(UUID().uuidString)"
+        )
+        let archive = root.appendingPathComponent("archive")
+        try FileManager.default.createDirectory(at: archive, withIntermediateDirectories: true)
+        let master = archive.appendingPathComponent("session.mp4")
+        try Data("MASTER-MOVIE").write(to: master)
+        try FileManager.default.createSymbolicLink(
+            at: root.appendingPathComponent("export"),
+            withDestinationURL: archive
+        )
+        defer { try? FileManager.default.removeItem(at: root) }
+        let manifest = SessionManifest.makeNew(sessionId: "export-link", product: .empty)
+        _ = try ExportProjector().project(sessionURL: root, manifest: manifest)
+        let export = root.appendingPathComponent("export")
+        XCTAssertNotEqual(
+            (try? export.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) ?? true,
+            true
+        )
+        var isDir: ObjCBool = false
+        XCTAssertTrue(FileManager.default.fileExists(atPath: export.path, isDirectory: &isDir) && isDir.boolValue)
+        XCTAssertEqual(try Data(contentsOf: master), Data("MASTER-MOVIE"))
+    }
+
+    func testResetExportTreeReplacesDanglingExportSymlink() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "st-export-dangling-\(UUID().uuidString)"
+        )
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(
+            at: root.appendingPathComponent("export"),
+            withDestinationURL: root.appendingPathComponent("missing-export-dest")
+        )
+        defer { try? FileManager.default.removeItem(at: root) }
+        let manifest = SessionManifest.makeNew(sessionId: "export-dangling", product: .empty)
+        _ = try ExportProjector().project(sessionURL: root, manifest: manifest)
+        let export = root.appendingPathComponent("export")
+        XCTAssertNotEqual(
+            (try? export.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) ?? true,
+            true
+        )
+        var isDir: ObjCBool = false
+        XCTAssertTrue(FileManager.default.fileExists(atPath: export.path, isDirectory: &isDir) && isDir.boolValue)
+    }
 }

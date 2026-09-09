@@ -159,6 +159,9 @@ def test_zipper_never_deletes_archive() -> None:
     assert "resetExportTree" in project_fn
     assert "removeEscapingExportLinks" in project_fn
     assert "removeItem(at: export)" in projector.split("func resetExportTree")[1].split("func writeProjectionManifest")[0]
+    reset = projector.split("func resetExportTree")[1].split("func writeProjectionManifest")[0]
+    assert "isSymbolicLink" in reset
+    assert "fileExists(atPath: export.path)" in reset
     omit_md = zipper.split("func writeOmittedMarkdown")[1].split("private func uniquedOmitted")[0]
     assert "omittedHandoffPath" in omit_md
     assert "writeExportText" in omit_md
@@ -182,6 +185,14 @@ def test_clip_exporter_macos14() -> None:
     assert "files.dropLast" in tighten
     assert "containedExportMember" in tighten
     assert "skipDescendants" in tighten
+    assert "sessionURL: sessionURL" in tighten
+    tighten_file = clip.split("func tighten(file")[1].split("func reencode")[0]
+    assert "temporaryDirectory" in tighten_file
+    assert "writeContainedData" in tighten_file
+    assert "isAllowedClipDest" in tighten_file
+    assert "isReadableSessionFile" in tighten_file
+    assert "scrumtrace-tighten" in tighten_file
+    assert "replaceItemAt" not in tighten_file
     assert "existingSessionFile" in clip
     assert "clip_path escaped" in clip
     assert "clip_path is not a working or export clip" in clip

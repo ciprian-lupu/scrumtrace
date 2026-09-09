@@ -83,17 +83,27 @@ struct ClipExporter {
         // Leave the smallest clip at H.264 Main 720p so Gate 4 still has a
         // Chrome-playable sample. Larger clips are the ones worth shrinking.
         for url in files.dropLast() {
-            try? await tighten(file: url)
+            try? await tighten(file: url, sessionURL: sessionURL)
         }
     }
 
     /// Working clips live under `archive/media-work/`. Tighten rewrites
     /// `export/media/` only. Never overwrite `archive/session.mp4`.
-    private func tighten(file url: URL) async throws {
+    /// Encode into the system temp folder so a leftover UUID.mp4 cannot
+    /// land in `export/media/` and enter the zip allow-list (C3).
+    private func tighten(file url: URL, sessionURL: URL) async throws {
+        guard let rel = ExportRel.unfollowedRelative(url, sessionRoot: sessionURL),
+              ExportRel.isAllowedClipDest(rel),
+              ExportRel.isReadableSessionFile(url, sessionRoot: sessionURL) else {
+            return
+        }
         let presets = [AVAssetExportPreset640x480, AVAssetExportPresetLowQuality]
         for preset in presets {
             let before = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? NSNumber)?.intValue ?? 0
-            let temp = url.deletingLastPathComponent().appendingPathComponent("\(UUID().uuidString).mp4")
+            let temp = FileManager.default.temporaryDirectory.appendingPathComponent(
+                "scrumtrace-tighten-\(UUID().uuidString).mp4"
+            )
+            try? FileManager.default.removeItem(at: temp)
             let asset = AVURLAsset(url: url)
             guard let session = AVAssetExportSession(asset: asset, presetName: preset) else { continue }
             session.outputURL = temp
@@ -112,8 +122,15 @@ struct ClipExporter {
             }
             let after = (try? FileManager.default.attributesOfItem(atPath: temp.path)[.size] as? NSNumber)?.intValue ?? before
             if after < before {
-                _ = try FileManager.default.replaceItemAt(url, withItemAt: temp)
-                return
+                do {
+                    let data = try Data(contentsOf: temp)
+                    try FileManager.default.removeItem(at: temp)
+                    try ExportRel.writeContainedData(data, relative: rel, sessionURL: sessionURL)
+                    return
+                } catch {
+                    try? FileManager.default.removeItem(at: temp)
+                    continue
+                }
             }
             try? FileManager.default.removeItem(at: temp)
         }

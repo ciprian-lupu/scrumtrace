@@ -181,8 +181,16 @@ struct ExportProjector {
     private func resetExportTree(sessionURL: URL) throws {
         let fileManager = FileManager.default
         let export = sessionURL.appendingPathComponent(ScrumTracePath.export)
-        if fileManager.fileExists(atPath: export.path) {
+        // fileExists follows links. A dangling or archive-pointing export/
+        // symlink must be unlinked first or createDirectory fails and the
+        // destination tree can be removed (C2).
+        if (try? export.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
             try fileManager.removeItem(at: export)
+        } else {
+            var isDir: ObjCBool = false
+            if fileManager.fileExists(atPath: export.path, isDirectory: &isDir) {
+                try fileManager.removeItem(at: export)
+            }
         }
         try fileManager.createDirectory(at: export, withIntermediateDirectories: true)
         try fileManager.createDirectory(
