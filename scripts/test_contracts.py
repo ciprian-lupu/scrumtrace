@@ -931,6 +931,10 @@ def test_write_contained_data_refuses_directory_symlinks() -> None:
     under = models.split("static func isUnderSession")[1].split("static func isUsableSessionRoot")[0]
     assert "ScrumTracePath.manifest" in under
     assert "func isUsableSessionRoot" in models
+    usable = models.split("static func isUsableSessionRoot")[1].split("static func containedRelative")[0]
+    assert "isSymbolicLink" in usable
+    assert "isDir.boolValue" in usable
+    assert "fileExists(atPath: sessionURL.path, isDirectory:" in usable
     prepare = models.split("static func prepareContainedWrite")[1].split("static func writeContainedData")[0]
     assert "isUsableSessionRoot" in prepare
     assert "ScrumTracePath.manifest" in prepare

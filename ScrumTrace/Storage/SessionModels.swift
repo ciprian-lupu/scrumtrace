@@ -93,9 +93,18 @@ enum ExportRel {
     }
 
     /// Session folder itself must be a real directory. A planted session → /tmp
-    /// link would otherwise make string-prefix containment succeed.
+    /// link would otherwise make string-prefix containment succeed. A regular
+    /// file at the session path is also refused. A missing path is allowed so
+    /// `ensureRoot` can create the sessions folder.
     static func isUsableSessionRoot(_ sessionURL: URL) -> Bool {
-        (try? sessionURL.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) != true
+        if (try? sessionURL.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+            return false
+        }
+        var isDir: ObjCBool = false
+        if FileManager.default.fileExists(atPath: sessionURL.path, isDirectory: &isDir) {
+            return isDir.boolValue
+        }
+        return true
     }
 
     /// Normalized session-relative path that still lives under the session folder.

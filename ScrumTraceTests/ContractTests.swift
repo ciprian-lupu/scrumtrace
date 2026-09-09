@@ -397,6 +397,27 @@ final class ContractTests: XCTestCase {
         )
     }
 
+    func testIsUsableSessionRootRejectsRegularFileAndAllowsMissing() throws {
+        let missing = FileManager.default.temporaryDirectory.appendingPathComponent("st-root-missing-\(UUID().uuidString)")
+        XCTAssertTrue(ExportRel.isUsableSessionRoot(missing))
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("st-root-file-\(UUID().uuidString)")
+        try Data("not-a-folder".utf8).write(to: file)
+        defer { try? FileManager.default.removeItem(at: file) }
+        XCTAssertFalse(ExportRel.isUsableSessionRoot(file))
+        XCTAssertThrowsError(
+            try ExportRel.prepareContainedWrite(relative: "archive/full_transcript.json", sessionURL: file)
+        )
+        XCTAssertNil(ExportRel.containedRelative("archive/full_transcript.json", sessionURL: file))
+        XCTAssertNil(ExportRel.readContainedData(relative: "archive/full_transcript.json", sessionURL: file))
+        XCTAssertThrowsError(
+            try ExportRel.copyContainedToTemporaryFile(
+                relative: "archive/audio.wav",
+                sessionURL: file,
+                prefix: "scrumtrace-copy-test"
+            )
+        )
+    }
+
     func testEnsureRootRefusesSessionsFolderSymlink() throws {
         let parent = FileManager.default.temporaryDirectory.appendingPathComponent("st-vault-root-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true)
