@@ -515,10 +515,10 @@ final class SessionProcessor: @unchecked Sendable {
             )
         }
         if out.isEmpty {
-            let media = uniquedPaths(
-                slice.stills + [slice.clipPath].compactMap { $0 } + shots.flatMap(\.stillCandidates)
-            )
-            if !shots.isEmpty || !media.isEmpty {
+            // Empty `candidates[]` is not an explicit drop. Keep a review row so a
+            // transcript-only keyword slice cannot vanish (D7). All-drop with no
+            // Shot still omits — those candidates were decided.
+            if response.candidates.isEmpty {
                 out.append(
                     contentsOf: reviewTasks(
                         shots: shots,
