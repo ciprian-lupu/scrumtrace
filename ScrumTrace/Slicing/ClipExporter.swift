@@ -80,6 +80,12 @@ struct ClipExporter {
     func tightenExportClips(sessionURL: URL) async {
         let exportDir = sessionURL.appendingPathComponent(ScrumTracePath.export)
         let media = sessionURL.appendingPathComponent(ScrumTracePath.media)
+        if (try? exportDir.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+            return
+        }
+        if (try? media.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+            return
+        }
         guard let enumerator = FileManager.default.enumerator(
             at: media,
             includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey],

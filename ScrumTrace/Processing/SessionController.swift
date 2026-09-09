@@ -100,6 +100,7 @@ final class SessionController: ObservableObject {
     }
 
     func pin() {
+        guard isRecording else { return }
         guard captureState.allowsNewCapture else { return }
         let media = clock.currentMediaSeconds()
         pinTimes.append(media)

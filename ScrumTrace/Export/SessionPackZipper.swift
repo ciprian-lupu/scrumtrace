@@ -255,6 +255,12 @@ enum PackBudget {
         }
         for folder in ["shots", "media"] {
             let root = exportDir.appendingPathComponent(folder)
+            // Enumerator follows a directory symlink. Delete it instead of
+            // walking `export/media` → `archive/` (C2).
+            if (try? root.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+                try? FileManager.default.removeItem(at: root)
+                continue
+            }
             guard let enumerator = FileManager.default.enumerator(
                 at: root,
                 includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey],
@@ -384,6 +390,9 @@ enum PackBudget {
 
     static func exportMediaSessionPaths(sessionURL: URL) -> [String] {
         let exportDir = sessionURL.appendingPathComponent(ScrumTracePath.export)
+        if (try? exportDir.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+            return []
+        }
         guard let enumerator = FileManager.default.enumerator(
             at: exportDir,
             includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey],

@@ -42,6 +42,9 @@ def test_agent_context_uses_export_relative_paths() -> None:
     assert "<untrusted_meeting_data>Next.js, Tailwind, PostgreSQL</untrusted_meeting_data>" in ctx
     assert "<untrusted_meeting_data>presenter</untrusted_meeting_data>" in ctx
     assert "Never open the private capture folder" in ctx
+    assert "## Needs review" in ctx
+    assert "## Shots" in ctx
+    assert "<untrusted_meeting_data>Save button does nothing</untrusted_meeting_data>" in ctx
     prompt = (ROOT / "samples" / "mock-session" / "export" / "AGENT_PROMPT.txt").read_text()
     assert "<untrusted_meeting_data>presenter</untrusted_meeting_data>" in prompt
 
@@ -163,6 +166,10 @@ def test_zipper_never_deletes_archive() -> None:
     leftover = zipper.split("static func exportMediaSessionPaths")[1].split("private static func uniqued")[0]
     assert "containedExportMember" in leftover
     assert "replacingOccurrences(of: prefix" not in leftover
+    assert leftover.index("isSymbolicLink") < leftover.index("enumerator")
+    folder_loop = allow.split('for folder in ["shots", "media"]')[1]
+    assert folder_loop.index("isSymbolicLink") < folder_loop.index("enumerator")
+    assert "removeItem(at: root)" in folder_loop
     models = (ROOT / "ScrumTrace" / "Storage" / "SessionModels.swift").read_text()
     member = models.split("static func containedExportMember")[1].split("static func handoffFileIfPresent")[0]
     assert "isSymbolicLink" in member
@@ -200,6 +207,7 @@ def test_clip_exporter_macos14() -> None:
     assert "files.dropLast" in tighten
     assert "containedExportMember" in tighten
     assert "skipDescendants" in tighten
+    assert tighten.index("isSymbolicLink") < tighten.index("enumerator")
     assert "sessionURL: sessionURL" in tighten
     tighten_file = clip.split("func tighten(file")[1].split("func reencode")[0]
     assert "temporaryDirectory" in tighten_file
@@ -586,6 +594,9 @@ def test_pause_privacy_and_metadata_gate() -> None:
     open_shot = controller.split("func openShot()")[1].split("func retryAnalysis()")[0]
     assert "guard isRecording else { return }" in open_shot
     assert "Paused — Shot is disabled" in open_shot
+    pin_fn = controller.split("func pin()")[1].split("var captureState")[0]
+    assert "guard isRecording else { return }" in pin_fn
+    assert pin_fn.index("isRecording") < pin_fn.index("allowsNewCapture")
     assert "org.keepassxc.KeePassXC" in privacy
     assert "me.proton.Pass" in privacy
     assert 'contains("protonpass")' in privacy

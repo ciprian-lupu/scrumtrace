@@ -329,6 +329,13 @@ Drop **this export folder** into a coding-agent workspace. Read this file first,
   - `media/task-02/clip.mp4`
   - ![](media/task-02/shot-1.jpg)
 
+## Needs review
+_None._
+
+## Shots
+- shot-001 at t_media 3:08: <untrusted_meeting_data>Save button does nothing</untrusted_meeting_data>
+  - ![](shots/001.annotated.png)
+
 ## Manifest
 All timestamps are `t_media`. Canonical session files are not in this folder. Source of truth for this pack: `session.manifest.json`.
 """
