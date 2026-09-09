@@ -1,0 +1,15 @@
+.DS_Store
+xcuserdata/
+DerivedData/
+*.xcuserstate
+*.p12
+*.cer
+secrets*
+.env
+.gemini_key
+.build/
+.swiftpm/
+*.xccheckout
+*.xcscmblueprint
+.idea/
+agent-tools/
