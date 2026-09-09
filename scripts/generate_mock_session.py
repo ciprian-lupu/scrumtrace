@@ -153,6 +153,46 @@ def fill_template(shell: str, replacements: dict[str, str]) -> str:
     return "".join(out)
 
 
+def contained_export_member(file: Path, export_dir: Path) -> str | None:
+    if file.is_symlink() or not file.is_file():
+        return None
+    export_root = export_dir.resolve()
+    try:
+        rel = file.resolve().relative_to(export_root)
+    except ValueError:
+        return None
+    parts = [part for part in rel.as_posix().split("/") if part]
+    if not parts or ".." in parts or "archive" in parts:
+        return None
+    return "/".join(parts)
+
+
+def export_zip_members(export: Path) -> list[str]:
+    named = [
+        "AGENT_CONTEXT.md",
+        "SESSION_BRIEF.html",
+        "AGENT_PROMPT.txt",
+        "session.manifest.json",
+        "OMITTED.md",
+    ]
+    out: list[str] = []
+    for name in named:
+        member = contained_export_member(export / name, export)
+        if member:
+            out.append(member)
+    for folder in ("shots", "media"):
+        root = export / folder
+        if not root.is_dir():
+            continue
+        for path in sorted(root.rglob("*")):
+            if path.name == "session-pack.zip":
+                continue
+            member = contained_export_member(path, export)
+            if member:
+                out.append(member)
+    return sorted(dict.fromkeys(out))
+
+
 def main() -> None:
     if EXPORT.exists():
         shutil.rmtree(EXPORT)
@@ -375,23 +415,9 @@ This pack is `samples/mock-session/export/` only. Do not hand `archive/` (this m
     )
     packed = EXPORT / "session-pack.zip"
     packed.unlink(missing_ok=True)
-    named = [
-        "AGENT_CONTEXT.md",
-        "SESSION_BRIEF.html",
-        "AGENT_PROMPT.txt",
-        "session.manifest.json",
-        "OMITTED.md",
-    ]
-    members: list[str] = [name for name in named if (EXPORT / name).exists()]
-    for folder in ("shots", "media"):
-        root = EXPORT / folder
-        if not root.exists():
-            continue
-        for path in sorted(root.rglob("*")):
-            if path.is_file() and path.name != "session-pack.zip":
-                members.append(path.relative_to(EXPORT).as_posix())
+    members = export_zip_members(EXPORT)
     subprocess.run(
-        ["zip", "-q", str(packed), "-@"],
+        ["zip", "-q", "-y", str(packed), "-@"],
         cwd=EXPORT,
         input="\n".join(members) + "\n",
         text=True,

@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -82,6 +83,10 @@ def test_html_escaper_order() -> None:
     gen = (ROOT / "scripts" / "generate_mock_session.py").read_text()
     assert "def fill_template" in gen
     assert "html.replace(key, value)" not in gen
+    assert "def contained_export_member" in gen
+    assert "def export_zip_members" in gen
+    assert '"-y"' in gen
+    assert "is_symlink" in gen
 
 
 def test_brief_template_does_not_rescan_values() -> None:
@@ -101,6 +106,21 @@ def test_brief_template_does_not_rescan_values() -> None:
         },
     )
     assert html == "HEADBug {{OMITTED_HTML}} hereMIDOMITTED-BLOCKTAIL"
+
+    with tempfile.TemporaryDirectory() as tmp:
+        export = Path(tmp) / "export"
+        export.mkdir()
+        (export / "shots").mkdir()
+        (export / "media").mkdir()
+        (export / "AGENT_CONTEXT.md").write_text("# ctx\n", encoding="utf-8")
+        (export / "shots" / "ok.png").write_bytes(b"still")
+        secret = Path(tmp) / "outside.mp4"
+        secret.write_bytes(b"ARCHIVE-LEAK")
+        (export / "media" / "leak.mp4").symlink_to(secret)
+        members = mod.export_zip_members(export)
+        assert "shots/ok.png" in members
+        assert "AGENT_CONTEXT.md" in members
+        assert "media/leak.mp4" not in members
 
 
 def test_zipper_never_deletes_archive() -> None:
@@ -395,7 +415,10 @@ def test_pause_privacy_and_metadata_gate() -> None:
     assert "canResumeFromPause" in hud
     assert "canResumeFromPause" in menu
     assert "org.keepassxc.KeePassXC" in privacy
-    assert 'contains("proton")' in privacy
+    assert "me.proton.Pass" in privacy
+    assert 'contains("protonpass")' in privacy
+    assert 'contains("proton.pass")' in privacy
+    assert 'contains("proton") ||' not in privacy
     assert 'contains("strongbox")' in privacy
     models = (ROOT / "ScrumTrace" / "Storage" / "SessionModels.swift").read_text()
     decision = models.split("enum CandidateDecision")[1].split("enum ShotSource")[0]

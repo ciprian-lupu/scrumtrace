@@ -86,7 +86,8 @@ final class PrivacyGuard: @unchecked Sendable {
         let lowered = bundle.lowercased()
         if lowered.contains("1password") || lowered.contains("bitwarden") || lowered.contains("lastpass")
             || lowered.contains("keepass") || lowered.contains("nordpass") || lowered.contains("enpass")
-            || lowered.contains("proton") || lowered.contains("strongbox") || lowered.contains("dashlane") {
+            || lowered.contains("protonpass") || lowered.contains("proton.pass")
+            || lowered.contains("strongbox") || lowered.contains("dashlane") {
             return bundle
         }
         return nil
