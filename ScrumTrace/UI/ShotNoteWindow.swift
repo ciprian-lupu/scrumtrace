@@ -164,6 +164,7 @@ struct ShotNoteView: View {
                 abortTalk()
             }
         }
+    }
 
     private func startTalk() {
         guard !holdingTalk else { return }

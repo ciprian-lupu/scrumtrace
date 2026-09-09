@@ -63,7 +63,7 @@ struct SettingsView: View {
             Section("Capture") {
                 Text("Shot  ⌥⌘S    Pin  ⌥⌘Space    Pause  ⌥⌘P")
                     .font(.system(.body, design: .monospaced))
-                Text("HUD shows t_media. Pause discards frames, microphone PCM, and metadata.")
+                Text("HUD shows t_media. Pause discards screen frames, system audio, microphone PCM, metadata, Shot, and Hold-to-Talk. After Stop, WhisperKit transcribes the room mic and the movie’s system-audio track, then merges on t_media.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

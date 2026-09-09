@@ -231,11 +231,29 @@ final class SessionProcessor: @unchecked Sendable {
         if !transcriber.isReady {
             try await transcriber.prepare(model: model)
         }
+        let layout = CaptureAudioLayout.load(sessionURL: sessionURL)
         let wav = sessionURL.appendingPathComponent(ScrumTracePath.audioWav)
-        if FileManager.default.fileExists(atPath: wav.path) {
-            return try await transcriber.transcribeFile(at: wav)
+        let movie = sessionURL.appendingPathComponent(ScrumTracePath.sessionMovie)
+        let wavExists = FileManager.default.fileExists(atPath: wav.path)
+        let movieExists = FileManager.default.fileExists(atPath: movie.path)
+        var passes: [TranscriptQuery.SourcePass] = []
+        if wavExists {
+            let speaker = layout.microphoneWav ? "room" : "system"
+            let wavTranscript = try await transcriber.transcribeFile(at: wav)
+            passes.append(TranscriptQuery.SourcePass(speaker: speaker, transcript: wavTranscript))
         }
-        return FullTranscript(sessionId: "", language: "en", segments: [])
+        if layout.shouldTranscribeMovie(wavExists: wavExists, movieExists: movieExists) {
+            do {
+                let movieTranscript = try await transcriber.transcribeMovieAudio(at: movie)
+                passes.append(TranscriptQuery.SourcePass(speaker: "system", transcript: movieTranscript))
+            } catch {
+                if passes.isEmpty { throw error }
+            }
+        }
+        if passes.isEmpty {
+            return FullTranscript(sessionId: "", language: "en", segments: [])
+        }
+        return TranscriptQuery.merge(passes, sessionId: "")
     }
 
     private func loadTranscript(sessionURL: URL, sessionId: String) -> FullTranscript {
@@ -276,8 +294,11 @@ final class SessionProcessor: @unchecked Sendable {
         if !excerpt.isEmpty {
             mediaSent.append("transcript")
         }
-        if configuration.acceptsVideo {
-            mediaSent.append("video")
+        if configuration.acceptsVideo, let clip = slice.clipPath {
+            let clipURL = sessionURL.appendingPathComponent(clip)
+            if FileManager.default.fileExists(atPath: clipURL.path) {
+                mediaSent.append("video")
+            }
         }
         slice.mediaSent = mediaSent
         if !configuration.acceptsVideo && images.isEmpty && excerpt.isEmpty && (shot?.note.isEmpty ?? true) {
@@ -289,7 +310,11 @@ final class SessionProcessor: @unchecked Sendable {
             slice: slice,
             transcriptExcerpt: excerpt,
             shotNote: shot?.note ?? "",
-            windowContext: "",
+            windowContext: vault.windowContext(
+                sessionId: manifest.sessionId,
+                start: slice.startMedia,
+                end: slice.endMedia
+            ),
             imageURLs: images
         )
         do {

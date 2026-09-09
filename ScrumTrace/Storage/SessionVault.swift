@@ -137,13 +137,35 @@ final class SessionVault: @unchecked Sendable {
     }
 
     func loadPinTimes(sessionId: String) -> [TimeInterval] {
+        events(sessionId: sessionId).compactMap { event in
+            guard event.kind == .pin else { return nil }
+            return event.tMedia
+        }
+    }
+
+    func windowContext(sessionId: String, start: TimeInterval, end: TimeInterval) -> String {
+        var lines: [String] = []
+        for event in events(sessionId: sessionId) {
+            guard event.tMedia >= start, event.tMedia <= end else { continue }
+            switch event.kind {
+            case .window, .url:
+                let app = event.payload["app"] ?? ""
+                let title = event.payload["title"] ?? ""
+                let url = event.payload["url"] ?? ""
+                lines.append("t_media=\(String(format: "%.1f", event.tMedia)) app=\(app) title=\(title) url=\(url)")
+            case .start, .stop, .pause, .resume, .pin, .shot, .privacyPause, .error:
+                continue
+            }
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    private func events(sessionId: String) -> [SessionEvent] {
         let url = sessionURL(id: sessionId).appendingPathComponent(ScrumTracePath.events)
         guard let text = try? String(contentsOf: url, encoding: .utf8) else { return [] }
         return text.split(whereSeparator: \.isNewline).compactMap { line in
-            guard let data = line.data(using: .utf8),
-                  let event = try? decoder.decode(SessionEvent.self, from: data),
-                  event.kind == .pin else { return nil }
-            return event.tMedia
+            guard let data = line.data(using: .utf8) else { return nil }
+            return try? decoder.decode(SessionEvent.self, from: data)
         }
     }
 

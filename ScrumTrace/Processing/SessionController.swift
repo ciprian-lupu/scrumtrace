@@ -53,6 +53,7 @@ final class SessionController: ObservableObject {
     }
 
     func startRecording() {
+        guard !isRecording, !isBusy else { return }
         Task { await startRecordingAsync() }
     }
 
@@ -106,6 +107,10 @@ final class SessionController: ObservableObject {
     }
 
     func retryAnalysis(sessionId: String) {
+        guard !isBusy, !isRecording else {
+            statusLine = isBusy ? "Already processing a session" : "Stop recording before retry"
+            return
+        }
         lastSessionId = sessionId
         Task { await runProcessor(sessionId: sessionId) }
     }
@@ -117,7 +122,7 @@ final class SessionController: ObservableObject {
     }
 
     private func startRecordingAsync() async {
-        guard !isRecording else { return }
+        guard !isRecording, !isBusy else { return }
         lastError = nil
         do {
             let created = try vault.createSession(product: settings.productContext)
@@ -146,6 +151,9 @@ final class SessionController: ObservableObject {
 
     private func stopRecordingAsync() async {
         guard isRecording else { return }
+        isBusy = true
+        statusLine = "Stopping capture"
+        phase = .transcribing
         privacy.stop()
         sampler.isSuspended = true
         recorder?.setPaused(false)
@@ -168,6 +176,10 @@ final class SessionController: ObservableObject {
             manifest = local
             log(.stop, [:])
             await runProcessor(sessionId: local.sessionId)
+        } else {
+            isBusy = false
+            phase = .offlineFailed
+            statusLine = "Session manifest missing after stop"
         }
         recorder = nil
     }

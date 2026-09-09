@@ -7,6 +7,7 @@ final class MenuBarController {
     private let item: NSStatusItem
     private var hud: RecordingHUDWindow?
     private var lastMenuSignature = ""
+    private var statusMenuItem: NSMenuItem?
 
     init(controller: SessionController, hud: RecordingHUDWindow) {
         self.controller = controller
@@ -23,24 +24,35 @@ final class MenuBarController {
     }
 
     private func sync() {
-        hud?.setVisible(controller.isRecording)
+        hud?.setVisible(controller.isRecording || controller.isBusy)
         if let button = item.button {
-            let symbol = controller.phase == .paused
-                ? "pause.circle.fill"
-                : (controller.isRecording ? "record.circle.fill" : "record.circle")
+            let symbol: String
+            if controller.isBusy {
+                symbol = "gearshape.circle.fill"
+            } else if controller.phase == .paused {
+                symbol = "pause.circle.fill"
+            } else if controller.isRecording {
+                symbol = "record.circle.fill"
+            } else {
+                symbol = "record.circle"
+            }
             button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: "ScrumTrace")
         }
+        // Do not include statusLine — rebuilding the menu closes it. Update the
+        // disabled status item in place while processing.
         let signature = [
-            controller.phase.rawValue,
+            controller.phase == .paused ? "paused" : "live",
+            controller.isRecording ? "1" : "0",
             controller.lastSessionId ?? "",
             controller.isBusy ? "1" : "0",
-            controller.statusLine,
             controller.captureState.rawValue
         ].joined(separator: "|")
         if signature != lastMenuSignature {
             lastMenuSignature = signature
             rebuild()
         }
+        statusMenuItem?.title = controller.statusLine
+        statusMenuItem?.isHidden = !controller.isBusy
     }
 
     private func rebuild() {
@@ -58,16 +70,18 @@ final class MenuBarController {
             menu.addItem(pinItem)
             menu.addItem(actionItem("Stop & process", #selector(stop)))
         } else {
-            menu.addItem(actionItem("Start recording", #selector(start)))
+            let start = actionItem("Start recording", #selector(start))
+            start.isEnabled = !controller.isBusy
+            menu.addItem(start)
         }
-        if controller.isBusy {
-            let status = NSMenuItem(title: controller.statusLine, action: nil, keyEquivalent: "")
-            status.isEnabled = false
-            menu.addItem(status)
-        }
+        let status = NSMenuItem(title: controller.statusLine, action: nil, keyEquivalent: "")
+        status.isEnabled = false
+        status.isHidden = !controller.isBusy
+        menu.addItem(status)
+        statusMenuItem = status
         menu.addItem(.separator())
         let retry = actionItem("Retry analysis", #selector(retry))
-        retry.isEnabled = controller.lastSessionId != nil
+        retry.isEnabled = controller.lastSessionId != nil && !controller.isBusy && !controller.isRecording
         menu.addItem(retry)
         let reveal = actionItem("Reveal last session", #selector(reveal))
         reveal.isEnabled = controller.lastSessionId != nil
@@ -99,6 +113,7 @@ final class MenuBarController {
                 )
                 retryItem.representedObject = session.sessionId
                 retryItem.target = self
+                retryItem.isEnabled = !controller.isBusy && !controller.isRecording
                 sub.addItem(revealItem)
                 sub.addItem(retryItem)
                 item.submenu = sub

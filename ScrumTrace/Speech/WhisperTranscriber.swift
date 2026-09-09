@@ -1,3 +1,4 @@
+import AVFoundation
 import Foundation
 import WhisperKit
 
@@ -59,6 +60,42 @@ final class WhisperTranscriber: @unchecked Sendable {
         return transcript.segments.map(\.text).joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    /// System audio lives in `archive/session.mp4`. Extract AAC, then fall back to the movie path.
+    func transcribeMovieAudio(at movie: URL) async throws -> FullTranscript {
+        let dest = movie.deletingLastPathComponent().appendingPathComponent("system-audio-extract.m4a")
+        do {
+            try await extractAudio(from: movie, to: dest)
+            defer { try? FileManager.default.removeItem(at: dest) }
+            return try await transcribeFile(at: dest)
+        } catch {
+            return try await transcribeFile(at: movie)
+        }
+    }
+
+    func extractAudio(from movie: URL, to dest: URL) async throws {
+        try? FileManager.default.removeItem(at: dest)
+        let asset = AVURLAsset(url: movie)
+        guard let session = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetAppleM4A) else {
+            throw NSError(
+                domain: "ScrumTrace",
+                code: 2,
+                userInfo: [NSLocalizedDescriptionKey: "Cannot extract system audio from the session movie."]
+            )
+        }
+        session.outputURL = dest
+        session.outputFileType = .m4a
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            session.exportAsynchronously { continuation.resume() }
+        }
+        guard session.status == .completed else {
+            throw session.error ?? NSError(
+                domain: "ScrumTrace",
+                code: 3,
+                userInfo: [NSLocalizedDescriptionKey: "System-audio extract from session.mp4 failed."]
+            )
+        }
+    }
+
     private func lockKit() -> WhisperKit? {
         lock.lock()
         defer { lock.unlock() }
@@ -67,6 +104,11 @@ final class WhisperTranscriber: @unchecked Sendable {
 }
 
 enum TranscriptQuery {
+    struct SourcePass: Sendable {
+        var speaker: String
+        var transcript: FullTranscript
+    }
+
     static func excerpt(from transcript: FullTranscript, start: TimeInterval, end: TimeInterval) -> String {
         transcript.segments
             .filter { $0.end >= start && $0.start <= end }
@@ -88,5 +130,89 @@ enum TranscriptQuery {
             }
         }
         return hits
+    }
+
+    /// Merge room-mic and system-audio passes on `t_media`. Near-duplicate overlapping
+    /// segments (mic bleed of the same system speech) collapse; distinct speech is kept.
+    static func merge(_ passes: [SourcePass], sessionId: String) -> FullTranscript {
+        var labeled: [TranscriptSegment] = []
+        var language = "en"
+        var sources: [String] = []
+        for pass in passes {
+            if !pass.transcript.language.isEmpty {
+                language = pass.transcript.language
+            }
+            if !pass.speaker.isEmpty {
+                sources.append(pass.speaker)
+            }
+            for segment in pass.transcript.segments where !segment.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                var copy = segment
+                if copy.speaker == nil || copy.speaker?.isEmpty == true {
+                    copy.speaker = pass.speaker
+                }
+                labeled.append(copy)
+            }
+        }
+        labeled.sort { lhs, rhs in
+            if lhs.start != rhs.start { return lhs.start < rhs.start }
+            return lhs.end < rhs.end
+        }
+        var seen = Set<String>()
+        let uniqueSources = sources.filter { seen.insert($0).inserted }
+        return FullTranscript(
+            sessionId: sessionId,
+            language: language,
+            segments: collapseDuplicates(labeled),
+            sources: uniqueSources
+        )
+    }
+
+    static func overlapFraction(_ a: TranscriptSegment, _ b: TranscriptSegment) -> Double {
+        let start = max(a.start, b.start)
+        let end = min(a.end, b.end)
+        let overlap = max(0, end - start)
+        let shorter = max(0.001, min(a.end - a.start, b.end - b.start))
+        return overlap / shorter
+    }
+
+    static func similarText(_ a: String, _ b: String) -> Bool {
+        let na = EvidenceValidator.normalize(a)
+        let nb = EvidenceValidator.normalize(b)
+        if na.isEmpty || nb.isEmpty { return false }
+        if na == nb { return true }
+        if na.contains(nb) || nb.contains(na) { return true }
+        let sa = Set(na.split(separator: " ").map(String.init))
+        let sb = Set(nb.split(separator: " ").map(String.init))
+        let union = sa.union(sb).count
+        guard union > 0 else { return false }
+        return Double(sa.intersection(sb).count) / Double(union) >= 0.75
+    }
+
+    static func collapseDuplicates(_ segments: [TranscriptSegment]) -> [TranscriptSegment] {
+        var result: [TranscriptSegment] = []
+        for segment in segments {
+            if let lastIndex = result.indices.last,
+               overlapFraction(result[lastIndex], segment) >= 0.5,
+               similarText(result[lastIndex].text, segment.text) {
+                var merged = result[lastIndex]
+                merged.start = min(merged.start, segment.start)
+                merged.end = max(merged.end, segment.end)
+                if segment.text.count > merged.text.count {
+                    merged.text = segment.text
+                    if segment.words.count >= merged.words.count {
+                        merged.words = segment.words
+                    }
+                }
+                if let left = merged.speaker, let right = segment.speaker, left != right {
+                    if !left.contains(right) && !right.contains(left) {
+                        merged.speaker = "\(left)+\(right)"
+                    }
+                }
+                result[lastIndex] = merged
+            } else {
+                result.append(segment)
+            }
+        }
+        return result
     }
 }

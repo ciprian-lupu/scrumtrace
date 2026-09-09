@@ -17,8 +17,9 @@ enum SessionRecorderError: LocalizedError {
     }
 }
 
-/// ScreenCaptureKit coordinator. While paused, video frames, microphone PCM,
-/// and metadata are discarded — nothing is written to MP4 or WAV.
+/// ScreenCaptureKit coordinator. While paused, screen frames, system audio,
+/// microphone PCM, and metadata are discarded — nothing is written to MP4 or WAV.
+/// System audio goes to the movie AAC track. Room mic goes to `archive/audio.wav`.
 final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sendable {
     let clock: ClockSynchronizer
     private let sessionURL: URL
@@ -34,7 +35,7 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
     private var started = false
     private var firstVideoPTS: CMTime?
     private var firstAudioPTS: CMTime?
-    private var microphoneTap = false
+    private var microphoneWav = false
 
     init(sessionURL: URL, clock: ClockSynchronizer) {
         self.sessionURL = sessionURL
@@ -76,14 +77,18 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         if #available(macOS 15.0, *) {
             do {
                 try stream.addStreamOutput(self, type: .microphone, sampleHandlerQueue: writerQueue)
-                microphoneTap = true
+                microphoneWav = true
             } catch {
-                microphoneTap = false
-                try startMicrophoneFallback()
+                do {
+                    try startMicrophoneFallback()
+                    microphoneWav = true
+                } catch {
+                    microphoneWav = false
+                }
             }
         } else {
             try startMicrophoneFallback()
-            microphoneTap = true
+            microphoneWav = true
         }
         try await stream.startCapture()
         self.stream = stream
@@ -129,16 +134,22 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             }
         }
         started = false
+        let layout = CaptureAudioLayout(
+            microphoneWav: microphoneWav,
+            systemAudioInMovie: true
+        )
+        try? layout.write(sessionURL: sessionURL)
     }
 
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
         // Pause drops every ScreenCaptureKit output: screen, system audio, microphone.
+        guard !paused else { return }
         switch type {
         case .screen:
             appendVideo(sampleBuffer)
         case .audio:
             appendAudioToMovie(sampleBuffer)
-            if !microphoneTap {
+            if !microphoneWav {
                 writeWav(from: sampleBuffer)
             }
         case .microphone:
@@ -282,7 +293,7 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         firstVideoPTS = nil
         firstAudioPTS = nil
         paused = false
-        microphoneTap = false
+        microphoneWav = false
     }
 
     private func startMicrophoneFallback() throws {

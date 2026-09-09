@@ -9,24 +9,41 @@ struct HUDView: View {
     var body: some View {
         HStack(spacing: 10) {
             Circle()
-                .fill(controller.phase == .paused ? Color(red: 0.94, green: 0.64, blue: 0.22) : Color(red: 0.89, green: 0.23, blue: 0.18))
+                .fill(dotColor)
                 .frame(width: 9, height: 9)
                 .shadow(color: Color.red.opacity(controller.phase == .recording ? 0.8 : 0), radius: 6)
                 .scaleEffect(controller.phase == .recording ? 1.15 : 1)
-                .animation(.easeInOut(duration: 0.7).repeatForever(autoreverses: true), value: controller.phase)
+                .animation(.easeInOut(duration: 0.7).repeatForever(autoreverses: true), value: controller.phase == .recording)
             Text(SessionController.clock(controller.mediaElapsed))
                 .font(.system(size: 13, weight: .semibold, design: .monospaced))
                 .foregroundStyle(Color(red: 0.97, green: 0.93, blue: 0.86))
             Divider().frame(height: 16)
-            hudButton("Shot", action: controller.openShot, enabled: controller.captureState.allowsNewCapture)
-            hudButton("Pin", action: controller.pin, enabled: controller.captureState.allowsNewCapture)
-            hudButton(controller.phase == .paused ? "Resume" : "Pause", action: controller.togglePause)
-            hudButton("Stop", action: controller.stopRecording)
+            if controller.isBusy {
+                Text(controller.statusLine)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(Color(red: 0.97, green: 0.93, blue: 0.86).opacity(0.9))
+                    .lineLimit(1)
+            } else {
+                hudButton("Shot", action: controller.openShot, enabled: controller.captureState.allowsNewCapture)
+                hudButton("Pin", action: controller.pin, enabled: controller.captureState.allowsNewCapture)
+                hudButton(controller.phase == .paused ? "Resume" : "Pause", action: controller.togglePause)
+                hudButton("Stop", action: controller.stopRecording)
+            }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
         .background(.ultraThinMaterial, in: Capsule())
         .overlay(Capsule().strokeBorder(Color.white.opacity(0.12), lineWidth: 1))
+    }
+
+    private var dotColor: Color {
+        if controller.isBusy {
+            return Color(red: 0.42, green: 0.62, blue: 0.88)
+        }
+        if controller.phase == .paused {
+            return Color(red: 0.94, green: 0.64, blue: 0.22)
+        }
+        return Color(red: 0.89, green: 0.23, blue: 0.18)
     }
 
     private func hudButton(_ title: String, action: @escaping () -> Void, enabled: Bool = true) -> some View {
@@ -45,7 +62,7 @@ final class RecordingHUDWindow: NSPanel {
 
     init(controller: SessionController) {
         super.init(
-            contentRect: NSRect(x: 0, y: 0, width: 420, height: 44),
+            contentRect: NSRect(x: 0, y: 0, width: 560, height: 44),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
@@ -79,7 +96,7 @@ final class RecordingHUDWindow: NSPanel {
     private func positionOnActiveScreen() {
         let screen = NSScreen.main ?? NSScreen.screens.first
         guard let frame = screen?.visibleFrame else { return }
-        let size = NSSize(width: 430, height: 46)
+        let size = NSSize(width: 560, height: 46)
         setFrame(
             NSRect(
                 x: frame.midX - size.width / 2,

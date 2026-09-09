@@ -110,11 +110,42 @@ def test_audio_split_and_brief_loader() -> None:
     assert "appendAudioToMovie" in recorder
     assert "case .microphone:" in recorder
     assert "writeWav(from: sampleBuffer)" in recorder
+    assert "microphoneWav" in recorder
+    assert "CaptureAudioLayout" in recorder
+    assert "guard !paused else { return }" in recorder
     brief = (ROOT / "ScrumTrace" / "Export" / "SessionBriefRenderer.swift").read_text()
     assert "Export/Resources" in brief
     menu = (ROOT / "ScrumTrace" / "UI" / "MenuBarController.swift").read_text()
     assert "retryRecent" in menu
     assert "lastMenuSignature" in menu
+    assert "isEnabled = !controller.isBusy" in menu
+    assert "controller.isRecording || controller.isBusy" in menu
+    hud = (ROOT / "ScrumTrace" / "UI" / "RecordingHUDWindow.swift").read_text()
+    assert "controller.isBusy" in hud
+    shot = (ROOT / "ScrumTrace" / "UI" / "ShotNoteWindow.swift").read_text()
+    assert "abortTalk" in shot
+    # ShotNoteView.body must close before startTalk (compile error if the brace is missing).
+    body = shot.index("var body: some View")
+    start_talk = shot.index("private func startTalk()")
+    assert shot[body:start_talk].count("{") == shot[body:start_talk].count("}")
+
+
+def test_dual_transcript_merge_wired() -> None:
+    speech = (ROOT / "ScrumTrace" / "Speech" / "WhisperTranscriber.swift").read_text()
+    assert "func merge" in speech
+    assert "func transcribeMovieAudio" in speech
+    assert "AVAssetExportPresetAppleM4A" in speech
+    processor = (ROOT / "ScrumTrace" / "Processing" / "SessionProcessor.swift").read_text()
+    assert "shouldTranscribeMovie" in processor
+    assert "transcribeMovieAudio" in processor
+    models = (ROOT / "ScrumTrace" / "Storage" / "SessionModels.swift").read_text()
+    assert "capture-layout.json" in models
+    assert "microphone_wav" in models
+    controller = (ROOT / "ScrumTrace" / "Processing" / "SessionController.swift").read_text()
+    assert "guard !isBusy, !isRecording" in controller
+    assert 'phase = .transcribing' in controller
+    vault = (ROOT / "ScrumTrace" / "Storage" / "SessionVault.swift").read_text()
+    assert "func windowContext" in vault
 
 
 def main() -> None:
@@ -129,6 +160,7 @@ def main() -> None:
     test_pause_gate_hold_to_talk()
     test_retry_failed_slices_and_pins()
     test_audio_split_and_brief_loader()
+    test_dual_transcript_merge_wired()
     print("contract tests ok")
 
 

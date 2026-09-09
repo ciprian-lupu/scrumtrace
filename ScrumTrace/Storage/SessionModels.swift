@@ -395,11 +395,53 @@ struct FullTranscript: Codable, Sendable {
     var sessionId: String
     var language: String
     var segments: [TranscriptSegment]
+    /// Hypotheses: `room` (microphone WAV) and/or `system` (movie audio).
+    var sources: [String]? = nil
 
     enum CodingKeys: String, CodingKey {
         case sessionId = "session_id"
         case language
         case segments
+        case sources
+    }
+}
+
+/// What landed in `archive/audio.wav` vs `archive/session.mp4` audio.
+struct CaptureAudioLayout: Codable, Sendable, Hashable {
+    var microphoneWav: Bool
+    var systemAudioInMovie: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case microphoneWav = "microphone_wav"
+        case systemAudioInMovie = "system_audio_in_movie"
+    }
+
+    static let both = CaptureAudioLayout(microphoneWav: true, systemAudioInMovie: true)
+
+    static func load(sessionURL: URL) -> CaptureAudioLayout {
+        let url = sessionURL.appendingPathComponent(ScrumTracePath.captureLayout)
+        guard let data = try? Data(contentsOf: url),
+              let layout = try? JSONDecoder().decode(CaptureAudioLayout.self, from: data) else {
+            return .both
+        }
+        return layout
+    }
+
+    func write(sessionURL: URL) throws {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        try encoder.encode(self).write(
+            to: sessionURL.appendingPathComponent(ScrumTracePath.captureLayout),
+            options: .atomic
+        )
+    }
+
+    /// Room mic WAV is a different source from movie system audio. If WAV *is*
+    /// system audio (no mic tap), transcribing the movie would duplicate it.
+    func shouldTranscribeMovie(wavExists: Bool, movieExists: Bool) -> Bool {
+        guard movieExists, systemAudioInMovie else { return false }
+        if microphoneWav { return true }
+        return !wavExists
     }
 }
 
@@ -524,6 +566,7 @@ enum ScrumTracePath {
     static let omitted = "export/OMITTED.md"
     static let sessionMovie = "archive/session.mp4"
     static let audioWav = "archive/audio.wav"
+    static let captureLayout = "archive/capture-layout.json"
     static let fullTranscript = "archive/full_transcript.json"
     static let events = "archive/events.jsonl"
 }

@@ -8,10 +8,11 @@ The working spec is [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) (contracts 
 
 - Native Swift menu-bar app (`com.str8minds.ScrumTrace`, sandbox off)
 - Pause gate shared by screen, system audio, microphone, metadata, Shot, and Hold-to-Talk
+- WhisperKit transcribes the room-mic WAV **and** system audio in `archive/session.mp4`, then merges on `t_media`
 - Session disk layout: `archive/` (private) vs `export/` (handoff, export-relative paths)
 - Measured 35 MB `session-pack.zip` with `OMITTED.md` when the cap drops files
 - Pluggable AI adapters behind one internal contract (MVP: OpenAI-compatible + JSON Schema)
-- Timeline / contract / pack-budget / evidence tests (no Mac required): `bash scripts/run_linux_tests.sh`
+- Timeline / contract / transcript-merge / pack-budget / evidence tests (no Mac required): `bash scripts/run_linux_tests.sh`
 
 ## Build (macOS 14+, Apple Silicon recommended)
 
@@ -44,6 +45,8 @@ Then open `samples/mock-session/export/SESSION_BRIEF.html`. The image-only failu
 
 ## Next gates (must run on a Mac)
 
+Use the fill-in log at [`samples/GATE_LOG.md`](samples/GATE_LOG.md). Linux tests do **not** prove these.
+
 1. Phase 0–1: 20 min record, 3 pauses, all-source pause token test (screen, system audio, mic, Shot, Hold-to-Talk)
-2. Phase 3: WhisperKit elapsed time on a named Mac
+2. Phase 3: WhisperKit elapsed time on a named Mac; confirm `full_transcript.json` `sources` includes room and system when both were captured
 3. Phase 5–6: invalid key does not crash; measured zip ≤ 35 MB; remaining `AGENT_CONTEXT.md` paths exist

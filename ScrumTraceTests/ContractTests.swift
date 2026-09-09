@@ -106,4 +106,44 @@ final class ContractTests: XCTestCase {
             [10.0, 20.0, 30.0]
         )
     }
+
+    func testShouldTranscribeMovieAvoidsDuplicatingSystemWav() {
+        let both = CaptureAudioLayout.both
+        XCTAssertTrue(both.shouldTranscribeMovie(wavExists: true, movieExists: true))
+        let systemWav = CaptureAudioLayout(microphoneWav: false, systemAudioInMovie: true)
+        XCTAssertFalse(systemWav.shouldTranscribeMovie(wavExists: true, movieExists: true))
+        XCTAssertTrue(systemWav.shouldTranscribeMovie(wavExists: false, movieExists: true))
+        XCTAssertFalse(systemWav.shouldTranscribeMovie(wavExists: false, movieExists: false))
+    }
+
+    func testTranscriptMergeCollapsesBleedAndKeepsDistinctSpeech() {
+        let room = FullTranscript(
+            sessionId: "",
+            language: "en",
+            segments: [
+                TranscriptSegment(start: 1, end: 3, text: "this does nothing", speaker: nil, words: []),
+                TranscriptSegment(start: 10, end: 12, text: "restart ingest-worker", speaker: nil, words: [])
+            ]
+        )
+        let system = FullTranscript(
+            sessionId: "",
+            language: "en",
+            segments: [
+                TranscriptSegment(start: 1.1, end: 3.1, text: "this does nothing", speaker: nil, words: []),
+                TranscriptSegment(start: 4, end: 6, text: "enable TRACE_SYNC", speaker: nil, words: [])
+            ]
+        )
+        let merged = TranscriptQuery.merge(
+            [
+                TranscriptQuery.SourcePass(speaker: "room", transcript: room),
+                TranscriptQuery.SourcePass(speaker: "system", transcript: system)
+            ],
+            sessionId: "s"
+        )
+        XCTAssertEqual(merged.sources, ["room", "system"])
+        XCTAssertEqual(merged.segments.count, 3)
+        XCTAssertTrue(merged.segments.contains { $0.text == "enable TRACE_SYNC" })
+        XCTAssertTrue(merged.segments.contains { $0.text == "restart ingest-worker" })
+        XCTAssertEqual(merged.segments.filter { EvidenceValidator.normalize($0.text) == "this does nothing" }.count, 1)
+    }
 }
