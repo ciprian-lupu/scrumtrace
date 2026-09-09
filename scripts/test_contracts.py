@@ -198,6 +198,8 @@ def test_clip_exporter_macos14() -> None:
     assert "scrumtrace-tighten" in tighten_file
     assert "replaceItemAt" not in tighten_file
     assert "existingSessionFile" in clip
+    export_fn = clip.split("func export(")[1].split("func tightenExportClips")[0]
+    assert "isReadableSessionFile" in export_fn
     assert "clip_path escaped" in clip
     assert "clip_path is not a working or export clip" in clip
     assert "isAllowedClipDest" in clip
@@ -545,6 +547,10 @@ def test_phase45_clip_consent_and_budget() -> None:
     sanitize = prompts.split("func sanitizeUntrusted")[1].split("func evaluationUserPrompt")[0]
     assert "</untrusted_meeting_data>" in sanitize
     assert "<untrusted_meeting_data>" in sanitize
+    eval_prompt = prompts.split("func evaluationUserPrompt")[1]
+    assert "wrapUntrustedInline(product.appName)" in eval_prompt
+    assert "wrapUntrustedInline(product.repoURL)" in eval_prompt
+    assert "wrapUntrustedInline(product.techStack)" in eval_prompt
     processor = (ROOT / "ScrumTrace" / "Processing" / "SessionProcessor.swift").read_text()
     assert "wrapUntrustedInline(draft)" in processor
     brief = (ROOT / "ScrumTrace" / "Export" / "SessionBriefRenderer.swift").read_text()

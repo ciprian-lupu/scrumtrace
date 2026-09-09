@@ -73,9 +73,9 @@ enum PromptTemplates {
         windowContext: String
     ) -> String {
         var parts: [String] = []
-        parts.append("Product: \(product.appName)")
-        parts.append("Repo: \(product.repoURL)")
-        parts.append("Stack: \(product.techStack)")
+        parts.append("Product: \(wrapUntrustedInline(product.appName))")
+        parts.append("Repo: \(wrapUntrustedInline(product.repoURL))")
+        parts.append("Stack: \(wrapUntrustedInline(product.techStack))")
         parts.append("Slice \(slice.sliceId) \(slice.startMedia)s–\(slice.endMedia)s trigger=\(slice.trigger.rawValue)")
         if !shotNote.isEmpty {
             parts.append(wrapUntrusted("Human shot note:\n\(shotNote)"))

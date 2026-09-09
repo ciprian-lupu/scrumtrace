@@ -13,7 +13,8 @@ struct ClipExporter {
         mediaDuration: TimeInterval
     ) async throws -> SliceRecord {
         let source = sessionURL.appendingPathComponent(ScrumTracePath.sessionMovie)
-        guard ExportRel.existingSessionFile(ScrumTracePath.sessionMovie, sessionURL: sessionURL) != nil else {
+        guard ExportRel.existingSessionFile(ScrumTracePath.sessionMovie, sessionURL: sessionURL) != nil,
+              ExportRel.isReadableSessionFile(source, sessionRoot: sessionURL) else {
             throw SessionRecorderError.writerFailed("session.mp4 is missing.")
         }
         guard let relativeClip = slice.clipPath else {

@@ -267,6 +267,9 @@ final class SessionVault: @unchecked Sendable {
         guard values?.isSymbolicLink != true else { return }
         var isDir: ObjCBool = false
         guard fileManager.fileExists(atPath: export.path, isDirectory: &isDir), isDir.boolValue else { return }
+        if (try? export.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+            return
+        }
         NSWorkspace.shared.activateFileViewerSelecting([export])
         #endif
     }
