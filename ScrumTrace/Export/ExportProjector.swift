@@ -209,6 +209,17 @@ struct ExportProjector {
             return jpegRelative
         }
         #endif
+        let destIsJPEG = destRelative.lowercased().hasSuffix(".jpg") || destRelative.lowercased().hasSuffix(".jpeg")
+        let sourceExt = from.pathExtension.lowercased()
+        if destIsJPEG && sourceExt != "jpg" && sourceExt != "jpeg" {
+            omitted.append(
+                OmittedAsset(
+                    path: destRelative,
+                    reason: "JPEG transcode failed; refusing to copy \(sourceExt) bytes as JPEG"
+                )
+            )
+            return nil
+        }
         return try copyIfPresent(
             from: from,
             to: sessionURL.appendingPathComponent(destRelative),

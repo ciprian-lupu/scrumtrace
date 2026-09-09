@@ -49,6 +49,7 @@ def test_export_rel_in_swift() -> None:
     projector = (ROOT / "ScrumTrace" / "Export" / "ExportProjector.swift").read_text()
     assert "lockFocus" not in projector
     assert "omittedHandoffPath" in projector
+    assert "JPEG transcode failed" in projector
 
 
 def test_frame_ref_basename_resolves() -> None:

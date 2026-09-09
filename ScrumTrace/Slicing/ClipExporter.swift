@@ -235,19 +235,15 @@ struct ClipExporter {
 
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             let once = ClipResumeOnce()
+            let state = ClipCopyState()
             let queue = DispatchQueue(label: "com.str8minds.ScrumTrace.clip")
             let group = DispatchGroup()
 
-            func finishInputs() {
-                videoInput.markAsFinished()
-                audioInput?.markAsFinished()
-            }
-
             func fail(_ error: Error) {
-                finishInputs()
+                // Do not cancelWriting or resume from requestMediaDataWhenReady —
+                // that can deadlock AVAssetWriter. Finish in group.notify.
+                state.setError(error)
                 reader.cancelReading()
-                writer.cancelWriting()
-                once.resumeThrowing(continuation, error)
             }
 
             func copySamples(output: AVAssetReaderOutput, input: AVAssetWriterInput) {
@@ -260,17 +256,17 @@ struct ClipExporter {
                     group.leave()
                 }
                 input.requestMediaDataWhenReady(on: queue) {
-                    if once.hasResumed {
+                    if state.peekError() != nil {
                         leaveOnce()
                         return
                     }
                     while input.isReadyForMoreMediaData {
                         if reader.status == .failed {
-                            leaveOnce()
                             fail(
                                 reader.error
                                     ?? SessionRecorderError.writerFailed("Clip reader failed while copying.")
                             )
+                            leaveOnce()
                             return
                         }
                         guard let sample = output.copyNextSampleBuffer() else {
@@ -278,11 +274,11 @@ struct ClipExporter {
                             return
                         }
                         if !input.append(sample) {
-                            leaveOnce()
                             fail(
                                 writer.error
                                     ?? SessionRecorderError.writerFailed("Clip writer rejected a sample.")
                             )
+                            leaveOnce()
                             return
                         }
                     }
@@ -296,6 +292,11 @@ struct ClipExporter {
 
             group.notify(queue: queue) {
                 guard !once.hasResumed else { return }
+                if let error = state.peekError() {
+                    writer.cancelWriting()
+                    once.resumeThrowing(continuation, error)
+                    return
+                }
                 writer.finishWriting {
                     if writer.status == .completed {
                         once.resume(continuation)
@@ -404,5 +405,25 @@ private final class ClipResumeOnce: @unchecked Sendable {
         resumed = true
         lock.unlock()
         continuation.resume(throwing: error)
+    }
+}
+
+/// Shared error from clip copy callbacks; consumed only after both inputs leave.
+private final class ClipCopyState: @unchecked Sendable {
+    private let lock = NSLock()
+    private var error: Error?
+
+    func setError(_ error: Error) {
+        lock.lock()
+        if self.error == nil {
+            self.error = error
+        }
+        lock.unlock()
+    }
+
+    func peekError() -> Error? {
+        lock.lock()
+        defer { lock.unlock() }
+        return error
     }
 }

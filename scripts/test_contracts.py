@@ -95,6 +95,8 @@ def test_clip_exporter_macos14() -> None:
     assert "loadTracks(withMediaType:" in clip
     assert "asset.tracks(withMediaType:" not in clip
     assert "ClipResumeOnce" in clip
+    assert "ClipCopyState" in clip
+    assert "Do not cancelWriting" in clip
     assert "shouldOptimizeForNetworkUse = true" in clip
     writer = clip.split("func writeMainProfileClip")[1].split("func exportPresetClip")[0]
     assert "AVVideoProfileLevelH264MainAutoLevel" in writer
@@ -270,6 +272,7 @@ def test_phase45_clip_consent_and_budget() -> None:
     settings = (ROOT / "ScrumTrace" / "UI" / "SettingsView.swift").read_text()
     assert "capabilities.acceptsText" in settings
     assert "capabilities.acceptsVideo" in settings
+    assert "willUploadClip" in settings
     models = (ROOT / "ScrumTrace" / "Storage" / "SessionModels.swift").read_text()
     assert "func needsReprompt" in models
     assert "func handoffPath" in models

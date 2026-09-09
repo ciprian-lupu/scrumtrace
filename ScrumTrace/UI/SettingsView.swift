@@ -39,12 +39,12 @@ struct SettingsView: View {
                 }
             }
             Section("Provider capabilities") {
-                Text("MVP backend: OpenAI-compatible. Adapters send only what these flags allow. Shipped adapters do not upload MP4.")
+                Text("MVP backend: OpenAI-compatible. Adapters send only what these flags allow. Shipped adapters do not upload MP4 even if capabilities.acceptsVideo is on.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 LabeledContent("Text", value: capabilities.acceptsText ? "yes" : "no")
                 LabeledContent("Images", value: capabilities.acceptsImages ? "yes" : "no")
-                LabeledContent("Video", value: capabilities.acceptsVideo ? "yes" : "no")
+                LabeledContent("Video", value: ProviderWireMedia.willUploadClip(configuration: capabilities) ? "yes" : "no")
             }
             Section("Speech") {
                 TextField("WhisperKit model", text: $settings.whisperModel)
