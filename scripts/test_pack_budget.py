@@ -35,7 +35,43 @@ def contained_export_member(file: Path, export_dir: Path) -> str | None:
     return "/".join(parts)
 
 
+def remove_escaping_export_links(export_dir: Path) -> None:
+    if export_dir.is_symlink():
+        export_dir.unlink()
+        export_dir.mkdir(parents=True, exist_ok=True)
+        return
+    if not export_dir.is_dir():
+        return
+    links: list[Path] = []
+    for dirpath, dirnames, filenames in os.walk(export_dir, followlinks=False):
+        base = Path(dirpath)
+        for name in dirnames:
+            path = base / name
+            if path.is_symlink():
+                links.append(path)
+        for name in filenames:
+            path = base / name
+            if path.is_symlink():
+                links.append(path)
+    for link in reversed(links):
+        if link.is_symlink():
+            link.unlink(missing_ok=True)
+
+
+def iter_export_files(root: Path):
+    if root.is_symlink() or not root.is_dir():
+        return
+    for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+        base = Path(dirpath)
+        dirnames[:] = [name for name in dirnames if not (base / name).is_symlink()]
+        for name in filenames:
+            path = base / name
+            if not path.is_symlink():
+                yield path
+
+
 def allow_list(export_dir: Path, include_full_transcript: bool = False) -> list[str]:
+    remove_escaping_export_links(export_dir)
     out: list[str] = []
     for name in NAMED_DOCS:
         member = contained_export_member(export_dir / name, export_dir)
@@ -46,10 +82,7 @@ def allow_list(export_dir: Path, include_full_transcript: bool = False) -> list[
         if member:
             out.append(member)
     for folder in ("shots", "media"):
-        root = export_dir / folder
-        if not root.is_dir():
-            continue
-        for path in root.rglob("*"):
+        for path in iter_export_files(export_dir / folder):
             member = contained_export_member(path, export_dir)
             if member:
                 out.append(member)
@@ -191,7 +224,29 @@ def main() -> int:
             for info in zf.infolist():
                 data = zf.read(info)
                 assert b"ARCHIVE-LEAK" not in data, info.filename
+        assert not (export / "media" / "leak.mp4").exists()
+        assert not (export / "AGENT_PROMPT.txt").exists()
+        assert secret.exists()
         print("pack budget symlink escape: ok", members)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        session = Path(tmp) / "session"
+        export = session / "export"
+        archive = session / "archive"
+        (export / "shots").mkdir(parents=True)
+        archive.mkdir(parents=True)
+        secret = archive / "session.mp4"
+        secret.write_bytes(b"secret-movie")
+        (export / "media").symlink_to(archive)
+        remove_escaping_export_links(export)
+        assert not (export / "media").exists()
+        assert secret.exists()
+        trap = export / "shots" / "leak.mp4"
+        trap.symlink_to(secret)
+        remove_escaping_export_links(export)
+        assert not trap.exists()
+        assert secret.exists()
+        print("pack budget folder-drop links: ok")
     return 0
 
 

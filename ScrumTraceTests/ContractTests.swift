@@ -915,6 +915,11 @@ final class ContractTests: XCTestCase {
         XCTAssertFalse(members.contains("media/leak.mp4"))
         XCTAssertFalse(members.contains("AGENT_PROMPT.txt"))
         XCTAssertFalse(members.contains(where: { $0.contains("..") }))
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: media.appendingPathComponent("leak.mp4").path),
+            "allowList must delete planted export/ symlinks so a folder drop cannot follow them"
+        )
+        XCTAssertTrue(FileManager.default.fileExists(atPath: outside.path), "must delete the link, not the target")
         XCTAssertNil(ExportRel.containedExportMember(
             file: media.appendingPathComponent("leak.mp4"),
             exportDir: export
@@ -937,6 +942,34 @@ final class ContractTests: XCTestCase {
         let leftover = PackBudget.exportMediaSessionPaths(sessionURL: session)
         XCTAssertTrue(leftover.contains("export/shots/ok.png"))
         XCTAssertFalse(leftover.contains("export/media/leak.mp4"))
+    }
+
+    func testRemoveEscapingExportLinksDeletesFolderDropTraps() throws {
+        let session = FileManager.default.temporaryDirectory.appendingPathComponent("st-folder-drop-\(UUID().uuidString)")
+        let export = session.appendingPathComponent("export")
+        let archive = session.appendingPathComponent("archive")
+        try FileManager.default.createDirectory(at: export.appendingPathComponent("shots"), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: archive, withIntermediateDirectories: true)
+        let secret = archive.appendingPathComponent("session.mp4")
+        try Data("secret-movie").write(to: secret)
+        defer { try? FileManager.default.removeItem(at: session) }
+
+        let media = export.appendingPathComponent("media")
+        try FileManager.default.createSymbolicLink(at: media, withDestinationURL: archive)
+        PackBudget.removeEscapingExportLinks(exportDir: export)
+        XCTAssertNotEqual(
+            (try? media.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) ?? false,
+            true
+        )
+        XCTAssertFalse(FileManager.default.fileExists(atPath: media.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: secret.path), "must delete the link, not the archive target")
+
+        try FileManager.default.createDirectory(at: export.appendingPathComponent("shots"), withIntermediateDirectories: true)
+        let trap = export.appendingPathComponent("shots").appendingPathComponent("leak.mp4")
+        try FileManager.default.createSymbolicLink(at: trap, withDestinationURL: secret)
+        PackBudget.removeEscapingExportLinks(exportDir: export)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: trap.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: secret.path))
     }
 
     func testCanConfirmRequiresKeepDecision() throws {

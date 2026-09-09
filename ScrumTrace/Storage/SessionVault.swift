@@ -112,6 +112,9 @@ final class SessionVault: @unchecked Sendable {
         let dir = sessionURL(id: manifest.sessionId)
         try fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
         let url = dir.appendingPathComponent(ScrumTracePath.manifest)
+        if (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+            try fileManager.removeItem(at: url)
+        }
         let tmp = url.appendingPathExtension("tmp")
         let data = try encoder.encode(manifest)
         try data.write(to: tmp, options: .atomic)
@@ -127,15 +130,22 @@ final class SessionVault: @unchecked Sendable {
             throw SessionVaultError.writeFailed("invalid session id")
         }
         let url = sessionURL(id: sessionId).appendingPathComponent(ScrumTracePath.events)
+        let session = sessionURL(id: sessionId)
+        if (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+            try fileManager.removeItem(at: url)
+        }
         var data = try eventEncoder.encode(event)
         data.append(contentsOf: [0x0A])
         if fileManager.fileExists(atPath: url.path) {
+            guard ExportRel.isContainedRegularFile(url, sessionRoot: session) else {
+                throw SessionVaultError.writeFailed("events.jsonl")
+            }
             let handle = try FileHandle(forWritingTo: url)
             defer { try? handle.close() }
             try handle.seekToEnd()
             try handle.write(contentsOf: data)
         } else {
-            try data.write(to: url)
+            try data.write(to: url, options: .atomic)
         }
     }
 
@@ -199,7 +209,12 @@ final class SessionVault: @unchecked Sendable {
     func revealInFinder(sessionId: String) {
         #if os(macOS)
         guard Self.isValidSessionId(sessionId) else { return }
-        NSWorkspace.shared.activateFileViewerSelecting([sessionURL(id: sessionId).appendingPathComponent(ScrumTracePath.export)])
+        let export = sessionURL(id: sessionId).appendingPathComponent(ScrumTracePath.export)
+        let values = try? export.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
+        guard values?.isSymbolicLink != true else { return }
+        var isDir: ObjCBool = false
+        guard fileManager.fileExists(atPath: export.path, isDirectory: &isDir), isDir.boolValue else { return }
+        NSWorkspace.shared.activateFileViewerSelecting([export])
         #endif
     }
 

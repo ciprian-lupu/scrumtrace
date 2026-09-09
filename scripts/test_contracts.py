@@ -85,8 +85,10 @@ def test_html_escaper_order() -> None:
     assert "html.replace(key, value)" not in gen
     assert "def contained_export_member" in gen
     assert "def export_zip_members" in gen
+    assert "def remove_escaping_export_links" in gen
     assert '"-y"' in gen
     assert "is_symlink" in gen
+    assert "followlinks=False" in gen
 
 
 def test_brief_template_does_not_rescan_values() -> None:
@@ -121,12 +123,15 @@ def test_brief_template_does_not_rescan_values() -> None:
         assert "shots/ok.png" in members
         assert "AGENT_CONTEXT.md" in members
         assert "media/leak.mp4" not in members
+        assert not (export / "media" / "leak.mp4").exists()
+        assert secret.exists()
 
 
 def test_zipper_never_deletes_archive() -> None:
     zipper = (ROOT / "ScrumTrace" / "Export" / "SessionPackZipper.swift").read_text()
     assert "ExportRel.isUnderExport" in zipper
     assert "allowList" in zipper
+    assert "removeEscapingExportLinks" in zipper
     assert '"-@"' in zipper
     assert "archive/session.mp4" not in zipper
     assert '"-y"' in zipper
@@ -134,6 +139,7 @@ def test_zipper_never_deletes_archive() -> None:
     assert "includeFullTranscript" in allow
     assert "if includeFullTranscript" in allow
     assert "containedExportMember" in allow
+    assert "removeEscapingExportLinks" in allow
     assert "replacingOccurrences(of: prefix" not in allow
     leftover = zipper.split("static func exportMediaSessionPaths")[1].split("private static func uniqued")[0]
     assert "containedExportMember" in leftover
@@ -145,8 +151,9 @@ def test_zipper_never_deletes_archive() -> None:
     body = member.split("{", 1)[1]
     assert "isUnderExport" not in body
     projector = (ROOT / "ScrumTrace" / "Export" / "ExportProjector.swift").read_text()
-    project_fn = projector.split("func project")[1].split("var omitted")[0]
+    project_fn = projector.split("func project")[1].split("func resetExportTree")[0]
     assert "resetExportTree" in project_fn
+    assert "removeEscapingExportLinks" in project_fn
     assert "removeItem(at: export)" in projector.split("func resetExportTree")[1].split("func writeProjectionManifest")[0]
     omit_md = zipper.split("func writeOmittedMarkdown")[1].split("private func uniquedOmitted")[0]
     assert "omittedHandoffPath" in omit_md
@@ -240,6 +247,12 @@ def test_retry_failed_slices_and_pins() -> None:
     assert "isContainedRegularFile" in vault
     events_fn = vault.split("private func events")[1].split("func revealInFinder")[0]
     assert "isContainedRegularFile" in events_fn
+    append = vault.split("func appendEvent")[1].split("func recentSessions")[0]
+    assert "isSymbolicLink" in append
+    assert "isContainedRegularFile" in append
+    reveal = vault.split("func revealInFinder")[1].split("private static let folderStamp")[0]
+    assert "isSymbolicLink" in reveal
+    assert "isDirectory" in reveal
     models = (ROOT / "ScrumTrace" / "Storage" / "SessionModels.swift").read_text()
     existing_media = models.split("func withExistingMedia")[1].split("enum CodingKeys")[0]
     assert "existingSessionFile" in existing_media
@@ -252,12 +265,14 @@ def test_retry_failed_slices_and_pins() -> None:
     capture = controller.split("private func captureShot")[1].split("private func finishShot")[0]
     assert "try? vault.write(manifest: &local)" not in capture
     assert "annotatedPath: nil" in capture
+    assert "containedRelative(rawPath" in capture
     finish = controller.split("private func finishShot")[1].split("private func privacyPause")[0]
     assert "try? vault.write" not in finish
     assert "catalog write failed" in finish
     assert "self.manifest = manifest" in finish
     assert "try? data.write" not in finish
     assert "options: .atomic" in finish
+    assert "containedRelative(annotatedPath" in finish
     stop = controller.split("func stopRecordingAsync")[1].split("func runProcessor")[0]
     assert stop.index("freezeWriters") < stop.index('phase = .transcribing')
     assert "scrumTraceSessionEnding" in stop
@@ -329,6 +344,7 @@ def test_pipeline_timing_stays_in_archive() -> None:
     assert "AGENT_CONTEXT.md" in allow
     assert "try? runZip" not in zipper
     zip_fn = zipper.split("func zip(")[1].split("func writeZip")[0]
+    assert "removeEscapingExportLinks" in zip_fn
     assert "try writeOmittedMarkdown" in zip_fn
     assert "try runZip" in zip_fn
     recorder = (ROOT / "ScrumTrace" / "Capture" / "SessionRecorder.swift").read_text()
@@ -482,10 +498,13 @@ def test_phase45_clip_consent_and_budget() -> None:
     projector = (ROOT / "ScrumTrace" / "Export" / "ExportProjector.swift").read_text()
     jpeg = projector.split("func transcodeJPEG")[1].split("func copyIfPresent")[0]
     assert "containedRelative" in jpeg
+    assert "isContainedRegularFile" in jpeg
+    assert "isUnderExport" in jpeg
     assert "hasPrefix(prefix)" not in jpeg
     copy_if = projector.split("func copyIfPresent")[1]
     assert "containedRelative" in copy_if
-    assert "resolvingSymlinksInPath" in copy_if
+    assert "isContainedRegularFile" in copy_if
+    assert "isUnderExport(toRel)" in copy_if
     assert "hasPrefix(prefix)" not in copy_if
     agent = (ROOT / "ScrumTrace" / "Export" / "AgentContextRenderer.swift").read_text()
     assert "stillCandidates" in agent.split("func displayPath")[1]
@@ -544,6 +563,8 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "vault.write" in retry_block
     assert "zip failed" in processor
     assert "writeExportDocuments" in processor.split("Docs first")[1].split("var zipResult")[0]
+    docs = processor.split("func writeExportDocuments")[1].split("private func transcribe")[0]
+    assert "removeEscapingExportLinks" in docs
     zipper_over = zipper.split("if size > MediaBudget.maxZipBytes")[1].split("func writeZip")[0]
     assert "throw" not in zipper_over
     assert "Pack still" in zipper_over

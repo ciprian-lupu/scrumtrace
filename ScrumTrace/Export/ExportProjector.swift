@@ -169,6 +169,9 @@ struct ExportProjector {
         projected.omitted = omitted.map {
             OmittedAsset(path: ExportRel.omittedHandoffPath($0.path), reason: $0.reason)
         }
+        PackBudget.removeEscapingExportLinks(
+            exportDir: sessionURL.appendingPathComponent(ScrumTracePath.export)
+        )
         try writeProjectionManifest(projected, sessionURL: sessionURL)
         return ExportProjection(manifest: projected, omitted: projected.omitted)
     }
@@ -225,7 +228,7 @@ struct ExportProjector {
         omitted: inout [OmittedAsset]
     ) throws -> String? {
         #if os(macOS)
-        if FileManager.default.fileExists(atPath: from.path),
+        if ExportRel.isContainedRegularFile(from, sessionRoot: sessionURL),
            let jpegRelative = try transcodeJPEG(from: from, destRelative: destRelative, sessionURL: sessionURL) {
             return jpegRelative
         }
@@ -251,11 +254,12 @@ struct ExportProjector {
 
     #if os(macOS)
     private func transcodeJPEG(from: URL, destRelative: String, sessionURL: URL) throws -> String? {
-        guard ExportRel.containedRelative(from, sessionRoot: sessionURL) != nil,
-              let destRel = ExportRel.containedRelative(destRelative, sessionURL: sessionURL) else {
+        guard ExportRel.isContainedRegularFile(from, sessionRoot: sessionURL),
+              let destRel = ExportRel.containedRelative(destRelative, sessionURL: sessionURL),
+              ExportRel.isUnderExport(destRel) else {
             return nil
         }
-        guard let image = NSImage(contentsOf: from.resolvingSymlinksInPath()) else { return nil }
+        guard let image = NSImage(contentsOf: from) else { return nil }
         guard let jpeg = ImageBase64.jpegData(
             from: image,
             maxEdge: CGFloat(MediaBudget.stillMaxWidth),
@@ -282,9 +286,13 @@ struct ExportProjector {
             omitted.append(OmittedAsset(path: from.lastPathComponent, reason: "Source missing in archive"))
             return nil
         }
-        guard ExportRel.containedRelative(from, sessionRoot: sessionURL) != nil,
-              let toRel = ExportRel.containedRelative(to, sessionRoot: sessionURL) else {
-            omitted.append(OmittedAsset(path: to.lastPathComponent, reason: "Copy path escaped the session folder"))
+        guard ExportRel.isContainedRegularFile(from, sessionRoot: sessionURL) else {
+            omitted.append(OmittedAsset(path: from.lastPathComponent, reason: "Source is not a contained regular file"))
+            return nil
+        }
+        guard let toRel = ExportRel.containedRelative(to, sessionRoot: sessionURL),
+              ExportRel.isUnderExport(toRel) else {
+            omitted.append(OmittedAsset(path: to.lastPathComponent, reason: "Copy destination escaped export/"))
             return nil
         }
         let dest = sessionURL.appendingPathComponent(toRel)
@@ -292,9 +300,7 @@ struct ExportProjector {
         if fileManager.fileExists(atPath: dest.path) {
             try fileManager.removeItem(at: dest)
         }
-        // Copy the resolved file so a contained symlink becomes a regular export
-        // member instead of a link zip would follow.
-        try fileManager.copyItem(at: from.resolvingSymlinksInPath(), to: dest)
+        try fileManager.copyItem(at: from, to: dest)
         return toRel
     }
 }

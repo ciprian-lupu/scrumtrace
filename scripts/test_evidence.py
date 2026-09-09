@@ -48,6 +48,7 @@ def test_export_rel_in_swift() -> None:
     assert '"-@"' in zipper
     assert "containedExportMember" in zipper
     assert '"-y"' in zipper
+    assert "removeEscapingExportLinks" in zipper
     models = (ROOT / "ScrumTrace" / "Storage" / "SessionModels.swift").read_text()
     assert "func containedExportMember" in models
     assert "isSymbolicLink" in models

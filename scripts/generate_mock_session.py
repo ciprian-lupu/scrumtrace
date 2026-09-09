@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -167,7 +168,44 @@ def contained_export_member(file: Path, export_dir: Path) -> str | None:
     return "/".join(parts)
 
 
+def remove_escaping_export_links(export_dir: Path) -> None:
+    """Delete every symlink under export/ so a folder drop cannot follow into archive/."""
+    if export_dir.is_symlink():
+        export_dir.unlink()
+        export_dir.mkdir(parents=True, exist_ok=True)
+        return
+    if not export_dir.is_dir():
+        return
+    links: list[Path] = []
+    for dirpath, dirnames, filenames in os.walk(export_dir, followlinks=False):
+        base = Path(dirpath)
+        for name in dirnames:
+            path = base / name
+            if path.is_symlink():
+                links.append(path)
+        for name in filenames:
+            path = base / name
+            if path.is_symlink():
+                links.append(path)
+    for link in reversed(links):
+        if link.is_symlink():
+            link.unlink(missing_ok=True)
+
+
+def iter_export_files(root: Path):
+    if root.is_symlink() or not root.is_dir():
+        return
+    for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+        base = Path(dirpath)
+        dirnames[:] = [name for name in dirnames if not (base / name).is_symlink()]
+        for name in filenames:
+            path = base / name
+            if not path.is_symlink():
+                yield path
+
+
 def export_zip_members(export: Path) -> list[str]:
+    remove_escaping_export_links(export)
     named = [
         "AGENT_CONTEXT.md",
         "SESSION_BRIEF.html",
@@ -182,9 +220,7 @@ def export_zip_members(export: Path) -> list[str]:
             out.append(member)
     for folder in ("shots", "media"):
         root = export / folder
-        if not root.is_dir():
-            continue
-        for path in sorted(root.rglob("*")):
+        for path in sorted(iter_export_files(root)):
             if path.name == "session-pack.zip":
                 continue
             member = contained_export_member(path, export)

@@ -11,6 +11,7 @@ struct SessionPackZipper {
     /// in spec priority until the measured zip is ≤ 35 MB.
     func zip(sessionURL: URL, manifest: SessionManifest) throws -> Result {
         let exportDir = sessionURL.appendingPathComponent(ScrumTracePath.export)
+        PackBudget.removeEscapingExportLinks(exportDir: exportDir)
         try FileManager.default.createDirectory(at: exportDir, withIntermediateDirectories: true)
         let zipURL = sessionURL.appendingPathComponent(ScrumTracePath.packZip)
         var omitted = uniquedOmitted(manifest.omitted)
@@ -81,6 +82,9 @@ struct SessionPackZipper {
     }
 
     func writeOmittedMarkdown(sessionURL: URL, omitted: [OmittedAsset]) throws {
+        PackBudget.removeEscapingExportLinks(
+            exportDir: sessionURL.appendingPathComponent(ScrumTracePath.export)
+        )
         let url = sessionURL.appendingPathComponent(ScrumTracePath.omitted)
         if omitted.isEmpty {
             try? FileManager.default.removeItem(at: url)
@@ -148,10 +152,38 @@ enum PackBudget {
         protectedNames.contains(URL(fileURLWithPath: sessionPath).lastPathComponent)
     }
 
+    /// Deletes every symbolic link under `export/` so a Finder/Cursor folder drop
+    /// cannot follow a planted `shots/` or `media/` link into `archive/` (C2).
+    /// The zip allow-list already skips links; this matches folder-handoff to zip.
+    static func removeEscapingExportLinks(exportDir: URL) {
+        let fm = FileManager.default
+        let linkKey = URLResourceKey.isSymbolicLinkKey
+        if (try? exportDir.resourceValues(forKeys: [linkKey]).isSymbolicLink) == true {
+            try? fm.removeItem(at: exportDir)
+            try? fm.createDirectory(at: exportDir, withIntermediateDirectories: true)
+            return
+        }
+        guard let enumerator = fm.enumerator(
+            at: exportDir,
+            includingPropertiesForKeys: [linkKey],
+            options: []
+        ) else { return }
+        var links: [URL] = []
+        for case let file as URL in enumerator {
+            if (try? file.resourceValues(forKeys: [linkKey]).isSymbolicLink) == true {
+                links.append(file)
+            }
+        }
+        for link in links.reversed() {
+            try? fm.removeItem(at: link)
+        }
+    }
+
     /// Explicit members under `export/` — never the session root, never `archive/`.
     /// `full_transcript.json` is only listed when the user opted it into the pack.
     /// Membership is resolved-path containment, not a string prefix strip.
     static func allowList(exportDir: URL, includeFullTranscript: Bool = false) -> [String] {
+        removeEscapingExportLinks(exportDir: exportDir)
         let named = [
             "AGENT_CONTEXT.md",
             "SESSION_BRIEF.html",

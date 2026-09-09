@@ -391,6 +391,10 @@ final class SessionController: ObservableObject {
         let rawPath = "\(ScrumTracePath.shots)/\(stem).png"
         let annotatedPath = "\(ScrumTracePath.shots)/\(stem).annotated.png"
         let rawURL = sessionURL.appendingPathComponent(rawPath)
+        guard ExportRel.containedRelative(rawPath, sessionURL: sessionURL) != nil else {
+            lastError = "Could not write the Shot PNG."
+            return
+        }
         guard let tiff = image.tiffRepresentation,
               let rep = NSBitmapImageRep(data: tiff),
               let png = rep.representation(using: .png, properties: [:]) else {
@@ -463,6 +467,10 @@ final class SessionController: ObservableObject {
         annotatedPath: String
     ) {
         guard let sessionURL, var manifest else { return }
+        guard ExportRel.containedRelative(annotatedPath, sessionURL: sessionURL) != nil else {
+            lastError = "Could not write the annotated Shot."
+            return
+        }
         let url = sessionURL.appendingPathComponent(annotatedPath)
         if let tiff = annotated.tiffRepresentation,
            let rep = NSBitmapImageRep(data: tiff),

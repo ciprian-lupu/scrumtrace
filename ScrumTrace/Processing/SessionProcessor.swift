@@ -272,6 +272,9 @@ final class SessionProcessor: @unchecked Sendable {
         excerpts: [String: String],
         projector: ExportProjector
     ) throws {
+        PackBudget.removeEscapingExportLinks(
+            exportDir: sessionURL.appendingPathComponent(ScrumTracePath.export)
+        )
         let markdown = agentRenderer.render(manifest: projected)
         let prompt = agentRenderer.prompt(manifest: projected)
         let html = briefRenderer.render(manifest: projected, excerpts: excerpts)
