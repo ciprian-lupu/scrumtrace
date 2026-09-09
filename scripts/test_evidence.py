@@ -156,6 +156,8 @@ def test_frame_ref_basename_resolves() -> None:
     assert "rankedTasks" not in eval_loop
     assert "manifest.tasks = tasks" in eval_loop
     assert "uniquedTaskIds(tasks)" in eval_loop
+    after_eval = processor.split("manifest.slices = updatedSlices.sorted")[1].split("try requireUsableSession")[0]
+    assert "mergeUncoveredReview(manifest: &manifest, kept: tasks)" in after_eval
     assert "unknown task kind" in validator
     assert "decision is not keep" in validator
     assert "existingSessionFile" in validator

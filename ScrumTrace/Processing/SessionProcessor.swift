@@ -166,7 +166,7 @@ final class SessionProcessor: @unchecked Sendable {
                     try vault.write(manifest: &manifest)
                 }
                 manifest.slices = updatedSlices.sorted { $0.sliceId < $1.sliceId }
-                manifest.tasks = rankedTasks(tasks)
+                mergeUncoveredReview(manifest: &manifest, kept: tasks)
                 let anyFailed = manifest.slices.contains { $0.analysisStatus == .offlineFailed }
                 manifest.markCompleted(.evaluating)
                 if anyFailed {
@@ -695,14 +695,20 @@ final class SessionProcessor: @unchecked Sendable {
         }
         // D7: pin/keyword clips still in export/ must not vanish because a Shot
         // already produced a kept task (or because consent was denied on retry).
-        let local = localReviewTasks(manifest: manifest)
-        let covered = Set(kept.map(\.sourceSliceId))
-        let extra = local.filter { !covered.contains($0.sourceSliceId) }
-        manifest.tasks = rankedTasks(kept + extra)
+        mergeUncoveredReview(manifest: &manifest, kept: kept)
         manifest.markCompleted(.evaluating)
         if markOffline {
             manifest.pipelineStatus = .offlineFailed
         }
+    }
+
+    /// Shots whose slice was dropped by the 12-window cap, and pin/keyword
+    /// windows with no keepable candidate, still get a review row (D7).
+    private func mergeUncoveredReview(manifest: inout SessionManifest, kept: [TaskRecord]) {
+        let local = localReviewTasks(manifest: manifest)
+        let covered = Set(kept.map(\.sourceSliceId))
+        let extra = local.filter { !covered.contains($0.sourceSliceId) }
+        manifest.tasks = rankedTasks(kept + extra)
     }
 
     private func localReviewTasks(manifest: SessionManifest) -> [TaskRecord] {
@@ -717,7 +723,7 @@ final class SessionProcessor: @unchecked Sendable {
             tasks.append(
                 TaskRecord(
                     taskId: String(format: "TASK-%02d", tasks.count + 1),
-                    sourceSliceId: slice?.sliceId ?? "slice-shot",
+                    sourceSliceId: slice?.sliceId ?? "slice-\(shot.id)",
                     kind: .bug,
                     status: .needsReview,
                     title: shot.note.isEmpty ? "Human shot requires review" : shot.note,
@@ -781,20 +787,17 @@ final class SessionProcessor: @unchecked Sendable {
     }
 
     /// Match a Shot to its slice by `associated_shot_id`, then still-path
-    /// overlap, then `t_media` inside the slice window after a clamp (D7).
+    /// overlap after an overlapping merge dropped the second shot's id (D7).
+    /// Do not use `t_media` here: a capped-out Shot can sit inside another
+    /// window and would be treated as covered, then vanish from extras.
     private func sliceMatching(_ shot: ShotRecord, in manifest: SessionManifest) -> SliceRecord? {
         if let match = manifest.slices.first(where: { $0.associatedShotId == shot.id }) {
             return match
         }
-        if let match = manifest.slices.first(where: { slice in
+        return manifest.slices.first { slice in
             slice.stills.contains { still in
                 shot.stillCandidates.contains(still) || shot.rawPath == still || shot.annotatedPath == still
             }
-        }) {
-            return match
-        }
-        return manifest.slices.first { slice in
-            shot.tMedia >= slice.startMedia && shot.tMedia <= slice.endMedia
         }
     }
 

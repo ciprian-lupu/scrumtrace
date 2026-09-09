@@ -765,6 +765,8 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "uncovered" in local
     assert "coveredIds" in local
     assert "sliceMatching" in local
+    assert "slice-\\(shot.id)" in local
+    assert "slice-shot" not in local
     assert "AgentInstructionTemplate.render(kind: .unknown, product: manifest.productContext)" in local
     fallback_offline = processor.split("func fallbackOffline")[1].split("func shotsLinked")[0]
     assert "[Requires Manual Review - API Offline]" in fallback_offline
@@ -847,7 +849,8 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "stillCandidates" in linked
     assert "tMedia >= slice.startMedia" in linked
     match_fn = processor.split("func sliceMatching")[1].split("func refreshShotsFromDisk")[0]
-    assert "tMedia >= slice.startMedia" in match_fn
+    assert "associatedShotId == shot.id" in match_fn
+    assert "tMedia >= slice.startMedia" not in match_fn
     append = processor.split("func appendImage")[1].split("if !configuration.acceptsImages")[0]
     assert "existingSessionFile" in append
     assert "fileExists(atPath: url.path)" not in append
@@ -986,6 +989,9 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "rankedTasks" not in eval_loop
     assert "manifest.tasks = tasks" in eval_loop
     assert "uniquedTaskIds(tasks)" in eval_loop
+    after_eval = processor.split("manifest.slices = updatedSlices.sorted")[1].split("try requireUsableSession")[0]
+    assert "mergeUncoveredReview(manifest: &manifest, kept: tasks)" in after_eval
+    assert "rankedTasks(tasks)" not in after_eval
     eval_slice = processor.split("private func evaluateSlice")[1].split("private func tasks(")[0]
     assert eval_slice.count("abortedForAuth") >= 3
     assert eval_slice.rfind("abortedForAuth") < eval_slice.find("provider.evaluate")
