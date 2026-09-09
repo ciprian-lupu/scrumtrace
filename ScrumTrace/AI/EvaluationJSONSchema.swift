@@ -1,8 +1,8 @@
 import Foundation
 
 /// Canonical evaluation schema (standard JSON Schema types).
-/// OpenAI Structured Outputs additionally marks every object
-/// `additionalProperties: false` and lists every key in `required`.
+    /// OpenAI Structured Outputs: no `$schema` (unsupported keyword), every
+    /// object has `additionalProperties: false`, and `required` lists every key.
 enum EvaluationJSONSchema {
     static let canonical: [String: Any] = [
         "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -18,7 +18,6 @@ enum EvaluationJSONSchema {
     ]
 
     static let openaiStructured: [String: Any] = [
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
         "additionalProperties": false,
         "required": ["candidates"],
