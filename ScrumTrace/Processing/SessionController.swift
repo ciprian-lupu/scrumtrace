@@ -173,7 +173,11 @@ final class SessionController: ObservableObject {
             mediaSeconds: clock.currentMediaSeconds()
         )
         local.pauses = clock.snapshotPauses()
-        try? vault.write(manifest: &local)
+        do {
+            try vault.write(manifest: &local)
+        } catch {
+            lastError = error.localizedDescription
+        }
         manifest = local
         log(.stop, ["reason": "quit"])
     }

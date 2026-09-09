@@ -57,9 +57,9 @@ struct SessionPackZipper {
             )
         }
         omitted = uniquedOmitted(omitted)
-        try? writeOmittedMarkdown(sessionURL: sessionURL, omitted: omitted)
+        try writeOmittedMarkdown(sessionURL: sessionURL, omitted: omitted)
         if omitted.contains(where: { !$0.path.isEmpty }) {
-            try? runZip(
+            try runZip(
                 exportDir: exportDir,
                 zipURL: zipURL,
                 includeFullTranscript: manifest.includeFullTranscriptInZip

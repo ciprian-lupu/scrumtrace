@@ -163,6 +163,10 @@ def test_pause_gate_hold_to_talk() -> None:
     assert "abortTalk" in shot
     assert "scrumTraceCaptureGate" in shot
     assert ".onDisappear" in shot
+    assert "canJoinAllSpaces" in shot
+    assert "fullScreenAuxiliary" in shot
+    assert "becomesKeyOnlyIfNeeded" in shot
+    assert "canBecomeMain" in shot
     start_talk = shot.split("private func startTalk()")[1].split("private func abortTalk()")[0]
     assert "holdingTalk = true" in start_talk
     assert start_talk.index("guard let rec") < start_talk.index("holdingTalk = true")
@@ -213,6 +217,8 @@ def test_audio_split_and_brief_loader() -> None:
     assert "writeWav(from: sampleBuffer)" in recorder
     assert "microphoneWav" in recorder
     assert "CaptureAudioLayout" in recorder
+    assert "try layout.write" in recorder
+    assert "try? layout.write" not in recorder
     assert "guard !paused, started else { return }" in recorder
     assert "func copyPCM" in recorder
     tap = recorder.split("func startMicrophoneFallback")[1].split("func copyPCM")[0]
@@ -267,7 +273,10 @@ def test_pipeline_timing_stays_in_archive() -> None:
     assert "pipeline-timing.json" not in zipper
     allow = (ROOT / "ScrumTrace" / "Export" / "SessionPackZipper.swift").read_text()
     assert "AGENT_CONTEXT.md" in allow
-    assert "try? runZip" in zipper
+    assert "try? runZip" not in zipper
+    zip_fn = zipper.split("func zip(")[1].split("func writeZip")[0]
+    assert "try writeOmittedMarkdown" in zip_fn
+    assert "try runZip" in zip_fn
     recorder = (ROOT / "ScrumTrace" / "Capture" / "SessionRecorder.swift").read_text()
     assert "writerQueue.sync" in recorder
     pause_fn = recorder.split("func setPaused")[1].split("func stop")[0]
@@ -304,6 +313,8 @@ def test_pause_privacy_and_metadata_gate() -> None:
     assert "stopRecording()" not in halt
     assert "Task.detached" in halt
     assert "persistInterruptedCapture" in halt
+    persist = controller.split("func persistInterruptedCapture")[1].split("func startRecordingAsync")[0]
+    assert "try? vault.write" not in persist
     app = (ROOT / "ScrumTrace" / "App" / "AppDelegate.swift").read_text()
     assert "haltCaptureForTermination" in app
     assert "height: 780" in app

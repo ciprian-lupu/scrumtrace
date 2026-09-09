@@ -185,7 +185,7 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             microphoneWav: microphoneWav,
             systemAudioInMovie: true
         )
-        try? layout.write(sessionURL: sessionURL)
+        try layout.write(sessionURL: sessionURL)
     }
 
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {

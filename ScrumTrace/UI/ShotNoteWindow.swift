@@ -274,6 +274,9 @@ final class ShotNoteWindow: NSPanel {
         isFloatingPanel = true
         level = .modalPanel
         hidesOnDeactivate = false
+        becomesKeyOnlyIfNeeded = true
+        animationBehavior = .none
+        collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         let root = ShotNoteView(
             screenshot: screenshot,
             transcriber: transcriber,
@@ -294,4 +297,6 @@ final class ShotNoteWindow: NSPanel {
         setFrameOrigin(NSPoint(x: screen.midX - 370, y: screen.midY - 270))
         orderFrontRegardless()
     }
+
+    override var canBecomeMain: Bool { false }
 }
