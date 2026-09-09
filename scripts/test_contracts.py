@@ -927,9 +927,12 @@ def test_write_contained_data_refuses_directory_symlinks() -> None:
     assert create_fn.count("isSymbolicLink") >= 2
     assert "isUsableSessionRoot(rootURL)" in create_fn
     process_head = processor.split("func process(")[1].split("var timing")[0]
-    assert "isUsableSessionRoot" in process_head
-    assert "isSymbolicLink" in process_head
-    assert process_head.index("isUsableSessionRoot") < process_head.index("loadManifest")
+    assert "requireUsableSession" in process_head
+    assert process_head.index("requireUsableSession") < process_head.index("loadManifest")
+    require_fn = processor.split("func requireUsableSession")[1].split("func abandonEvaluate")[0]
+    assert "isUsableSessionRoot" in require_fn
+    assert "isSymbolicLink" in require_fn
+    assert processor.count("requireUsableSession(") >= 5
     append_ev = vault.split("func appendEvent")[1].split("func recentSessions")[0]
     assert "fileExists(atPath: url.path)" not in append_ev
     assert "isContainedRegularFile" in append_ev

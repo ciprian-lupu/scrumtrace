@@ -26,12 +26,7 @@ final class SessionProcessor: @unchecked Sendable {
         onStatus: @escaping @MainActor (PipelineStatus, String) -> Void
     ) async throws -> SessionManifest {
         let sessionURL = vault.sessionURL(id: sessionId)
-        guard ExportRel.isUsableSessionRoot(sessionURL) else {
-            throw SessionVaultError.sessionMissing(sessionId)
-        }
-        if (try? sessionURL.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
-            throw SessionVaultError.sessionMissing(sessionId)
-        }
+        try requireUsableSession(sessionURL, id: sessionId)
         var manifest = try vault.loadManifest(id: sessionId)
 
         var timing = PipelineTiming.load(sessionURL: sessionURL) ?? PipelineTiming()
@@ -44,6 +39,7 @@ final class SessionProcessor: @unchecked Sendable {
             let whisperStarted = Date()
             var transcript = await transcribe(sessionURL: sessionURL, model: whisperModel)
             transcript.sessionId = sessionId
+            try requireUsableSession(sessionURL, id: sessionId)
             let data = try JSONEncoder().encode(transcript)
             try ExportRel.writeContainedData(
                 data,
@@ -76,6 +72,7 @@ final class SessionProcessor: @unchecked Sendable {
             try vault.write(manifest: &manifest)
         }
 
+        try requireUsableSession(sessionURL, id: sessionId)
         if !manifest.hasCompleted(.slicing) {
             refreshShotsFromDisk(sessionId: sessionId, manifest: &manifest)
             await onStatus(.slicing, "Cutting evidence windows to the media budget")
@@ -110,6 +107,7 @@ final class SessionProcessor: @unchecked Sendable {
             try vault.write(manifest: &manifest)
         }
 
+        try requireUsableSession(sessionURL, id: sessionId)
         let needsEvaluate = !manifest.hasCompleted(.evaluating)
             || manifest.slices.contains { $0.analysisStatus == .offlineFailed || $0.analysisStatus == .pending }
             || (manifest.uploadConsent.approved
@@ -181,6 +179,7 @@ final class SessionProcessor: @unchecked Sendable {
             }
         }
 
+        try requireUsableSession(sessionURL, id: sessionId)
         await onStatus(.synthesizing, "Writing AGENT_CONTEXT.md and SESSION_BRIEF.html")
         manifest.pipelineStatus = .synthesizing
         let excerpts = excerptMap(manifest: manifest, transcript: transcript)
@@ -633,6 +632,17 @@ final class SessionProcessor: @unchecked Sendable {
         evalLock.lock()
         evalAuthFailed = true
         evalLock.unlock()
+    }
+
+    /// Re-check after Whisper / clip encode. A planted session-folder symlink
+    /// must not receive the transcript, clips, or zip (C2).
+    private func requireUsableSession(_ sessionURL: URL, id: String) throws {
+        guard ExportRel.isUsableSessionRoot(sessionURL) else {
+            throw SessionVaultError.sessionMissing(id)
+        }
+        if (try? sessionURL.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+            throw SessionVaultError.sessionMissing(id)
+        }
     }
 
     /// D14: a denied retry or missing key must not erase slices that already evaluated.
