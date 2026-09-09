@@ -27,6 +27,10 @@ enum AIProviderError: LocalizedError {
     case httpStatus(Int, String)
     case emptyResponse
     case decoding(String)
+    /// Slice had nothing the adapter can send (no still, no wired MP4, no excerpt).
+    case skippedNoSendableMedia
+    /// Model returned only `drop` / empty `candidates[]` for a slice that still has media (D7).
+    case noKeepableCandidate
 
     var errorDescription: String? {
         switch self {
@@ -40,6 +44,10 @@ enum AIProviderError: LocalizedError {
             return "Provider returned an empty response."
         case .decoding(let message):
             return "Could not decode provider JSON: \(message)"
+        case .skippedNoSendableMedia:
+            return "No still was available and clip video is not uploaded."
+        case .noKeepableCandidate:
+            return "Provider returned no keepable candidate for this slice."
         }
     }
 
@@ -50,7 +58,7 @@ enum AIProviderError: LocalizedError {
             return true
         case .httpStatus(let code, _):
             return code == 401 || code == 403
-        case .invalidURL, .emptyResponse, .decoding:
+        case .invalidURL, .emptyResponse, .decoding, .skippedNoSendableMedia, .noKeepableCandidate:
             return false
         }
     }

@@ -1233,6 +1233,12 @@ final class ContractTests: XCTestCase {
         XCTAssertTrue(AIProviderError.missingAPIKey.isAuthFailure)
         XCTAssertFalse(AIProviderError.httpStatus(429, "rate").isAuthFailure)
         XCTAssertFalse(AIProviderError.emptyResponse.isAuthFailure)
+        XCTAssertFalse(AIProviderError.skippedNoSendableMedia.isAuthFailure)
+        XCTAssertFalse(AIProviderError.noKeepableCandidate.isAuthFailure)
+        XCTAssertEqual(
+            AIProviderError.skippedNoSendableMedia.errorDescription,
+            "No still was available and clip video is not uploaded."
+        )
         XCTAssertTrue(AIProviderError.isAuthFailure(AIProviderError.httpStatus(401, "")))
         XCTAssertFalse(AIProviderError.isAuthFailure(AIProviderError.emptyResponse))
     }

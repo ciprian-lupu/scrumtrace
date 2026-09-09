@@ -333,6 +333,7 @@ def test_retry_failed_slices_and_pins() -> None:
     abandon = processor.split("func abandonEvaluate")[1].split("func localReviewTasks")[0]
     assert "analysisStatus != .success" in abandon
     assert "rankedTasks(kept)" in abandon
+    assert "kept + extra" in abandon
     assert "localReviewTasks" in abandon
     denied = processor.split("Upload not approved")[1].split("Anthropic model missing")[0]
     assert "abandonEvaluate" in denied
@@ -721,6 +722,9 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "shot.stillCandidates" in local
     assert "slice?.stills" in local
     assert "slice?.clipPath" in local
+    assert "uncovered" in local
+    assert "coveredIds" in local
+    assert "sliceMatching" in local
     assert "AgentInstructionTemplate.render(kind: .unknown, product: manifest.productContext)" in local
     fallback_offline = processor.split("func fallbackOffline")[1].split("func shotsLinked")[0]
     assert "[Requires Manual Review - API Offline]" in fallback_offline
@@ -914,6 +918,9 @@ def test_phase45_clip_consent_and_budget() -> None:
     brief_omit = brief_src.split("private func omittedHTML")[1].split("private static func clock")[0]
     assert "omittedHandoffPath" in brief_omit
     assert "isAuthFailure" in protocol_src
+    assert "skippedNoSendableMedia" in protocol_src
+    assert "noKeepableCandidate" in protocol_src
+    assert "No still was available and clip video is not uploaded." in protocol_src
     assert "markEvalAuthFailed" in processor
     assert "Skipped remaining slices after provider authentication failed." in processor
     eval_loop = processor.split("let toRun =")[1].split("manifest.slices = updatedSlices.sorted")[0]
@@ -929,6 +936,11 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert eval_slice.rfind("abortedForAuth") < eval_slice.find("provider.evaluate")
     assert "jpegPayload(url: url, sessionRoot: sessionURL)" in eval_slice
     assert "readContainedData(url, sessionRoot: sessionURL)" not in eval_slice
+    assert "skippedNoSendableMedia" in eval_slice
+    assert "AIProviderError.emptyResponse" not in eval_slice
+    tasks_fn = processor.split("private func tasks(")[1].split("private func rankedTasks")[0]
+    assert "noKeepableCandidate" in tasks_fn
+    assert "fallbackOffline" in tasks_fn
     assert "willUploadClip(configuration: configuration)" in processor
     assert "includeFullTranscript: projection.manifest.includeFullTranscriptInZip" in processor
     google = (ROOT / "ScrumTrace" / "AI" / "GoogleClient.swift").read_text()

@@ -400,14 +400,11 @@ final class SessionProcessor: @unchecked Sendable {
         if !ProviderWireMedia.willUploadClip(configuration: configuration)
             && !hasStill && excerpt.isEmpty && shotNote.isEmpty {
             slice.analysisStatus = .skipped
-            return (
-                slice,
-                [fallbackOffline(
-                    slice: slice,
-                    error: AIProviderError.emptyResponse,
-                    product: manifest.productContext
-                )]
-            )
+            let skipped = AIProviderError.skippedNoSendableMedia
+            if let shot {
+                return (slice, [fallbackTask(shot: shot, slice: slice, error: skipped, product: manifest.productContext)])
+            }
+            return (slice, [fallbackOffline(slice: slice, error: skipped, product: manifest.productContext)])
         }
         if let aborted = abortedForAuth(slice: slice, shot: shot, product: manifest.productContext) {
             return aborted
@@ -524,8 +521,18 @@ final class SessionProcessor: @unchecked Sendable {
                 )
             )
         }
-        if let shot, out.isEmpty {
-            out.append(fallbackTask(shot: shot, slice: slice, error: nil, product: product))
+        if out.isEmpty {
+            if let shot {
+                out.append(fallbackTask(shot: shot, slice: slice, error: nil, product: product))
+            } else if !uniquedPaths(slice.stills + [slice.clipPath].compactMap { $0 }).isEmpty {
+                out.append(
+                    fallbackOffline(
+                        slice: slice,
+                        error: AIProviderError.noKeepableCandidate,
+                        product: product
+                    )
+                )
+            }
         }
         return out
     }
@@ -660,11 +667,12 @@ final class SessionProcessor: @unchecked Sendable {
         for index in manifest.slices.indices where manifest.slices[index].analysisStatus != .success {
             manifest.slices[index].analysisStatus = failedStatus
         }
-        if kept.isEmpty {
-            manifest.tasks = localReviewTasks(manifest: manifest)
-        } else {
-            manifest.tasks = rankedTasks(kept)
-        }
+        // D7: pin/keyword clips still in export/ must not vanish because a Shot
+        // already produced a kept task (or because consent was denied on retry).
+        let local = localReviewTasks(manifest: manifest)
+        let covered = Set(kept.map(\.sourceSliceId))
+        let extra = local.filter { !covered.contains($0.sourceSliceId) }
+        manifest.tasks = rankedTasks(kept + extra)
         manifest.markCompleted(.evaluating)
         if markOffline {
             manifest.pipelineStatus = .offlineFailed
@@ -673,12 +681,55 @@ final class SessionProcessor: @unchecked Sendable {
 
     private func localReviewTasks(manifest: SessionManifest) -> [TaskRecord] {
         let prefix = "[Requires Manual Review - API Offline] "
-        if manifest.shots.isEmpty {
-            let evidence = uniquedPaths(
-                manifest.slices.flatMap { slice in
-                    slice.stills + [slice.clipPath].compactMap { $0 }
-                }
+        var coveredIds = Set<String>()
+        var tasks: [TaskRecord] = []
+        for shot in manifest.shots {
+            let slice = sliceMatching(shot, in: manifest)
+            if let id = slice?.sliceId, !id.isEmpty {
+                coveredIds.insert(id)
+            }
+            tasks.append(
+                TaskRecord(
+                    taskId: String(format: "TASK-%02d", tasks.count + 1),
+                    sourceSliceId: slice?.sliceId ?? "slice-shot",
+                    kind: .bug,
+                    status: .needsReview,
+                    title: shot.note.isEmpty ? "Human shot requires review" : shot.note,
+                    observed: "Human-captured frame at t_media \(shot.tMedia)s.",
+                    stated: shot.note,
+                    inferred: "Provider evaluation skipped.",
+                    agentInstructions: prefix + AgentInstructionTemplate.render(kind: .bug, product: manifest.productContext),
+                    quotes: [],
+                    evidenceMedia: uniquedPaths(
+                        shot.stillCandidates + (slice?.stills ?? []) + [slice?.clipPath].compactMap { $0 }
+                    ),
+                    confidence: 0
+                )
             )
+        }
+        let uncovered = manifest.slices.filter { slice in
+            !coveredIds.contains(slice.sliceId)
+                && (!slice.stills.isEmpty || !(slice.clipPath ?? "").isEmpty)
+        }
+        for slice in uncovered {
+            tasks.append(
+                TaskRecord(
+                    taskId: String(format: "TASK-%02d", tasks.count + 1),
+                    sourceSliceId: slice.sliceId,
+                    kind: .unknown,
+                    status: .needsReview,
+                    title: "Unanalyzed slice \(slice.sliceId)",
+                    observed: "Slice \(slice.startMedia)s–\(slice.endMedia)s was not evaluated.",
+                    stated: "",
+                    inferred: "Triggered by \(slice.trigger.rawValue). Provider evaluation skipped.",
+                    agentInstructions: prefix + AgentInstructionTemplate.render(kind: .unknown, product: manifest.productContext),
+                    quotes: [],
+                    evidenceMedia: uniquedPaths(slice.stills + [slice.clipPath].compactMap { $0 }),
+                    confidence: 0
+                )
+            )
+        }
+        if tasks.isEmpty {
             return [
                 TaskRecord(
                     taskId: "TASK-01",
@@ -691,31 +742,29 @@ final class SessionProcessor: @unchecked Sendable {
                     inferred: "Evaluation did not run. Local stills and clips stay on this Mac. Inspect this export folder after synthesis.",
                     agentInstructions: prefix + AgentInstructionTemplate.render(kind: .unknown, product: manifest.productContext),
                     quotes: [],
-                    evidenceMedia: evidence,
+                    evidenceMedia: uniquedPaths(
+                        manifest.slices.flatMap { slice in
+                            slice.stills + [slice.clipPath].compactMap { $0 }
+                        }
+                    ),
                     confidence: 0
                 )
             ]
         }
-        let tasks = manifest.shots.enumerated().map { index, shot in
-            let slice = manifest.slices.first(where: { $0.associatedShotId == shot.id })
-            TaskRecord(
-                taskId: String(format: "TASK-%02d", index + 1),
-                sourceSliceId: slice?.sliceId ?? "slice-shot",
-                kind: .bug,
-                status: .needsReview,
-                title: shot.note.isEmpty ? "Human shot requires review" : shot.note,
-                observed: "Human-captured frame at t_media \(shot.tMedia)s.",
-                stated: shot.note,
-                inferred: "Provider evaluation skipped.",
-                agentInstructions: prefix + AgentInstructionTemplate.render(kind: .bug, product: manifest.productContext),
-                quotes: [],
-                evidenceMedia: uniquedPaths(
-                    shot.stillCandidates + (slice?.stills ?? []) + [slice?.clipPath].compactMap { $0 }
-                ),
-                confidence: 0
-            )
-        }
         return TaskRanking.selectForPack(tasks)
+    }
+
+    /// Match a Shot to its slice by `associated_shot_id`, then by still-path overlap
+    /// after an overlapping merge dropped the second shot's id (D7).
+    private func sliceMatching(_ shot: ShotRecord, in manifest: SessionManifest) -> SliceRecord? {
+        if let match = manifest.slices.first(where: { $0.associatedShotId == shot.id }) {
+            return match
+        }
+        return manifest.slices.first { slice in
+            slice.stills.contains { still in
+                shot.stillCandidates.contains(still) || shot.rawPath == still || shot.annotatedPath == still
+            }
+        }
     }
 
     /// Save during Whisper can land annotated PNGs after the initial manifest load.
