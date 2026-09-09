@@ -344,6 +344,30 @@ final class ContractTests: XCTestCase {
         XCTAssertEqual(merged.pauses.count, 1)
     }
 
+    func testStillCandidatesKeepRawUntilAnnotatedExists() {
+        let unsaved = ShotRecord(
+            id: "shot-001",
+            tMedia: 10,
+            rawPath: "archive/shots/001.png",
+            annotatedPath: nil,
+            note: "",
+            source: .typed
+        )
+        XCTAssertEqual(unsaved.stillCandidates, ["archive/shots/001.png"])
+        let saved = ShotRecord(
+            id: "shot-001",
+            tMedia: 10,
+            rawPath: "archive/shots/001.png",
+            annotatedPath: "archive/shots/001.annotated.png",
+            note: "Save is dead",
+            source: .typed
+        )
+        XCTAssertEqual(
+            saved.stillCandidates,
+            ["archive/shots/001.annotated.png", "archive/shots/001.png"]
+        )
+    }
+
     func testShouldTranscribeMovieAvoidsDuplicatingSystemWav() {
         let both = CaptureAudioLayout.both
         XCTAssertTrue(both.shouldTranscribeMovie(wavExists: true, movieExists: true))

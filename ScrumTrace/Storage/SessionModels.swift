@@ -3,6 +3,7 @@ import Foundation
 extension Notification.Name {
     static let scrumTraceCaptureGate = Notification.Name("ScrumTrace.captureGate")
     static let scrumTraceHUDSuppress = Notification.Name("ScrumTrace.hudSuppress")
+    static let scrumTraceSessionEnding = Notification.Name("ScrumTrace.sessionEnding")
 }
 
 /// Paths agents see are relative to `export/` (`shots/…`, `media/…`).
@@ -284,6 +285,17 @@ struct ShotRecord: Codable, Sendable, Identifiable, Hashable {
     var exportPath: String? = nil
     var note: String
     var source: ShotSource
+
+    /// Annotated PNG exists only after Save. Unsaved Shots still have the raw frame.
+    var stillCandidates: [String] {
+        var seen = Set<String>()
+        var out: [String] = []
+        for path in [annotatedPath, rawPath] {
+            guard let path, !path.isEmpty, seen.insert(path).inserted else { continue }
+            out.append(path)
+        }
+        return out
+    }
 
     enum CodingKeys: String, CodingKey {
         case id

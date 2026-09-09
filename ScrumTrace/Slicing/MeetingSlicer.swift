@@ -22,7 +22,7 @@ struct MeetingSlicer {
                     trigger: .shot,
                     associatedShotId: shot.id,
                     clipPath: nil,
-                    stills: [shot.annotatedPath ?? shot.rawPath],
+                    stills: shot.stillCandidates,
                     analysisStatus: .pending,
                     score: 100
                 )

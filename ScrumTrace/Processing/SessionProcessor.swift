@@ -70,6 +70,7 @@ final class SessionProcessor: @unchecked Sendable {
         }
 
         if !manifest.hasCompleted(.slicing) {
+            refreshShotsFromDisk(sessionId: sessionId, manifest: &manifest)
             await onStatus(.slicing, "Cutting evidence windows to the media budget")
             manifest.pipelineStatus = .slicing
             let slices = slicer.slice(
@@ -365,7 +366,9 @@ final class SessionProcessor: @unchecked Sendable {
             images.append(url)
         }
         if let shot {
-            appendImage(shot.annotatedPath ?? shot.rawPath)
+            for path in shot.stillCandidates {
+                appendImage(path)
+            }
         }
         for still in slice.stills {
             appendImage(still)
@@ -486,7 +489,7 @@ final class SessionProcessor: @unchecked Sendable {
             }
             let resolvedFrames = EvidenceValidator.existingPaths(candidate.frameReferences, sessionURL: sessionURL)
             let uniqueEvidence = uniquedPaths(
-                resolvedFrames + slice.stills + [slice.clipPath].compactMap { $0 } + [shot?.annotatedPath ?? shot?.rawPath].compactMap { $0 }
+                resolvedFrames + slice.stills + [slice.clipPath].compactMap { $0 } + (shot?.stillCandidates ?? [])
             )
             var instructions = AgentInstructionTemplate.render(
                 kind: candidate.kind,
@@ -527,7 +530,7 @@ final class SessionProcessor: @unchecked Sendable {
 
     private func fallbackTask(shot: ShotRecord, slice: SliceRecord, error: Error?) -> TaskRecord {
         var evidence = slice.stills
-        evidence.append(shot.annotatedPath ?? shot.rawPath)
+        evidence.append(contentsOf: shot.stillCandidates)
         if let clip = slice.clipPath {
             evidence.append(clip)
         }
@@ -663,7 +666,7 @@ final class SessionProcessor: @unchecked Sendable {
                     inferred: "Evaluation did not run. Local stills and clips stay on this Mac. Inspect this export folder after synthesis.",
                     agentInstructions: AgentInstructionTemplate.render(kind: .unknown, product: manifest.productContext),
                     quotes: [],
-                    evidenceMedia: manifest.shots.map { $0.annotatedPath ?? $0.rawPath },
+                    evidenceMedia: manifest.shots.flatMap(\.stillCandidates),
                     confidence: 0
                 )
             ]
@@ -680,11 +683,23 @@ final class SessionProcessor: @unchecked Sendable {
                 inferred: "Provider evaluation skipped.",
                 agentInstructions: AgentInstructionTemplate.render(kind: .bug, product: manifest.productContext),
                 quotes: [],
-                evidenceMedia: [shot.annotatedPath ?? shot.rawPath],
+                evidenceMedia: shot.stillCandidates,
                 confidence: 0
             )
         }
         return TaskRanking.selectForPack(tasks)
+    }
+
+    /// Save during Whisper can land annotated PNGs after the initial manifest load.
+    private func refreshShotsFromDisk(sessionId: String, manifest: inout SessionManifest) {
+        guard let latest = try? vault.loadManifest(id: sessionId) else { return }
+        for shot in latest.shots {
+            if let idx = manifest.shots.firstIndex(where: { $0.id == shot.id }) {
+                manifest.shots[idx] = shot
+            } else {
+                manifest.shots.append(shot)
+            }
+        }
     }
 
     private func excerptMap(manifest: SessionManifest, transcript: FullTranscript) -> [String: String] {

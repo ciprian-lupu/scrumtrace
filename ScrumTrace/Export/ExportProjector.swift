@@ -278,12 +278,23 @@ struct ExportProjector {
             omitted.append(OmittedAsset(path: from.lastPathComponent, reason: "Source missing in archive"))
             return nil
         }
+        let prefix = sessionURL.path.hasSuffix("/") ? sessionURL.path : sessionURL.path + "/"
+        guard from.path.hasPrefix(prefix), to.path.hasPrefix(prefix) else {
+            omitted.append(OmittedAsset(path: to.lastPathComponent, reason: "Copy path is outside the session folder"))
+            return nil
+        }
+        let fromRel = String(from.path.dropFirst(prefix.count))
+        let toRel = String(to.path.dropFirst(prefix.count))
+        guard ExportRel.containedRelative(fromRel, sessionURL: sessionURL) != nil,
+              ExportRel.containedRelative(toRel, sessionURL: sessionURL) != nil else {
+            omitted.append(OmittedAsset(path: to.lastPathComponent, reason: "Copy path escaped the session folder"))
+            return nil
+        }
         try fileManager.createDirectory(at: to.deletingLastPathComponent(), withIntermediateDirectories: true)
         if fileManager.fileExists(atPath: to.path) {
             try fileManager.removeItem(at: to)
         }
         try fileManager.copyItem(at: from, to: to)
-        let prefix = sessionURL.path.hasSuffix("/") ? sessionURL.path : sessionURL.path + "/"
-        return to.path.replacingOccurrences(of: prefix, with: "")
+        return toRel
     }
 }

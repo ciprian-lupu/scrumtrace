@@ -168,6 +168,10 @@ struct ShotNoteView: View {
                 abortTalk()
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .scrumTraceSessionEnding)) { _ in
+            abortTalk()
+            save()
+        }
         .onDisappear {
             abortTalk()
         }

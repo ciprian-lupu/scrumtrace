@@ -130,6 +130,9 @@ def test_clip_exporter_macos14() -> None:
     assert "export(to:" not in clip
     assert "AVAssetExportPreset1280x720" in clip
     assert "tightenExportClips" in clip
+    tighten = clip.split("func tightenExportClips")[1].split("func tighten(file")[0]
+    assert "dropLast" in tighten
+    assert "files.dropLast" in tighten
     assert "AVAssetExportPreset640x480" in clip
     assert "fileLengthLimit" in clip
     assert "clipVideoBitrate" in clip
@@ -162,6 +165,7 @@ def test_pause_gate_hold_to_talk() -> None:
     shot = (ROOT / "ScrumTrace" / "UI" / "ShotNoteWindow.swift").read_text()
     assert "abortTalk" in shot
     assert "scrumTraceCaptureGate" in shot
+    assert "scrumTraceSessionEnding" in shot
     assert ".onDisappear" in shot
     assert "canJoinAllSpaces" in shot
     assert "fullScreenAuxiliary" in shot
@@ -202,12 +206,17 @@ def test_retry_failed_slices_and_pins() -> None:
     assert "pinTimesSessionId == sessionId" in controller
     capture = controller.split("private func captureShot")[1].split("private func finishShot")[0]
     assert "try? vault.write(manifest: &local)" not in capture
+    assert "annotatedPath: nil" in capture
     finish = controller.split("private func finishShot")[1].split("private func privacyPause")[0]
     assert "try? vault.write" not in finish
     assert "catalog write failed" in finish
     assert "self.manifest = manifest" in finish
     assert "try? data.write" not in finish
     assert "options: .atomic" in finish
+    stop = controller.split("func stopRecordingAsync")[1].split("func runProcessor")[0]
+    assert stop.index("freezeWriters") < stop.index('phase = .transcribing')
+    assert "scrumTraceSessionEnding" in stop
+    assert "scrumTraceCaptureGate" in stop
 
 
 def test_audio_split_and_brief_loader() -> None:
@@ -313,6 +322,9 @@ def test_pause_privacy_and_metadata_gate() -> None:
     assert "stopRecording()" not in halt
     assert "Task.detached" in halt
     assert "persistInterruptedCapture" in halt
+    assert halt.index("freezeWriters") < halt.index("persistInterruptedCapture")
+    assert "scrumTraceSessionEnding" in halt
+    assert "scrumTraceCaptureGate" in halt
     persist = controller.split("func persistInterruptedCapture")[1].split("func startRecordingAsync")[0]
     assert "try? vault.write" not in persist
     app = (ROOT / "ScrumTrace" / "App" / "AppDelegate.swift").read_text()
@@ -407,9 +419,17 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "func handoffPath" in models
     assert "func omittedHandoffPath" in models
     assert "enum TaskRanking" in models
+    assert "stillCandidates" in models
+    assert "scrumTraceSessionEnding" in models
     assert "selectForPack" in processor
     local = processor.split("func localReviewTasks")[1].split("func excerptMap")[0]
     assert "selectForPack" in local
+    assert "refreshShotsFromDisk" in processor
+    slicer = (ROOT / "ScrumTrace" / "Slicing" / "MeetingSlicer.swift").read_text()
+    assert "shot.stillCandidates" in slicer
+    projector = (ROOT / "ScrumTrace" / "Export" / "ExportProjector.swift").read_text()
+    copy_if = projector.split("func copyIfPresent")[1]
+    assert "containedRelative" in copy_if
     assert "Inspect the linked evidence only" in processor
     assert "remain in archive/" not in processor
     assert "applyExportEvidence" in processor

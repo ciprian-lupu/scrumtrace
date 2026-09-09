@@ -151,6 +151,8 @@ final class SessionController: ObservableObject {
         metadataTimer?.invalidate()
         metadataTimer = nil
         recorder?.freezeWriters()
+        NotificationCenter.default.post(name: .scrumTraceCaptureGate, object: CaptureSessionState.paused)
+        NotificationCenter.default.post(name: .scrumTraceSessionEnding, object: nil)
         persistInterruptedCapture()
         let rec = recorder
         recorder = nil
@@ -221,11 +223,13 @@ final class SessionController: ObservableObject {
         guard isRecording else { return }
         isBusy = true
         statusLine = "Stopping capture"
-        phase = .transcribing
         privacy.stop()
         sampler.isSuspended = true
         // Freeze writers immediately without resuming a paused session (C1).
         recorder?.freezeWriters()
+        NotificationCenter.default.post(name: .scrumTraceCaptureGate, object: CaptureSessionState.paused)
+        NotificationCenter.default.post(name: .scrumTraceSessionEnding, object: nil)
+        phase = .transcribing
         do {
             try await recorder?.stop()
         } catch {
@@ -403,7 +407,7 @@ final class SessionController: ObservableObject {
             id: String(format: "shot-%03d", index),
             tMedia: media,
             rawPath: rawPath,
-            annotatedPath: annotatedPath,
+            annotatedPath: nil,
             note: "",
             source: .typed
         )
@@ -439,15 +443,13 @@ final class SessionController: ObservableObject {
                 self?.captureState.allowsNewCapture == true
             }
         ) { [weak self] note, annotated, source in
-            Task { @MainActor in
-                self?.finishShot(
-                    record: record,
-                    note: note,
-                    annotated: annotated,
-                    source: source,
-                    annotatedPath: annotatedPath
-                )
-            }
+            self?.finishShot(
+                record: record,
+                note: note,
+                annotated: annotated,
+                source: source,
+                annotatedPath: annotatedPath
+            )
         }
         shotWindow?.show()
     }
