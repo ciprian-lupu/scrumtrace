@@ -142,6 +142,22 @@ def test_mock_agent_context_paths_exist() -> None:
         assert (export / rel).is_file(), f"missing {rel}"
 
 
+def test_mock_pack_zip_is_export_only() -> None:
+    import zipfile
+
+    export = ROOT / "samples" / "mock-session" / "export"
+    zip_path = export / "session-pack.zip"
+    assert zip_path.is_file()
+    assert zip_path.stat().st_size <= 35 * 1024 * 1024
+    with zipfile.ZipFile(zip_path) as zf:
+        names = zf.namelist()
+    assert names, "session-pack.zip is empty"
+    for name in names:
+        assert "archive/" not in name, name
+        assert not name.startswith("..")
+        assert (export / name).is_file(), name
+
+
 def main() -> None:
     test_quote_window()
     test_export_rel_in_swift()
@@ -149,6 +165,7 @@ def main() -> None:
     test_brief_shell_tokens_are_filled()
     test_mock_clip_ffprobe()
     test_mock_agent_context_paths_exist()
+    test_mock_pack_zip_is_export_only()
     print("evidence contracts ok")
 
 

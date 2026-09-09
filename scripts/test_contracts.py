@@ -264,6 +264,7 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "mp4BodyURL" in anthropic
     assert "mp4BodyURL" in google
     assert "func mp4BodyURL" in protocol_src
+    assert 'mediaSent.append("video")' not in processor
     assert "Data(contentsOf: request.clipURL" not in openai
     assert "Data(contentsOf: request.clipURL" not in anthropic
     assert "Data(contentsOf: request.clipURL" not in google

@@ -21,7 +21,7 @@ The working spec is [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) (contracts 
 open ScrumTrace.xcodeproj
 ```
 
-Grant Screen Recording and Microphone. First WhisperKit launch downloads `large-v3-turbo`.
+Xcode resolves WhisperKit **0.11.0** on first open (`Package.resolved` is not checked in). Grant Screen Recording and Microphone. First WhisperKit launch downloads `large-v3-turbo`.
 
 ## Hotkeys
 
