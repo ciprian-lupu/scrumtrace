@@ -27,13 +27,14 @@ struct ClipExporter {
         var updated = slice
         let stillRelative = relativeClip
             .replacingOccurrences(of: "/clip.mp4", with: "/shot-1.jpg")
-        if updated.stills.isEmpty {
-            updated.stills = [stillRelative]
-        }
         let stillURL = sessionURL.appendingPathComponent(stillRelative)
-        try await extractStill(source: source, at: (slice.startMedia + slice.endMedia) / 2, to: stillURL)
-        if !updated.stills.contains(stillRelative) {
-            updated.stills.insert(stillRelative, at: 0)
+        do {
+            try await extractStill(source: source, at: (slice.startMedia + slice.endMedia) / 2, to: stillURL)
+            if !updated.stills.contains(stillRelative) {
+                updated.stills.insert(stillRelative, at: 0)
+            }
+        } catch {
+            // Shot stills on the slice remain; do not fail the whole session for one frame grab.
         }
         return updated
     }

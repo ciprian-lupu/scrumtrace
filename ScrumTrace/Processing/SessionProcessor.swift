@@ -58,13 +58,20 @@ final class SessionProcessor: @unchecked Sendable {
             var exported: [SliceRecord] = []
             for slice in slices {
                 if FileManager.default.fileExists(atPath: sessionURL.appendingPathComponent(ScrumTracePath.sessionMovie).path) {
-                    exported.append(try await exporter.export(
-                        sessionURL: sessionURL,
-                        slice: slice,
-                        mediaDuration: manifest.duration.mediaSeconds
-                    ))
+                    do {
+                        let clipped = try await exporter.export(
+                            sessionURL: sessionURL,
+                            slice: slice,
+                            mediaDuration: manifest.duration.mediaSeconds
+                        )
+                        exported.append(clipped.withExistingMedia(sessionURL: sessionURL))
+                    } catch {
+                        // Keep the slice (shot stills, transcript window). One bad
+                        // clip must not abort the session.
+                        exported.append(slice.withExistingMedia(sessionURL: sessionURL))
+                    }
                 } else {
-                    exported.append(slice)
+                    exported.append(slice.withExistingMedia(sessionURL: sessionURL))
                 }
             }
             manifest.slices = exported
@@ -303,14 +310,19 @@ final class SessionProcessor: @unchecked Sendable {
         if !excerpt.isEmpty {
             mediaSent.append("transcript")
         }
+        var clipURL: URL?
         if configuration.acceptsVideo, let clip = slice.clipPath {
-            let clipURL = sessionURL.appendingPathComponent(clip)
-            if FileManager.default.fileExists(atPath: clipURL.path) {
-                mediaSent.append("video")
+            let url = sessionURL.appendingPathComponent(clip)
+            if FileManager.default.fileExists(atPath: url.path) {
+                clipURL = url
             }
         }
+        // media_sent is what actually leaves the Mac. Shipped adapters never
+        // attach MP4, even when the internal request carries clipURL.
         slice.mediaSent = mediaSent
-        if !configuration.acceptsVideo && images.isEmpty && excerpt.isEmpty && (shot?.note.isEmpty ?? true) {
+        let hasStill = !images.isEmpty
+        // No still + no video capability → needs_review, do not drop the slice.
+        if !configuration.acceptsVideo && !hasStill && excerpt.isEmpty && (shot?.note.isEmpty ?? true) {
             slice.analysisStatus = .skipped
             return (slice, [fallbackOffline(slice: slice, error: AIProviderError.emptyResponse)])
         }
@@ -324,7 +336,8 @@ final class SessionProcessor: @unchecked Sendable {
                 start: slice.startMedia,
                 end: slice.endMedia
             ),
-            imageURLs: images
+            imageURLs: images,
+            clipURL: configuration.acceptsVideo ? clipURL : nil
         )
         do {
             let response = try await provider.evaluate(request: request)
@@ -335,7 +348,8 @@ final class SessionProcessor: @unchecked Sendable {
                 shot: shot,
                 product: manifest.productContext,
                 transcript: transcript,
-                sessionURL: sessionURL
+                sessionURL: sessionURL,
+                forceReview: !configuration.acceptsVideo && !hasStill
             )
             return (slice, tasks)
         } catch {
@@ -353,7 +367,8 @@ final class SessionProcessor: @unchecked Sendable {
         shot: ShotRecord?,
         product: ProductContext,
         transcript: FullTranscript,
-        sessionURL: URL
+        sessionURL: URL,
+        forceReview: Bool
     ) -> [TaskRecord] {
         var out: [TaskRecord] = []
         for (index, candidate) in response.candidates.enumerated() {
@@ -369,51 +384,54 @@ final class SessionProcessor: @unchecked Sendable {
             if shot != nil && status == .dropped {
                 status = .needsReview
             }
+            if forceReview && status == .confirmed {
+                status = .needsReview
+            }
             if status == .dropped {
                 continue
             }
-        let issues = EvidenceValidator.canConfirm(
-            candidate: candidate,
-            slice: slice,
-            transcript: transcript,
-            sessionURL: sessionURL
-        )
-        if !issues.isEmpty && status == .confirmed {
-            status = .needsReview
-        }
-        let resolvedFrames = EvidenceValidator.existingPaths(candidate.frameReferences, sessionURL: sessionURL)
-        let evidence = resolvedFrames + slice.stills + [slice.clipPath].compactMap { $0 } + [shot?.annotatedPath ?? shot?.rawPath].compactMap { $0 }
-        var uniqueEvidence: [String] = []
-        var seenEvidence = Set<String>()
-        for path in evidence where seenEvidence.insert(path).inserted {
-            uniqueEvidence.append(path)
-        }
-        var instructions = AgentInstructionTemplate.render(
-            kind: candidate.kind,
-            product: product
-        )
-        if status == .needsReview {
-            let draft = candidate.agentInstructionsDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !draft.isEmpty {
-                instructions += "\n\n## Model notes (untrusted)\n\(draft)"
-            }
-        }
-        out.append(
-            TaskRecord(
-                taskId: String(format: "TASK-%02d", out.count + 1),
-                sourceSliceId: slice.sliceId,
-                kind: candidate.kind == .unknown ? .bug : candidate.kind,
-                status: status,
-                title: candidate.title.isEmpty ? "Untitled candidate \(index + 1)" : candidate.title,
-                observed: candidate.observed,
-                stated: candidate.stated,
-                inferred: candidate.inferred,
-                agentInstructions: instructions,
-                quotes: candidate.quotes,
-                evidenceMedia: uniqueEvidence,
-                confidence: candidate.confidence
+            let issues = EvidenceValidator.canConfirm(
+                candidate: candidate,
+                slice: slice,
+                transcript: transcript,
+                sessionURL: sessionURL
             )
-        )
+            if !issues.isEmpty && status == .confirmed {
+                status = .needsReview
+            }
+            let resolvedFrames = EvidenceValidator.existingPaths(candidate.frameReferences, sessionURL: sessionURL)
+            let evidence = resolvedFrames + slice.stills + [slice.clipPath].compactMap { $0 } + [shot?.annotatedPath ?? shot?.rawPath].compactMap { $0 }
+            var uniqueEvidence: [String] = []
+            var seenEvidence = Set<String>()
+            for path in evidence where seenEvidence.insert(path).inserted {
+                uniqueEvidence.append(path)
+            }
+            var instructions = AgentInstructionTemplate.render(
+                kind: candidate.kind,
+                product: product
+            )
+            if status == .needsReview {
+                let draft = candidate.agentInstructionsDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !draft.isEmpty {
+                    instructions += "\n\n## Model notes (untrusted)\n\(draft)"
+                }
+            }
+            out.append(
+                TaskRecord(
+                    taskId: String(format: "TASK-%02d", out.count + 1),
+                    sourceSliceId: slice.sliceId,
+                    kind: candidate.kind == .unknown ? .bug : candidate.kind,
+                    status: status,
+                    title: candidate.title.isEmpty ? "Untitled candidate \(index + 1)" : candidate.title,
+                    observed: candidate.observed,
+                    stated: candidate.stated,
+                    inferred: candidate.inferred,
+                    agentInstructions: instructions,
+                    quotes: candidate.quotes,
+                    evidenceMedia: uniqueEvidence,
+                    confidence: candidate.confidence
+                )
+            )
         }
         if let shot, out.isEmpty {
             out.append(fallbackTask(shot: shot, slice: slice, error: nil))

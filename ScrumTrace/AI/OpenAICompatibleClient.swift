@@ -5,6 +5,7 @@ struct OpenAICompatibleClient: AIProvider {
     var kind: AIProviderKind { .openaiCompatible }
 
     func evaluate(request: SliceEvaluationRequest) async throws -> CandidateEvaluationResponse {
+        _ = ProviderWireMedia.mp4BodyURL(configuration: configuration, request: request)
         let key = configuration.apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !key.isEmpty else { throw AIProviderError.missingAPIKey }
         let root = configuration.baseURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))

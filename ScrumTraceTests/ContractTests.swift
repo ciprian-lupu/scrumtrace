@@ -197,4 +197,127 @@ final class ContractTests: XCTestCase {
             XCTAssertLessThanOrEqual(slice.endMedia - slice.startMedia, MediaBudget.clipMaxDuration + 0.001)
         }
     }
+
+    func testSlicerDoesNotInventMissingStills() {
+        let slices = MeetingSlicer().slice(
+            shots: [],
+            pins: [12],
+            transcript: FullTranscript(sessionId: "s", language: "en", segments: []),
+            mediaDuration: 60
+        )
+        XCTAssertEqual(slices.count, 1)
+        XCTAssertTrue(slices[0].stills.isEmpty)
+        XCTAssertEqual(slices[0].clipPath, "archive/media-work/task-01/clip.mp4")
+    }
+
+    func testWithExistingMediaDropsMissingClipAndStills() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("scrumtrace-media-\(UUID().uuidString)")
+        let shots = root.appendingPathComponent("archive/shots")
+        try FileManager.default.createDirectory(at: shots, withIntermediateDirectories: true)
+        try Data("png".utf8).write(to: shots.appendingPathComponent("001.png"))
+        defer { try? FileManager.default.removeItem(at: root) }
+        let slice = SliceRecord(
+            sliceId: "slice-01",
+            startMedia: 0,
+            endMedia: 20,
+            trigger: .pin,
+            associatedShotId: nil,
+            clipPath: "archive/media-work/task-01/clip.mp4",
+            stills: ["archive/shots/001.png", "archive/media-work/task-01/shot-1.jpg"],
+            analysisStatus: .pending,
+            score: 80
+        )
+        let kept = slice.withExistingMedia(sessionURL: root)
+        XCTAssertNil(kept.clipPath)
+        XCTAssertEqual(kept.stills, ["archive/shots/001.png"])
+    }
+
+    func testConsentRepromptOnlyWhenNeverAskedOrDestinationOrPayloadChanges() {
+        let empty = UploadConsent.denied
+        XCTAssertTrue(
+            empty.needsReprompt(
+                provider: "openai_compatible",
+                endpoint: "https://api.openai.com",
+                model: "gpt-4o",
+                acceptsVideo: false
+            )
+        )
+        let askedLocal = UploadConsent(
+            approved: false,
+            approvedAt: Date(),
+            provider: "openai_compatible",
+            endpoint: "https://api.openai.com",
+            model: "gpt-4o",
+            includesClipAudio: false,
+            includesStills: false
+        )
+        XCTAssertFalse(
+            askedLocal.needsReprompt(
+                provider: "openai_compatible",
+                endpoint: "https://api.openai.com",
+                model: "gpt-4o",
+                acceptsVideo: false
+            )
+        )
+        XCTAssertTrue(
+            askedLocal.needsReprompt(
+                provider: "openai_compatible",
+                endpoint: "https://api.openai.com",
+                model: "gpt-4.1",
+                acceptsVideo: false
+            )
+        )
+        let approvedVideo = UploadConsent(
+            approved: true,
+            approvedAt: Date(),
+            provider: "openai_compatible",
+            endpoint: "https://api.openai.com",
+            model: "gpt-4o",
+            includesClipAudio: true,
+            includesStills: true
+        )
+        XCTAssertTrue(
+            approvedVideo.needsReprompt(
+                provider: "openai_compatible",
+                endpoint: "https://api.openai.com",
+                model: "gpt-4o",
+                acceptsVideo: false
+            )
+        )
+    }
+
+    func testShippedAdaptersNeverAttachMp4() {
+        let configuration = AIProviderConfiguration(
+            kind: .openaiCompatible,
+            baseURL: "https://api.openai.com",
+            model: "gpt-4o",
+            apiKey: "sk-test",
+            acceptsText: true,
+            acceptsImages: true,
+            acceptsVideo: true
+        )
+        let request = SliceEvaluationRequest(
+            product: .empty,
+            slice: SliceRecord(
+                sliceId: "slice-01",
+                startMedia: 0,
+                endMedia: 20,
+                trigger: .shot,
+                associatedShotId: nil,
+                clipPath: "archive/media-work/task-01/clip.mp4",
+                stills: [],
+                analysisStatus: .pending,
+                score: 1
+            ),
+            transcriptExcerpt: "hello",
+            shotNote: "",
+            windowContext: "",
+            imageURLs: [],
+            clipURL: URL(fileURLWithPath: "/tmp/clip.mp4")
+        )
+        XCTAssertNil(ProviderWireMedia.mp4BodyURL(configuration: configuration, request: request))
+        var noVideo = configuration
+        noVideo.acceptsVideo = false
+        XCTAssertNil(ProviderWireMedia.mp4BodyURL(configuration: noVideo, request: request))
+    }
 }

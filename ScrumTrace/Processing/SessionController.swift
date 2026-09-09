@@ -206,16 +206,16 @@ final class SessionController: ObservableObject {
         do {
             if var local = try? vault.loadManifest(id: sessionId) {
                 local.includeFullTranscriptInZip = settings.includeFullTranscriptInZip
-                let destinationChanged = local.uploadConsent.approved
-                    && (local.uploadConsent.provider != settings.provider.rawValue
-                        || local.uploadConsent.endpoint != settings.baseURL
-                        || local.uploadConsent.model != settings.model)
-                if !local.uploadConsent.approved || destinationChanged {
+                let capabilities = settings.providerConfiguration()
+                if local.uploadConsent.needsReprompt(
+                    provider: settings.provider.rawValue,
+                    endpoint: settings.baseURL,
+                    model: settings.model,
+                    acceptsVideo: capabilities.acceptsVideo
+                ) {
                     local.uploadConsent = requestUploadConsent()
-                    try vault.write(manifest: &local)
-                } else {
-                    try vault.write(manifest: &local)
                 }
+                try vault.write(manifest: &local)
             }
             let storedPins = vault.loadPinTimes(sessionId: sessionId)
             let pins = Self.mergePins(pinTimes, storedPins)

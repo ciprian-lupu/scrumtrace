@@ -185,6 +185,40 @@ def test_pause_privacy_and_metadata_gate() -> None:
     assert "isCurrentlyTripped" in privacy
 
 
+def test_phase45_clip_consent_and_budget() -> None:
+    processor = (ROOT / "ScrumTrace" / "Processing" / "SessionProcessor.swift").read_text()
+    assert "clipURL" in processor
+    assert "forceReview" in processor
+    assert "withExistingMedia" in processor
+    assert "One bad" in processor or "must not abort the session" in processor
+    projector = (ROOT / "ScrumTrace" / "Export" / "ExportProjector.swift").read_text()
+    assert "MediaBudget.maxStills" in projector
+    assert "Over extra-still budget" in projector
+    models = (ROOT / "ScrumTrace" / "Storage" / "SessionModels.swift").read_text()
+    assert "func needsReprompt" in models
+    assert "includesClipAudio != acceptsVideo" in models
+    controller = (ROOT / "ScrumTrace" / "Processing" / "SessionController.swift").read_text()
+    assert "needsReprompt" in controller
+    assert "!local.uploadConsent.approved || destinationChanged" not in controller
+    openai = (ROOT / "ScrumTrace" / "AI" / "OpenAICompatibleClient.swift").read_text()
+    anthropic = (ROOT / "ScrumTrace" / "AI" / "AnthropicClient.swift").read_text()
+    google = (ROOT / "ScrumTrace" / "AI" / "GoogleClient.swift").read_text()
+    protocol_src = (ROOT / "ScrumTrace" / "AI" / "AIProviderProtocol.swift").read_text()
+    assert "mp4BodyURL" in openai
+    assert "mp4BodyURL" in anthropic
+    assert "mp4BodyURL" in google
+    assert "func mp4BodyURL" in protocol_src
+    assert "Data(contentsOf: request.clipURL" not in openai
+    assert "Data(contentsOf: request.clipURL" not in anthropic
+    assert "Data(contentsOf: request.clipURL" not in google
+    clip = (ROOT / "ScrumTrace" / "Slicing" / "ClipExporter.swift").read_text()
+    assert "updated.stills = [stillRelative]" not in clip
+    slicer = (ROOT / "ScrumTrace" / "Slicing" / "MeetingSlicer.swift").read_text()
+    assert 'copy.stills = ["\\(folder)/shot-1.jpg"]' not in slicer
+    shot = (ROOT / "ScrumTrace" / "UI" / "ShotNoteWindow.swift").read_text()
+    assert "let hadText = !note.isEmpty" in shot
+
+
 def main() -> None:
     test_export_has_no_archive_and_no_tokens()
     test_agent_context_uses_export_relative_paths()
@@ -200,6 +234,7 @@ def main() -> None:
     test_dual_transcript_merge_wired()
     test_pipeline_timing_stays_in_archive()
     test_pause_privacy_and_metadata_gate()
+    test_phase45_clip_consent_and_budget()
     print("contract tests ok")
 
 

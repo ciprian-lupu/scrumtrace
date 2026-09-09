@@ -76,9 +76,6 @@ struct MeetingSlicer {
             copy.sliceId = String(format: "slice-%02d", ordinal)
             let folder = "archive/media-work/task-\(String(format: "%02d", ordinal))"
             copy.clipPath = "\(folder)/clip.mp4"
-            if copy.stills.isEmpty {
-                copy.stills = ["\(folder)/shot-1.jpg"]
-            }
             return copy
         }
     }

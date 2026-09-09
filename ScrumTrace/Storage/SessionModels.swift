@@ -217,6 +217,19 @@ struct SliceRecord: Codable, Sendable, Identifiable, Hashable {
 
     var id: String { sliceId }
 
+    /// Drop clip/still paths that were never written (failed encode or still grab).
+    func withExistingMedia(sessionURL: URL) -> SliceRecord {
+        var copy = self
+        if let clip = clipPath,
+           !FileManager.default.fileExists(atPath: sessionURL.appendingPathComponent(clip).path) {
+            copy.clipPath = nil
+        }
+        copy.stills = stills.filter {
+            FileManager.default.fileExists(atPath: sessionURL.appendingPathComponent($0).path)
+        }
+        return copy
+    }
+
     enum CodingKeys: String, CodingKey {
         case sliceId = "slice_id"
         case startMedia = "start_media"
@@ -585,6 +598,22 @@ struct UploadConsent: Codable, Sendable, Hashable {
         includesClipAudio: false,
         includesStills: false
     )
+
+    /// D15: Retry does not re-prompt unless this session never asked, the
+    /// destination changed, or the payload kind (clip video vs stills-only) changed.
+    func needsReprompt(provider: String, endpoint: String, model: String, acceptsVideo: Bool) -> Bool {
+        let neverAsked = self.provider.isEmpty && self.endpoint.isEmpty && self.model.isEmpty
+        if neverAsked {
+            return true
+        }
+        if self.provider != provider || self.endpoint != endpoint || self.model != model {
+            return true
+        }
+        if includesClipAudio != acceptsVideo {
+            return true
+        }
+        return false
+    }
 }
 
 struct OmittedAsset: Codable, Sendable, Hashable {

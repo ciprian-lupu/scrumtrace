@@ -5,6 +5,7 @@ struct AnthropicClient: AIProvider {
     var kind: AIProviderKind { .anthropic }
 
     func evaluate(request: SliceEvaluationRequest) async throws -> CandidateEvaluationResponse {
+        _ = ProviderWireMedia.mp4BodyURL(configuration: configuration, request: request)
         if configuration.kind == .anthropic && AIProviderConfiguration.isRetiredAnthropic(configuration.model) {
             throw AIProviderError.invalidURL("Retired Anthropic model \(configuration.model)")
         }

@@ -207,8 +207,9 @@ struct ShotNoteView: View {
         guard live else { return }
         try? await transcriber.prepare(model: whisperModel)
         if let text = try? await transcriber.transcribeVoiceNote(at: url), !text.isEmpty {
-            note = note.isEmpty ? text : "\(note) \(text)"
-            source = note.isEmpty ? .voice : .mixed
+            let hadText = !note.isEmpty
+            note = hadText ? "\(note) \(text)" : text
+            source = hadText ? .mixed : .voice
         }
     }
 

@@ -75,6 +75,7 @@ struct ExportProjector {
             projectedShots.append(copy)
         }
 
+        var extraStillsCopied = 0
         for (index, slice) in manifest.slices.enumerated() {
             var copy = slice
             let ordinal = String(format: "%02d", index + 1)
@@ -109,6 +110,15 @@ struct ExportProjector {
                     exportStills.append(mapped)
                     continue
                 }
+                // Human shots are already in `placed`. Remaining stills are extras
+                // (clip grabs). Cap those at MediaBudget.maxStills; 35 MB omit is later.
+                if extraStillsCopied >= MediaBudget.maxStills {
+                    omitted.append(OmittedAsset(
+                        path: still,
+                        reason: "Over extra-still budget (\(MediaBudget.maxStills))"
+                    ))
+                    continue
+                }
                 if let placedStill = try copyStill(
                     from: sessionURL.appendingPathComponent(still),
                     destRelative: dest,
@@ -118,6 +128,7 @@ struct ExportProjector {
                     let rel = ExportRel.toExportRoot(placedStill)
                     exportStills.append(rel)
                     placed[still] = rel
+                    extraStillsCopied += 1
                 }
             }
             copy.stills = exportStills

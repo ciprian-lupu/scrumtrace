@@ -15,6 +15,8 @@ struct SliceEvaluationRequest: Sendable {
     var shotNote: String
     var windowContext: String
     var imageURLs: [URL]
+    /// Present when the slice has a clip on disk. Adapters must not upload it unless `accepts_video`.
+    var clipURL: URL?
 }
 
 enum AIProviderError: LocalizedError {
@@ -37,6 +39,17 @@ enum AIProviderError: LocalizedError {
         case .decoding(let message):
             return "Could not decode provider JSON: \(message)"
         }
+    }
+}
+
+enum ProviderWireMedia {
+    /// Clip file bytes that may be placed on the HTTP body.
+    /// Always nil unless `accepts_video` is true **and** the adapter has an MP4
+    /// mapping. Shipped adapters have none — they send stills + transcript only.
+    static func mp4BodyURL(configuration: AIProviderConfiguration, request: SliceEvaluationRequest) -> URL? {
+        guard configuration.acceptsVideo else { return nil }
+        guard request.clipURL != nil else { return nil }
+        return nil
     }
 }
 
