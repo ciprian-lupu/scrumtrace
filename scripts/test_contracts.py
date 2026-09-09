@@ -636,6 +636,10 @@ def test_pause_privacy_and_metadata_gate() -> None:
     assert "captureState == .paused" in menu
     assert "isRecording && controller.captureState == .paused" in menu
     assert "pause.circle.fill" in menu
+    hud_clock = controller.split("static func clock")[1].split("static func mergePins")[0]
+    assert "%d:%02d:%02d" in hud_clock
+    assert "%02d:%02d" in hud_clock
+    assert "3600" in hud_clock
     open_shot = controller.split("func openShot()")[1].split("func retryAnalysis()")[0]
     assert "guard isRecording else { return }" in open_shot
     assert "Paused — Shot is disabled" in open_shot
