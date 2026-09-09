@@ -169,9 +169,11 @@ struct ExportProjector {
             )
         }
 
-        projected.omitted = omitted
+        projected.omitted = omitted.map {
+            OmittedAsset(path: ExportRel.omittedHandoffPath($0.path), reason: $0.reason)
+        }
         try writeProjectionManifest(projected, sessionURL: sessionURL)
-        return ExportProjection(manifest: projected, omitted: omitted)
+        return ExportProjection(manifest: projected, omitted: projected.omitted)
     }
 
     func writeProjectionManifest(_ manifest: SessionManifest, sessionURL: URL) throws {

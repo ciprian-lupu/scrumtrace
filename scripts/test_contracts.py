@@ -68,6 +68,8 @@ def test_zipper_never_deletes_archive() -> None:
     assert "allowList" in zipper
     assert '"-@"' in zipper
     assert "archive/session.mp4" not in zipper
+    omit_md = zipper.split("func writeOmittedMarkdown")[1].split("private func uniquedOmitted")[0]
+    assert "omittedHandoffPath" in omit_md
 
 
 def test_clip_exporter_macos14() -> None:
@@ -241,6 +243,7 @@ def test_phase45_clip_consent_and_budget() -> None:
     models = (ROOT / "ScrumTrace" / "Storage" / "SessionModels.swift").read_text()
     assert "func needsReprompt" in models
     assert "func handoffPath" in models
+    assert "func omittedHandoffPath" in models
     assert "enum TaskRanking" in models
     assert "selectForPack" in processor
     local = processor.split("func localReviewTasks")[1].split("func excerptMap")[0]
@@ -332,6 +335,10 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "var parts: [Part]?" in google
     recorder_engine = recorder.split("func writeEngineBuffer")[1].split("func requestPermission")[0]
     assert "buffer.frameLength" in recorder_engine
+    agent = (ROOT / "ScrumTrace" / "Export" / "AgentContextRenderer.swift").read_text()
+    assert "omittedHandoffPath" in agent
+    brief_omit = brief_src.split("private func omittedHTML")[1].split("private static func clock")[0]
+    assert "omittedHandoffPath" in brief_omit
 
 
 def main() -> None:

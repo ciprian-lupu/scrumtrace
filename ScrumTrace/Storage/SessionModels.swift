@@ -37,6 +37,15 @@ enum ExportRel {
         if rel.hasPrefix("archive/") { return nil }
         return rel
     }
+
+    /// Omitted-asset labels in `export/`. Strip `archive/` so the pack never names that folder.
+    static func omittedHandoffPath(_ path: String) -> String {
+        let rel = toExportRoot(path)
+        if rel.hasPrefix("archive/") {
+            return String(rel.dropFirst("archive/".count))
+        }
+        return rel
+    }
 }
 
 enum MediaBudget {

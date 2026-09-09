@@ -70,7 +70,9 @@ struct SessionPackZipper {
             try? FileManager.default.removeItem(at: url)
             return
         }
-        let lines = ["# Omitted from export", ""] + omitted.map { "- `\($0.path)` — \($0.reason)" }
+        let lines = ["# Omitted from export", ""] + omitted.map {
+            "- `\(ExportRel.omittedHandoffPath($0.path))` — \($0.reason)"
+        }
         try lines.joined(separator: "\n").write(to: url, atomically: true, encoding: .utf8)
     }
 

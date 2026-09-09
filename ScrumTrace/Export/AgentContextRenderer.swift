@@ -53,9 +53,7 @@ struct AgentContextRenderer {
             lines.append("## Omitted from this pack")
             lines.append("These files stayed on this Mac. Do not assume they are here.")
             for item in manifest.omitted {
-                let rel = ExportRel.toExportRoot(item.path)
-                if rel.hasPrefix("archive/") { continue }
-                lines.append("- `\(rel)` — \(item.reason)")
+                lines.append("- `\(ExportRel.omittedHandoffPath(item.path))` — \(item.reason)")
             }
         }
         lines.append("")

@@ -12,6 +12,9 @@ final class ContractTests: XCTestCase {
         XCTAssertEqual(ExportRel.handoffPath("export/shots/001.jpg"), "shots/001.jpg")
         XCTAssertNil(ExportRel.handoffPath("archive/session.mp4"))
         XCTAssertNil(ExportRel.handoffPath("archive/shots/001.png"))
+        XCTAssertEqual(ExportRel.omittedHandoffPath("archive/shots/001.png"), "shots/001.png")
+        XCTAssertEqual(ExportRel.omittedHandoffPath("export/media/task-01/clip.mp4"), "media/task-01/clip.mp4")
+        XCTAssertFalse(ExportRel.omittedHandoffPath("archive/session.mp4").hasPrefix("archive/"))
     }
 
     func testTaskRankingPrefersHumanShotsAndConfirmed() {

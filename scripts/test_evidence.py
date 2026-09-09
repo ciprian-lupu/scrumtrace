@@ -35,6 +35,7 @@ def test_export_rel_in_swift() -> None:
     assert '"-@"' in zipper
     models = (ROOT / "ScrumTrace" / "Storage" / "SessionModels.swift").read_text()
     assert "func handoffPath" in models
+    assert "func omittedHandoffPath" in models
     clip = (ROOT / "ScrumTrace" / "Slicing" / "ClipExporter.swift").read_text()
     assert "tightenExportClips" in clip
     assert "AVAssetExportPreset640x480" in clip
@@ -45,6 +46,7 @@ def test_export_rel_in_swift() -> None:
     assert "lockFocus" not in jpeg
     projector = (ROOT / "ScrumTrace" / "Export" / "ExportProjector.swift").read_text()
     assert "lockFocus" not in projector
+    assert "omittedHandoffPath" in projector
 
 
 def test_frame_ref_basename_resolves() -> None:

@@ -153,10 +153,8 @@ struct SessionBriefRenderer {
 
     private func omittedHTML(_ manifest: SessionManifest) -> String {
         if manifest.omitted.isEmpty { return "" }
-        let items = manifest.omitted.compactMap { item -> String? in
-            let rel = ExportRel.toExportRoot(item.path)
-            if rel.hasPrefix("archive/") { return nil }
-            return "<li><code>\(HTMLEscaper.escape(rel))</code> — \(HTMLEscaper.escape(item.reason))</li>"
+        let items = manifest.omitted.map { item in
+            "<li><code>\(HTMLEscaper.escape(ExportRel.omittedHandoffPath(item.path)))</code> — \(HTMLEscaper.escape(item.reason))</li>"
         }.joined()
         return """
         <section class="omitted">
