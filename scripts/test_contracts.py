@@ -91,6 +91,9 @@ def test_html_escaper_order() -> None:
     assert '"-y"' in gen
     assert "is_symlink" in gen
     assert "followlinks=False" in gen
+    assert "mkstemp" in gen
+    assert "scrumtrace-zip-" in gen
+    assert "shutil.move" in gen
 
 
 def test_brief_template_does_not_rescan_values() -> None:
@@ -804,6 +807,9 @@ def test_write_contained_data_refuses_directory_symlinks() -> None:
     assert "isSymbolicLink" in load_fn
     create_fn = vault.split("func createSession")[1].split("func loadManifest")[0]
     assert "isSymbolicLink" in create_fn
+    assert create_fn.count("isSymbolicLink") >= 2
+    process_head = processor.split("func process(")[1].split("var timing")[0]
+    assert "isSymbolicLink" in process_head
     append_ev = vault.split("func appendEvent")[1].split("func recentSessions")[0]
     assert "fileExists(atPath: url.path)" not in append_ev
     assert "isContainedRegularFile" in append_ev

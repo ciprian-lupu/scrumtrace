@@ -7,6 +7,7 @@ import json
 import os
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
@@ -452,13 +453,21 @@ This pack is `samples/mock-session/export/` only. Do not hand `archive/` (this m
     packed = EXPORT / "session-pack.zip"
     packed.unlink(missing_ok=True)
     members = export_zip_members(EXPORT)
-    subprocess.run(
-        ["zip", "-q", "-y", str(packed), "-@"],
-        cwd=EXPORT,
-        input="\n".join(members) + "\n",
-        text=True,
-        check=True,
-    )
+    fd, tmp_name = tempfile.mkstemp(prefix="scrumtrace-zip-", suffix=".zip")
+    os.close(fd)
+    tmp = Path(tmp_name)
+    try:
+        subprocess.run(
+            ["zip", "-q", "-y", str(tmp), "-@"],
+            cwd=EXPORT,
+            input="\n".join(members) + "\n",
+            text=True,
+            check=True,
+        )
+        packed.unlink(missing_ok=True)
+        shutil.move(str(tmp), packed)
+    finally:
+        tmp.unlink(missing_ok=True)
     size = packed.stat().st_size
     print(f"export ready at {EXPORT} zip={size} bytes")
 

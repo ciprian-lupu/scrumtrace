@@ -27,6 +27,9 @@ final class SessionProcessor: @unchecked Sendable {
     ) async throws -> SessionManifest {
         var manifest = try vault.loadManifest(id: sessionId)
         let sessionURL = vault.sessionURL(id: sessionId)
+        if (try? sessionURL.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+            throw SessionVaultError.sessionMissing(sessionId)
+        }
 
         var timing = PipelineTiming.load(sessionURL: sessionURL) ?? PipelineTiming()
 

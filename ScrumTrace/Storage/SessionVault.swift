@@ -77,6 +77,9 @@ final class SessionVault: @unchecked Sendable {
             throw SessionVaultError.writeFailed("session folder")
         }
         try fileManager.createDirectory(at: url, withIntermediateDirectories: true)
+        if (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+            throw SessionVaultError.writeFailed("session folder")
+        }
         for folder in [
             ScrumTracePath.archive,
             ScrumTracePath.export,
@@ -120,6 +123,9 @@ final class SessionVault: @unchecked Sendable {
             throw SessionVaultError.writeFailed("session folder")
         }
         try fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
+        if (try? dir.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+            throw SessionVaultError.writeFailed("session folder")
+        }
         let url = dir.appendingPathComponent(ScrumTracePath.manifest)
         if (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
             try fileManager.removeItem(at: url)
