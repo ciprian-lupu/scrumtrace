@@ -51,6 +51,9 @@ def test_export_rel_in_swift() -> None:
     assert "lockFocus" not in projector
     assert "omittedHandoffPath" in projector
     assert "JPEG transcode failed" in projector
+    rewrite = projector.split("func rewriteEvidence")[1].split("func copyStill")[0]
+    assert "ExportRel.handoffPath" in rewrite
+    assert 'path.hasPrefix("export/")' not in rewrite
 
 
 def test_frame_ref_basename_resolves() -> None:
@@ -91,6 +94,9 @@ def test_frame_ref_basename_resolves() -> None:
     assert "func applyExportEvidence" in validator
     assert "unknown task kind" in validator
     assert "decision is not keep" in validator
+    assert "existingSessionFile" in validator
+    models = (ROOT / "ScrumTrace" / "Storage" / "SessionModels.swift").read_text()
+    assert "func existingSessionFile" in models
     assert "archive/shots/" in validator
     slicer = (ROOT / "ScrumTrace" / "Slicing" / "MeetingSlicer.swift").read_text()
     assert "clipMaxDuration" in slicer

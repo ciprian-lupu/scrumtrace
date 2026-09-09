@@ -21,7 +21,6 @@ enum EvidenceValidator {
 
     /// Model `frame_references` are untrusted strings: basename, `shots/…`, or archive paths.
     static func resolvePath(_ path: String, sessionURL: URL) -> String? {
-        let fileManager = FileManager.default
         let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
         let name = URL(fileURLWithPath: trimmed).lastPathComponent
@@ -40,8 +39,8 @@ enum EvidenceValidator {
         }
         var seen = Set<String>()
         for rel in tries where seen.insert(rel).inserted {
-            if fileManager.fileExists(atPath: sessionURL.appendingPathComponent(rel).path) {
-                return rel
+            if let existing = ExportRel.existingSessionFile(rel, sessionURL: sessionURL) {
+                return existing
             }
         }
         for folder in [ScrumTracePath.shots, ScrumTracePath.mediaWork, ScrumTracePath.exportShots, ScrumTracePath.media] {
@@ -114,9 +113,10 @@ enum EvidenceValidator {
     }
 
     static func exportFileExists(_ path: String, sessionURL: URL) -> Bool {
-        let session = ExportRel.sessionPath(path)
-        guard ExportRel.isUnderExport(session) else { return false }
-        return FileManager.default.fileExists(atPath: sessionURL.appendingPathComponent(session).path)
+        guard let relative = ExportRel.existingSessionFile(ExportRel.sessionPath(path), sessionURL: sessionURL) else {
+            return false
+        }
+        return ExportRel.isUnderExport(relative)
     }
 
     private static func firstMatch(name: String, stem: String, in root: URL, sessionURL: URL) -> String? {
@@ -129,7 +129,8 @@ enum EvidenceValidator {
         for case let url as URL in enumerator {
             guard (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true else { continue }
             if url.lastPathComponent == name || url.deletingPathExtension().lastPathComponent == stem {
-                return url.path.replacingOccurrences(of: prefix, with: "")
+                let relative = url.path.replacingOccurrences(of: prefix, with: "")
+                return ExportRel.containedRelative(relative, sessionURL: sessionURL)
             }
         }
         return nil

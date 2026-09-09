@@ -130,9 +130,17 @@ struct ExportProjector {
                 if let mapped = placed[path] {
                     return mapped
                 }
-                let exportCandidate = rewriteEvidence(path)
-                if fileManager.fileExists(atPath: sessionURL.appendingPathComponent(ExportRel.sessionPath(exportCandidate)).path) {
-                    return ExportRel.toExportRoot(exportCandidate)
+                if let mapped = placed[ExportRel.sessionPath(path)] {
+                    return mapped
+                }
+                guard let exportCandidate = rewriteEvidence(path) else {
+                    omitted.append(OmittedAsset(path: path, reason: "Not present under export/ after projection"))
+                    return nil
+                }
+                let session = ExportRel.sessionPath(exportCandidate)
+                if ExportRel.isUnderExport(session),
+                   fileManager.fileExists(atPath: sessionURL.appendingPathComponent(session).path) {
+                    return ExportRel.toExportRoot(session)
                 }
                 omitted.append(OmittedAsset(path: path, reason: "Not present under export/ after projection"))
                 return nil
@@ -192,18 +200,22 @@ struct ExportProjector {
         try encoder.encode(manifest).write(to: sessionURL.appendingPathComponent(ScrumTracePath.exportManifest))
     }
 
-    private func rewriteEvidence(_ path: String) -> String {
-        if path.hasPrefix("export/") || !path.contains("/") {
-            return ExportRel.toExportRoot(path)
+    private func rewriteEvidence(_ path: String) -> String? {
+        if let handoff = ExportRel.handoffPath(path) {
+            return handoff
         }
-        if path.hasPrefix("archive/shots/") {
-            let name = URL(fileURLWithPath: path).deletingPathExtension().lastPathComponent
-            return "shots/\(name).jpg"
+        guard let parts = ExportRel.normalizedComponents(path) else { return nil }
+        if parts.first == "archive", parts.count >= 3, parts[1] == "shots" {
+            let stem = URL(fileURLWithPath: parts.last ?? "").deletingPathExtension().lastPathComponent
+            return "shots/\(stem).jpg"
         }
-        if path.contains("media-work") {
-            return path.replacingOccurrences(of: "archive/media-work/", with: "media/")
+        if let idx = parts.firstIndex(of: "media-work"), idx + 1 < parts.count {
+            return (["media"] + Array(parts[(idx + 1)...])).joined(separator: "/")
         }
-        return "shots/\(URL(fileURLWithPath: path).lastPathComponent)"
+        if parts.count == 1 {
+            return "shots/\(parts[0])"
+        }
+        return nil
     }
 
     private func copyStill(

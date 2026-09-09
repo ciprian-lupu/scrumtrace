@@ -286,6 +286,14 @@ final class ContractTests: XCTestCase {
             "archive/shots/001.png"
         )
         XCTAssertNil(EvidenceValidator.resolvePath("missing.png", sessionURL: root))
+        XCTAssertEqual(
+            EvidenceValidator.resolvePath("export/../archive/shots/001.png", sessionURL: root),
+            "archive/shots/001.png"
+        )
+        XCTAssertNil(EvidenceValidator.resolvePath("../../etc/passwd", sessionURL: root))
+        XCTAssertFalse(
+            EvidenceValidator.exportFileExists("export/../archive/shots/001.png", sessionURL: root)
+        )
     }
 
     func testMergedSlicesStayWithinClipMax() {

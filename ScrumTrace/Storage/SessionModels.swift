@@ -72,6 +72,29 @@ enum ExportRel {
         }
         return stack.isEmpty ? nil : stack
     }
+
+    static func isUnderSession(_ path: String) -> Bool {
+        guard let parts = normalizedComponents(path), let first = parts.first else { return false }
+        return (first == "archive" || first == "export") && parts.count >= 2
+    }
+
+    /// Normalized session-relative path that still lives under the session folder.
+    static func containedRelative(_ path: String, sessionURL: URL) -> String? {
+        guard isUnderSession(path), let parts = normalizedComponents(path) else { return nil }
+        let joined = parts.joined(separator: "/")
+        let root = sessionURL.standardizedFileURL
+        let url = sessionURL.appendingPathComponent(joined).standardizedFileURL
+        let rootPath = root.path
+        guard url.path == rootPath || url.path.hasPrefix(rootPath + "/") else { return nil }
+        return joined
+    }
+
+    static func existingSessionFile(_ path: String, sessionURL: URL) -> String? {
+        guard let relative = containedRelative(path, sessionURL: sessionURL) else { return nil }
+        let url = sessionURL.appendingPathComponent(relative)
+        guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+        return relative
+    }
 }
 
 enum MediaBudget {
