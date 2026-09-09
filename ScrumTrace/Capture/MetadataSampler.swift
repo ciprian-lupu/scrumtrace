@@ -24,9 +24,9 @@ final class MetadataSampler: @unchecked Sendable {
         }
     }
 
-    static func requestTrust() {
-        let prompt = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
-        _ = AXIsProcessTrustedWithOptions([prompt: true] as CFDictionary)
+    static func requestTrust(prompt: Bool = false) {
+        let promptKey = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
+        _ = AXIsProcessTrustedWithOptions([promptKey: prompt] as CFDictionary)
     }
 
     func sample(timeoutMs: UInt64 = MediaBudget.metadataSampleTimeoutMs) async -> WindowMetadata? {

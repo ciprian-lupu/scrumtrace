@@ -305,7 +305,11 @@ def test_pipeline_timing_stays_in_archive() -> None:
         assert (icons / name).is_file(), name
     app = (ROOT / "ScrumTrace" / "App" / "AppDelegate.swift").read_text()
     assert "MetadataSampler.requestTrust" in app
+    assert "requestTrust(prompt: false)" in app
+    assert "requestTrust(prompt: true)" not in app
     controller = (ROOT / "ScrumTrace" / "Processing" / "SessionController.swift").read_text()
+    start_rec = controller.split("func startRecordingAsync")[1].split("func stopRecordingAsync")[0]
+    assert "requestTrust(prompt: true)" in start_rec
     assert "transcriber.prepare" in controller
     hud = (ROOT / "ScrumTrace" / "UI" / "RecordingHUDWindow.swift").read_text()
     assert "wallElapsed" in hud
@@ -428,8 +432,12 @@ def test_phase45_clip_consent_and_budget() -> None:
     slicer = (ROOT / "ScrumTrace" / "Slicing" / "MeetingSlicer.swift").read_text()
     assert "shot.stillCandidates" in slicer
     projector = (ROOT / "ScrumTrace" / "Export" / "ExportProjector.swift").read_text()
+    jpeg = projector.split("func transcodeJPEG")[1].split("func copyIfPresent")[0]
+    assert "containedRelative" in jpeg
     copy_if = projector.split("func copyIfPresent")[1]
     assert "containedRelative" in copy_if
+    agent = (ROOT / "ScrumTrace" / "Export" / "AgentContextRenderer.swift").read_text()
+    assert "stillCandidates" in agent.split("func displayPath")[1]
     assert "Inspect the linked evidence only" in processor
     assert "remain in archive/" not in processor
     assert "applyExportEvidence" in processor

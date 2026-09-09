@@ -105,10 +105,12 @@ struct AgentContextRenderer {
     }
 
     private func displayPath(_ shot: ShotRecord) -> String? {
-        let raw = shot.exportPath ?? shot.annotatedPath ?? (shot.rawPath.isEmpty ? nil : shot.rawPath)
-        guard let raw else { return nil }
-        let rel = ExportRel.handoffPath(raw)
-        return rel
+        for path in [shot.exportPath].compactMap({ $0 }) + shot.stillCandidates {
+            if let rel = ExportRel.handoffPath(path) {
+                return rel
+            }
+        }
+        return nil
     }
 
     private static func pauseLabel(_ count: Int) -> String {

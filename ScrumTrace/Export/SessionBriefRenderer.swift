@@ -169,8 +169,14 @@ struct SessionBriefRenderer {
 
     private func shots(_ manifest: SessionManifest) -> String {
         let figures = manifest.shots.compactMap { shot -> String? in
-            let raw = shot.exportPath ?? shot.annotatedPath ?? (shot.rawPath.isEmpty ? nil : shot.rawPath)
-            guard let raw, let path = ExportRel.handoffPath(raw) else { return nil }
+            var path: String?
+            for candidate in [shot.exportPath].compactMap({ $0 }) + shot.stillCandidates {
+                if let rel = ExportRel.handoffPath(candidate) {
+                    path = rel
+                    break
+                }
+            }
+            guard let path else { return nil }
             return """
             <figure>
               <a href="\(HTMLEscaper.escape(path))" data-lightbox>

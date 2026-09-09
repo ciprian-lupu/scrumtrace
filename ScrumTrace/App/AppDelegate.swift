@@ -17,7 +17,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menuBar = MenuBarController(controller: controller, hud: hud)
         hotkeys = HotkeyManager(controller: controller)
         hotkeys?.register()
-        MetadataSampler.requestTrust()
+        MetadataSampler.requestTrust(prompt: false)
     }
 
     func applicationWillTerminate(_ notification: Notification) {

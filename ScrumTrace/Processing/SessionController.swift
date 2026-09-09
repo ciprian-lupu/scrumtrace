@@ -200,6 +200,7 @@ final class SessionController: ObservableObject {
             lastMetaSignature = ""
             pausedByPrivacy = false
             clock.reset()
+            MetadataSampler.requestTrust(prompt: true)
             let recorder = SessionRecorder(sessionURL: created.url, clock: clock)
             try await recorder.start()
             self.recorder = recorder

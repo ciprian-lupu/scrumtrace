@@ -251,19 +251,26 @@ struct ExportProjector {
 
     #if os(macOS)
     private func transcodeJPEG(from: URL, destRelative: String, sessionURL: URL) throws -> String? {
+        let prefix = sessionURL.path.hasSuffix("/") ? sessionURL.path : sessionURL.path + "/"
+        guard from.path.hasPrefix(prefix) else { return nil }
+        let fromRel = String(from.path.dropFirst(prefix.count))
+        guard ExportRel.containedRelative(fromRel, sessionURL: sessionURL) != nil,
+              let destRel = ExportRel.containedRelative(destRelative, sessionURL: sessionURL) else {
+            return nil
+        }
         guard let image = NSImage(contentsOf: from) else { return nil }
         guard let jpeg = ImageBase64.jpegData(
             from: image,
             maxEdge: CGFloat(MediaBudget.stillMaxWidth),
             quality: MediaBudget.stillJPEGQuality
         ) else { return nil }
-        let dest = sessionURL.appendingPathComponent(destRelative)
+        let dest = sessionURL.appendingPathComponent(destRel)
         try FileManager.default.createDirectory(at: dest.deletingLastPathComponent(), withIntermediateDirectories: true)
         if FileManager.default.fileExists(atPath: dest.path) {
             try FileManager.default.removeItem(at: dest)
         }
         try jpeg.write(to: dest)
-        return destRelative
+        return destRel
     }
     #endif
 
