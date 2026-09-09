@@ -446,9 +446,11 @@ def test_phase45_clip_consent_and_budget() -> None:
     projector = (ROOT / "ScrumTrace" / "Export" / "ExportProjector.swift").read_text()
     jpeg = projector.split("func transcodeJPEG")[1].split("func copyIfPresent")[0]
     assert "containedRelative" in jpeg
+    assert "hasPrefix(prefix)" not in jpeg
     copy_if = projector.split("func copyIfPresent")[1]
     assert "containedRelative" in copy_if
     assert "resolvingSymlinksInPath" in copy_if
+    assert "hasPrefix(prefix)" not in copy_if
     agent = (ROOT / "ScrumTrace" / "Export" / "AgentContextRenderer.swift").read_text()
     assert "stillCandidates" in agent.split("func displayPath")[1]
     assert "Inspect the linked evidence only" in processor

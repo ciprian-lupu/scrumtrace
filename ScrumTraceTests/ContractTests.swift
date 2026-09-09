@@ -722,6 +722,30 @@ final class ContractTests: XCTestCase {
         )
         XCTAssertNil(ExportRel.existingSessionFile("archive/shots/001.png", sessionURL: root))
         XCTAssertNil(ExportRel.containedRelative("archive/shots/001.png", sessionURL: root))
+        XCTAssertNil(ExportRel.containedRelative(shots.appendingPathComponent("001.png"), sessionRoot: root))
+    }
+
+    func testResolvePathSkipsSymlinkTrapAndFindsRealStill() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("scrumtrace-frame-\(UUID().uuidString)")
+        let shots = root.appendingPathComponent("archive/shots")
+        let trap = shots.appendingPathComponent("trap")
+        try FileManager.default.createDirectory(at: trap, withIntermediateDirectories: true)
+        let outside = FileManager.default.temporaryDirectory.appendingPathComponent("scrumtrace-frame-secret-\(UUID().uuidString)")
+        try Data("ARCHIVE-LEAK").write(to: outside)
+        try Data("real-shot").write(to: shots.appendingPathComponent("001.png"))
+        defer {
+            try? FileManager.default.removeItem(at: root)
+            try? FileManager.default.removeItem(at: outside)
+        }
+        try FileManager.default.createSymbolicLink(
+            at: trap.appendingPathComponent("001.png"),
+            withDestinationURL: outside
+        )
+        XCTAssertEqual(
+            EvidenceValidator.resolvePath("001.png", sessionURL: root),
+            "archive/shots/001.png"
+        )
+        XCTAssertNil(ExportRel.existingSessionFile("archive/shots/trap/001.png", sessionURL: root))
     }
 
     func testKeywordTaskClipIsDroppedAfterExtraStills() throws {

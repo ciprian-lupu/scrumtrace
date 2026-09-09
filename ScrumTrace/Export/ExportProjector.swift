@@ -251,14 +251,11 @@ struct ExportProjector {
 
     #if os(macOS)
     private func transcodeJPEG(from: URL, destRelative: String, sessionURL: URL) throws -> String? {
-        let prefix = sessionURL.path.hasSuffix("/") ? sessionURL.path : sessionURL.path + "/"
-        guard from.path.hasPrefix(prefix) else { return nil }
-        let fromRel = String(from.path.dropFirst(prefix.count))
-        guard ExportRel.containedRelative(fromRel, sessionURL: sessionURL) != nil,
+        guard ExportRel.containedRelative(from, sessionRoot: sessionURL) != nil,
               let destRel = ExportRel.containedRelative(destRelative, sessionURL: sessionURL) else {
             return nil
         }
-        guard let image = NSImage(contentsOf: from) else { return nil }
+        guard let image = NSImage(contentsOf: from.resolvingSymlinksInPath()) else { return nil }
         guard let jpeg = ImageBase64.jpegData(
             from: image,
             maxEdge: CGFloat(MediaBudget.stillMaxWidth),
@@ -285,25 +282,19 @@ struct ExportProjector {
             omitted.append(OmittedAsset(path: from.lastPathComponent, reason: "Source missing in archive"))
             return nil
         }
-        let prefix = sessionURL.path.hasSuffix("/") ? sessionURL.path : sessionURL.path + "/"
-        guard from.path.hasPrefix(prefix), to.path.hasPrefix(prefix) else {
-            omitted.append(OmittedAsset(path: to.lastPathComponent, reason: "Copy path is outside the session folder"))
-            return nil
-        }
-        let fromRel = String(from.path.dropFirst(prefix.count))
-        let toRel = String(to.path.dropFirst(prefix.count))
-        guard ExportRel.containedRelative(fromRel, sessionURL: sessionURL) != nil,
-              ExportRel.containedRelative(toRel, sessionURL: sessionURL) != nil else {
+        guard ExportRel.containedRelative(from, sessionRoot: sessionURL) != nil,
+              let toRel = ExportRel.containedRelative(to, sessionRoot: sessionURL) else {
             omitted.append(OmittedAsset(path: to.lastPathComponent, reason: "Copy path escaped the session folder"))
             return nil
         }
-        try fileManager.createDirectory(at: to.deletingLastPathComponent(), withIntermediateDirectories: true)
-        if fileManager.fileExists(atPath: to.path) {
-            try fileManager.removeItem(at: to)
+        let dest = sessionURL.appendingPathComponent(toRel)
+        try fileManager.createDirectory(at: dest.deletingLastPathComponent(), withIntermediateDirectories: true)
+        if fileManager.fileExists(atPath: dest.path) {
+            try fileManager.removeItem(at: dest)
         }
         // Copy the resolved file so a contained symlink becomes a regular export
         // member instead of a link zip would follow.
-        try fileManager.copyItem(at: from.resolvingSymlinksInPath(), to: to)
+        try fileManager.copyItem(at: from.resolvingSymlinksInPath(), to: dest)
         return toRel
     }
 }

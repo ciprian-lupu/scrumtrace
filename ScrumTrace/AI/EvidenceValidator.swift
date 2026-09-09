@@ -131,15 +131,18 @@ enum EvidenceValidator {
     private static func firstMatch(name: String, stem: String, in root: URL, sessionURL: URL) -> String? {
         guard let enumerator = FileManager.default.enumerator(
             at: root,
-            includingPropertiesForKeys: [.isRegularFileKey],
+            includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey],
             options: [.skipsHiddenFiles]
         ) else { return nil }
-        let prefix = sessionURL.path.hasSuffix("/") ? sessionURL.path : sessionURL.path + "/"
         for case let url as URL in enumerator {
+            if (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+                continue
+            }
             guard (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true else { continue }
             if url.lastPathComponent == name || url.deletingPathExtension().lastPathComponent == stem {
-                let relative = url.path.replacingOccurrences(of: prefix, with: "")
-                return ExportRel.containedRelative(relative, sessionURL: sessionURL)
+                if let relative = ExportRel.containedRelative(url, sessionRoot: sessionURL) {
+                    return relative
+                }
             }
         }
         return nil

@@ -107,6 +107,10 @@ def test_frame_ref_basename_resolves() -> None:
         assert resolve("missing.png", root) is None
 
     validator = (ROOT / "ScrumTrace" / "AI" / "EvidenceValidator.swift").read_text()
+    first_match = validator.split("static func firstMatch")[1]
+    assert "isSymbolicLink" in first_match
+    assert "sessionRoot: sessionURL" in first_match
+    assert "replacingOccurrences(of: prefix" not in first_match
     assert "func resolvePath" in validator
     assert "func applyExportEvidence" in validator
     assert "unknown task kind" in validator
