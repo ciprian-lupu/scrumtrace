@@ -335,6 +335,10 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "updated.stills = [stillRelative]" not in clip
     slicer = (ROOT / "ScrumTrace" / "Slicing" / "MeetingSlicer.swift").read_text()
     assert 'copy.stills = ["\\(folder)/shot-1.jpg"]' not in slicer
+    assert "unionStills" in slicer
+    assert "if last.stills.isEmpty" not in slicer
+    processor = (ROOT / "ScrumTrace" / "Processing" / "SessionProcessor.swift").read_text()
+    assert "shotsLinked" in processor
     shot = (ROOT / "ScrumTrace" / "UI" / "ShotNoteWindow.swift").read_text()
     assert "let hadText = !note.isEmpty" in shot
     processor = (ROOT / "ScrumTrace" / "Processing" / "SessionProcessor.swift").read_text()
@@ -358,6 +362,13 @@ def test_phase45_clip_consent_and_budget() -> None:
     js = (ROOT / "ScrumTrace" / "Export" / "Resources" / "brief.js").read_text()
     assert 'box.setAttribute("aria-label", img.alt)' in js
     assert "box.focus()" in js
+    assert "event.target === box" in js
+    assert "lastOpener" in js
+    fallback_js = brief.split("let fallbackJS")[1]
+    assert "event.target === box" in fallback_js
+    assert "lastOpener" in fallback_js
+    assert 'box.addEventListener("click", close)' not in js
+    assert 'box.addEventListener("click", close)' not in fallback_js
     prompts = (ROOT / "ScrumTrace" / "AI" / "PromptTemplates.swift").read_text()
     assert 'wrapUntrusted("Human shot note' in prompts
     pbx = (ROOT / "ScrumTrace.xcodeproj" / "project.pbxproj").read_text()

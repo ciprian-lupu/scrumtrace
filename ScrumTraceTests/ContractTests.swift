@@ -296,6 +296,43 @@ final class ContractTests: XCTestCase {
         }
     }
 
+    func testMergedOverlappingShotsUnionStills() {
+        let shots = [
+            ShotRecord(
+                id: "shot-001",
+                tMedia: 10,
+                rawPath: "archive/shots/001.png",
+                annotatedPath: nil,
+                note: "save control",
+                source: .typed
+            ),
+            ShotRecord(
+                id: "shot-002",
+                tMedia: 28,
+                rawPath: "archive/shots/002.png",
+                annotatedPath: "archive/shots/002.annotated.png",
+                note: "ingest overlay",
+                source: .typed
+            )
+        ]
+        let slices = MeetingSlicer().slice(
+            shots: shots,
+            pins: [],
+            transcript: FullTranscript(sessionId: "s", language: "en", segments: []),
+            mediaDuration: 120
+        )
+        XCTAssertEqual(slices.count, 1)
+        XCTAssertEqual(
+            Set(slices[0].stills),
+            ["archive/shots/001.png", "archive/shots/002.annotated.png"]
+        )
+        XCTAssertEqual(slices[0].associatedShotId, "shot-001")
+        XCTAssertEqual(
+            MeetingSlicer.unionStills(["a.png", "b.png"], ["b.png", "c.png"]),
+            ["a.png", "b.png", "c.png"]
+        )
+    }
+
     func testSlicerDoesNotInventMissingStills() {
         let slices = MeetingSlicer().slice(
             shots: [],

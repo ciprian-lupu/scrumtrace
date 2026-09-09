@@ -356,7 +356,9 @@ final class SessionProcessor: @unchecked Sendable {
         configuration: AIProviderConfiguration
     ) async -> (SliceRecord, [TaskRecord]) {
         var slice = slice
-        let shot = manifest.shots.first { $0.id == slice.associatedShotId }
+        let linked = shotsLinked(to: slice, in: manifest)
+        let shot = linked.first
+        let shotNote = linked.map(\.note).filter { !$0.isEmpty }.joined(separator: "\n")
         if let aborted = abortedForAuth(slice: slice, shot: shot, product: manifest.productContext) {
             return aborted
         }
@@ -364,13 +366,18 @@ final class SessionProcessor: @unchecked Sendable {
         if !configuration.acceptsText {
             excerpt = ""
         }
-        var images = slice.stills.map { sessionURL.appendingPathComponent($0) }
-            .filter { FileManager.default.fileExists(atPath: $0.path) }
+        var images: [URL] = []
+        var seenImage = Set<String>()
+        func appendImage(_ relative: String) {
+            let url = sessionURL.appendingPathComponent(relative)
+            guard FileManager.default.fileExists(atPath: url.path), seenImage.insert(url.path).inserted else { return }
+            images.append(url)
+        }
         if let shot {
-            let shotURL = sessionURL.appendingPathComponent(shot.annotatedPath ?? shot.rawPath)
-            if FileManager.default.fileExists(atPath: shotURL.path) {
-                images.insert(shotURL, at: 0)
-            }
+            appendImage(shot.annotatedPath ?? shot.rawPath)
+        }
+        for still in slice.stills {
+            appendImage(still)
         }
         if !configuration.acceptsImages {
             images = []
@@ -395,7 +402,7 @@ final class SessionProcessor: @unchecked Sendable {
         let hasStill = !images.isEmpty
         // No still + no wired video upload → needs_review, do not drop the slice.
         if !ProviderWireMedia.willUploadClip(configuration: configuration)
-            && !hasStill && excerpt.isEmpty && (shot?.note.isEmpty ?? true) {
+            && !hasStill && excerpt.isEmpty && shotNote.isEmpty {
             slice.analysisStatus = .skipped
             return (
                 slice,
@@ -413,7 +420,7 @@ final class SessionProcessor: @unchecked Sendable {
             product: manifest.productContext,
             slice: slice,
             transcriptExcerpt: excerpt,
-            shotNote: shot?.note ?? "",
+            shotNote: shotNote,
             windowContext: vault.windowContext(
                 sessionId: manifest.sessionId,
                 start: slice.startMedia,
@@ -468,6 +475,7 @@ final class SessionProcessor: @unchecked Sendable {
                 status = .dropped
             }
             if shot != nil && status == .dropped {
+                // D7: a human Shot on this slice must stay visible.
                 status = .needsReview
             }
             if forceReview && status == .confirmed {
@@ -486,12 +494,9 @@ final class SessionProcessor: @unchecked Sendable {
                 status = .needsReview
             }
             let resolvedFrames = EvidenceValidator.existingPaths(candidate.frameReferences, sessionURL: sessionURL)
-            let evidence = resolvedFrames + slice.stills + [slice.clipPath].compactMap { $0 } + [shot?.annotatedPath ?? shot?.rawPath].compactMap { $0 }
-            var uniqueEvidence: [String] = []
-            var seenEvidence = Set<String>()
-            for path in evidence where seenEvidence.insert(path).inserted {
-                uniqueEvidence.append(path)
-            }
+            let uniqueEvidence = uniquedPaths(
+                resolvedFrames + slice.stills + [slice.clipPath].compactMap { $0 } + [shot?.annotatedPath ?? shot?.rawPath].compactMap { $0 }
+            )
             var instructions = AgentInstructionTemplate.render(
                 kind: candidate.kind,
                 product: product
@@ -530,7 +535,12 @@ final class SessionProcessor: @unchecked Sendable {
     }
 
     private func fallbackTask(shot: ShotRecord, slice: SliceRecord, error: Error?) -> TaskRecord {
-        TaskRecord(
+        var evidence = slice.stills
+        evidence.append(shot.annotatedPath ?? shot.rawPath)
+        if let clip = slice.clipPath {
+            evidence.append(clip)
+        }
+        return TaskRecord(
             taskId: "TASK-SHOT",
             sourceSliceId: slice.sliceId,
             kind: .bug,
@@ -541,7 +551,7 @@ final class SessionProcessor: @unchecked Sendable {
             inferred: error.map { "Analysis unavailable: \($0.localizedDescription)" } ?? "Requires manual review.",
             agentInstructions: "[Requires Manual Review - API Offline] Inspect the linked evidence only.",
             quotes: [],
-            evidenceMedia: [shot.annotatedPath ?? shot.rawPath, slice.clipPath].compactMap { $0 },
+            evidenceMedia: uniquedPaths(evidence),
             confidence: 0
         )
     }
@@ -558,9 +568,35 @@ final class SessionProcessor: @unchecked Sendable {
             inferred: error.localizedDescription,
             agentInstructions: "[Requires Manual Review - API Offline] \(AgentInstructionTemplate.render(kind: .unknown, product: product))",
             quotes: [],
-            evidenceMedia: slice.stills + [slice.clipPath].compactMap { $0 },
+            evidenceMedia: uniquedPaths(slice.stills + [slice.clipPath].compactMap { $0 }),
             confidence: 0
         )
+    }
+
+    /// Shots whose stills landed on this slice after overlap merge, plus `associatedShotId`.
+    private func shotsLinked(to slice: SliceRecord, in manifest: SessionManifest) -> [ShotRecord] {
+        var out: [ShotRecord] = []
+        var seen = Set<String>()
+        func append(_ shot: ShotRecord?) {
+            guard let shot, seen.insert(shot.id).inserted else { return }
+            out.append(shot)
+        }
+        if let id = slice.associatedShotId {
+            append(manifest.shots.first { $0.id == id })
+        }
+        for still in slice.stills {
+            append(manifest.shots.first { $0.rawPath == still || $0.annotatedPath == still })
+        }
+        return out
+    }
+
+    private func uniquedPaths(_ paths: [String]) -> [String] {
+        var seen = Set<String>()
+        var out: [String] = []
+        for path in paths where !path.isEmpty && seen.insert(path).inserted {
+            out.append(path)
+        }
+        return out
     }
 
     private func abortedForAuth(

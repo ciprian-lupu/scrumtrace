@@ -80,20 +80,30 @@ struct MeetingSlicer {
         }
     }
 
+    /// Human Shot stills stay on the merged slice even when the later window
+    /// loses the clip center (D7). Unique paths, first-seen order.
+    static func unionStills(_ lhs: [String], _ rhs: [String]) -> [String] {
+        var seen = Set<String>()
+        var out: [String] = []
+        for path in lhs + rhs {
+            guard !path.isEmpty, seen.insert(path).inserted else { continue }
+            out.append(path)
+        }
+        return out
+    }
+
     private func mergeOverlapping(_ slices: [SliceRecord], mediaDuration: TimeInterval) -> [SliceRecord] {
         let sorted = slices.sorted { $0.startMedia < $1.startMedia }
         var result: [SliceRecord] = []
         for slice in sorted {
             if var last = result.last, overlaps(last, slice) {
+                last.stills = Self.unionStills(last.stills, slice.stills)
                 if slice.score > last.score {
                     last.trigger = slice.trigger
                     last.associatedShotId = slice.associatedShotId ?? last.associatedShotId
                     last.score = slice.score
-                    if last.stills.isEmpty {
-                        last.stills = slice.stills
-                    }
-                } else if last.stills.isEmpty {
-                    last.stills = slice.stills
+                } else if last.associatedShotId == nil {
+                    last.associatedShotId = slice.associatedShotId
                 }
                 let combinedStart = min(last.startMedia, slice.startMedia)
                 let combinedEnd = max(last.endMedia, slice.endMedia)

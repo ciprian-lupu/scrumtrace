@@ -188,9 +188,10 @@ figcaption { font-family: "IBM Plex Mono", monospace; font-size: 11px; color: va
   place-items: center;
   z-index: 20;
   padding: 24px;
+  cursor: zoom-out;
 }
 .lightbox.open { display: grid; }
-.lightbox img { max-width: min(92vw, 1400px); max-height: 92vh; }
+.lightbox img { max-width: min(92vw, 1400px); max-height: 92vh; cursor: default; }
 
 @media (max-width: 860px) {
   .shell { margin-left: 0; padding: 18px 18px 64px; }
