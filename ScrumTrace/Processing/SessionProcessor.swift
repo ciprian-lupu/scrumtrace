@@ -593,7 +593,8 @@ final class SessionProcessor: @unchecked Sendable {
         )
     }
 
-    /// Shots whose stills landed on this slice after overlap merge, plus `associatedShotId`.
+    /// Shots on this slice after overlap merge: associated id, still-path
+    /// overlap, or `t_media` inside the (possibly clamped) window (D7).
     private func shotsLinked(to slice: SliceRecord, in manifest: SessionManifest) -> [ShotRecord] {
         var out: [ShotRecord] = []
         var seen = Set<String>()
@@ -608,6 +609,9 @@ final class SessionProcessor: @unchecked Sendable {
             append(manifest.shots.first { shot in
                 shot.stillCandidates.contains(still) || shot.rawPath == still || shot.annotatedPath == still
             })
+        }
+        for shot in manifest.shots where shot.tMedia >= slice.startMedia && shot.tMedia <= slice.endMedia {
+            append(shot)
         }
         return out
     }
@@ -764,16 +768,21 @@ final class SessionProcessor: @unchecked Sendable {
         return TaskRanking.selectForPack(tasks)
     }
 
-    /// Match a Shot to its slice by `associated_shot_id`, then by still-path overlap
-    /// after an overlapping merge dropped the second shot's id (D7).
+    /// Match a Shot to its slice by `associated_shot_id`, then still-path
+    /// overlap, then `t_media` inside the slice window after a clamp (D7).
     private func sliceMatching(_ shot: ShotRecord, in manifest: SessionManifest) -> SliceRecord? {
         if let match = manifest.slices.first(where: { $0.associatedShotId == shot.id }) {
             return match
         }
-        return manifest.slices.first { slice in
+        if let match = manifest.slices.first(where: { slice in
             slice.stills.contains { still in
                 shot.stillCandidates.contains(still) || shot.rawPath == still || shot.annotatedPath == still
             }
+        }) {
+            return match
+        }
+        return manifest.slices.first { slice in
+            shot.tMedia >= slice.startMedia && shot.tMedia <= slice.endMedia
         }
     }
 

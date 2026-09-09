@@ -80,7 +80,7 @@ final class SessionController: ObservableObject {
         // before MainActor sets `.paused`; Opt+⌘P must not take the Pause
         // branch and clear `pausedByPrivacy` (C1).
         if captureState == .paused {
-            if privacy.isCurrentlyTripped {
+            if privacy.isCurrentlyTripped || privacy.currentCredentialApp() != nil {
                 statusLine = "Still auto-paused for a password manager"
                 return
             }
@@ -123,7 +123,9 @@ final class SessionController: ObservableObject {
     }
 
     var canResumeFromPause: Bool {
-        phase == .paused && !privacy.isCurrentlyTripped
+        phase == .paused
+            && !privacy.isCurrentlyTripped
+            && privacy.currentCredentialApp() == nil
     }
 
     func openShot() {
@@ -220,22 +222,39 @@ final class SessionController: ObservableObject {
             let recorder = SessionRecorder(sessionURL: created.url, clock: clock)
             captureFreeze.attach(recorder)
             do {
-                try await recorder.start()
+                try await recorder.start(shouldPauseCapture: { [privacy] in
+                    privacy.currentCredentialApp() != nil
+                })
             } catch {
                 captureFreeze.attach(nil)
                 clock.reset()
                 throw error
             }
             self.recorder = recorder
-            phase = .recording
-            statusLine = "Recording"
+            if let bundle = privacy.currentCredentialApp() {
+                recorder.setPaused(true)
+                sampler.isSuspended = true
+                pausedByPrivacy = true
+                phase = .paused
+                statusLine = "Auto-paused for \(bundle)"
+                log(.privacyPause, ["bundle": bundle])
+                NotificationCenter.default.post(name: .scrumTraceCaptureGate, object: CaptureSessionState.paused)
+            } else {
+                if recorder.isPaused {
+                    recorder.setPaused(false)
+                }
+                phase = .recording
+                statusLine = "Recording"
+            }
             if var local = manifest {
                 local.pipelineStatus = .recording
                 try? vault.write(manifest: &local)
                 manifest = local
             }
             privacy.start()
-            sampler.isSuspended = false
+            if phase == .recording {
+                sampler.isSuspended = false
+            }
             startTimer()
             log(.start, [:])
             let model = settings.whisperModel
@@ -545,8 +564,19 @@ final class SessionController: ObservableObject {
 
     private func privacyPause(bundle: String) {
         guard isRecording else { return }
+        if !privacy.isCurrentlyTripped && privacy.currentCredentialApp() == nil {
+            // CaptureFreeze paused the writer on the timer queue. If the
+            // credential app is already gone before this MainActor hop,
+            // do not stick in a paused writer with phase still `.recording`.
+            unstickWriterIfPrivacyMissed()
+            return
+        }
         if phase == .paused {
-            statusLine = "Still auto-paused for a password manager"
+            // User Pause already owns the session. Do not steal Resume by
+            // setting `pausedByPrivacy`, and do not overwrite the HUD line.
+            if pausedByPrivacy {
+                statusLine = "Still auto-paused for a password manager"
+            }
             return
         }
         pausedByPrivacy = true
@@ -559,14 +589,28 @@ final class SessionController: ObservableObject {
     }
 
     private func privacyResume() {
-        guard pausedByPrivacy, phase == .paused, isRecording else { return }
-        if privacy.isCurrentlyTripped { return }
-        pausedByPrivacy = false
+        guard isRecording else { return }
+        if privacy.isCurrentlyTripped || privacy.currentCredentialApp() != nil { return }
+        if pausedByPrivacy, phase == .paused {
+            pausedByPrivacy = false
+            recorder?.setPaused(false)
+            sampler.isSuspended = false
+            phase = .recording
+            statusLine = "Recording"
+            log(.resume, ["reason": "privacy_clear"])
+            NotificationCenter.default.post(name: .scrumTraceCaptureGate, object: CaptureSessionState.recording)
+            return
+        }
+        unstickWriterIfPrivacyMissed()
+    }
+
+    /// Writer paused by CaptureFreeze, phase not yet `.paused`, credential app gone.
+    /// Do not treat a user Pause (`phase == .paused`, `pausedByPrivacy == false`) as this.
+    private func unstickWriterIfPrivacyMissed() {
+        guard !pausedByPrivacy, phase == .recording, recorder?.isPaused == true else { return }
         recorder?.setPaused(false)
         sampler.isSuspended = false
-        phase = .recording
         statusLine = "Recording"
-        log(.resume, ["reason": "privacy_clear"])
         NotificationCenter.default.post(name: .scrumTraceCaptureGate, object: CaptureSessionState.recording)
     }
 

@@ -553,7 +553,11 @@ def test_pipeline_timing_stays_in_archive() -> None:
     assert "clock.reset()" in start_rec
     assert "captureFreeze.attach(nil)" in start_rec
     assert "pipelineStatus = .recording" in start_rec
-    assert start_rec.index("try await recorder.start()") < start_rec.index("pipelineStatus = .recording")
+    assert start_rec.index("try await recorder.start(") < start_rec.index("pipelineStatus = .recording")
+    assert "shouldPauseCapture" in start_rec
+    assert "currentCredentialApp" in start_rec
+    assert start_rec.index("shouldPauseCapture") < start_rec.index("privacy.start()")
+    assert start_rec.index("privacy.start()") < start_rec.index("phase == .recording")
     assert "transcriber.prepare" in controller
     hud = (ROOT / "ScrumTrace" / "UI" / "RecordingHUDWindow.swift").read_text()
     assert "wallElapsed" in hud
@@ -621,6 +625,8 @@ def test_pause_privacy_and_metadata_gate() -> None:
     resume_ok = controller.split("var canResumeFromPause")[1].split("func openShot")[0]
     assert "phase == .paused" in resume_ok
     assert "captureState == .paused" not in resume_ok
+    assert "currentCredentialApp" in resume_ok
+    assert toggle.index("isCurrentlyTripped") < toggle.index("currentCredentialApp")
     assert "Stills and transcript excerpts" in controller
     assert "clip audio will leave this Mac" in controller
     assert "and clip video will leave this Mac" not in controller
@@ -675,7 +681,20 @@ def test_pause_privacy_and_metadata_gate() -> None:
     assert "unknown task kind" in validator
     processor = (ROOT / "ScrumTrace" / "Processing" / "SessionProcessor.swift").read_text()
     assert "kind: candidate.kind == .unknown ? .bug" not in processor
-    assert "phase == .paused" in controller.split("private func privacyPause")[1].split("private func privacyResume")[0]
+    pause_priv = controller.split("private func privacyPause")[1].split("private func privacyResume")[0]
+    assert "phase == .paused" in pause_priv
+    assert "isCurrentlyTripped" in pause_priv
+    assert "currentCredentialApp" in pause_priv
+    assert "unstickWriterIfPrivacyMissed" in pause_priv
+    assert pause_priv.index("phase == .paused") < pause_priv.index("pausedByPrivacy = true")
+    resume_priv = controller.split("func privacyResume")[1].split("func startTimer")[0]
+    assert "pausedByPrivacy, phase == .paused" in resume_priv
+    assert "unstickWriterIfPrivacyMissed" in resume_priv
+    assert "currentCredentialApp" in resume_priv
+    unstick = controller.split("func unstickWriterIfPrivacyMissed")[1].split("func startTimer")[0]
+    assert "phase == .recording" in unstick
+    assert "recorder?.isPaused == true" in unstick
+    assert "!pausedByPrivacy" in unstick
 
 
 def test_phase45_clip_consent_and_budget() -> None:
@@ -820,6 +839,9 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "shotsLinked" in processor
     linked = processor.split("func shotsLinked")[1].split("private func uniquedPaths")[0]
     assert "stillCandidates" in linked
+    assert "tMedia >= slice.startMedia" in linked
+    match_fn = processor.split("func sliceMatching")[1].split("func refreshShotsFromDisk")[0]
+    assert "tMedia >= slice.startMedia" in match_fn
     append = processor.split("func appendImage")[1].split("if !configuration.acceptsImages")[0]
     assert "existingSessionFile" in append
     assert "fileExists(atPath: url.path)" not in append
@@ -898,11 +920,13 @@ def test_phase45_clip_consent_and_budget() -> None:
     task_decode = models.split("struct TaskRecord")[1].split("struct CandidateRecord")[0]
     assert "decodeIfPresent([QuoteRecord]" in task_decode
     recorder = (ROOT / "ScrumTrace" / "Capture" / "SessionRecorder.swift").read_text()
-    start_fn = recorder.split("func start()")[1].split("func setPaused")[0]
+    start_fn = recorder.split("func start(shouldPauseCapture")[1].split("func abortFailedStart")[0]
     assert "self.started = true" in start_fn
     assert "startCapture" in start_fn
+    assert "shouldPauseCapture" in start_fn
     assert start_fn.index("self.started = true") < start_fn.index("startCapture")
-    assert "abortFailedStart" in start_fn
+    assert start_fn.index("pauseNow") < start_fn.index("startCapture")
+    assert start_fn.index("self.paused = true") < start_fn.index("startCapture")
     abort_start = recorder.split("func abortFailedStart")[1].split("func setPaused")[0]
     assert "self.started = false" in abort_start
     assert "snapshot.engine?.stop()" in abort_start

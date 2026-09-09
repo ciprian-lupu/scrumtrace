@@ -45,7 +45,7 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         writerQueue.sync { paused }
     }
 
-    func start() async throws {
+    func start(shouldPauseCapture: @escaping () -> Bool = { false }) async throws {
         try await requestPermission()
         let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
         guard let display = content.displays.first else {
@@ -99,10 +99,18 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
                     mic = false
                 }
             }
+            // Evaluate the privacy gate after writers exist and before the
+            // first SCStream buffer: a credential app that was already front
+            // (or that appeared during the permission sheet) must not hit disk.
+            let pauseNow = shouldPauseCapture()
             writerQueue.sync {
                 self.microphoneWav = mic
                 self.stream = stream
                 self.started = true
+                if pauseNow {
+                    self.paused = true
+                    self.clock.beginPause()
+                }
             }
             try await stream.startCapture()
         } catch {
