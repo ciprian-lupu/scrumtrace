@@ -313,8 +313,12 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         }
         let movieURL = sessionURL.appendingPathComponent(movieRel)
         let wavURL = sessionURL.appendingPathComponent(wavRel)
-        try? FileManager.default.removeItem(at: movieURL)
-        try? FileManager.default.removeItem(at: wavURL)
+        try ExportRel.removeItemIfRegularFile(movieURL, sessionRoot: sessionURL)
+        try ExportRel.removeItemIfRegularFile(wavURL, sessionRoot: sessionURL)
+        if (try? movieURL.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true
+            || (try? wavURL.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+            throw SessionRecorderError.writerFailed("archive capture paths escaped the session folder.")
+        }
 
         let w = max(width - width % 2, 2)
         let h = max(height - height % 2, 2)

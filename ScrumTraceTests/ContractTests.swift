@@ -94,6 +94,42 @@ final class ContractTests: XCTestCase {
         XCTAssertNotEqual((try dest.resourceValues(forKeys: [.isSymbolicLinkKey])).isSymbolicLink, true)
     }
 
+    func testRemoveItemIfRegularFileUnlinksDestSymlinkWithoutFollowing() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("st-rm-\(UUID().uuidString)")
+        let export = root.appendingPathComponent("export")
+        let archive = root.appendingPathComponent("archive")
+        try FileManager.default.createDirectory(at: export, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: archive, withIntermediateDirectories: true)
+        let secret = archive.appendingPathComponent("session.mp4")
+        try Data("MASTER".utf8).write(to: secret)
+        let planted = export.appendingPathComponent("session-pack.zip")
+        try FileManager.default.createSymbolicLink(at: planted, withDestinationURL: secret)
+        try ExportRel.removeItemIfRegularFile(planted, sessionRoot: root)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: planted.path))
+        XCTAssertEqual(try String(contentsOf: secret, encoding: .utf8), "MASTER")
+        try? FileManager.default.removeItem(at: root)
+    }
+
+    func testVaultWriteReplacesManifestSymlinkWithoutFollowing() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("st-vault-man-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let vault = SessionVault(rootURL: root)
+        let created = try vault.createSession(product: .empty)
+        var manifest = created.manifest
+        let session = vault.sessionURL(id: manifest.sessionId)
+        let dest = session.appendingPathComponent(ScrumTracePath.manifest)
+        let secret = root.appendingPathComponent("outside-manifest.json")
+        try Data("DO-NOT-OVERWRITE".utf8).write(to: secret)
+        try FileManager.default.removeItem(at: dest)
+        try FileManager.default.createSymbolicLink(at: dest, withDestinationURL: secret)
+        manifest.pipelineStatus = .completed
+        try vault.write(manifest: &manifest)
+        XCTAssertEqual(try String(contentsOf: secret, encoding: .utf8), "DO-NOT-OVERWRITE")
+        XCTAssertNotEqual((try dest.resourceValues(forKeys: [.isSymbolicLinkKey])).isSymbolicLink, true)
+        let loaded = try vault.loadManifest(id: manifest.sessionId)
+        XCTAssertEqual(loaded.pipelineStatus, .completed)
+    }
+
     func testIsAllowedClipDestRejectsMasterMovie() {
         XCTAssertTrue(ExportRel.isAllowedClipDest("archive/media-work/task-01/clip.mp4"))
         XCTAssertTrue(ExportRel.isAllowedClipDest("export/media/task-01/clip.mp4"))

@@ -33,7 +33,13 @@ struct ClipExporter {
             throw SessionRecorderError.writerFailed("Slice clip_path escaped the session folder.")
         }
         let clipURL = sessionURL.appendingPathComponent(prepared)
-        try await reencode(source: source, destination: clipURL, slice: slice, mediaDuration: mediaDuration)
+        try await reencode(
+            source: source,
+            destination: clipURL,
+            slice: slice,
+            mediaDuration: mediaDuration,
+            sessionURL: sessionURL
+        )
 
         var updated = slice
         updated.clipPath = prepared
@@ -140,15 +146,19 @@ struct ClipExporter {
         source: URL,
         destination: URL,
         slice: SliceRecord,
-        mediaDuration: TimeInterval
+        mediaDuration: TimeInterval,
+        sessionURL: URL
     ) async throws {
-        try? FileManager.default.removeItem(at: destination)
+        try ExportRel.removeItemIfRegularFile(destination, sessionRoot: sessionURL)
+        if (try? destination.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+            throw SessionRecorderError.writerFailed("Slice clip_path escaped the session folder.")
+        }
         let range = try clipTimeRange(slice: slice, mediaDuration: mediaDuration)
         let asset = AVURLAsset(url: source)
         do {
             try await writeMainProfileClip(asset: asset, destination: destination, timeRange: range)
         } catch {
-            try? FileManager.default.removeItem(at: destination)
+            try ExportRel.removeItemIfRegularFile(destination, sessionRoot: sessionURL)
             try await exportPresetClip(asset: asset, destination: destination, timeRange: range)
         }
     }

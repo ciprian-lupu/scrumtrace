@@ -91,11 +91,7 @@ struct SessionPackZipper {
         )
         let dest = sessionURL.appendingPathComponent(ScrumTracePath.omitted)
         if omitted.isEmpty {
-            if (try? dest.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
-                try? FileManager.default.removeItem(at: dest)
-            } else if ExportRel.isContainedRegularFile(dest, sessionRoot: sessionURL) {
-                try? FileManager.default.removeItem(at: dest)
-            }
+            try ExportRel.removeItemIfRegularFile(dest, sessionRoot: sessionURL)
             return
         }
         let lines = ["# Omitted from export", ""] + omitted.map {
@@ -123,8 +119,9 @@ struct SessionPackZipper {
             sessionURL: sessionURL
         )
         let dest = sessionURL.appendingPathComponent(destRel)
-        if ExportRel.isContainedRegularFile(dest, sessionRoot: sessionURL) {
-            try FileManager.default.removeItem(at: dest)
+        try ExportRel.removeItemIfRegularFile(dest, sessionRoot: sessionURL)
+        if (try? dest.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+            throw SessionRecorderError.writerFailed("Pack zip dest escaped the session folder.")
         }
         let members = PackBudget.allowList(
             exportDir: exportDir,

@@ -121,10 +121,22 @@ final class SessionVault: @unchecked Sendable {
         }
         let data = try encoder.encode(manifest)
         try data.write(to: tmp, options: .atomic)
-        if fileManager.fileExists(atPath: url.path) {
-            _ = try fileManager.replaceItemAt(url, withItemAt: tmp)
-        } else {
+        if (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+            try fileManager.removeItem(at: url)
+        }
+        try ExportRel.removeItemIfRegularFile(url, sessionRoot: dir)
+        if (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+            try? fileManager.removeItem(at: tmp)
+            throw SessionVaultError.writeFailed(ScrumTracePath.manifest)
+        }
+        do {
             try fileManager.moveItem(at: tmp, to: url)
+        } catch {
+            try? fileManager.removeItem(at: tmp)
+            throw error
+        }
+        guard ExportRel.isContainedRegularFile(url, sessionRoot: dir) else {
+            throw SessionVaultError.writeFailed(ScrumTracePath.manifest)
         }
     }
 
@@ -142,10 +154,7 @@ final class SessionVault: @unchecked Sendable {
         }
         var data = try eventEncoder.encode(event)
         data.append(contentsOf: [0x0A])
-        if fileManager.fileExists(atPath: url.path) {
-            guard ExportRel.isContainedRegularFile(url, sessionRoot: session) else {
-                throw SessionVaultError.writeFailed("events.jsonl")
-            }
+        if ExportRel.isContainedRegularFile(url, sessionRoot: session) {
             let handle = try FileHandle(forWritingTo: url)
             defer { try? handle.close() }
             try handle.seekToEnd()

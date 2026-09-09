@@ -208,6 +208,10 @@ def test_clip_exporter_macos14() -> None:
     assert "fileLengthLimit" in clip
     assert "clipVideoBitrate" in clip
     assert "AVVideoProfileLevelH264MainAutoLevel" in clip
+    reencode = clip.split("func reencode")[1].split("func clipTimeRange")[0]
+    assert "removeItemIfRegularFile(destination, sessionRoot: sessionURL)" in reencode
+    assert "try? FileManager.default.removeItem(at: destination)" not in reencode
+    assert "sessionURL: URL" in reencode
     assert "writeMainProfileClip" in clip
     assert "loadTracks(withMediaType:" in clip
     assert "asset.tracks(withMediaType:" not in clip
@@ -393,7 +397,8 @@ def test_pipeline_timing_stays_in_archive() -> None:
     run_zip = zipper.split("func runZip")[1].split("enum PackBudget")[0]
     assert "prepareContainedWrite" in run_zip
     assert "ScrumTracePath.packZip" in run_zip
-    assert "isContainedRegularFile" in run_zip
+    assert "removeItemIfRegularFile" in run_zip
+    assert "isSymbolicLink" in run_zip
     assert "dest.path" in run_zip
     zip_fn = zipper.split("func zip(")[1].split("func writeZip")[0]
     assert "removeEscapingExportLinks" in zip_fn
@@ -699,6 +704,9 @@ def test_phase45_clip_consent_and_budget() -> None:
     prepare = recorder.split("func prepareWriters")[1].split("func startMicrophoneFallback")[0]
     assert "prepareContainedWrite" in prepare
     assert "archive capture paths escaped" in prepare
+    assert "removeItemIfRegularFile(movieURL, sessionRoot: sessionURL)" in prepare
+    assert "removeItemIfRegularFile(wavURL, sessionRoot: sessionURL)" in prepare
+    assert "try? FileManager.default.removeItem(at: movieURL)" not in prepare
     assert "config.width = size.width" in start_fn
     assert "config.height = size.height" in start_fn
     assert "AVVideoWidthKey: w" in recorder
@@ -746,6 +754,12 @@ def test_write_contained_data_refuses_directory_symlinks() -> None:
     assert "prepareContainedWrite" in write_fn
     assert "options: .atomic" in write_fn
     assert "isContainedRegularFile" in write_fn
+    assert "removeItemIfRegularFile" in write_fn
+    assert "replaceItemAt" not in write_fn
+    assert "moveItem(at: tmp, to: dest)" in write_fn
+    assert "temporaryDirectory" in write_fn
+    assert "scrumtrace-write" in write_fn
+    assert "static func removeItemIfRegularFile" in models
     rel = models.split("static func containedRelative(_ path: String, sessionURL: URL)")[1].split("static func existingSessionFile")[0]
     assert "isSymbolicLink" in rel
     assert "func unfollowedRelative" in models
@@ -772,6 +786,13 @@ def test_write_contained_data_refuses_directory_symlinks() -> None:
     write_man = vault.split("func write(manifest")[1].split("func appendEvent")[0]
     tmp_block = write_man.split("appendingPathExtension")[1].split("encoder.encode")[0]
     assert "isSymbolicLink" in tmp_block
+    assert "fileExists(atPath: url.path)" not in write_man
+    assert "replaceItemAt" not in write_man
+    assert "removeItemIfRegularFile(url, sessionRoot: dir)" in write_man
+    assert "isContainedRegularFile" in write_man
+    append_ev = vault.split("func appendEvent")[1].split("func recentSessions")[0]
+    assert "fileExists(atPath: url.path)" not in append_ev
+    assert "isContainedRegularFile" in append_ev
     assert "containsSymlinkComponent" in vault.split("func nextShotIndex")[1].split("func loadPinTimes")[0]
 
 

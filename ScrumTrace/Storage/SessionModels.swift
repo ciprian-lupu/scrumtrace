@@ -248,12 +248,33 @@ enum ExportRel {
     /// Write bytes under the session folder. A dest symlink is removed first so
     /// the write cannot follow out of `archive/` or `export/`. Intermediate
     /// directory symlinks are refused (a planted `archive/` → `export/` link
-    /// must not receive Whisper JSON).
+    /// must not receive Whisper JSON). Bytes land in the system temp folder,
+    /// then `moveItem` replaces the dest. Do not exchange the dest with an API
+    /// that follows a dest symlink planted between prepare and write. A
+    /// `.write-tmp` next to the dest would otherwise be enumerable into the zip
+    /// allow-list.
     static func writeContainedData(_ data: Data, relative: String, sessionURL: URL) throws {
         let destRel = try prepareContainedWrite(relative: relative, sessionURL: sessionURL)
         let dest = sessionURL.appendingPathComponent(destRel)
-        try data.write(to: dest, options: .atomic)
+        let tmp = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "scrumtrace-write-\(UUID().uuidString)"
+        )
+        if (try? tmp.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+            try FileManager.default.removeItem(at: tmp)
+        }
+        do {
+            try data.write(to: tmp, options: .atomic)
+            try removeItemIfRegularFile(dest, sessionRoot: sessionURL)
+            if (try? dest.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+                throw SessionVaultError.writeFailed(relative)
+            }
+            try FileManager.default.moveItem(at: tmp, to: dest)
+        } catch {
+            try? FileManager.default.removeItem(at: tmp)
+            throw error
+        }
         guard isContainedRegularFile(dest, sessionRoot: sessionURL) else {
+            try? removeItemIfRegularFile(dest, sessionRoot: sessionURL)
             throw SessionVaultError.writeFailed(relative)
         }
     }
@@ -276,6 +297,19 @@ enum ExportRel {
     static func parentIsSymbolicLink(_ file: URL) -> Bool {
         let parent = file.deletingLastPathComponent()
         return (try? parent.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true
+    }
+
+    /// Deletes `file` only when it is a symbolic link (the link inode, not the
+    /// target) or a regular file still inside `sessionRoot`. Used instead of
+    /// `replaceItemAt` / unguarded `removeItem` so a planted dest cannot steer
+    /// a write into `archive/` or a sibling tree.
+    static func removeItemIfRegularFile(_ file: URL, sessionRoot: URL) throws {
+        if (try? file.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+            try FileManager.default.removeItem(at: file)
+            return
+        }
+        guard isContainedRegularFile(file, sessionRoot: sessionRoot) else { return }
+        try FileManager.default.removeItem(at: file)
     }
 }
 
