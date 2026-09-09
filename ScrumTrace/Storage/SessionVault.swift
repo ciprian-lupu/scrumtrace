@@ -88,10 +88,14 @@ final class SessionVault: @unchecked Sendable {
             ScrumTracePath.media,
             ScrumTracePath.mediaWork
         ] {
-            try fileManager.createDirectory(
-                at: url.appendingPathComponent(folder),
-                withIntermediateDirectories: true
-            )
+            let dest = url.appendingPathComponent(folder)
+            if (try? dest.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+                try fileManager.removeItem(at: dest)
+            }
+            try fileManager.createDirectory(at: dest, withIntermediateDirectories: true)
+            if (try? dest.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+                throw SessionVaultError.writeFailed(folder)
+            }
         }
         var manifest = SessionManifest.makeNew(sessionId: id, product: product)
         try write(manifest: &manifest)
@@ -126,33 +130,12 @@ final class SessionVault: @unchecked Sendable {
         if (try? dir.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
             throw SessionVaultError.writeFailed("session folder")
         }
-        let url = dir.appendingPathComponent(ScrumTracePath.manifest)
-        if (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
-            try fileManager.removeItem(at: url)
-        }
-        let tmp = url.appendingPathExtension("tmp")
-        if (try? tmp.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
-            try fileManager.removeItem(at: tmp)
-        }
         let data = try encoder.encode(manifest)
-        try data.write(to: tmp, options: .atomic)
-        if (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
-            try fileManager.removeItem(at: url)
-        }
-        try ExportRel.removeItemIfRegularFile(url, sessionRoot: dir)
-        if (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
-            try? fileManager.removeItem(at: tmp)
-            throw SessionVaultError.writeFailed(ScrumTracePath.manifest)
-        }
-        do {
-            try fileManager.moveItem(at: tmp, to: url)
-        } catch {
-            try? fileManager.removeItem(at: tmp)
-            throw error
-        }
-        guard ExportRel.isContainedRegularFile(url, sessionRoot: dir) else {
-            throw SessionVaultError.writeFailed(ScrumTracePath.manifest)
-        }
+        try ExportRel.writeContainedData(
+            data,
+            relative: ScrumTracePath.manifest,
+            sessionURL: dir
+        )
     }
 
     func appendEvent(_ event: SessionEvent, sessionId: String) throws {
@@ -170,16 +153,14 @@ final class SessionVault: @unchecked Sendable {
         guard ExportRel.containedRelative(ScrumTracePath.events, sessionURL: session) == ScrumTracePath.events else {
             throw SessionVaultError.writeFailed("events.jsonl")
         }
+        var payload = Data()
+        if ExportRel.isContainedRegularFile(url, sessionRoot: session) {
+            payload = try Data(contentsOf: url)
+        }
         var data = try eventEncoder.encode(event)
         data.append(contentsOf: [0x0A])
-        if ExportRel.isContainedRegularFile(url, sessionRoot: session) {
-            let handle = try FileHandle(forWritingTo: url)
-            defer { try? handle.close() }
-            try handle.seekToEnd()
-            try handle.write(contentsOf: data)
-        } else {
-            try ExportRel.writeContainedData(data, relative: ScrumTracePath.events, sessionURL: session)
-        }
+        payload.append(data)
+        try ExportRel.writeContainedData(payload, relative: ScrumTracePath.events, sessionURL: session)
     }
 
     func recentSessions(limit: Int = 12) -> [SessionManifest] {

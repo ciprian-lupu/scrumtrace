@@ -212,6 +212,86 @@ final class ContractTests: XCTestCase {
         XCTAssertTrue(vault.recentSessions().isEmpty)
     }
 
+    func testVaultWriteRefusesSessionFolderSymlink() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("st-write-sess-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let vault = SessionVault(rootURL: root)
+        let created = try vault.createSession(product: .empty)
+        var manifest = created.manifest
+        let session = vault.sessionURL(id: manifest.sessionId)
+        let outside = FileManager.default.temporaryDirectory.appendingPathComponent("st-write-outside-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: outside) }
+        try FileManager.default.copyItem(at: session, to: outside)
+        try FileManager.default.removeItem(at: session)
+        try FileManager.default.createSymbolicLink(at: session, withDestinationURL: outside)
+        manifest.pipelineStatus = .completed
+        XCTAssertThrowsError(try vault.write(manifest: &manifest))
+        let planted = try String(
+            contentsOf: outside.appendingPathComponent(ScrumTracePath.manifest),
+            encoding: .utf8
+        )
+        XCTAssertFalse(planted.contains("completed"))
+    }
+
+    func testAppendEventRewritesWithoutFollowingDestSymlink() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("st-append-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let vault = SessionVault(rootURL: root)
+        let created = try vault.createSession(product: .empty)
+        let session = vault.sessionURL(id: created.manifest.sessionId)
+        let dest = session.appendingPathComponent(ScrumTracePath.events)
+        let secret = FileManager.default.temporaryDirectory.appendingPathComponent("st-append-secret-\(UUID().uuidString).jsonl")
+        defer { try? FileManager.default.removeItem(at: secret) }
+        try Data("DO-NOT-APPEND\n").write(to: secret)
+        try? FileManager.default.removeItem(at: dest)
+        try FileManager.default.createSymbolicLink(at: dest, withDestinationURL: secret)
+        let event = SessionEvent(tWall: 1, tMedia: 1, kind: .pin, payload: ["k": "v"])
+        try vault.appendEvent(event, sessionId: created.manifest.sessionId)
+        XCTAssertEqual(try String(contentsOf: secret, encoding: .utf8), "DO-NOT-APPEND\n")
+        XCTAssertNotEqual((try dest.resourceValues(forKeys: [.isSymbolicLinkKey])).isSymbolicLink, true)
+        let text = try String(contentsOf: dest, encoding: .utf8)
+        XCTAssertTrue(text.contains("\"kind\":\"pin\"") || text.contains("\"kind\" : \"pin\"") || text.contains("pin"))
+    }
+
+    func testWriteContainedDataWritesCanonicalManifest() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("st-canon-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let secret = FileManager.default.temporaryDirectory.appendingPathComponent("st-canon-secret-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: secret) }
+        try Data("DO-NOT-OVERWRITE").write(to: secret)
+        let dest = root.appendingPathComponent(ScrumTracePath.manifest)
+        try FileManager.default.createSymbolicLink(at: dest, withDestinationURL: secret)
+        let payload = Data("{\"manifest_version\":\"1.1.0\"}".utf8)
+        try ExportRel.writeContainedData(payload, relative: ScrumTracePath.manifest, sessionURL: root)
+        XCTAssertEqual(try String(contentsOf: secret, encoding: .utf8), "DO-NOT-OVERWRITE")
+        XCTAssertEqual(try Data(contentsOf: dest), payload)
+        XCTAssertNotEqual((try dest.resourceValues(forKeys: [.isSymbolicLinkKey])).isSymbolicLink, true)
+        XCTAssertThrowsError(
+            try ExportRel.writeContainedData(Data("nope".utf8), relative: "evil.json", sessionURL: root)
+        )
+    }
+
+    func testPrepareContainedWriteRefusesSessionFolderSymlink() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("st-prep-sess-\(UUID().uuidString)")
+        let outside = FileManager.default.temporaryDirectory.appendingPathComponent("st-prep-out-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: outside.appendingPathComponent("archive"), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: root.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(at: root, withDestinationURL: outside)
+        defer {
+            try? FileManager.default.removeItem(at: root)
+            try? FileManager.default.removeItem(at: outside)
+        }
+        XCTAssertFalse(ExportRel.isUsableSessionRoot(root))
+        XCTAssertThrowsError(
+            try ExportRel.prepareContainedWrite(relative: "archive/full_transcript.json", sessionURL: root)
+        )
+        XCTAssertNil(ExportRel.containedRelative("archive/full_transcript.json", sessionURL: root))
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: outside.appendingPathComponent("archive/full_transcript.json").path)
+        )
+    }
+
     func testContainedRegularFileRejectsSymlinkEvenIfTargetIsInsideSession() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("scrumtrace-regular-\(UUID().uuidString)")
         let shots = root.appendingPathComponent("archive/shots")
@@ -1224,6 +1304,7 @@ final class ContractTests: XCTestCase {
             "archive/shots/001.png"
         )
         XCTAssertFalse(ExportRel.isReadableSessionFile(throughLink, sessionRoot: root))
+        XCTAssertFalse(ExportRel.isContainedRegularFile(throughLink, sessionRoot: root))
         XCTAssertNil(ExportRel.existingSessionFile("archive/shots/001.png", sessionURL: root))
         XCTAssertTrue(ExportRel.containsSymlinkComponent("archive/shots/001.png", sessionURL: root))
 

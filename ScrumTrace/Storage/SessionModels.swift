@@ -76,13 +76,24 @@ enum ExportRel {
 
     static func isUnderSession(_ path: String) -> Bool {
         guard let parts = normalizedComponents(path), let first = parts.first else { return false }
+        // Canonical SoT lives at the session root. Everything else is archive/ or export/.
+        if parts.count == 1, first == ScrumTracePath.manifest {
+            return true
+        }
         return (first == "archive" || first == "export") && parts.count >= 2
+    }
+
+    /// Session folder itself must be a real directory. A planted session → /tmp
+    /// link would otherwise make string-prefix containment succeed.
+    static func isUsableSessionRoot(_ sessionURL: URL) -> Bool {
+        (try? sessionURL.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) != true
     }
 
     /// Normalized session-relative path that still lives under the session folder.
     /// Any symlink in the relative path (including a planted `archive/` or `shots/`
     /// directory link) is refused so later writes cannot follow into another tree.
     static func containedRelative(_ path: String, sessionURL: URL) -> String? {
+        guard isUsableSessionRoot(sessionURL) else { return nil }
         guard isUnderSession(path), let parts = normalizedComponents(path) else { return nil }
         let joined = parts.joined(separator: "/")
         var current = sessionURL.standardizedFileURL
@@ -105,6 +116,7 @@ enum ExportRel {
 
     /// True when any path component under the session folder is a symbolic link.
     static func containsSymlinkComponent(_ relative: String, sessionURL: URL) -> Bool {
+        if !isUsableSessionRoot(sessionURL) { return true }
         guard let parts = normalizedComponents(relative) else { return true }
         var current = sessionURL.standardizedFileURL
         for part in parts {
@@ -127,6 +139,7 @@ enum ExportRel {
     /// Session-relative path from the URL's own components. Does not follow
     /// planted `archive/` or `shots/` directory links.
     static func unfollowedRelative(_ file: URL, sessionRoot: URL) -> String? {
+        guard isUsableSessionRoot(sessionRoot) else { return nil }
         let root = sessionRoot.standardizedFileURL.path
         let filePath = file.standardizedFileURL.path
         guard filePath == root || filePath.hasPrefix(root + "/") else { return nil }
@@ -145,11 +158,16 @@ enum ExportRel {
 
     /// Regular file whose resolved target stays under `sessionRoot`. Symlinks are
     /// rejected so later reads cannot follow a link out of the session folder.
+    /// A path that walks a planted `archive/` directory link is refused even when
+    /// the resolved target is still inside the session (C2).
     static func isContainedRegularFile(_ file: URL, sessionRoot: URL) -> Bool {
+        guard isUsableSessionRoot(sessionRoot) else { return false }
         let keys: Set<URLResourceKey> = [.isSymbolicLinkKey, .isRegularFileKey]
         let values = try? file.resourceValues(forKeys: keys)
         if values?.isSymbolicLink == true { return false }
         guard values?.isRegularFile == true else { return false }
+        guard let unfollowed = unfollowedRelative(file, sessionRoot: sessionRoot) else { return false }
+        if containsSymlinkComponent(unfollowed, sessionURL: sessionRoot) { return false }
         return containedRelative(file, sessionRoot: sessionRoot) != nil
     }
 
@@ -204,7 +222,17 @@ enum ExportRel {
     /// Create missing real directories and unlink a dest file-symlink so a
     /// subsequent write cannot follow `archive/` or `export/` into another tree.
     static func prepareContainedWrite(relative: String, sessionURL: URL) throws -> String {
-        guard isUnderSession(relative), let parts = normalizedComponents(relative), parts.count >= 2 else {
+        guard isUsableSessionRoot(sessionURL) else {
+            throw SessionVaultError.writeFailed("session folder")
+        }
+        guard isUnderSession(relative), let parts = normalizedComponents(relative), !parts.isEmpty else {
+            throw SessionVaultError.writeFailed(relative)
+        }
+        if parts.count == 1 {
+            guard parts[0] == ScrumTracePath.manifest else {
+                throw SessionVaultError.writeFailed(relative)
+            }
+        } else if parts.count < 2 {
             throw SessionVaultError.writeFailed(relative)
         }
         let joined = parts.joined(separator: "/")

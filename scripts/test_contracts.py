@@ -774,6 +774,7 @@ def test_write_contained_data_refuses_directory_symlinks() -> None:
     assert "static func moveIntoSession" in models
     rel = models.split("static func containedRelative(_ path: String, sessionURL: URL)")[1].split("static func existingSessionFile")[0]
     assert "isSymbolicLink" in rel
+    assert "isUsableSessionRoot" in rel
     assert "func unfollowedRelative" in models
     assert "func isReadableSessionFile" in models
     readable = models.split("static func isReadableSessionFile")[1].split("static func isContainedRegularFile")[0]
@@ -796,12 +797,12 @@ def test_write_contained_data_refuses_directory_symlinks() -> None:
     assert "writeContainedData(jpeg, relative: stillRelative" in export_fn
     vault = (ROOT / "ScrumTrace" / "Storage" / "SessionVault.swift").read_text()
     write_man = vault.split("func write(manifest")[1].split("func appendEvent")[0]
-    tmp_block = write_man.split("appendingPathExtension")[1].split("encoder.encode")[0]
-    assert "isSymbolicLink" in tmp_block
+    assert "writeContainedData" in write_man
+    assert "ScrumTracePath.manifest" in write_man
+    assert "appendingPathExtension" not in write_man
     assert "fileExists(atPath: url.path)" not in write_man
     assert "replaceItemAt" not in write_man
-    assert "removeItemIfRegularFile(url, sessionRoot: dir)" in write_man
-    assert "isContainedRegularFile" in write_man
+    assert "FileHandle" not in write_man
     assert "writeFailed(\"session folder\")" in write_man
     load_fn = vault.split("func loadManifest")[1].split("func write(manifest")[0]
     assert "isSymbolicLink" in load_fn
@@ -813,7 +814,19 @@ def test_write_contained_data_refuses_directory_symlinks() -> None:
     append_ev = vault.split("func appendEvent")[1].split("func recentSessions")[0]
     assert "fileExists(atPath: url.path)" not in append_ev
     assert "isContainedRegularFile" in append_ev
+    assert "writeContainedData" in append_ev
+    assert "FileHandle" not in append_ev
     assert "containsSymlinkComponent" in vault.split("func nextShotIndex")[1].split("func loadPinTimes")[0]
+    under = models.split("static func isUnderSession")[1].split("static func isUsableSessionRoot")[0]
+    assert "ScrumTracePath.manifest" in under
+    assert "func isUsableSessionRoot" in models
+    prepare = models.split("static func prepareContainedWrite")[1].split("static func writeContainedData")[0]
+    assert "isUsableSessionRoot" in prepare
+    assert "ScrumTracePath.manifest" in prepare
+    contained_reg = models.split("static func isContainedRegularFile")[1].split("static func containedRelative(_ file")[0]
+    assert "unfollowedRelative" in contained_reg
+    assert "containsSymlinkComponent" in contained_reg
+    assert "isUsableSessionRoot" in contained_reg
 
 
 def main() -> None:
