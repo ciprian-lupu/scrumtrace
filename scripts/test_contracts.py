@@ -77,6 +77,13 @@ def test_zipper_never_deletes_archive() -> None:
     assert "allowList" in zipper
     assert '"-@"' in zipper
     assert "archive/session.mp4" not in zipper
+    allow = zipper.split("static func allowList")[1].split("static func omissionOrder")[0]
+    assert "includeFullTranscript" in allow
+    assert "if includeFullTranscript" in allow
+    projector = (ROOT / "ScrumTrace" / "Export" / "ExportProjector.swift").read_text()
+    project_fn = projector.split("func project")[1].split("var omitted")[0]
+    assert "resetExportTree" in project_fn
+    assert "removeItem(at: export)" in projector.split("func resetExportTree")[1].split("func writeProjectionManifest")[0]
     omit_md = zipper.split("func writeOmittedMarkdown")[1].split("private func uniquedOmitted")[0]
     assert "omittedHandoffPath" in omit_md
 
@@ -243,6 +250,8 @@ def test_pause_privacy_and_metadata_gate() -> None:
     assert "handoffPath" in agent
     assert "Still auto-paused for a password manager" in controller
     assert "Stills and transcript excerpts" in controller
+    assert "clip audio will leave this Mac" in controller
+    assert "and clip video will leave this Mac" not in controller
     assert "includesClipAudio: approved && uploadsClip" in controller
     assert "willUploadClip" in controller
     assert "Clip video and the master movie are not uploaded" in controller
@@ -421,6 +430,7 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "markEvalAuthFailed" in processor
     assert "Skipped remaining slices after provider authentication failed." in processor
     assert "willUploadClip(configuration: configuration)" in processor
+    assert "includeFullTranscript: projection.manifest.includeFullTranscriptInZip" in processor
     google = (ROOT / "ScrumTrace" / "AI" / "GoogleClient.swift").read_text()
     assert "x-goog-api-key" in google
     assert "?key=" not in google

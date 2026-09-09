@@ -315,7 +315,7 @@ final class SessionController: ObservableObject {
         let uploadsClip = ProviderWireMedia.willUploadClip(configuration: capabilities)
         let payload: String
         if uploadsClip {
-            payload = "Stills, transcript excerpts, and clip video will leave this Mac."
+            payload = "Stills, transcript excerpts, and clip audio will leave this Mac."
         } else {
             payload = "Stills and transcript excerpts will leave this Mac. Clip video and the master movie are not uploaded."
         }

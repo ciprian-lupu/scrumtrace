@@ -90,6 +90,7 @@ def test_frame_ref_basename_resolves() -> None:
     assert "func resolvePath" in validator
     assert "func applyExportEvidence" in validator
     assert "unknown task kind" in validator
+    assert "decision is not keep" in validator
     assert "archive/shots/" in validator
     slicer = (ROOT / "ScrumTrace" / "Slicing" / "MeetingSlicer.swift").read_text()
     assert "clipMaxDuration" in slicer

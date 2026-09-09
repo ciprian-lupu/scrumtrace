@@ -16,7 +16,11 @@ struct SessionPackZipper {
         var omitted = uniquedOmitted(manifest.omitted)
 
         do {
-            try runZip(exportDir: exportDir, zipURL: zipURL)
+            try runZip(
+                exportDir: exportDir,
+                zipURL: zipURL,
+                includeFullTranscript: manifest.includeFullTranscriptInZip
+            )
         } catch {
             omitted.append(OmittedAsset(path: "session-pack.zip", reason: error.localizedDescription))
             return Result(zipURL: zipURL, byteCount: fileSize(zipURL), omitted: uniquedOmitted(omitted))
@@ -32,7 +36,11 @@ struct SessionPackZipper {
             try? FileManager.default.removeItem(at: url)
             omitted.append(OmittedAsset(path: ExportRel.toExportRoot(path), reason: "Pack over 35 MB; dropped by priority"))
             do {
-                try runZip(exportDir: exportDir, zipURL: zipURL)
+                try runZip(
+                    exportDir: exportDir,
+                    zipURL: zipURL,
+                    includeFullTranscript: manifest.includeFullTranscriptInZip
+                )
                 size = fileSize(zipURL)
             } catch {
                 omitted.append(OmittedAsset(path: "session-pack.zip", reason: error.localizedDescription))
@@ -51,16 +59,24 @@ struct SessionPackZipper {
         omitted = uniquedOmitted(omitted)
         try? writeOmittedMarkdown(sessionURL: sessionURL, omitted: omitted)
         if omitted.contains(where: { !$0.path.isEmpty }) {
-            try? runZip(exportDir: exportDir, zipURL: zipURL)
+            try? runZip(
+                exportDir: exportDir,
+                zipURL: zipURL,
+                includeFullTranscript: manifest.includeFullTranscriptInZip
+            )
             size = fileSize(zipURL)
         }
         return Result(zipURL: zipURL, byteCount: size, omitted: omitted)
     }
 
-    func writeZip(sessionURL: URL) throws -> Int {
+    func writeZip(sessionURL: URL, includeFullTranscript: Bool = false) throws -> Int {
         let exportDir = sessionURL.appendingPathComponent(ScrumTracePath.export)
         let zipURL = sessionURL.appendingPathComponent(ScrumTracePath.packZip)
-        try runZip(exportDir: exportDir, zipURL: zipURL)
+        try runZip(
+            exportDir: exportDir,
+            zipURL: zipURL,
+            includeFullTranscript: includeFullTranscript
+        )
         return fileSize(zipURL)
     }
 
@@ -89,9 +105,12 @@ struct SessionPackZipper {
         (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? NSNumber)?.intValue ?? 0
     }
 
-    private func runZip(exportDir: URL, zipURL: URL) throws {
+    private func runZip(exportDir: URL, zipURL: URL, includeFullTranscript: Bool) throws {
         try? FileManager.default.removeItem(at: zipURL)
-        let members = PackBudget.allowList(exportDir: exportDir)
+        let members = PackBudget.allowList(
+            exportDir: exportDir,
+            includeFullTranscript: includeFullTranscript
+        )
         guard !members.isEmpty else {
             throw SessionRecorderError.writerFailed("export/ allow-list is empty; nothing to zip.")
         }
@@ -128,19 +147,25 @@ enum PackBudget {
     }
 
     /// Explicit members under `export/` — never the session root, never `archive/`.
-    static func allowList(exportDir: URL) -> [String] {
+    /// `full_transcript.json` is only listed when the user opted it into the pack.
+    static func allowList(exportDir: URL, includeFullTranscript: Bool = false) -> [String] {
         let named = [
             "AGENT_CONTEXT.md",
             "SESSION_BRIEF.html",
             "AGENT_PROMPT.txt",
             "session.manifest.json",
-            "OMITTED.md",
-            "full_transcript.json"
+            "OMITTED.md"
         ]
         var out: [String] = []
         for name in named {
             if FileManager.default.fileExists(atPath: exportDir.appendingPathComponent(name).path) {
                 out.append(name)
+            }
+        }
+        if includeFullTranscript {
+            let transcript = "full_transcript.json"
+            if FileManager.default.fileExists(atPath: exportDir.appendingPathComponent(transcript).path) {
+                out.append(transcript)
             }
         }
         let prefix = exportDir.path.hasSuffix("/") ? exportDir.path : exportDir.path + "/"

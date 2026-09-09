@@ -71,6 +71,9 @@ enum EvidenceValidator {
         sessionURL: URL
     ) -> [EvidenceIssue] {
         var issues: [EvidenceIssue] = []
+        if candidate.decision != .keep {
+            issues.append(EvidenceIssue(reason: "decision is not keep"))
+        }
         if candidate.confidence < MediaBudget.keepConfidenceFloor {
             issues.append(EvidenceIssue(reason: "confidence below 0.55"))
         }

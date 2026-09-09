@@ -210,7 +210,10 @@ final class SessionProcessor: @unchecked Sendable {
             projector: projector
         )
         try zipper.writeOmittedMarkdown(sessionURL: sessionURL, omitted: projection.omitted)
-        if let trial = try? zipper.writeZip(sessionURL: sessionURL), trial > MediaBudget.maxZipBytes {
+        if let trial = try? zipper.writeZip(
+            sessionURL: sessionURL,
+            includeFullTranscript: projection.manifest.includeFullTranscriptInZip
+        ), trial > MediaBudget.maxZipBytes {
             await onStatus(.synthesizing, "Re-encoding clips to fit the 35 MB pack")
             await exporter.tightenExportClips(sessionURL: sessionURL)
         }
@@ -243,7 +246,10 @@ final class SessionProcessor: @unchecked Sendable {
                     projector: projector
                 )
                 try zipper.writeOmittedMarkdown(sessionURL: sessionURL, omitted: zipResult.omitted)
-                zipBytes = try zipper.writeZip(sessionURL: sessionURL)
+                zipBytes = try zipper.writeZip(
+                    sessionURL: sessionURL,
+                    includeFullTranscript: projection.manifest.includeFullTranscriptInZip
+                )
             } catch {
                 zipBytes = zipResult.byteCount
                 break

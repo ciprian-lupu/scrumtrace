@@ -18,18 +18,7 @@ struct ExportProjector {
         includeFullTranscript: Bool = false
     ) throws -> ExportProjection {
         let fileManager = FileManager.default
-        try fileManager.createDirectory(
-            at: sessionURL.appendingPathComponent(ScrumTracePath.export),
-            withIntermediateDirectories: true
-        )
-        try fileManager.createDirectory(
-            at: sessionURL.appendingPathComponent(ScrumTracePath.exportShots),
-            withIntermediateDirectories: true
-        )
-        try fileManager.createDirectory(
-            at: sessionURL.appendingPathComponent(ScrumTracePath.media),
-            withIntermediateDirectories: true
-        )
+        try resetExportTree(sessionURL: sessionURL)
 
         var omitted: [OmittedAsset] = []
         var projected = manifest
@@ -174,6 +163,26 @@ struct ExportProjector {
         }
         try writeProjectionManifest(projected, sessionURL: sessionURL)
         return ExportProjection(manifest: projected, omitted: projected.omitted)
+    }
+
+    /// C2/D5: rebuild `export/` from this projection. Stale `full_transcript.json`
+    /// and orphan `media/` from a prior run must not survive into the zip.
+    /// Never touches `archive/` or the canonical session-root manifest.
+    private func resetExportTree(sessionURL: URL) throws {
+        let fileManager = FileManager.default
+        let export = sessionURL.appendingPathComponent(ScrumTracePath.export)
+        if fileManager.fileExists(atPath: export.path) {
+            try fileManager.removeItem(at: export)
+        }
+        try fileManager.createDirectory(at: export, withIntermediateDirectories: true)
+        try fileManager.createDirectory(
+            at: sessionURL.appendingPathComponent(ScrumTracePath.exportShots),
+            withIntermediateDirectories: true
+        )
+        try fileManager.createDirectory(
+            at: sessionURL.appendingPathComponent(ScrumTracePath.media),
+            withIntermediateDirectories: true
+        )
     }
 
     func writeProjectionManifest(_ manifest: SessionManifest, sessionURL: URL) throws {

@@ -577,4 +577,98 @@ final class ContractTests: XCTestCase {
         XCTAssertTrue(AIProviderError.isAuthFailure(AIProviderError.httpStatus(401, "")))
         XCTAssertFalse(AIProviderError.isAuthFailure(AIProviderError.emptyResponse))
     }
+
+    func testProjectClearsStaleExportArtifacts() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("scrumtrace-export-reset-\(UUID().uuidString)")
+        let archive = root.appendingPathComponent("archive")
+        let export = root.appendingPathComponent("export")
+        let orphan = export.appendingPathComponent("media/task-99")
+        try FileManager.default.createDirectory(at: archive, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: orphan, withIntermediateDirectories: true)
+        try Data("stale-export-transcript").write(to: export.appendingPathComponent("full_transcript.json"))
+        try Data("orphan-clip").write(to: orphan.appendingPathComponent("clip.mp4"))
+        try Data("archive-transcript").write(to: archive.appendingPathComponent("full_transcript.json"))
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let manifest = SessionManifest.makeNew(sessionId: "reset-export", product: .empty)
+        _ = try ExportProjector().project(
+            sessionURL: root,
+            manifest: manifest,
+            includeFullTranscript: false
+        )
+        XCTAssertFalse(FileManager.default.fileExists(atPath: export.appendingPathComponent("full_transcript.json").path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: orphan.appendingPathComponent("clip.mp4").path))
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: archive.appendingPathComponent("full_transcript.json").path)
+        )
+
+        _ = try ExportProjector().project(
+            sessionURL: root,
+            manifest: manifest,
+            includeFullTranscript: true
+        )
+        XCTAssertTrue(FileManager.default.fileExists(atPath: export.appendingPathComponent("full_transcript.json").path))
+        XCTAssertEqual(
+            try String(contentsOf: export.appendingPathComponent("full_transcript.json"), encoding: .utf8),
+            "archive-transcript"
+        )
+    }
+
+    func testAllowListOmitsTranscriptUnlessOptedIn() throws {
+        let export = FileManager.default.temporaryDirectory.appendingPathComponent("scrumtrace-allow-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: export, withIntermediateDirectories: true)
+        try Data("# ctx\n").write(to: export.appendingPathComponent("AGENT_CONTEXT.md"))
+        try Data("{}").write(to: export.appendingPathComponent("full_transcript.json"))
+        defer { try? FileManager.default.removeItem(at: export) }
+        XCTAssertFalse(PackBudget.allowList(exportDir: export, includeFullTranscript: false).contains("full_transcript.json"))
+        XCTAssertTrue(PackBudget.allowList(exportDir: export, includeFullTranscript: true).contains("full_transcript.json"))
+    }
+
+    func testCanConfirmRequiresKeepDecision() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("scrumtrace-keep-\(UUID().uuidString)")
+        let shots = root.appendingPathComponent("export/shots")
+        try FileManager.default.createDirectory(at: shots, withIntermediateDirectories: true)
+        try Data("jpg").write(to: shots.appendingPathComponent("001.jpg"))
+        defer { try? FileManager.default.removeItem(at: root) }
+        let slice = SliceRecord(
+            sliceId: "slice-01",
+            startMedia: 0,
+            endMedia: 20,
+            trigger: .shot,
+            associatedShotId: nil,
+            clipPath: nil,
+            stills: ["export/shots/001.jpg"],
+            analysisStatus: .success,
+            score: 100
+        )
+        let transcript = FullTranscript(sessionId: "s", language: "en", segments: [])
+        func candidate(_ decision: CandidateDecision) -> CandidateRecord {
+            CandidateRecord(
+                decision: decision,
+                confidence: 0.9,
+                kind: .bug,
+                title: "Save",
+                observed: "button",
+                stated: "said",
+                inferred: "maybe",
+                agentInstructionsDraft: "",
+                quotes: [],
+                frameReferences: ["export/shots/001.jpg"]
+            )
+        }
+        let reviewIssues = EvidenceValidator.canConfirm(
+            candidate: candidate(.needsReview),
+            slice: slice,
+            transcript: transcript,
+            sessionURL: root
+        )
+        XCTAssertTrue(reviewIssues.contains { $0.reason == "decision is not keep" })
+        let keepIssues = EvidenceValidator.canConfirm(
+            candidate: candidate(.keep),
+            slice: slice,
+            transcript: transcript,
+            sessionURL: root
+        )
+        XCTAssertFalse(keepIssues.contains { $0.reason == "decision is not keep" })
+    }
 }
