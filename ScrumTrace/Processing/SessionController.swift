@@ -123,6 +123,7 @@ final class SessionController: ObservableObject {
     }
 
     func openShot() {
+        guard isRecording else { return }
         guard captureState.allowsNewCapture else {
             statusLine = "Paused — Shot is disabled"
             return

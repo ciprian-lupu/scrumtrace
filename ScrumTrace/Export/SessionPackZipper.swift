@@ -134,10 +134,18 @@ struct SessionPackZipper {
             relative: ScrumTracePath.packZip,
             sessionURL: sessionURL
         )
-        let members = PackBudget.allowList(
+        let scanned = PackBudget.allowList(
             exportDir: exportDir,
             includeFullTranscript: includeFullTranscript
         )
+        // Re-check after allowList: a planted symlink must not enter `-@`.
+        PackBudget.removeEscapingExportLinks(exportDir: exportDir)
+        let members = scanned.compactMap { member in
+            ExportRel.containedExportMember(
+                file: exportDir.appendingPathComponent(member),
+                exportDir: exportDir
+            )
+        }
         guard !members.isEmpty else {
             throw SessionRecorderError.writerFailed("export/ allow-list is empty; nothing to zip.")
         }

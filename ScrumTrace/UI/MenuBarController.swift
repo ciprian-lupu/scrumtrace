@@ -37,7 +37,7 @@ final class MenuBarController {
             let symbol: String
             if controller.isBusy {
                 symbol = "gearshape.circle.fill"
-            } else if controller.captureState == .paused {
+            } else if controller.isRecording && controller.captureState == .paused {
                 symbol = "pause.circle.fill"
             } else if controller.isRecording {
                 symbol = "record.circle.fill"

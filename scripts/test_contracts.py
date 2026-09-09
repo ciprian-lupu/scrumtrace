@@ -454,6 +454,10 @@ def test_pipeline_timing_stays_in_archive() -> None:
     assert "temporaryDirectory" in run_zip
     assert "temp.path" in run_zip
     assert "dest.path" not in run_zip
+    assert "containedExportMember" in run_zip
+    assert "compactMap" in run_zip
+    assert run_zip.index("allowList") < run_zip.index("containedExportMember")
+    assert run_zip.index("removeEscapingExportLinks") < run_zip.index("compactMap")
     zip_fn = zipper.split("func zip(")[1].split("func writeZip")[0]
     assert "isUsableSessionRoot" in zip_fn
     assert "removeEscapingExportLinks" in zip_fn
@@ -577,6 +581,11 @@ def test_pause_privacy_and_metadata_gate() -> None:
     assert "canResumeFromPause" in menu
     assert "gatePaused" in hud
     assert "captureState == .paused" in menu
+    assert "isRecording && controller.captureState == .paused" in menu
+    assert "pause.circle.fill" in menu
+    open_shot = controller.split("func openShot()")[1].split("func retryAnalysis()")[0]
+    assert "guard isRecording else { return }" in open_shot
+    assert "Paused — Shot is disabled" in open_shot
     assert "org.keepassxc.KeePassXC" in privacy
     assert "me.proton.Pass" in privacy
     assert 'contains("protonpass")' in privacy
