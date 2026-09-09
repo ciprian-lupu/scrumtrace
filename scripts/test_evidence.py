@@ -124,6 +124,8 @@ def test_frame_ref_basename_resolves() -> None:
     assert "existingSessionFile" in validator
     models = (ROOT / "ScrumTrace" / "Storage" / "SessionModels.swift").read_text()
     assert "func existingSessionFile" in models
+    assert "func isContainedRegularFile" in models
+    assert "isSymbolicLink" in models
     assert "resolvingSymlinksInPath" in models
     assert "archive/shots/" in validator
     assert "sourceSliceId.isEmpty" in validator

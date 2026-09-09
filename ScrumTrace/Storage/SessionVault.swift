@@ -97,7 +97,8 @@ final class SessionVault: @unchecked Sendable {
             throw SessionVaultError.sessionMissing(id)
         }
         let url = sessionURL(id: id).appendingPathComponent(ScrumTracePath.manifest)
-        guard fileManager.fileExists(atPath: url.path) else {
+        let session = sessionURL(id: id)
+        guard ExportRel.isContainedRegularFile(url, sessionRoot: session) else {
             throw SessionVaultError.sessionMissing(id)
         }
         let data = try Data(contentsOf: url)
@@ -148,6 +149,7 @@ final class SessionVault: @unchecked Sendable {
     }
 
     func nextShotIndex(sessionId: String) -> Int {
+        guard Self.isValidSessionId(sessionId) else { return 1 }
         let shots = sessionURL(id: sessionId).appendingPathComponent(ScrumTracePath.shots)
         let names = (try? fileManager.contentsOfDirectory(atPath: shots.path)) ?? []
         let numbers = names.compactMap { name -> Int? in
@@ -183,7 +185,10 @@ final class SessionVault: @unchecked Sendable {
     }
 
     private func events(sessionId: String) -> [SessionEvent] {
-        let url = sessionURL(id: sessionId).appendingPathComponent(ScrumTracePath.events)
+        guard Self.isValidSessionId(sessionId) else { return [] }
+        let session = sessionURL(id: sessionId)
+        let url = session.appendingPathComponent(ScrumTracePath.events)
+        guard ExportRel.isContainedRegularFile(url, sessionRoot: session) else { return [] }
         guard let text = try? String(contentsOf: url, encoding: .utf8) else { return [] }
         return text.split(whereSeparator: \.isNewline).compactMap { line in
             guard let data = line.data(using: .utf8) else { return nil }

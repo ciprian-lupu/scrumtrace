@@ -38,6 +38,22 @@ final class ContractTests: XCTestCase {
         XCTAssertEqual(vault.sessionURL(id: "foo/bar").path, vault.sessionURL(id: "invalid-session-id").path)
     }
 
+    func testContainedRegularFileRejectsSymlinkEvenIfTargetIsInsideSession() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("scrumtrace-regular-\(UUID().uuidString)")
+        let shots = root.appendingPathComponent("archive/shots")
+        try FileManager.default.createDirectory(at: shots, withIntermediateDirectories: true)
+        let real = shots.appendingPathComponent("001.png")
+        try Data("still").write(to: real)
+        try FileManager.default.createSymbolicLink(
+            at: shots.appendingPathComponent("alias.png"),
+            withDestinationURL: real
+        )
+        defer { try? FileManager.default.removeItem(at: root) }
+        XCTAssertTrue(ExportRel.isContainedRegularFile(real, sessionRoot: root))
+        XCTAssertNil(ExportRel.existingSessionFile("archive/shots/alias.png", sessionURL: root))
+        XCTAssertEqual(ExportRel.existingSessionFile("archive/shots/001.png", sessionURL: root), "archive/shots/001.png")
+    }
+
     func testWhisperKitModelNamePrefixesShortAlias() {
         XCTAssertEqual(
             WhisperTranscriber.whisperKitModelName("large-v3-turbo"),

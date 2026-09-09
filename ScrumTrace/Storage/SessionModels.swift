@@ -93,8 +93,18 @@ enum ExportRel {
     static func existingSessionFile(_ path: String, sessionURL: URL) -> String? {
         guard let relative = containedRelative(path, sessionURL: sessionURL) else { return nil }
         let url = sessionURL.appendingPathComponent(relative)
-        guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+        guard isContainedRegularFile(url, sessionRoot: sessionURL) else { return nil }
         return relative
+    }
+
+    /// Regular file whose resolved target stays under `sessionRoot`. Symlinks are
+    /// rejected so later reads cannot follow a link out of the session folder.
+    static func isContainedRegularFile(_ file: URL, sessionRoot: URL) -> Bool {
+        let keys: Set<URLResourceKey> = [.isSymbolicLinkKey, .isRegularFileKey]
+        let values = try? file.resourceValues(forKeys: keys)
+        if values?.isSymbolicLink == true { return false }
+        guard values?.isRegularFile == true else { return false }
+        return containedRelative(file, sessionRoot: sessionRoot) != nil
     }
 
     /// Resolved file relative to `root` when the target stays inside that folder.

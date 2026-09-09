@@ -217,6 +217,9 @@ def test_retry_failed_slices_and_pins() -> None:
     assert "loadPinTimes" in vault
     assert "isValidSessionId" in vault
     assert "invalid-session-id" in vault
+    assert "isContainedRegularFile" in vault
+    events_fn = vault.split("private func events")[1].split("func revealInFinder")[0]
+    assert "isContainedRegularFile" in events_fn
     models = (ROOT / "ScrumTrace" / "Storage" / "SessionModels.swift").read_text()
     existing_media = models.split("func withExistingMedia")[1].split("enum CodingKeys")[0]
     assert "existingSessionFile" in existing_media
