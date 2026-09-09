@@ -90,6 +90,38 @@ def test_brief_shell_tokens_are_filled() -> None:
     assert "{{" not in html
 
 
+def test_mock_clip_ffprobe() -> None:
+    import json
+    import subprocess
+
+    clip = ROOT / "samples" / "mock-session" / "export" / "media" / "task-02" / "clip.mp4"
+    assert clip.is_file()
+    probe = subprocess.check_output(
+        [
+            "ffprobe",
+            "-v",
+            "error",
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            "stream=codec_name,width,height",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "json",
+            str(clip),
+        ],
+        text=True,
+    )
+    data = json.loads(probe)
+    stream = data["streams"][0]
+    assert stream["codec_name"] == "h264"
+    assert int(stream["width"]) == 1280
+    assert int(stream["height"]) == 720
+    duration = float(data["format"]["duration"])
+    assert 15.0 <= duration <= 17.0, duration
+
+
 def test_mock_agent_context_paths_exist() -> None:
     export = ROOT / "samples" / "mock-session" / "export"
     ctx = (export / "AGENT_CONTEXT.md").read_text()
@@ -104,6 +136,7 @@ def main() -> None:
     test_export_rel_in_swift()
     test_frame_ref_basename_resolves()
     test_brief_shell_tokens_are_filled()
+    test_mock_clip_ffprobe()
     test_mock_agent_context_paths_exist()
     print("evidence contracts ok")
 

@@ -61,6 +61,10 @@ final class SessionProcessor: @unchecked Sendable {
             manifest.completedStages.removeAll {
                 $0 == .slicing || $0 == .evaluating || $0 == .synthesizing || $0 == .completed
             }
+            manifest.tasks = []
+            // Persist immediately so a crash during clip export cannot leave
+            // slicing marked complete on disk while the new transcript is unused.
+            try vault.write(manifest: &manifest)
         }
 
         if !manifest.hasCompleted(.slicing) {
@@ -191,29 +195,57 @@ final class SessionProcessor: @unchecked Sendable {
             includeFullTranscript: manifest.includeFullTranscriptInZip
         )
         manifest.omitted = projection.omitted
-        let trial = try zipper.writeZip(sessionURL: sessionURL)
-        if trial > MediaBudget.maxZipBytes {
+        // Docs first: a zip failure must not skip SESSION_BRIEF.html / AGENT_CONTEXT.md.
+        try writeExportDocuments(
+            sessionURL: sessionURL,
+            projected: projection.manifest,
+            excerpts: excerpts,
+            projector: projector
+        )
+        try zipper.writeOmittedMarkdown(sessionURL: sessionURL, omitted: projection.omitted)
+        if let trial = try? zipper.writeZip(sessionURL: sessionURL), trial > MediaBudget.maxZipBytes {
             await onStatus(.synthesizing, "Re-encoding clips to fit the 35 MB pack")
             await exporter.tightenExportClips(sessionURL: sessionURL)
         }
-        var zipResult = try zipper.zip(sessionURL: sessionURL, manifest: projection.manifest)
-        var zipBytes = 0
+        var zipResult = SessionPackZipper.Result(
+            zipURL: sessionURL.appendingPathComponent(ScrumTracePath.packZip),
+            byteCount: 0,
+            omitted: projection.omitted
+        )
+        do {
+            zipResult = try zipper.zip(sessionURL: sessionURL, manifest: projection.manifest)
+        } catch {
+            zipResult.omitted.append(
+                OmittedAsset(path: "session-pack.zip", reason: "zip failed: \(error.localizedDescription)")
+            )
+            try? zipper.writeOmittedMarkdown(sessionURL: sessionURL, omitted: zipResult.omitted)
+        }
+        var zipBytes = zipResult.byteCount
         for pass in 0..<3 {
             projection.manifest = PackBudget.stripOmitted(zipResult.omitted, from: projection.manifest)
             projection.manifest.omitted = zipResult.omitted
-            try writeExportDocuments(
-                sessionURL: sessionURL,
-                projected: projection.manifest,
-                excerpts: excerpts,
-                projector: projector
-            )
-            try zipper.writeOmittedMarkdown(sessionURL: sessionURL, omitted: zipResult.omitted)
-            zipBytes = try zipper.writeZip(sessionURL: sessionURL)
+            do {
+                try writeExportDocuments(
+                    sessionURL: sessionURL,
+                    projected: projection.manifest,
+                    excerpts: excerpts,
+                    projector: projector
+                )
+                try zipper.writeOmittedMarkdown(sessionURL: sessionURL, omitted: zipResult.omitted)
+                zipBytes = try zipper.writeZip(sessionURL: sessionURL)
+            } catch {
+                zipBytes = zipResult.byteCount
+                break
+            }
             if zipBytes <= MediaBudget.maxZipBytes {
                 break
             }
             if pass == 2 { break }
-            zipResult = try zipper.zip(sessionURL: sessionURL, manifest: projection.manifest)
+            do {
+                zipResult = try zipper.zip(sessionURL: sessionURL, manifest: projection.manifest)
+            } catch {
+                break
+            }
         }
         timing.zipBytes = zipBytes
         timing.omittedCount = zipResult.omitted.count

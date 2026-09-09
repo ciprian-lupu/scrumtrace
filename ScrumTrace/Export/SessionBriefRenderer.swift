@@ -42,8 +42,14 @@ struct SessionBriefRenderer {
         if shell.isEmpty {
             shell = Self.fallbackShell
         }
-        let css = BriefTemplateLoader.text("brief", ext: "css")
-        let js = BriefTemplateLoader.text("brief", ext: "js")
+        var css = BriefTemplateLoader.text("brief", ext: "css")
+        var js = BriefTemplateLoader.text("brief", ext: "js")
+        if css.isEmpty {
+            css = Self.fallbackCSS
+        }
+        if js.isEmpty {
+            js = Self.fallbackJS
+        }
         let confirmed = manifest.tasks.filter { $0.status == .confirmed }
         let review = manifest.tasks.filter { $0.status == .needsReview }
         let replacements: [String: String] = [
@@ -171,8 +177,107 @@ struct SessionBriefRenderer {
         return String(format: "%d:%02d", m, s)
     }
 
+    /// Used when `brief.shell.html` is missing from the bundle. Must keep
+    /// timeline, contact sheet, lightbox, and omitted-assets tokens.
     private static let fallbackShell = """
-    <!doctype html><html><head><meta charset="utf-8"><style>{{CSS}}</style></head>
-    <body><main>{{TASKS_HTML}}</main>{{OMITTED_HTML}}<script>{{JS}}</script></body></html>
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <title>{{TITLE}} · ScrumTrace</title>
+      <style>{{CSS}}</style>
+    </head>
+    <body>
+      <div class="sprocket" aria-hidden="true"></div>
+      <div class="shell">
+        <header class="slate">
+          <div>
+            <div class="clapper">ScrumTrace · session slate</div>
+            <h1>{{TITLE}}<br><em>{{SESSION_ID}}</em></h1>
+          </div>
+          <div class="meta">
+            <span>t_media {{MEDIA_DURATION}}</span>
+            <span>wall {{WALL_DURATION}}</span>
+            <span>{{PAUSE_COUNT}} pauses</span>
+            <span>{{CONFIRMED_COUNT}} confirmed</span>
+            <span>{{REVIEW_COUNT}} review</span>
+          </div>
+          <div class="meta">
+            <span>{{PRODUCT_NAME}}</span>
+            <span>{{TECH_STACK}}</span>
+            <a href="{{REPO_URL}}">{{REPO_URL}}</a>
+            <span>{{CREATED_AT}}</span>
+          </div>
+        </header>
+        {{TIMELINE_HTML}}
+        <section>
+          {{TASKS_HTML}}
+        </section>
+        <section class="review">
+          <details>
+            <summary>Needs review</summary>
+            {{NEEDS_REVIEW_HTML}}
+          </details>
+        </section>
+        {{OMITTED_HTML}}
+        <section>
+          <h2>Contact sheet</h2>
+          <div class="contact">{{SHOTS_HTML}}</div>
+        </section>
+        <section class="review">
+          <details>
+            <summary>Transcript excerpts</summary>
+            {{TRANSCRIPT_HTML}}
+          </details>
+        </section>
+      </div>
+      <script>{{JS}}</script>
+    </body>
+    </html>
+    """
+
+    private static let fallbackCSS = """
+    :root { --ink:#0c0b09; --panel:#16140f; --paper:#ede6d6; --amber:#f0a35e; --rec:#e23b2e; --line:rgba(237,230,214,.12); --muted:rgba(237,230,214,.62); }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; background: var(--ink); color: var(--paper); font-family: sans-serif; }
+    .shell { padding: 28px 8vw 80px; }
+    .slate { display: grid; gap: 12px; border-bottom: 1px solid var(--line); padding-bottom: 22px; margin-bottom: 28px; }
+    .ruler { position: relative; height: 28px; margin: 18px 0 36px; background: rgba(237,230,214,.08); border-radius: 999px; overflow: hidden; }
+    .ruler .pause { position: absolute; top: 0; bottom: 0; background: #3a2a18; }
+    .ruler .shot { position: absolute; top: 4px; width: 8px; height: 8px; background: var(--rec); border-radius: 50%; transform: translateX(-50%); }
+    .take { background: var(--panel); border: 1px solid var(--line); border-radius: 18px; padding: 22px; margin: 0 0 22px; }
+    .epistemic { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+    .clip { width: 100%; border-radius: 12px; background: #000; }
+    .still img, figure img { width: 100%; border-radius: 12px; display: block; }
+    .contact { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 14px; }
+    .lightbox { position: fixed; inset: 0; background: rgba(6,5,4,.92); display: none; place-items: center; z-index: 20; padding: 24px; }
+    .lightbox.open { display: grid; }
+    .lightbox img { max-width: min(92vw, 1400px); max-height: 92vh; }
+    @media (max-width: 860px) { .epistemic { grid-template-columns: 1fr; } }
+    """
+
+    private static let fallbackJS = """
+    (() => {
+      const box = document.createElement("div");
+      box.className = "lightbox";
+      box.innerHTML = "<img alt=''>";
+      document.body.appendChild(box);
+      const img = box.querySelector("img");
+      const close = () => box.classList.remove("open");
+      box.addEventListener("click", close);
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") close();
+      });
+      document.querySelectorAll("[data-lightbox]").forEach((link) => {
+        link.addEventListener("click", (event) => {
+          event.preventDefault();
+          const href = link.getAttribute("href");
+          if (!href) return;
+          img.src = href;
+          box.classList.add("open");
+        });
+      });
+    })();
     """
 }

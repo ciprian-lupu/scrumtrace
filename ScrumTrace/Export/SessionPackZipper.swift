@@ -31,8 +31,11 @@ struct SessionPackZipper {
         }
 
         if size > MediaBudget.maxZipBytes {
-            throw SessionRecorderError.writerFailed(
-                "session-pack.zip is \(size) bytes after omissions; still over 35 MB."
+            omitted.append(
+                OmittedAsset(
+                    path: "session-pack.zip",
+                    reason: "Pack still \(size) bytes after dropping all droppable export media; protected docs remain."
+                )
             )
         }
         try writeOmittedMarkdown(sessionURL: sessionURL, omitted: omitted)

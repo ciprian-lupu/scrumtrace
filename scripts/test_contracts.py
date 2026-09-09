@@ -235,6 +235,24 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "transcriber.isReady || !hadAudio" in processor
     assert "async -> FullTranscript" in processor
     assert "justFinishedTranscribing" in processor
+    retry_block = processor.split("if justFinishedTranscribing")[1].split("if !manifest.hasCompleted(.slicing)")[0]
+    assert "completedStages.removeAll" in retry_block
+    assert "tasks = []" in retry_block
+    assert "vault.write" in retry_block
+    assert "zip failed" in processor
+    assert "writeExportDocuments" in processor.split("Docs first")[1].split("var zipResult")[0]
+    zipper_over = zipper.split("if size > MediaBudget.maxZipBytes")[1].split("func writeZip")[0]
+    assert "throw" not in zipper_over
+    assert "Pack still" in zipper_over
+    brief = (ROOT / "ScrumTrace" / "Export" / "SessionBriefRenderer.swift").read_text()
+    fallback = brief.split("let fallbackShell")[1].split("let fallbackCSS")[0]
+    assert "{{TIMELINE_HTML}}" in fallback
+    assert "{{SHOTS_HTML}}" in fallback
+    assert "data-lightbox" in brief.split("let fallbackJS")[1]
+    prompts = (ROOT / "ScrumTrace" / "AI" / "PromptTemplates.swift").read_text()
+    assert 'wrapUntrusted("Human shot note' in prompts
+    pbx = (ROOT / "ScrumTrace.xcodeproj" / "project.pbxproj").read_text()
+    assert "ENABLE_TESTABILITY = YES" in pbx
     assert "!configuration.acceptsText" in processor
     controller = (ROOT / "ScrumTrace" / "Processing" / "SessionController.swift").read_text()
     assert "suppressHUD" in controller

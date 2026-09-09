@@ -67,7 +67,7 @@ enum PromptTemplates {
         parts.append("Stack: \(product.techStack)")
         parts.append("Slice \(slice.sliceId) \(slice.startMedia)s–\(slice.endMedia)s trigger=\(slice.trigger.rawValue)")
         if !shotNote.isEmpty {
-            parts.append("Human shot note:\n\(shotNote)")
+            parts.append(wrapUntrusted("Human shot note:\n\(shotNote)"))
         }
         if !windowContext.isEmpty {
             parts.append(wrapUntrusted("Window metadata:\n\(windowContext)"))
