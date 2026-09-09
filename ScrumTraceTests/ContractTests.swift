@@ -128,6 +128,50 @@ final class ContractTests: XCTestCase {
         XCTAssertTrue(issues.contains { $0.reason.contains("inferred") })
     }
 
+    func testUnknownKindBlocksConfirm() {
+        let candidate = CandidateRecord(
+            decision: .keep,
+            confidence: 0.9,
+            kind: .unknown,
+            title: "Save",
+            observed: "button is gray",
+            stated: "it should store",
+            inferred: "validation",
+            agentInstructionsDraft: "draft",
+            quotes: [],
+            frameReferences: ["archive/shots/001.png"]
+        )
+        let slice = SliceRecord(
+            sliceId: "slice-01",
+            startMedia: 0,
+            endMedia: 20,
+            trigger: .shot,
+            associatedShotId: nil,
+            clipPath: nil,
+            stills: [],
+            analysisStatus: .success,
+            score: 1
+        )
+        let issues = EvidenceValidator.canConfirm(
+            candidate: candidate,
+            slice: slice,
+            transcript: FullTranscript(sessionId: "s", language: "en", segments: []),
+            sessionURL: URL(fileURLWithPath: "/tmp")
+        )
+        XCTAssertTrue(issues.contains { $0.reason.contains("unknown task kind") })
+    }
+
+    func testCandidateDecisionUnknownFallsBackToNeedsReview() throws {
+        let json = Data(#""maybe_later""#.utf8)
+        let decoded = try JSONDecoder().decode(CandidateDecision.self, from: json)
+        XCTAssertEqual(decoded, .needsReview)
+        let kind = try JSONDecoder().decode(TaskKind.self, from: Data(#""feature_request""#.utf8))
+        XCTAssertEqual(kind, .unknown)
+        let status = try JSONDecoder().decode(TaskStatus.self, from: Data(#""maybe""#.utf8))
+        XCTAssertEqual(status, .needsReview)
+    }
+
+
     func testStripOmittedDemotesConfirmedWithoutEvidence() {
         var manifest = SessionManifest.makeNew(sessionId: "s", product: .empty)
         manifest.tasks = [

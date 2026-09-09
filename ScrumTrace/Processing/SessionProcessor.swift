@@ -486,7 +486,7 @@ final class SessionProcessor: @unchecked Sendable {
                 TaskRecord(
                     taskId: String(format: "TASK-%02d", out.count + 1),
                     sourceSliceId: slice.sliceId,
-                    kind: candidate.kind == .unknown ? .bug : candidate.kind,
+                    kind: candidate.kind,
                     status: status,
                     title: candidate.title.isEmpty ? "Untitled candidate \(index + 1)" : candidate.title,
                     observed: candidate.observed,

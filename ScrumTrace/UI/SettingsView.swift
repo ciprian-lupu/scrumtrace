@@ -2,6 +2,7 @@ import SwiftUI
 
 struct SettingsView: View {
     @ObservedObject var settings: AppSettings
+    @State private var keyStatus = ""
 
     var body: some View {
         Form {
@@ -35,7 +36,18 @@ struct SettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Button("Save key") {
-                    try? settings.saveAPIKey()
+                    do {
+                        try settings.saveAPIKey()
+                        let empty = settings.apiKeyDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        keyStatus = empty ? "Key removed from Keychain." : "Key saved on this Mac."
+                    } catch {
+                        keyStatus = error.localizedDescription
+                    }
+                }
+                if !keyStatus.isEmpty {
+                    Text(keyStatus)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             }
             Section("Provider capabilities") {
@@ -72,7 +84,7 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 520, height: 720)
+        .frame(width: 520, height: 780)
         .padding()
     }
 

@@ -53,7 +53,8 @@ final class MenuBarController {
             controller.isRecording ? "1" : "0",
             controller.lastSessionId ?? "",
             controller.isBusy ? "1" : "0",
-            controller.captureState.rawValue
+            controller.captureState.rawValue,
+            controller.privacy.isCurrentlyTripped ? "priv" : "ok"
         ].joined(separator: "|")
         if signature != lastMenuSignature {
             lastMenuSignature = signature
@@ -66,10 +67,14 @@ final class MenuBarController {
     private func rebuild() {
         let menu = NSMenu()
         if controller.isRecording {
-            menu.addItem(actionItem(
+            let pauseItem = actionItem(
                 controller.phase == .paused ? "Resume" : "Pause",
                 #selector(pause)
-            ))
+            )
+            if controller.phase == .paused {
+                pauseItem.isEnabled = controller.canResumeFromPause
+            }
+            menu.addItem(pauseItem)
             let shotItem = actionItem("Shot  ⌥⌘S", #selector(shot))
             shotItem.isEnabled = controller.captureState.allowsNewCapture
             menu.addItem(shotItem)

@@ -17,7 +17,12 @@ final class PrivacyGuard: @unchecked Sendable {
         "com.bitwarden.desktop",
         "com.dashlane.dashlanephonehalper",
         "com.dashlane.Dashlane",
-        "com.apple.Safari.PasswordManager"
+        "com.apple.Safari.PasswordManager",
+        "org.keepassxc.KeePassXC",
+        "me.proton.Pass",
+        "com.nordpass.macos",
+        "com.enpass.macos.standalone",
+        "com.strongbox"
     ]
 
     private var timer: DispatchSourceTimer?
@@ -79,7 +84,9 @@ final class PrivacyGuard: @unchecked Sendable {
             return bundle
         }
         let lowered = bundle.lowercased()
-        if lowered.contains("1password") || lowered.contains("bitwarden") || lowered.contains("lastpass") {
+        if lowered.contains("1password") || lowered.contains("bitwarden") || lowered.contains("lastpass")
+            || lowered.contains("keepass") || lowered.contains("nordpass") || lowered.contains("enpass")
+            || lowered.contains("proton") || lowered.contains("strongbox") || lowered.contains("dashlane") {
             return bundle
         }
         return nil

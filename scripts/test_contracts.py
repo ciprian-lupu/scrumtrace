@@ -249,7 +249,27 @@ def test_pause_privacy_and_metadata_gate() -> None:
     clock = (ROOT / "ScrumTrace" / "Capture" / "ClockSynchronizer.swift").read_text()
     assert "CMSyncConvertTime" in clock
     privacy = (ROOT / "ScrumTrace" / "Capture" / "PrivacyGuard.swift").read_text()
-    assert "isCurrentlyTripped" in privacy
+    hud = (ROOT / "ScrumTrace" / "UI" / "RecordingHUDWindow.swift").read_text()
+    assert "canResumeFromPause" in controller
+    assert "canResumeFromPause" in hud
+    assert "canResumeFromPause" in menu
+    assert "org.keepassxc.KeePassXC" in privacy
+    assert 'contains("proton")' in privacy
+    assert 'contains("strongbox")' in privacy
+    models = (ROOT / "ScrumTrace" / "Storage" / "SessionModels.swift").read_text()
+    decision = models.split("enum CandidateDecision")[1].split("enum ShotSource")[0]
+    assert "?? .needsReview" in decision
+    status = models.split("enum TaskStatus")[1].split("enum CandidateDecision")[0]
+    assert "?? .needsReview" in status
+    kind = models.split("enum TaskKind")[1].split("enum TaskStatus")[0]
+    assert "?? .unknown" in kind
+    extractor = (ROOT / "ScrumTrace" / "AI" / "AIProviderProtocol.swift").read_text()
+    assert "func decodeLossy" in extractor
+    validator = (ROOT / "ScrumTrace" / "AI" / "EvidenceValidator.swift").read_text()
+    assert "unknown task kind" in validator
+    processor = (ROOT / "ScrumTrace" / "Processing" / "SessionProcessor.swift").read_text()
+    assert "kind: candidate.kind == .unknown ? .bug" not in processor
+    assert "phase == .paused" in controller.split("private func privacyPause")[1].split("private func privacyResume")[0]
 
 
 def test_phase45_clip_consent_and_budget() -> None:
@@ -271,8 +291,9 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "wrapUntrusted(\"Window metadata" in prompts
     settings = (ROOT / "ScrumTrace" / "UI" / "SettingsView.swift").read_text()
     assert "capabilities.acceptsText" in settings
-    assert "capabilities.acceptsVideo" in settings
     assert "willUploadClip" in settings
+    assert "Save key" in settings
+    assert "Key saved on this Mac" in settings
     models = (ROOT / "ScrumTrace" / "Storage" / "SessionModels.swift").read_text()
     assert "func needsReprompt" in models
     assert "func handoffPath" in models

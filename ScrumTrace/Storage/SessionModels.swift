@@ -118,18 +118,43 @@ enum TaskKind: String, Codable, Sendable {
         let raw = try decoder.singleValueContainer().decode(String.self)
         self = TaskKind(rawValue: raw) ?? .unknown
     }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
+    }
 }
 
 enum TaskStatus: String, Codable, Sendable {
     case confirmed
     case needsReview = "needs_review"
     case dropped
+
+    init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = TaskStatus(rawValue: raw) ?? .needsReview
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
+    }
 }
 
 enum CandidateDecision: String, Codable, Sendable {
     case keep
     case needsReview = "needs_review"
     case drop
+
+    init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = CandidateDecision(rawValue: raw) ?? .needsReview
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
+    }
 }
 
 enum ShotSource: String, Codable, Sendable {

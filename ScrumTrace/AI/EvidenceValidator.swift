@@ -90,6 +90,9 @@ enum EvidenceValidator {
         if slice.sliceId.isEmpty {
             issues.append(EvidenceIssue(reason: "missing source_slice_id"))
         }
+        if candidate.kind == .unknown {
+            issues.append(EvidenceIssue(reason: "unknown task kind"))
+        }
         return issues
     }
 

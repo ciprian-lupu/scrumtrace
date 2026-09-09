@@ -29,7 +29,11 @@ struct HUDView: View {
             } else {
                 hudButton("Shot", action: controller.openShot, enabled: controller.captureState.allowsNewCapture)
                 hudButton("Pin", action: controller.pin, enabled: controller.captureState.allowsNewCapture)
-                hudButton(controller.phase == .paused ? "Resume" : "Pause", action: controller.togglePause)
+                hudButton(
+                    controller.phase == .paused ? "Resume" : "Pause",
+                    action: controller.togglePause,
+                    enabled: controller.phase != .paused || controller.canResumeFromPause
+                )
                 hudButton("Stop", action: controller.stopRecording)
             }
         }

@@ -93,8 +93,30 @@ enum JSONExtractor {
         do {
             return try JSONDecoder().decode(CandidateEvaluationResponse.self, from: data)
         } catch {
+            if let lossy = try? decodeLossy(from: data), !lossy.candidates.isEmpty {
+                return lossy
+            }
             throw AIProviderError.decoding(error.localizedDescription)
         }
+    }
+
+    /// One malformed candidate must not fail the whole slice (C5: model JSON is untrusted).
+    static func decodeLossy(from data: Data) throws -> CandidateEvaluationResponse {
+        guard let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw AIProviderError.decoding("No JSON object in model output.")
+        }
+        let list = obj["candidates"] as? [Any] ?? []
+        let decoder = JSONDecoder()
+        var candidates: [CandidateRecord] = []
+        for item in list {
+            guard JSONSerialization.isValidJSONObject(item),
+                  let itemData = try? JSONSerialization.data(withJSONObject: item),
+                  let record = try? decoder.decode(CandidateRecord.self, from: itemData) else {
+                continue
+            }
+            candidates.append(record)
+        }
+        return CandidateEvaluationResponse(candidates: candidates)
     }
 
     static func stripFences(_ text: String) -> String {

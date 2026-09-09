@@ -107,6 +107,10 @@ final class SessionController: ObservableObject {
         phase == .paused ? .paused : (phase == .recording ? .recording : .paused)
     }
 
+    var canResumeFromPause: Bool {
+        phase == .paused && !privacy.isCurrentlyTripped
+    }
+
     func openShot() {
         guard captureState.allowsNewCapture else {
             statusLine = "Paused — Shot is disabled"
@@ -435,7 +439,11 @@ final class SessionController: ObservableObject {
     }
 
     private func privacyPause(bundle: String) {
-        guard phase == .recording else { return }
+        guard isRecording else { return }
+        if phase == .paused {
+            statusLine = "Still auto-paused for a password manager"
+            return
+        }
         pausedByPrivacy = true
         recorder?.setPaused(true)
         sampler.isSuspended = true
