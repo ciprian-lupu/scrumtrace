@@ -179,6 +179,7 @@ final class ShotTalkState: ObservableObject {
         do {
             url = try ExportRel.makePrivateTemporaryURL(prefix: "scrumtrace-note", ext: "wav")
         } catch {
+            talkError = "Could not start Hold-to-Talk."
             return
         }
         ExportRel.unlinkLastComponentUnfollowed(url)
@@ -199,6 +200,7 @@ final class ShotTalkState: ObservableObject {
         guard rec.record() else {
             recorder = nil
             ExportRel.removePrivateTemporaryURL(url)
+            talkError = "Could not start Hold-to-Talk."
             return
         }
         holdingTalk = true
@@ -458,7 +460,11 @@ final class ShotNoteWindow: NSPanel, NSTextFieldDelegate {
         if talk.holdingTalk {
             talkButton.setLabel("Release to transcribe")
         } else if let talkError = talk.talkError, !talkError.isEmpty {
-            talkButton.setLabel("Hold to talk — transcribe failed")
+            if talkError == "Could not start Hold-to-Talk." {
+                talkButton.setLabel("Hold to talk — start failed")
+            } else {
+                talkButton.setLabel("Hold to talk — transcribe failed")
+            }
         } else if talk.canTalk {
             talkButton.setLabel("Hold to talk")
         } else {

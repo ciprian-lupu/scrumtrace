@@ -53,6 +53,12 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
     /// means the master movie is no longer receiving samples (C1).
     private var videoBackpressureStreak = 0
     private var audioBackpressureStreak = 0
+    /// Consecutive `CMSampleBufferDataIsReady == false`. One late buffer is
+    /// realtime; a multi-second streak means screen/system/mic samples are
+    /// being dropped while CaptureSessionState is still recording (C1).
+    private var videoSampleNotReadyStreak = 0
+    private var audioSampleNotReadyStreak = 0
+    private var wavSampleNotReadyStreak = 0
 
     init(sessionURL: URL, clock: ClockSynchronizer) {
         self.sessionURL = sessionURL
@@ -243,6 +249,13 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         syncWriter {
             guard self.paused != next else { return }
             self.paused = next
+            self.remapFailStreak = 0
+            self.wavFormatFailStreak = 0
+            self.videoBackpressureStreak = 0
+            self.audioBackpressureStreak = 0
+            self.videoSampleNotReadyStreak = 0
+            self.audioSampleNotReadyStreak = 0
+            self.wavSampleNotReadyStreak = 0
             if next {
                 self.clock.beginPause()
             } else {
@@ -260,6 +273,9 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             self.wavFormatFailStreak = 0
             self.videoBackpressureStreak = 0
             self.audioBackpressureStreak = 0
+            self.videoSampleNotReadyStreak = 0
+            self.audioSampleNotReadyStreak = 0
+            self.wavSampleNotReadyStreak = 0
             self.clock.markRecordingStopped()
         }
     }
@@ -417,7 +433,12 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
     }
 
     private func appendVideo(_ sampleBuffer: CMSampleBuffer, sampleClock: CMClock?) {
-        guard !paused, started, CMSampleBufferDataIsReady(sampleBuffer) else { return }
+        guard !paused, started else { return }
+        guard CMSampleBufferDataIsReady(sampleBuffer) else {
+            noteVideoSampleNotReady()
+            return
+        }
+        videoSampleNotReadyStreak = 0
         guard let writer, let videoInput else { return }
         if writer.status == .failed {
             failCaptureWrite(
@@ -444,7 +465,12 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
     }
 
     private func appendAudioToMovie(_ sampleBuffer: CMSampleBuffer, sampleClock: CMClock?) {
-        guard !paused, started, CMSampleBufferDataIsReady(sampleBuffer) else { return }
+        guard !paused, started else { return }
+        guard CMSampleBufferDataIsReady(sampleBuffer) else {
+            noteAudioSampleNotReady()
+            return
+        }
+        audioSampleNotReadyStreak = 0
         guard let writer, let audioInput else { return }
         if writer.status == .failed {
             failCaptureWrite(
@@ -524,8 +550,34 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         }
     }
 
+    private func noteVideoSampleNotReady() {
+        videoSampleNotReadyStreak += 1
+        if videoSampleNotReadyStreak >= 90 {
+            failCaptureWrite("Could not write archive/session.mp4: video sample was not ready.")
+        }
+    }
+
+    private func noteAudioSampleNotReady() {
+        audioSampleNotReadyStreak += 1
+        if audioSampleNotReadyStreak >= 90 {
+            failCaptureWrite("Could not write archive/session.mp4: audio sample was not ready.")
+        }
+    }
+
+    private func noteWavSampleNotReady() {
+        wavSampleNotReadyStreak += 1
+        if wavSampleNotReadyStreak >= 90 {
+            failCaptureWrite("Could not write archive/audio.wav: audio sample was not ready.")
+        }
+    }
+
     private func writeWav(from sampleBuffer: CMSampleBuffer) {
         guard !paused, started else { return }
+        guard CMSampleBufferDataIsReady(sampleBuffer) else {
+            noteWavSampleNotReady()
+            return
+        }
+        wavSampleNotReadyStreak = 0
         guard let wavFile else { return }
         guard let formatDesc = CMSampleBufferGetFormatDescription(sampleBuffer),
               let asbdPtr = CMAudioFormatDescriptionGetStreamBasicDescription(formatDesc) else {

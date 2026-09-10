@@ -508,6 +508,13 @@ def test_pause_gate_hold_to_talk() -> None:
     assert start_talk.index("guard rec.record()") < start_talk.index("holdingTalk = true")
     assert start_talk.index("recorder = rec") < start_talk.index("guard rec.record()")
     assert start_talk.index("holdingTalk = true") < start_talk.index("abortTalk()")
+    temp_fail = start_talk.split("makePrivateTemporaryURL")[1].split("unlinkLastComponentUnfollowed")[0]
+    assert "talkError" in temp_fail
+    assert "Could not start Hold-to-Talk." in temp_fail
+    record_fail = start_talk.split("guard rec.record()")[1].split("holdingTalk = true")[0]
+    assert "talkError" in record_fail
+    assert "Could not start Hold-to-Talk." in record_fail
+    assert "Hold to talk — start failed" in shot
     abort = shot.split("func abortTalk()")[1].split("func stopTalk")[0]
     assert "guard holdingTalk else { return }" not in abort
     assert "removePrivateTemporaryURL" in abort
@@ -717,6 +724,10 @@ def test_audio_split_and_brief_loader() -> None:
     assert "PCM copy failed" in write_wav
     assert "PCM buffer allocation failed" in write_wav
     assert "format conversion failed" in write_wav
+    assert "guard !paused, started else { return }" in write_wav
+    assert "CMSampleBufferDataIsReady" in write_wav
+    assert "noteWavSampleNotReady" in write_wav
+    assert "wavSampleNotReadyStreak = 0" in write_wav
     engine_buf = recorder.split("func writeEngineBuffer")[1].split("func requestPermission")[0]
     assert "format conversion failed" in engine_buf
     assert "_ = videoInput.append" not in recorder
@@ -730,11 +741,19 @@ def test_audio_split_and_brief_loader() -> None:
     assert "remapFailStreak = 0" in append_video
     assert "noteVideoBackpressure" in append_video
     assert "videoBackpressureStreak = 0" in append_video
+    assert "guard !paused, started else { return }" in append_video
+    assert "CMSampleBufferDataIsReady" in append_video
+    assert "noteVideoSampleNotReady" in append_video
+    assert "videoSampleNotReadyStreak = 0" in append_video
     append_audio = recorder.split("func appendAudioToMovie")[1].split("func remappedBuffer")[0]
     assert "noteRemapFailure" in append_audio
     assert "remapFailStreak = 0" in append_audio
     assert "noteAudioBackpressure" in append_audio
     assert "audioBackpressureStreak = 0" in append_audio
+    assert "guard !paused, started else { return }" in append_audio
+    assert "CMSampleBufferDataIsReady" in append_audio
+    assert "noteAudioSampleNotReady" in append_audio
+    assert "audioSampleNotReadyStreak = 0" in append_audio
     remap_fail = recorder.split("func noteRemapFailure")[1].split("func writeWav")[0]
     assert "failCaptureWrite" in remap_fail
     assert "Could not timestamp capture samples" in remap_fail
@@ -747,6 +766,15 @@ def test_audio_split_and_brief_loader() -> None:
     assert "wavFormatFailStreak = 0" in freeze
     assert "videoBackpressureStreak = 0" in freeze
     assert "audioBackpressureStreak = 0" in freeze
+    assert "videoSampleNotReadyStreak = 0" in freeze
+    assert "audioSampleNotReadyStreak = 0" in freeze
+    assert "wavSampleNotReadyStreak = 0" in freeze
+    not_ready = recorder.split("func noteVideoSampleNotReady")[1].split("func writeWav")[0]
+    assert "failCaptureWrite" in not_ready
+    assert "video sample was not ready" in not_ready
+    assert "audio sample was not ready" in not_ready
+    assert "audio.wav" in not_ready
+    assert "started, CMSampleBufferDataIsReady" not in recorder
     assert "if error == nil, converted.frameLength > 0" not in recorder
     fail_write = recorder.split("func failCaptureWrite")[1].split("func persistWav")[0]
     assert "freezeWriters" in fail_write
