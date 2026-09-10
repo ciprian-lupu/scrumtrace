@@ -426,6 +426,10 @@ def test_pause_gate_hold_to_talk() -> None:
     assert "abortTalk" in shot
     assert "scrumTraceCaptureGate" in shot
     assert "scrumTraceSessionEnding" in shot
+    ending = shot.split("scrumTraceSessionEnding")[1].split("deinit")[0]
+    assert "noteField.stringValue" in ending
+    assert "talk.persist()" in ending
+    assert ending.index("noteField.stringValue") < ending.index("talk.persist()")
     assert ".onDisappear" not in shot
     assert "canJoinAllSpaces" in shot
     assert "fullScreenAuxiliary" in shot

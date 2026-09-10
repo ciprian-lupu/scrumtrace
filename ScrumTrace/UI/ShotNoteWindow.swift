@@ -311,8 +311,13 @@ final class ShotNoteWindow: NSPanel, NSTextFieldDelegate {
                 forName: .scrumTraceSessionEnding,
                 object: nil,
                 queue: nil
-            ) { [weak talk] _ in
-                talk?.persist()
+            ) { [weak self] _ in
+                // Stop/Quit posts on MainActor. Copy the field so an uncommitted
+                // note is in the catalog before persistInterruptedCapture (C1).
+                if let self, Thread.isMainThread {
+                    self.talk.note = self.noteField.stringValue
+                }
+                self?.talk.persist()
             }
         )
     }
