@@ -87,6 +87,12 @@ struct ExportProjector {
             }
             var exportStills: [String] = []
             for still in slice.stills {
+                guard EvidenceValidator.framesOverlapSlice(
+                    [still],
+                    slice: slice,
+                    shots: manifest.shots,
+                    sessionURL: sessionURL
+                ) else { continue }
                 let name = URL(fileURLWithPath: still).lastPathComponent
                 let destName: String
                 if name.lowercased().hasSuffix(".png") {

@@ -334,6 +334,9 @@ def test_zipper_never_deletes_archive() -> None:
     project_fn = projector.split("func project")[1].split("func resetExportTree")[0]
     assert "resetExportTree" in project_fn
     assert "removeEscapingExportLinks" in project_fn
+    stills_loop = project_fn.split("for still in slice.stills")[1].split("copy.stills")[0]
+    assert "framesOverlapSlice" in stills_loop
+    assert "shots: manifest.shots" in stills_loop
     evidence_map = project_fn.split("for task in manifest.tasks")[1].split("projected.shots")[0]
     assert "Set(placed.values).contains" in evidence_map
     assert "existingSessionFile(session, sessionURL: sessionURL)" not in evidence_map
@@ -1507,6 +1510,9 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "exportClipPath" in fallback
     assert "exportPath" in fallback
     assert "framesOverlapSlice" in fallback
+    assert "tMedia >= slice.startMedia" in fallback
+    assert "tMedia <= slice.endMedia" in fallback
+    assert "var evidence = slice.stills" not in fallback
     local = processor.split("func localReviewTasks")[1].split("func refreshShotsFromDisk")[0]
     assert "selectForPack" in local
     assert "[Requires Manual Review - API Offline]" in local
@@ -1532,6 +1538,8 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "AgentInstructionTemplate.render(kind: .unknown, product: manifest.productContext)" in local
     fallback_offline = processor.split("func fallbackOffline")[1].split("func shotsLinked")[0]
     assert "[Requires Manual Review - API Offline]" in fallback_offline
+    assert "framesOverlapSlice" in fallback_offline
+    assert "slice.stills + [slice.exportClipPath" not in fallback_offline
     assert "refreshShotsFromDisk" in processor
     refresh = processor.split("func refreshShotsFromDisk")[1].split("func excerptMap")[0]
     assert "loadShotSidecars" in refresh

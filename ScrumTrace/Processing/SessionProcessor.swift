@@ -803,19 +803,21 @@ final class SessionProcessor: @unchecked Sendable {
         product: ProductContext,
         sessionURL: URL
     ) -> TaskRecord {
-        var evidence = slice.stills.filter {
-            EvidenceValidator.framesOverlapSlice(
-                [$0],
+        // D7: a merge-clamped Shot still gets a review row. C5: that row
+        // must not inherit this slice's clip or another moment's stills.
+        let inWindow = shot.tMedia >= slice.startMedia && shot.tMedia <= slice.endMedia
+        var evidence = shot.stillCandidates.filter { still in
+            !inWindow || EvidenceValidator.framesOverlapSlice(
+                [still],
                 slice: slice,
                 shots: [shot],
                 sessionURL: sessionURL
             )
         }
-        evidence.append(contentsOf: shot.stillCandidates)
         if let exportPath = shot.exportPath {
             evidence.append(exportPath)
         }
-        if let clip = slice.exportClipPath ?? slice.clipPath {
+        if inWindow, let clip = slice.exportClipPath ?? slice.clipPath {
             evidence.append(clip)
         }
         return TaskRecord(
@@ -852,7 +854,14 @@ final class SessionProcessor: @unchecked Sendable {
             agentInstructions: "[Requires Manual Review - API Offline] \(AgentInstructionTemplate.render(kind: .unknown, product: product))",
             quotes: [],
             evidenceMedia: uniquedPaths(
-                slice.stills + [slice.exportClipPath, slice.clipPath].compactMap { $0 },
+                slice.stills.filter {
+                    EvidenceValidator.framesOverlapSlice(
+                        [$0],
+                        slice: slice,
+                        shots: [],
+                        sessionURL: sessionURL
+                    )
+                } + [slice.exportClipPath, slice.clipPath].compactMap { $0 },
                 sessionURL: sessionURL
             ),
             confidence: 0
@@ -1015,8 +1024,19 @@ final class SessionProcessor: @unchecked Sendable {
                     evidenceMedia: uniquedPaths(
                         [shot.exportPath].compactMap { $0 }
                             + shot.stillCandidates
-                            + (slice?.stills ?? [])
-                            + [slice?.exportClipPath, slice?.clipPath].compactMap { $0 },
+                            + (slice?.stills ?? []).filter { still in
+                                guard let slice else { return false }
+                                guard shot.tMedia >= slice.startMedia && shot.tMedia <= slice.endMedia else {
+                                    return false
+                                }
+                                return shot.stillCandidates.contains(still)
+                                    || shot.rawPath == still
+                                    || shot.annotatedPath == still
+                            }
+                            + [slice?.exportClipPath, slice?.clipPath].compactMap { $0 }.filter { _ in
+                                guard let slice else { return false }
+                                return shot.tMedia >= slice.startMedia && shot.tMedia <= slice.endMedia
+                            },
                         sessionURL: sessionURL
                     ),
                     confidence: 0
