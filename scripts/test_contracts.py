@@ -1330,6 +1330,12 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "wrapUntrustedInline(remainder)" in handoff_fn
     assert "wrapUntrustedInline(notes)" in handoff_fn
     assert "Use only the linked evidence paths." in handoff_fn
+    assert "rangeOutsideUntrusted" in handoff_fn
+    assert "isInsideUntrustedWrapper" in handoff_fn
+    assert "rangeOutsideUntrusted(marker" in handoff_fn
+    assert "rangeOutsideUntrusted(templateAnchor" in handoff_fn
+    assert "text.range(of: marker)" not in handoff_fn
+    assert "body.range(of: anchor)" not in handoff_fn
     assert "Model notes (untrusted)" in agent
     assert 'lines.append("- Agent instructions: \\(task.agentInstructions)")' not in agent
     brief_omit = brief_src.split("private func omittedHTML")[1].split("private static func clock")[0]
