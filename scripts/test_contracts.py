@@ -1318,6 +1318,8 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "--sans:" in css
     assert "--mono:" in css
     assert "--display:" in css
+    assert "@media (max-width: 860px)" in css
+    assert ".meta { display: grid" in css.split("@media (max-width: 860px)")[1]
     assert "IBM Plex" not in css
     assert "Cormorant" not in css
     brief_html = (ROOT / "samples" / "mock-session" / "export" / "SESSION_BRIEF.html").read_text()

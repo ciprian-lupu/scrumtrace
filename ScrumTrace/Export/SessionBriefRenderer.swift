@@ -325,7 +325,11 @@ struct SessionBriefRenderer {
     .lightbox img { max-width: min(92vw, 1400px); max-height: 92vh; cursor: default; }
     .spk { display: block; font-size: 11px; color: #f0a35e; }
     .when { display: block; font-size: 10px; opacity: 0.6; margin-bottom: 6px; }
-    @media (max-width: 860px) { .epistemic { grid-template-columns: 1fr; } }
+    @media (max-width: 860px) {
+      .epistemic, .evidence { grid-template-columns: 1fr; }
+      .slate { grid-template-columns: 1fr; }
+      .meta { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 14px; }
+    }
     """
 
     private static let fallbackJS = """

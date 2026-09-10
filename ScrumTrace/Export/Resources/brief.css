@@ -205,6 +205,9 @@ figcaption { font-family: var(--mono); font-size: 11px; color: var(--muted); mar
   .sprocket { display: none; }
   .epistemic, .evidence { grid-template-columns: 1fr; }
   .slate { grid-template-columns: 1fr; }
+  h1 { font-size: clamp(2rem, 11vw, 2.8rem); }
+  .meta { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 14px; }
+  .take h2 { font-size: 1.45rem; }
 }
 
 @media (prefers-reduced-motion: reduce) {
