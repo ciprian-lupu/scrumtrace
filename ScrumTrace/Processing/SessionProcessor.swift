@@ -572,10 +572,20 @@ final class SessionProcessor: @unchecked Sendable {
             mediaSent.append("transcript")
         }
         var clipURL: URL?
-        if ProviderWireMedia.willUploadClip(configuration: configuration),
-           let clip = slice.exportClipPath ?? slice.clipPath,
-           let contained = ExportRel.existingSessionFile(clip, sessionURL: sessionURL) {
-            clipURL = sessionURL.appendingPathComponent(contained)
+        if ProviderWireMedia.willUploadClip(configuration: configuration) {
+            let clip = slice.exportClipPath ?? slice.clipPath
+            var contained = clip.flatMap { ExportRel.existingSessionFile($0, sessionURL: sessionURL) }
+            if contained == nil {
+                for path in EvidenceValidator.sliceClipPaths(slice) {
+                    if let found = ExportRel.existingSessionFile(path, sessionURL: sessionURL) {
+                        contained = found
+                        break
+                    }
+                }
+            }
+            if let contained {
+                clipURL = sessionURL.appendingPathComponent(contained)
+            }
         }
         // media_sent is what actually leaves the Mac. Shipped adapters never
         // attach MP4, even when the internal request carries clipURL.

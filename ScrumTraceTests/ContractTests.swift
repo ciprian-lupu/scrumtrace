@@ -2399,6 +2399,38 @@ final class ContractTests: XCTestCase {
         XCTAssertEqual(stripped.shots[0].rawPath, "")
     }
 
+    func testSessionBriefShowsMappedArchiveShot() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("scrumtrace-brief-shot-\(UUID().uuidString)")
+        let shots = root.appendingPathComponent("export/shots")
+        try FileManager.default.createDirectory(at: shots, withIntermediateDirectories: true)
+        try Data("jpg".utf8).write(to: shots.appendingPathComponent("001.jpg"))
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        var manifest = SessionManifest.makeNew(sessionId: "brief-shot", product: .empty)
+        manifest.shots = [
+            ShotRecord(
+                id: "shot-001",
+                tMedia: 8,
+                rawPath: "archive/shots/001.png",
+                annotatedPath: nil,
+                exportPath: "export/shots/gone.jpg",
+                note: "ingest",
+                source: .typed
+            )
+        ]
+        XCTAssertNil(ExportRel.packMediaHandoff("archive/shots/001.png", sessionURL: root))
+        XCTAssertEqual(
+            EvidenceValidator.exportRelativeStillPaths(for: manifest.shots[0]),
+            ["export/shots/gone.jpg", "export/shots/001.jpg"]
+        )
+        let html = SessionBriefRenderer().render(manifest: manifest, excerpts: [:], sessionURL: root)
+        XCTAssertTrue(html.contains("shots/001.jpg"), html)
+        XCTAssertFalse(html.contains("No shots in this pack."))
+        let markdown = AgentContextRenderer().render(manifest: manifest, sessionURL: root)
+        XCTAssertTrue(markdown.contains("shots/001.jpg"), markdown)
+        XCTAssertFalse(markdown.contains("_No shots in this pack._"))
+    }
+
     func testAuthFailureStopsFurtherUploads() {
         XCTAssertTrue(AIProviderError.httpStatus(401, "invalid").isAuthFailure)
         XCTAssertTrue(AIProviderError.httpStatus(403, "forbidden").isAuthFailure)

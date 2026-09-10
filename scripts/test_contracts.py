@@ -1438,6 +1438,7 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "failed.withExistingMedia" in catch_clip
     eval_clip = processor.split("private func evaluateSlice")[1].split("private func tasks(")[0]
     assert "exportClipPath ?? slice.clipPath" in eval_clip
+    assert "sliceClipPaths" in eval_clip
     projector = (ROOT / "ScrumTrace" / "Export" / "ExportProjector.swift").read_text()
     assert "MediaBudget.maxStills" in projector
     assert "Over extra-still budget" in projector
@@ -1599,6 +1600,7 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "hasPrefix(prefix)" not in copy_if
     agent = (ROOT / "ScrumTrace" / "Export" / "AgentContextRenderer.swift").read_text()
     assert "stillCandidates" in agent.split("func displayPath")[1]
+    assert "exportRelativeStillPaths" in agent.split("func displayPath")[1]
     assert "packMediaHandoff" in agent.split("func displayPath")[1]
     assert "omitted: omitted" in agent.split("func displayPath")[1]
     assert "packMediaHandoff" in agent.split("private func taskBlock")[1].split("private func displayPath")[0]
@@ -1968,6 +1970,8 @@ def test_phase45_clip_consent_and_budget() -> None:
     shots_fn = brief_src.split("private func shots")[1].split("private func omittedHTML")[0]
     assert "packMediaHandoff" in shots_fn
     assert "omitted: manifest.omitted" in shots_fn
+    assert "exportRelativeStillPaths" in shots_fn
+    assert "stillCandidates" in shots_fn
     google = (ROOT / "ScrumTrace" / "AI" / "GoogleClient.swift").read_text()
     assert "var candidates: [Candidate]?" in google
     assert "var content: Content?" in google

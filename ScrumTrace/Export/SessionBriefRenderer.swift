@@ -199,7 +199,10 @@ struct SessionBriefRenderer {
     private func shots(_ manifest: SessionManifest, sessionURL: URL) -> String {
         let figures = manifest.shots.compactMap { shot -> String? in
             var path: String?
-            for candidate in [shot.exportPath].compactMap({ $0 }) + shot.stillCandidates {
+            let candidates = EvidenceValidator.exportRelativeStillPaths(for: shot)
+                + [shot.exportPath].compactMap { $0 }
+                + shot.stillCandidates
+            for candidate in candidates {
                 if let rel = ExportRel.packMediaHandoff(candidate, sessionURL: sessionURL, omitted: manifest.omitted) {
                     path = rel
                     break

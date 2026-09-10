@@ -170,7 +170,10 @@ struct AgentContextRenderer {
     }
 
     private func displayPath(_ shot: ShotRecord, sessionURL: URL, omitted: [OmittedAsset]) -> String? {
-        for path in [shot.exportPath].compactMap({ $0 }) + shot.stillCandidates {
+        let candidates = EvidenceValidator.exportRelativeStillPaths(for: shot)
+            + [shot.exportPath].compactMap { $0 }
+            + shot.stillCandidates
+        for path in candidates {
             if let rel = ExportRel.packMediaHandoff(path, sessionURL: sessionURL, omitted: omitted) {
                 return rel
             }
