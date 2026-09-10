@@ -206,6 +206,11 @@ def test_zipper_never_deletes_archive() -> None:
     assert "isUsableSessionRoot" in reset
     assert reset.count("isSymbolicLink") >= 4
     assert reset.index("createDirectory(at: export") < reset.index('writeFailed("export/")')
+    assert "containsSymlinkComponent" in reset
+    shots_mkdir = reset.split("createDirectory(at: shots")[1].split("createDirectory(at: media")[0]
+    assert "containsSymlinkComponent" in shots_mkdir
+    assert 'writeFailed("export/")' in shots_mkdir
+    assert shots_mkdir.index("containsSymlinkComponent") < shots_mkdir.index("removeItem(at: shots)")
     omit_md = zipper.split("func writeOmittedMarkdown")[1].split("private func uniquedOmitted")[0]
     assert "omittedHandoffPath" in omit_md
     assert "writeExportText" in omit_md
@@ -1308,6 +1313,7 @@ def test_write_contained_data_refuses_directory_symlinks() -> None:
     assert "isUsableSessionRoot(rootURL)" in create_fn
     assert create_fn.count("isUsableSessionRoot(rootURL)") >= 2
     assert "isUsableSessionRoot(url)" in create_fn
+    assert "containsSymlinkComponent" in create_fn
     assert "removeItem(at: url)" in create_fn
     assert create_fn.index("try write(manifest: &manifest)") < create_fn.index("removeItem(at: url)")
     assert "isUsableSessionRoot(rootURL)" in create_fn.split("createDirectory(at: url")[1]

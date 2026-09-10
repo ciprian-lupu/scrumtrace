@@ -115,6 +115,11 @@ final class SessionVault: @unchecked Sendable {
                     try? fileManager.removeItem(at: dest)
                     throw SessionVaultError.writeFailed(folder)
                 }
+                // Nested `export/shots` mkdir follows a planted `export/` link.
+                // Do not delete `dest` when a parent component is the link.
+                if ExportRel.containsSymlinkComponent(folder, sessionURL: url) {
+                    throw SessionVaultError.writeFailed(folder)
+                }
             }
             var manifest = SessionManifest.makeNew(sessionId: id, product: product)
             try write(manifest: &manifest)
