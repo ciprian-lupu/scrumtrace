@@ -38,10 +38,7 @@ enum BriefTemplateLoader {
 
     /// Bundle lookups follow a planted resource symlink; refuse those URLs.
     private static func readableResourceText(_ url: URL) -> String? {
-        if (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
-            return nil
-        }
-        return try? String(contentsOf: url, encoding: .utf8)
+        ExportRel.unfollowedUTF8Text(url)
     }
 }
 

@@ -467,8 +467,8 @@ def test_audio_split_and_brief_loader() -> None:
     assert "isSymbolicLink" in loader
     assert "skipDescendants" in loader
     assert "readableResourceText" in loader
-    assert "String(contentsOf:" in loader.split("func readableResourceText")[1]
-    assert loader.index("isSymbolicLink") < loader.index("String(contentsOf:")
+    assert "unfollowedUTF8Text" in loader
+    assert "String(contentsOf:" not in loader
     menu = (ROOT / "ScrumTrace" / "UI" / "MenuBarController.swift").read_text()
     assert "retryRecent" in menu
     assert "lastMenuSignature" in menu
@@ -1180,11 +1180,18 @@ def test_write_contained_data_refuses_directory_symlinks() -> None:
     assert "fstat" in pack_size
     assert "S_IFREG" in pack_size
     assert "attributesOfItem" not in pack_size
-    unfollowed_size = models.split("static func unfollowedRegularFileByteCount")[1].split("enum MediaBudget")[0]
+    unfollowed_size = models.split("static func unfollowedRegularFileByteCount")[1].split(
+        "static func unfollowedUTF8Text"
+    )[0]
     assert "O_NOFOLLOW" in unfollowed_size
     assert "fstat" in unfollowed_size
     assert "isSymbolicLink" in unfollowed_size
     assert "attributesOfItem" not in unfollowed_size
+    utf8_read = models.split("static func unfollowedUTF8Text")[1].split("enum MediaBudget")[0]
+    assert "O_NOFOLLOW" in utf8_read
+    assert "Darwin.read" in utf8_read
+    assert "String(data:" in utf8_read
+    assert "String(contentsOf:" not in utf8_read
     prepare = models.split("static func prepareContainedWrite")[1].split("static func writeContainedData")[0]
     assert "isSymbolicLink" in prepare
     assert "createDirectory" in prepare

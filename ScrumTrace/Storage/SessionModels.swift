@@ -547,6 +547,39 @@ enum ExportRel {
         guard size >= 0 else { return nil }
         return size
     }
+
+    /// Read UTF-8 from a regular file without following a dest symlink.
+    /// Bundle `String(contentsOf:)` follows a planted resource link.
+    static func unfollowedUTF8Text(_ url: URL, maxBytes: Int = 2 * 1024 * 1024) -> String? {
+        if (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+            return nil
+        }
+        let fd = url.withUnsafeFileSystemRepresentation { ptr -> Int32 in
+            guard let ptr else { return -1 }
+            return Darwin.open(ptr, O_RDONLY | O_CLOEXEC | O_NOFOLLOW)
+        }
+        guard fd >= 0 else { return nil }
+        defer { Darwin.close(fd) }
+        var info = stat()
+        guard Darwin.fstat(fd, &info) == 0 else { return nil }
+        guard (info.st_mode & S_IFMT) == S_IFREG else { return nil }
+        let size = Int(info.st_size)
+        guard size >= 0, size <= maxBytes else { return nil }
+        if size == 0 { return "" }
+        var data = Data(count: size)
+        let filled = data.withUnsafeMutableBytes { buf -> Int in
+            guard let base = buf.baseAddress else { return -1 }
+            var offset = 0
+            while offset < size {
+                let n = Darwin.read(fd, base.advanced(by: offset), size - offset)
+                if n <= 0 { return n == 0 ? offset : -1 }
+                offset += Int(n)
+            }
+            return offset
+        }
+        guard filled == size else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
 }
 
 enum MediaBudget {
