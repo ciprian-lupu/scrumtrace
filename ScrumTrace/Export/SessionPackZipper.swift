@@ -165,8 +165,13 @@ struct SessionPackZipper {
             exportDir: exportDir,
             includeFullTranscript: includeFullTranscript
         )
-        // Re-check after allowList: a planted symlink must not enter `-@`.
+        // Re-check after allowList: a planted symlink must not enter `-@`
+        // and must not become zip's cwd (`export/` → `archive/`).
         PackBudget.removeEscapingExportLinks(exportDir: exportDir)
+        if (try? exportDir.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true
+            || ExportRel.containsSymlinkComponent(ScrumTracePath.export, sessionURL: sessionURL) {
+            throw SessionRecorderError.writerFailed("export/ is a symbolic link.")
+        }
         let members = scanned.compactMap { member in
             ExportRel.containedExportMember(
                 file: exportDir.appendingPathComponent(member),
@@ -180,6 +185,10 @@ struct SessionPackZipper {
             "scrumtrace-zip-\(UUID().uuidString).zip"
         )
         try? FileManager.default.removeItem(at: temp)
+        if (try? exportDir.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true
+            || ExportRel.containsSymlinkComponent(ScrumTracePath.export, sessionURL: sessionURL) {
+            throw SessionRecorderError.writerFailed("export/ is a symbolic link.")
+        }
         let process = Process()
         process.currentDirectoryURL = exportDir
         process.executableURL = URL(fileURLWithPath: "/usr/bin/zip")

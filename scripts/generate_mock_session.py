@@ -466,6 +466,8 @@ This pack is `samples/mock-session/export/` only. Do not hand `archive/` (this m
     tmp = Path(tmp_name)
     # zip cannot update an empty placeholder; Swift runZip also removes the temp first.
     tmp.unlink(missing_ok=True)
+    if EXPORT.is_symlink():
+        raise SystemExit("export/ is a symbolic link")
     try:
         subprocess.run(
             ["zip", "-q", "-y", str(tmp), "-@"],

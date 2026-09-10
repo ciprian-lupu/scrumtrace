@@ -119,6 +119,8 @@ def test_html_escaper_order() -> None:
     assert "os.close(fd)" in zip_build
     assert "tmp.unlink(missing_ok=True)" in zip_build
     assert zip_build.index("tmp.unlink") < zip_build.index('["zip"')
+    assert "EXPORT.is_symlink" in zip_build
+    assert zip_build.index("EXPORT.is_symlink") < zip_build.index("cwd=EXPORT")
 
 
 def test_brief_template_does_not_rescan_values() -> None:
@@ -568,6 +570,11 @@ def test_pipeline_timing_stays_in_archive() -> None:
     assert "compactMap" in run_zip
     assert run_zip.index("allowList") < run_zip.index("containedExportMember")
     assert run_zip.index("removeEscapingExportLinks") < run_zip.index("compactMap")
+    assert "isSymbolicLink" in run_zip
+    assert "containsSymlinkComponent" in run_zip
+    assert run_zip.index("isSymbolicLink") < run_zip.index("currentDirectoryURL")
+    assert run_zip.count("isSymbolicLink") >= 2
+    assert 'writerFailed("export/ is a symbolic link.")' in run_zip
     zip_fn = zipper.split("func zip(")[1].split("func writeZip")[0]
     assert "isUsableSessionRoot" in zip_fn
     assert "removeEscapingExportLinks" in zip_fn
