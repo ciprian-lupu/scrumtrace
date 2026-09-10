@@ -665,21 +665,6 @@ final class SessionProcessor: @unchecked Sendable {
         forceReview: Bool
     ) -> [TaskRecord] {
         var out: [TaskRecord] = []
-        func ownedByOtherAssociatedShot(_ still: String) -> Bool {
-            guard let associated = slice.associatedShotId else { return false }
-            return shots.contains { shot in
-                guard shot.id != associated else { return false }
-                let paths = shot.stillCandidates
-                    + [shot.rawPath]
-                    + [shot.annotatedPath, shot.exportPath].compactMap { $0 }
-                return paths.contains { candidate in
-                    !candidate.isEmpty && (
-                        candidate == still
-                            || ExportRel.sessionPath(candidate) == ExportRel.sessionPath(still)
-                    )
-                }
-            }
-        }
         for (index, candidate) in response.candidates.enumerated() {
             var status: TaskStatus
             switch candidate.decision {
@@ -708,6 +693,7 @@ final class SessionProcessor: @unchecked Sendable {
             }
             let resolvedFrames = EvidenceValidator.existingPaths(candidate.frameReferences, sessionURL: sessionURL)
                 .filter { EvidenceValidator.framesOverlapSlice([$0], slice: slice, shots: shots, sessionURL: sessionURL) }
+                .filter { !EvidenceValidator.ownedByOtherAssociatedShot($0, slice: slice, shots: shots) }
             let uniqueEvidence = uniquedPaths(
                 resolvedFrames
                     + slice.stills.filter { still in
@@ -717,7 +703,7 @@ final class SessionProcessor: @unchecked Sendable {
                             shots: shots,
                             sessionURL: sessionURL
                         ) else { return false }
-                        return !ownedByOtherAssociatedShot(still)
+                        return !EvidenceValidator.ownedByOtherAssociatedShot(still, slice: slice, shots: shots)
                     }
                     + [slice.exportClipPath ?? slice.clipPath].compactMap { $0 }
                     + shots.flatMap { shot in

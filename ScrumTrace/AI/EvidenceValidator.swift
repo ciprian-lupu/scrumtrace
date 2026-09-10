@@ -89,6 +89,7 @@ enum EvidenceValidator {
             }
         }
         let frames = existingPaths(candidate.frameReferences, sessionURL: sessionURL)
+            .filter { !ownedByOtherAssociatedShot($0, slice: slice, shots: shots) }
         if frames.isEmpty {
             issues.append(EvidenceIssue(reason: "no valid frame_references on disk"))
         } else if !framesOverlapSlice(frames, slice: slice, shots: shots, sessionURL: sessionURL) {
@@ -177,6 +178,19 @@ enum EvidenceValidator {
                 !candidate.isEmpty && (candidate == path || isSameSessionPath(path, candidate))
             }
         }
+    }
+
+    /// C5: an evaluated candidate belongs to `associated_shot_id`. Another
+    /// merged in-window Shot's PNG is not this candidate's evidence (D7 rows
+    /// cover that Shot). Match archive and export path forms.
+    static func ownedByOtherAssociatedShot(
+        _ still: String,
+        slice: SliceRecord,
+        shots: [ShotRecord]
+    ) -> Bool {
+        guard let associated = slice.associatedShotId else { return false }
+        guard let owner = shotOwning(still, in: shots) else { return false }
+        return owner.id != associated
     }
 
     /// Clip path still counts as this window after omit deletes the MP4.

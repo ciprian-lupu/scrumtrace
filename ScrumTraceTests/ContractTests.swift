@@ -1212,6 +1212,80 @@ final class ContractTests: XCTestCase {
         XCTAssertFalse(inside.contains { $0.reason == "frame_references outside this slice window" })
     }
 
+    func testCanConfirmRejectsFrameFromOtherAssociatedShot() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("st-other-assoc-\(UUID().uuidString)")
+        let shotsDir = root.appendingPathComponent("archive/shots")
+        try FileManager.default.createDirectory(at: shotsDir, withIntermediateDirectories: true)
+        try Data("one").write(to: shotsDir.appendingPathComponent("001.png"))
+        try Data("two").write(to: shotsDir.appendingPathComponent("002.png"))
+        defer { try? FileManager.default.removeItem(at: root) }
+        let slice = SliceRecord(
+            sliceId: "slice-01",
+            startMedia: 0,
+            endMedia: 40,
+            trigger: .shot,
+            associatedShotId: "shot-001",
+            clipPath: nil,
+            stills: ["archive/shots/001.png", "archive/shots/002.png"],
+            analysisStatus: .success,
+            score: 1
+        )
+        let associated = ShotRecord(
+            id: "shot-001",
+            tMedia: 12,
+            rawPath: "archive/shots/001.png",
+            annotatedPath: nil,
+            note: "associated",
+            source: .typed
+        )
+        let merged = ShotRecord(
+            id: "shot-002",
+            tMedia: 28,
+            rawPath: "archive/shots/002.png",
+            annotatedPath: nil,
+            exportPath: "export/shots/002.jpg",
+            note: "merged in window",
+            source: .typed
+        )
+        let transcript = FullTranscript(sessionId: "s", language: "en", segments: [])
+        func candidate(frames: [String]) -> CandidateRecord {
+            CandidateRecord(
+                decision: .keep,
+                confidence: 0.9,
+                kind: .bug,
+                title: "Save",
+                observed: "button",
+                stated: "said",
+                inferred: "maybe",
+                agentInstructionsDraft: "",
+                quotes: [],
+                frameReferences: frames
+            )
+        }
+        let other = EvidenceValidator.canConfirm(
+            candidate: candidate(frames: ["archive/shots/002.png"]),
+            slice: slice,
+            transcript: transcript,
+            sessionURL: root,
+            shots: [associated, merged]
+        )
+        XCTAssertTrue(other.contains { $0.reason == "no valid frame_references on disk" })
+        XCTAssertTrue(EvidenceValidator.ownedByOtherAssociatedShot(
+            "export/shots/002.jpg",
+            slice: slice,
+            shots: [associated, merged]
+        ))
+        let local = EvidenceValidator.canConfirm(
+            candidate: candidate(frames: ["archive/shots/001.png"]),
+            slice: slice,
+            transcript: transcript,
+            sessionURL: root,
+            shots: [associated, merged]
+        )
+        XCTAssertFalse(local.contains { $0.reason == "no valid frame_references on disk" })
+        XCTAssertFalse(local.contains { $0.reason == "frame_references outside this slice window" })
+    }
+
     func testInferredCopiedIntoObservedBlocksConfirm() {
         let candidate = CandidateRecord(
             decision: .keep,

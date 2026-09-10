@@ -27,12 +27,17 @@ def test_quote_window() -> None:
     assert not quote_matches("invented passphrase", 10.5, 13.0, segments)
     validator = (ROOT / "ScrumTrace" / "AI" / "EvidenceValidator.swift").read_text()
     confirm = validator.split("static func canConfirm")[1].split("static func applyExportEvidence")[0]
+    confirm_body = validator.split("static func canConfirm")[1].split("static func framesOverlapSlice")[0]
     assert "quote outside slice window" in confirm
     assert "quote times are inverted" in confirm
     assert "quote not found in transcript window" in confirm
     assert "frame_references outside this slice window" in confirm
     assert "shots: [ShotRecord]" in confirm
     assert "framesOverlapSlice" in confirm
+    assert "ownedByOtherAssociatedShot" in confirm_body
+    owner_fn = validator.split("static func ownedByOtherAssociatedShot")[1].split("static func applyExportEvidence")[0]
+    assert "shotOwning" in owner_fn
+    assert "associatedShotId" in owner_fn
     overlap = validator.split("static func framesOverlapSlice")[1].split("static func applyExportEvidence")[0]
     assert "tMedia" in overlap
     assert "startMedia" in overlap

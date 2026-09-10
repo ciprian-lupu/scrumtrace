@@ -701,6 +701,7 @@ def test_retry_failed_slices_and_pins() -> None:
     assert "testPackMediaHandoffDropsOmittedExportFile" in contracts
     assert "testCanConfirmRejectsFrameFromAnotherSlice" in contracts
     assert "testCanConfirmRejectsStillOutsideClampedWindow" in contracts
+    assert "testCanConfirmRejectsFrameFromOtherAssociatedShot" in contracts
     assert "testMergeCanonicalStatusesKeepsArchiveEvidence" in contracts
     models = (ROOT / "ScrumTrace" / "Storage" / "SessionModels.swift").read_text()
     existing_media = models.split("func withExistingMedia")[1].split("enum CodingKeys")[0]
@@ -2033,6 +2034,9 @@ def test_phase45_clip_consent_and_budget() -> None:
     confirm_call = tasks_fn.split("EvidenceValidator.canConfirm")[1].split("if !issues.isEmpty")[0]
     assert "shots: shots" in confirm_call
     assert "framesOverlapSlice" in tasks_fn.split("let resolvedFrames")[1].split("let uniqueEvidence")[0]
+    assert "ownedByOtherAssociatedShot" in tasks_fn.split("let resolvedFrames")[1].split("let uniqueEvidence")[0]
+    assert "EvidenceValidator.ownedByOtherAssociatedShot" in tasks_fn
+    assert "func ownedByOtherAssociatedShot" not in tasks_fn
     uniqued_fn = processor.split("private func uniquedPaths")[1].split("private func abortedForAuth")[0]
     assert "existingSessionFile" in uniqued_fn
     assert "isVisualEvidence" in uniqued_fn
