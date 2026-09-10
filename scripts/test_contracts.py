@@ -751,6 +751,9 @@ def test_audio_split_and_brief_loader() -> None:
     assert "writeEngineBuffer(buffer)" not in tap
     assert "syncWriter" in tap
     assert "self.engine = engine" in tap
+    assert "failCaptureWrite" in tap
+    assert "Could not copy microphone PCM" in tap
+    assert "else { return }" not in tap.split("copyPCM(buffer)")[1].split("writerQueue.async")[0]
     brief = (ROOT / "ScrumTrace" / "Export" / "SessionBriefRenderer.swift").read_text()
     assert "Export/Resources" in brief
     loader = brief.split("enum BriefTemplateLoader")[1].split("enum HTMLEscaper")[0]

@@ -681,7 +681,10 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             guard let self else { return }
             // The tap reuses `buffer`. Copy before hopping queues or pause-dropped
             // frames can still scribble into a later WAV write (C1).
-            guard let copy = Self.copyPCM(buffer) else { return }
+            guard let copy = Self.copyPCM(buffer) else {
+                self.failCaptureWrite("Could not copy microphone PCM.")
+                return
+            }
             self.writerQueue.async {
                 guard !self.paused, self.started else { return }
                 self.writeEngineBuffer(copy)
