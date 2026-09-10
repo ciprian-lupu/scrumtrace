@@ -1618,6 +1618,9 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "cancelWriting" in abort_start
     assert "markRecordingStopped" in abort_start
     assert "discardLiveCaptureLocked" in abort_start
+    assert "stopCapture" in abort_start
+    assert "try? await live.stopCapture()" not in abort_start
+    assert abort_start.count("try await live.stopCapture()") >= 2
     deinit_fn = recorder.split("deinit {")[1]
     assert "cancelWriting" in deinit_fn
     assert "snapshot.engine?.stop()" in deinit_fn

@@ -189,7 +189,16 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             return (stream, engine)
         }
         if let live = snapshot.stream {
-            try? await live.stopCapture()
+            do {
+                try await live.stopCapture()
+            } catch {
+                do {
+                    try await live.stopCapture()
+                } catch {
+                    // start() still rethrows the original error. Cancel writers below
+                    // so a live SCStream cannot keep appending after abort (C1).
+                }
+            }
         }
         snapshot.engine?.stop()
         syncWriter {
