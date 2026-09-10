@@ -86,6 +86,11 @@ final class SessionController: ObservableObject {
     }
 
     func stopRecording() {
+        // Freeze before the unstructured Task hop so HUD/menu Stop cannot
+        // leave a window where SCStream still appends (C1).
+        recorder?.freezeWriters()
+        sampler.isSuspended = true
+        NotificationCenter.default.post(name: .scrumTraceCaptureGate, object: CaptureSessionState.paused)
         Task { await stopRecordingAsync() }
     }
 

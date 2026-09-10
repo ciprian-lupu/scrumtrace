@@ -966,6 +966,11 @@ def test_pipeline_timing_stays_in_archive() -> None:
     assert start_btn.index("startInFlight = true") < start_btn.index("startRecordingAsync")
     assert "markStartInFlight(true)" in start_btn
     assert start_btn.index("startInFlight = true") < start_btn.index("markStartInFlight(true)")
+    stop_btn = controller.split("func stopRecording()")[1].split("func handleCaptureStreamFailure")[0]
+    assert "freezeWriters" in stop_btn
+    assert "scrumTraceCaptureGate" in stop_btn
+    assert stop_btn.index("freezeWriters") < stop_btn.index("Task { await stopRecordingAsync()")
+    assert stop_btn.index("freezeWriters") < stop_btn.index("scrumTraceCaptureGate")
     start_rec = controller.split("func startRecordingAsync")[1].split("func stopRecordingAsync")[0]
     assert "defer { startInFlight = false }" in start_rec
     assert "markStartInFlight(false)" in start_rec
