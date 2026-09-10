@@ -693,6 +693,10 @@ def test_retry_failed_slices_and_pins() -> None:
     assert "exportClipPath" in existing_media
     assert existing_media.count("existingSessionFile") >= 3
     assert "fileExists(atPath: sessionURL.appendingPathComponent(clip)" not in existing_media
+    exist_fn = models.split("static func existingSessionFile")[1].split("static func unfollowedRelative")[0]
+    assert "isContainedRegularFile" in exist_fn
+    assert "regularFileByteCount" in exist_fn
+    assert "bytes > 0" in exist_fn
     controller = (ROOT / "ScrumTrace" / "Processing" / "SessionController.swift").read_text()
     assert "mergePins" in controller
     assert "mergeLiveCatalog" in controller

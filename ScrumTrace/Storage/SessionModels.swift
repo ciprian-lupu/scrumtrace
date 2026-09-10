@@ -242,6 +242,11 @@ enum ExportRel {
         guard let relative = containedRelative(path, sessionURL: sessionURL) else { return nil }
         let url = sessionURL.appendingPathComponent(relative)
         guard isContainedRegularFile(url, sessionRoot: sessionURL) else { return nil }
+        // C5: a 0-byte clip or still is not validatable evidence. Empty WAV/movie
+        // also must not count as captured audio for Whisper.
+        guard let bytes = regularFileByteCount(relative: relative, sessionURL: sessionURL), bytes > 0 else {
+            return nil
+        }
         return relative
     }
 

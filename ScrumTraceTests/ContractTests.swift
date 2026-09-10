@@ -1351,6 +1351,7 @@ final class ContractTests: XCTestCase {
         let shots = root.appendingPathComponent("archive/shots")
         try FileManager.default.createDirectory(at: shots, withIntermediateDirectories: true)
         try Data("png".utf8).write(to: shots.appendingPathComponent("001.png"))
+        try Data().write(to: shots.appendingPathComponent("empty.png"))
         defer { try? FileManager.default.removeItem(at: root) }
         let slice = SliceRecord(
             sliceId: "slice-01",
@@ -1360,7 +1361,7 @@ final class ContractTests: XCTestCase {
             associatedShotId: nil,
             clipPath: "archive/media-work/task-01/clip.mp4",
             exportClipPath: "export/media/task-01/clip.mp4",
-            stills: ["archive/shots/001.png", "archive/media-work/task-01/shot-1.jpg"],
+            stills: ["archive/shots/001.png", "archive/shots/empty.png", "archive/media-work/task-01/shot-1.jpg"],
             analysisStatus: .pending,
             score: 80
         )
@@ -1368,6 +1369,7 @@ final class ContractTests: XCTestCase {
         XCTAssertNil(kept.clipPath)
         XCTAssertNil(kept.exportClipPath)
         XCTAssertEqual(kept.stills, ["archive/shots/001.png"])
+        XCTAssertNil(ExportRel.existingSessionFile("archive/shots/empty.png", sessionURL: root))
     }
 
     func testConsentRepromptOnlyWhenNeverAskedOrDestinationOrPayloadChanges() {
