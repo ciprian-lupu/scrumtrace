@@ -126,9 +126,7 @@ enum EvidenceValidator {
         sessionURL: URL
     ) -> Bool {
         var allowed: [String] = []
-        if let clip = slice.exportClipPath ?? slice.clipPath {
-            allowed.append(clip)
-        }
+        allowed.append(contentsOf: sliceClipPaths(slice))
         for still in slice.stills {
             if let owner = shotOwning(still, in: shots) {
                 if owner.tMedia < slice.startMedia || owner.tMedia > slice.endMedia {
@@ -169,6 +167,18 @@ enum EvidenceValidator {
         }
     }
 
+    /// A stale `export_clip_path` must not hide the archive clip after omit (C5).
+    private static func sliceClipPaths(_ slice: SliceRecord) -> [String] {
+        var paths: [String] = []
+        if let exported = slice.exportClipPath, !exported.isEmpty {
+            paths.append(exported)
+        }
+        if let clip = slice.clipPath, !clip.isEmpty, !paths.contains(clip) {
+            paths.append(clip)
+        }
+        return paths
+    }
+
     private static func shotOwning(_ path: String, in shots: [ShotRecord]) -> ShotRecord? {
         shots.first { shot in
             let paths = shot.stillCandidates
@@ -205,10 +215,7 @@ enum EvidenceValidator {
         if framesOverlapSlice([path], slice: slice, shots: shots, sessionURL: sessionURL) {
             return true
         }
-        if let clip = slice.exportClipPath ?? slice.clipPath, isSameSessionPath(path, clip) {
-            return true
-        }
-        return false
+        return sliceClipPaths(slice).contains { isSameSessionPath(path, $0) }
     }
 
     private static func isSameSessionPath(_ lhs: String, _ rhs: String) -> Bool {

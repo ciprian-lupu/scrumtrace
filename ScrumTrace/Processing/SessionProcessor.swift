@@ -720,7 +720,9 @@ final class SessionProcessor: @unchecked Sendable {
                         ) else { return false }
                         return !EvidenceValidator.ownedByOtherAssociatedShot(still, slice: slice, shots: shots)
                     }
-                    + [slice.exportClipPath ?? slice.clipPath].compactMap { $0 }
+                    + [slice.exportClipPath.flatMap { exported in
+                        ExportRel.existingSessionFile(exported, sessionURL: sessionURL) == nil ? nil : exported
+                    } ?? slice.clipPath].compactMap { $0 }
                     + shots.flatMap { shot in
                         guard let associated = slice.associatedShotId, shot.id == associated else {
                             return []
@@ -837,8 +839,13 @@ final class SessionProcessor: @unchecked Sendable {
         if let exportPath = shot.exportPath {
             evidence.append(exportPath)
         }
-        if inWindow, let clip = slice.exportClipPath ?? slice.clipPath {
-            evidence.append(clip)
+        if inWindow {
+            if let exported = slice.exportClipPath,
+               ExportRel.existingSessionFile(exported, sessionURL: sessionURL) != nil {
+                evidence.append(exported)
+            } else if let clip = slice.clipPath {
+                evidence.append(clip)
+            }
         }
         return TaskRecord(
             taskId: "TASK-SHOT",
@@ -881,7 +888,9 @@ final class SessionProcessor: @unchecked Sendable {
                         shots: [],
                         sessionURL: sessionURL
                     )
-                } + [slice.exportClipPath ?? slice.clipPath].compactMap { $0 },
+                } + [slice.exportClipPath.flatMap { exported in
+                    ExportRel.existingSessionFile(exported, sessionURL: sessionURL) == nil ? nil : exported
+                } ?? slice.clipPath].compactMap { $0 },
                 sessionURL: sessionURL
             ),
             confidence: 0
@@ -1090,7 +1099,9 @@ final class SessionProcessor: @unchecked Sendable {
                                 shots: shotsLinked(to: slice, in: manifest),
                                 sessionURL: sessionURL
                             )
-                        } + [slice.exportClipPath ?? slice.clipPath].compactMap { $0 },
+                        } + [slice.exportClipPath.flatMap { exported in
+                            ExportRel.existingSessionFile(exported, sessionURL: sessionURL) == nil ? nil : exported
+                        } ?? slice.clipPath].compactMap { $0 },
                         sessionURL: sessionURL
                     ),
                     confidence: 0
@@ -1119,7 +1130,9 @@ final class SessionProcessor: @unchecked Sendable {
                                     shots: shotsLinked(to: slice, in: manifest),
                                     sessionURL: sessionURL
                                 )
-                            } + [slice.exportClipPath ?? slice.clipPath].compactMap { $0 }
+                            } + [slice.exportClipPath.flatMap { exported in
+                                ExportRel.existingSessionFile(exported, sessionURL: sessionURL) == nil ? nil : exported
+                            } ?? slice.clipPath].compactMap { $0 }
                         },
                         sessionURL: sessionURL
                     ),

@@ -50,6 +50,8 @@ def test_quote_window() -> None:
     assert 'contains("shots/")' in overlap
     assert "isSameSessionPath" in overlap
     assert "stillCandidates" in overlap
+    assert "sliceClipPaths" in overlap
+    assert "exportClipPath ?? slice.clipPath" not in overlap
     controller = (ROOT / "ScrumTrace" / "Processing" / "SessionController.swift").read_text()
     capture = controller.split("private func captureShot")[1].split("private func finishShot")[0]
     assert "writeContainedData(png, relative: rawPath" in capture
