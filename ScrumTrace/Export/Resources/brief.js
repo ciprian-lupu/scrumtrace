@@ -12,7 +12,14 @@
   const isPackMediaHref = (href) => {
     if (!href || href.includes("\\") || href.includes(":") || href.includes("\n") || href.includes("\r") || href.includes("\0")) return false;
     if (href.startsWith("/") || href.startsWith("#")) return false;
-    const parts = href.split("/").filter((part) => part.length > 0);
+    let decoded = href;
+    try {
+      decoded = decodeURIComponent(href);
+    } catch (e) {
+      return false;
+    }
+    if (decoded.includes("\\") || decoded.includes(":") || decoded.includes("\n") || decoded.includes("\r") || decoded.includes("\0")) return false;
+    const parts = decoded.split("/").filter((part) => part.length > 0);
     if (parts.length < 2) return false;
     if (parts.some((part) => part === "." || part === "..")) return false;
     return parts[0] === "shots" || parts[0] === "media";

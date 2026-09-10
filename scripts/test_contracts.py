@@ -1254,9 +1254,12 @@ def test_phase45_clip_consent_and_budget() -> None:
     pack_href = js.split("const isPackMediaHref")[1].split("const isOpen")[0]
     assert '"\\n"' in pack_href
     assert '"\\0"' in pack_href
+    assert "decodeURIComponent" in pack_href
+    assert "decoded.split" in pack_href
     assert "isPackMediaHref" in fallback_js
     fallback_href = fallback_js.split("const isPackMediaHref")[1].split("const isOpen")[0]
     assert "\\\\n" in fallback_href or "\\n" in fallback_href
+    assert "decodeURIComponent" in fallback_href
     assert fallback_js.index("isPackMediaHref(href)") < fallback_js.index("img.src = href")
     assert 'box.addEventListener("click", close)' not in js
     assert 'box.addEventListener("click", close)' not in fallback_js
