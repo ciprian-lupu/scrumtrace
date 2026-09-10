@@ -227,14 +227,16 @@ final class SessionProcessor: @unchecked Sendable {
                 tasks: projection.manifest.tasks,
                 sessionURL: sessionURL
             )
+            // C5: demoted tasks must hit AGENT_CONTEXT / BRIEF / the projection
+            // even if the zip rewrite fails. Do not swallow this write with writeZip.
+            try writeExportDocuments(
+                sessionURL: sessionURL,
+                projected: projection.manifest,
+                excerpts: excerpts,
+                projector: projector
+            )
+            try zipper.writeOmittedMarkdown(sessionURL: sessionURL, omitted: zipResult.omitted)
             do {
-                try writeExportDocuments(
-                    sessionURL: sessionURL,
-                    projected: projection.manifest,
-                    excerpts: excerpts,
-                    projector: projector
-                )
-                try zipper.writeOmittedMarkdown(sessionURL: sessionURL, omitted: zipResult.omitted)
                 zipBytes = try zipper.writeZip(
                     sessionURL: sessionURL,
                     includeFullTranscript: projection.manifest.includeFullTranscriptInZip

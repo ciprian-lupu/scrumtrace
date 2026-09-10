@@ -207,6 +207,7 @@ def test_zipper_never_deletes_archive() -> None:
     omit_md = zipper.split("func writeOmittedMarkdown")[1].split("private func uniquedOmitted")[0]
     assert "omittedHandoffPath" in omit_md
     assert "writeExportText" in omit_md
+    assert "wrapUntrustedInline" in omit_md
     assert ".write(to: url, atomically" not in omit_md
     omit_fn = zipper.split("static func omissionOrder")[1].split("static func stripOmitted")[0]
     dropped = omit_fn.split("return uniqued")[1].split(".filter")[0]
@@ -465,6 +466,9 @@ def test_audio_split_and_brief_loader() -> None:
     loader = brief.split("enum BriefTemplateLoader")[1].split("enum HTMLEscaper")[0]
     assert "isSymbolicLink" in loader
     assert "skipDescendants" in loader
+    assert "readableResourceText" in loader
+    assert "String(contentsOf:" in loader.split("func readableResourceText")[1]
+    assert loader.index("isSymbolicLink") < loader.index("String(contentsOf:")
     menu = (ROOT / "ScrumTrace" / "UI" / "MenuBarController.swift").read_text()
     assert "retryRecent" in menu
     assert "lastMenuSignature" in menu
@@ -698,6 +702,7 @@ def test_pause_privacy_and_metadata_gate() -> None:
     assert "wrapUntrustedInline(manifest.productContext.techStack)" in agent
     assert "wrapUntrustedInline(quote.speaker)" in agent
     assert "wrapUntrustedInline(quote.text)" in agent
+    assert "wrapUntrustedInline(item.reason)" in agent
     assert "pauseLabel" in agent
     assert "pauses.count) pauses" not in agent
     privacy = (ROOT / "ScrumTrace" / "Capture" / "PrivacyGuard.swift").read_text()
@@ -1000,6 +1005,10 @@ def test_phase45_clip_consent_and_budget() -> None:
     docs = processor.split("func writeExportDocuments")[1].split("private func transcribe")[0]
     assert "removeEscapingExportLinks" in docs
     assert "writeExportText" in docs
+    rewrite = processor.split("for pass in 0..<3")[1].split("timing.zipBytes")[0]
+    assert rewrite.index("try writeExportDocuments") < rewrite.index("writeZip")
+    zip_rewrite = rewrite.split("zipBytes = try zipper.writeZip")[1].split("if zipBytes")[0]
+    assert "writeExportDocuments" not in zip_rewrite
     zipper_over = zipper.split("if size > MediaBudget.maxZipBytes")[1].split("func writeZip")[0]
     assert "throw" not in zipper_over
     assert "Pack still" in zipper_over

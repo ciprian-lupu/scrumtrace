@@ -76,14 +76,29 @@ struct SessionPackZipper {
             )
         }
         omitted = uniquedOmitted(omitted)
-        try writeOmittedMarkdown(sessionURL: sessionURL, omitted: omitted)
+        do {
+            try writeOmittedMarkdown(sessionURL: sessionURL, omitted: omitted)
+        } catch {
+            return Result(zipURL: zipURL, byteCount: size, omitted: omitted)
+        }
         if omitted.contains(where: { !$0.path.isEmpty }) {
-            try runZip(
-                exportDir: exportDir,
-                includeFullTranscript: manifest.includeFullTranscriptInZip,
-                sessionURL: sessionURL
-            )
-            size = try measuredPackBytes(sessionURL: sessionURL)
+            do {
+                try runZip(
+                    exportDir: exportDir,
+                    includeFullTranscript: manifest.includeFullTranscriptInZip,
+                    sessionURL: sessionURL
+                )
+                size = try measuredPackBytes(sessionURL: sessionURL)
+            } catch {
+                omitted.append(OmittedAsset(path: "session-pack.zip", reason: error.localizedDescription))
+                omitted = uniquedOmitted(omitted)
+                do {
+                    try writeOmittedMarkdown(sessionURL: sessionURL, omitted: omitted)
+                } catch {
+                    return Result(zipURL: zipURL, byteCount: size, omitted: omitted)
+                }
+                return Result(zipURL: zipURL, byteCount: size, omitted: omitted)
+            }
         }
         return Result(zipURL: zipURL, byteCount: size, omitted: omitted)
     }
@@ -117,7 +132,7 @@ struct SessionPackZipper {
             return
         }
         let lines = ["# Omitted from export", ""] + omitted.map {
-            "- `\(ExportRel.omittedHandoffPath($0.path))` — \($0.reason)"
+            "- `\(ExportRel.omittedHandoffPath($0.path))` — \(PromptTemplates.wrapUntrustedInline($0.reason))"
         }
         try ExportRel.writeExportText(lines.joined(separator: "\n"), relative: ScrumTracePath.omitted, sessionURL: sessionURL)
     }

@@ -5,12 +5,12 @@ enum BriefTemplateLoader {
         let subdirs = ["Resources", "Export/Resources", "Export"]
         for folder in subdirs {
             if let url = Bundle.main.url(forResource: name, withExtension: ext, subdirectory: folder),
-               let text = try? String(contentsOf: url, encoding: .utf8) {
+               let text = readableResourceText(url) {
                 return text
             }
         }
         if let url = Bundle.main.url(forResource: name, withExtension: ext),
-           let text = try? String(contentsOf: url, encoding: .utf8) {
+           let text = readableResourceText(url) {
             return text
         }
         if let root = Bundle.main.resourceURL {
@@ -27,13 +27,21 @@ enum BriefTemplateLoader {
                         continue
                     }
                     if url.deletingPathExtension().lastPathComponent == name, url.pathExtension == ext,
-                       let text = try? String(contentsOf: url, encoding: .utf8) {
+                       let text = readableResourceText(url) {
                         return text
                     }
                 }
             }
         }
         return ""
+    }
+
+    /// Bundle lookups follow a planted resource symlink; refuse those URLs.
+    private static func readableResourceText(_ url: URL) -> String? {
+        if (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+            return nil
+        }
+        return try? String(contentsOf: url, encoding: .utf8)
     }
 }
 
