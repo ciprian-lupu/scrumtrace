@@ -323,6 +323,10 @@ enum ExportRel {
                     try? FileManager.default.removeItem(at: next)
                     throw SessionVaultError.writeFailed(relative)
                 }
+                let walked = parts[0...index].joined(separator: "/")
+                if containsSymlinkComponent(walked, sessionURL: sessionURL) {
+                    throw SessionVaultError.writeFailed(relative)
+                }
             }
             current = next
         }

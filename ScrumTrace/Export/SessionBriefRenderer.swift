@@ -340,6 +340,14 @@ struct SessionBriefRenderer {
       document.body.appendChild(box);
       const img = box.querySelector("img");
       let lastOpener = null;
+      const isPackMediaHref = (href) => {
+        if (!href || href.includes("\\\\") || href.includes(":")) return false;
+        if (href.startsWith("/") || href.startsWith("#")) return false;
+        const parts = href.split("/").filter((part) => part.length > 0);
+        if (parts.length < 2) return false;
+        if (parts.some((part) => part === "." || part === "..")) return false;
+        return parts[0] === "shots" || parts[0] === "media";
+      };
       const isOpen = () => box.classList.contains("open");
       const close = () => {
         if (!isOpen()) return;
@@ -366,7 +374,7 @@ struct SessionBriefRenderer {
         link.addEventListener("click", (event) => {
           event.preventDefault();
           const href = link.getAttribute("href");
-          if (!href) return;
+          if (!isPackMediaHref(href)) return;
           img.src = href;
           const thumb = link.querySelector("img");
           img.alt =

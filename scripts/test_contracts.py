@@ -1070,6 +1070,12 @@ def test_phase45_clip_consent_and_budget() -> None:
     fallback_js = brief.split("let fallbackJS")[1]
     assert "event.target === box" in fallback_js
     assert "lastOpener" in fallback_js
+    assert "isPackMediaHref" in js
+    assert 'parts[0] === "shots"' in js
+    assert 'parts[0] === "media"' in js
+    assert js.index("isPackMediaHref(href)") < js.index("img.src = href")
+    assert "isPackMediaHref" in fallback_js
+    assert fallback_js.index("isPackMediaHref(href)") < fallback_js.index("img.src = href")
     assert 'box.addEventListener("click", close)' not in js
     assert 'box.addEventListener("click", close)' not in fallback_js
     prompts = (ROOT / "ScrumTrace" / "AI" / "PromptTemplates.swift").read_text()
@@ -1360,6 +1366,7 @@ def test_write_contained_data_refuses_directory_symlinks() -> None:
     mkdir_check = prepare.split("createDirectory")[1]
     assert "isSymbolicLink" in mkdir_check
     assert "removeItem" in mkdir_check
+    assert "containsSymlinkComponent" in mkdir_check
     contained_reg = models.split("static func isContainedRegularFile")[1].split("static func containedRelative(_ file")[0]
     assert "unfollowedRelative" in contained_reg
     assert "containsSymlinkComponent" in contained_reg
