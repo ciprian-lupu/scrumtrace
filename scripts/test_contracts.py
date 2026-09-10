@@ -706,6 +706,7 @@ def test_retry_failed_slices_and_pins() -> None:
     assert "testApplyExportEvidenceDemotesInvertedAndOutOfSliceQuotes" in contracts
     assert "testApplyExportEvidenceDropsOtherAssociatedShotFromConfirmed" in contracts
     assert "testShotStillStemCollapsesAnnotatedTwin" in contracts
+    assert "testApplyExportEvidenceMapsAnnotatedArchiveToRawExportJPEG" in contracts
     assert "testPackMediaHandoffDropsOmittedExportFile" in contracts
     assert "testCanConfirmRejectsFrameFromAnotherSlice" in contracts
     assert "testCanConfirmRejectsStillOutsideClampedWindow" in contracts
@@ -1674,6 +1675,7 @@ def test_phase45_clip_consent_and_budget() -> None:
     linked = processor.split("func shotsLinked")[1].split("private func uniquedPaths")[0]
     assert "stillCandidates" in linked
     assert "tMedia >= slice.startMedia" in linked
+    assert "shotStillStem" in linked
     match_fn = processor.split("func sliceMatching")[1].split("func refreshShotsFromDisk")[0]
     assert "associatedShotId == shot.id" in match_fn
     assert "tMedia >= slice.startMedia" not in match_fn

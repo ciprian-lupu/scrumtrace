@@ -921,7 +921,17 @@ final class SessionProcessor: @unchecked Sendable {
         }
         for still in slice.stills {
             append(manifest.shots.first { shot in
-                shot.stillCandidates.contains(still) || shot.rawPath == still || shot.annotatedPath == still
+                if shot.stillCandidates.contains(still) || shot.rawPath == still || shot.annotatedPath == still {
+                    return true
+                }
+                if let exportPath = shot.exportPath, exportPath == still {
+                    return true
+                }
+                guard let want = EvidenceValidator.shotStillStem(still) else { return false }
+                let paths = shot.stillCandidates
+                    + [shot.rawPath]
+                    + [shot.annotatedPath, shot.exportPath].compactMap { $0 }
+                return paths.contains { EvidenceValidator.shotStillStem($0) == want }
             })
         }
         for shot in manifest.shots where shot.tMedia >= slice.startMedia && shot.tMedia <= slice.endMedia {

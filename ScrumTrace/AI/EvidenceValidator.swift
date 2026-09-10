@@ -34,6 +34,12 @@ enum EvidenceValidator {
             "export/shots/\(stem).jpg",
             "export/shots/\(stem).annotated.jpg"
         ]
+        if let collapsed = shotStillStem("shots/\(name)"), collapsed != stem {
+            tries.append("archive/shots/\(collapsed).png")
+            tries.append("archive/shots/\(collapsed).annotated.png")
+            tries.append("export/shots/\(collapsed).jpg")
+            tries.append("export/shots/\(collapsed).annotated.jpg")
+        }
         if trimmed.hasPrefix("./") {
             tries.insert(String(trimmed.dropFirst(2)), at: 1)
         }
@@ -229,6 +235,14 @@ enum EvidenceValidator {
             }
             if let mapped = ExportRel.shotsArchiveToExport(path) {
                 append(mapped)
+            }
+            if let stem = shotStillStem(path) {
+                if let mapped = ExportRel.shotsArchiveToExport("shots/\(stem).jpg") {
+                    append(mapped)
+                }
+                if let mapped = ExportRel.shotsArchiveToExport("shots/\(stem).annotated.jpg") {
+                    append(mapped)
+                }
             }
         }
         return out

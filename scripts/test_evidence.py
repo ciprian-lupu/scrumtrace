@@ -178,6 +178,9 @@ def test_frame_ref_basename_resolves() -> None:
     resolve = validator.split("static func resolvePath")[1].split("static func existingPaths")[0]
     assert "containsSymlinkComponent" in resolve
     assert "isVisualEvidence" in resolve
+    assert "shotStillStem" in resolve
+    assert "archive/shots/\\(stem).annotated.png" in resolve
+    assert "export/shots/\\(stem).annotated.jpg" in resolve
     assert "func resolvePath" in validator
     assert "func applyExportEvidence" in validator
     processor = (ROOT / "ScrumTrace" / "Processing" / "SessionProcessor.swift").read_text()
