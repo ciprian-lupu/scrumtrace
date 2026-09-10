@@ -452,7 +452,10 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         guard let format = AVAudioFormat(streamDescription: &asbd) else { return }
         let frames = AVAudioFrameCount(CMSampleBufferGetNumSamples(sampleBuffer))
         guard frames > 0 else { return }
-        guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frames) else { return }
+        guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frames) else {
+            failCaptureWrite("Could not write archive/audio.wav: PCM buffer allocation failed.")
+            return
+        }
         buffer.frameLength = frames
         let copied = CMSampleBufferCopyPCMDataIntoAudioBufferList(
             sampleBuffer,
@@ -460,7 +463,10 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             frameCount: Int32(frames),
             into: buffer.mutableAudioBufferList
         )
-        guard copied == noErr else { return }
+        guard copied == noErr else {
+            failCaptureWrite("Could not write archive/audio.wav: PCM copy failed.")
+            return
+        }
         let target = wavFile.processingFormat
         if buffer.format == target {
             persistWav(buffer, file: wavFile)
@@ -470,7 +476,10 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             converter = AVAudioConverter(from: buffer.format, to: target)
         }
         guard let converter,
-              let converted = AVAudioPCMBuffer(pcmFormat: target, frameCapacity: frames) else { return }
+              let converted = AVAudioPCMBuffer(pcmFormat: target, frameCapacity: frames) else {
+            failCaptureWrite("Could not write archive/audio.wav: format conversion failed.")
+            return
+        }
         var error: NSError?
         var consumed = false
         converter.convert(to: converted, error: &error) { _, status in
@@ -747,7 +756,10 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             converter = AVAudioConverter(from: buffer.format, to: target)
         }
         guard let converter,
-              let converted = AVAudioPCMBuffer(pcmFormat: target, frameCapacity: frames) else { return }
+              let converted = AVAudioPCMBuffer(pcmFormat: target, frameCapacity: frames) else {
+            failCaptureWrite("Could not write archive/audio.wav: format conversion failed.")
+            return
+        }
         var error: NSError?
         var consumed = false
         converter.convert(to: converted, error: &error) { _, status in

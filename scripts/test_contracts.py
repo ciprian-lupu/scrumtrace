@@ -701,6 +701,14 @@ def test_audio_split_and_brief_loader() -> None:
     assert "try? wavFile.write" not in recorder
     assert "Could not write archive/audio.wav" in recorder
     assert "audioWriteFailure" in recorder
+    assert "guard copied == noErr else { return }" not in recorder
+    write_wav = recorder.split("func writeWav(from")[1].split("func failCaptureWrite")[0]
+    assert "failCaptureWrite" in write_wav
+    assert "PCM copy failed" in write_wav
+    assert "PCM buffer allocation failed" in write_wav
+    assert "format conversion failed" in write_wav
+    engine_buf = recorder.split("func writeEngineBuffer")[1].split("func requestPermission")[0]
+    assert "format conversion failed" in engine_buf
     assert "_ = videoInput.append" not in recorder
     assert "_ = audioInput.append" not in recorder
     assert "Could not write archive/session.mp4" in recorder
