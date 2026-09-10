@@ -188,7 +188,8 @@ final class SessionProcessor: @unchecked Sendable {
         )
         projection.manifest.tasks = EvidenceValidator.applyExportEvidence(
             tasks: projection.manifest.tasks,
-            sessionURL: sessionURL
+            sessionURL: sessionURL,
+            transcript: transcript
         )
         manifest.omitted = projection.omitted
         // Docs first: a zip failure must not skip SESSION_BRIEF.html / AGENT_CONTEXT.md.
@@ -225,7 +226,8 @@ final class SessionProcessor: @unchecked Sendable {
             projection.manifest.omitted = zipResult.omitted
             projection.manifest.tasks = EvidenceValidator.applyExportEvidence(
                 tasks: projection.manifest.tasks,
-                sessionURL: sessionURL
+                sessionURL: sessionURL,
+                transcript: transcript
             )
             // C5: demoted tasks must hit AGENT_CONTEXT / BRIEF / the projection
             // even if rebuilding the pack file fails. Do not swallow this write
@@ -260,7 +262,8 @@ final class SessionProcessor: @unchecked Sendable {
                 projection.manifest.omitted = zipResult.omitted
                 projection.manifest.tasks = EvidenceValidator.applyExportEvidence(
                     tasks: projection.manifest.tasks,
-                    sessionURL: sessionURL
+                    sessionURL: sessionURL,
+                    transcript: transcript
                 )
                 try writeExportDocuments(
                     sessionURL: sessionURL,

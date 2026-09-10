@@ -165,7 +165,7 @@ struct SessionBriefRenderer {
             <div><dt>Stated</dt><dd>\(HTMLEscaper.escape(task.stated))</dd></div>
             <div><dt>Inferred</dt><dd>\(HTMLEscaper.escape(task.inferred))</dd></div>
           </dl>
-          <p class="agent">\(HTMLEscaper.escape(task.agentInstructions))</p>
+          <p class="agent">\(HTMLEscaper.escape(PromptTemplates.sanitizeUntrusted(task.agentInstructions)))</p>
           \(quotes)
           \(excerpt)
           <div class="evidence">\(media)</div>

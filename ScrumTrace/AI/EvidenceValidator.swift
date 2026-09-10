@@ -111,14 +111,35 @@ enum EvidenceValidator {
     }
 
     /// C5: after projection/omit, `confirmed` requires a real file under `export/`.
-    static func applyExportEvidence(tasks: [TaskRecord], sessionURL: URL) -> [TaskRecord] {
+    /// Quotes and inferred-copy rules are re-checked when a transcript is present
+    /// so a demotion at zip time cannot leave a `confirmed` row without evidence.
+    static func applyExportEvidence(
+        tasks: [TaskRecord],
+        sessionURL: URL,
+        transcript: FullTranscript? = nil
+    ) -> [TaskRecord] {
         tasks.map { task in
             var copy = task
             copy.evidenceMedia = task.evidenceMedia.filter { path in
                 exportFileExists(path, sessionURL: sessionURL)
             }
-            if copy.status == .confirmed && (copy.evidenceMedia.isEmpty || copy.sourceSliceId.isEmpty) {
-                copy.status = .needsReview
+            if copy.status == .confirmed {
+                if copy.evidenceMedia.isEmpty || copy.sourceSliceId.isEmpty {
+                    copy.status = .needsReview
+                } else if let transcript {
+                    for quote in copy.quotes {
+                        if !quoteMatchesTranscript(quote, transcript: transcript) {
+                            copy.status = .needsReview
+                            break
+                        }
+                    }
+                }
+                let inferred = normalize(copy.inferred)
+                if copy.status == .confirmed, !inferred.isEmpty {
+                    if normalize(copy.observed) == inferred || normalize(copy.stated) == inferred {
+                        copy.status = .needsReview
+                    }
+                }
             }
             return copy
         }

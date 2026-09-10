@@ -973,6 +973,8 @@ def test_phase45_clip_consent_and_budget() -> None:
     brief = (ROOT / "ScrumTrace" / "Export" / "SessionBriefRenderer.swift").read_text()
     assert "func transcriptHTML" in brief
     assert "excerpts[task.taskId]" in brief.split("func taskCard")[1].split("func transcriptHTML")[0]
+    assert "sanitizeUntrusted(task.agentInstructions)" in brief.split("func taskCard")[1].split("func transcriptHTML")[0]
+    assert "HTMLEscaper.escape(task.agentInstructions)" not in brief
     settings = (ROOT / "ScrumTrace" / "UI" / "SettingsView.swift").read_text()
     assert "capabilities.acceptsText" in settings
     assert "willUploadClip" in settings
@@ -1053,6 +1055,10 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "packMediaHandoff" in agent.split("private func taskBlock")[1].split("private func displayPath")[0]
     assert "remain in archive/" not in processor
     assert "applyExportEvidence" in processor
+    assert processor.count("EvidenceValidator.applyExportEvidence") == 3
+    for chunk in processor.split("EvidenceValidator.applyExportEvidence")[1:]:
+        head = chunk.split(")")[0]
+        assert "transcript: transcript" in head
     assert "manifest.tasks = projection.manifest.tasks" in processor
     assert "includesClipAudio != acceptsVideo" in models
     controller = (ROOT / "ScrumTrace" / "Processing" / "SessionController.swift").read_text()
