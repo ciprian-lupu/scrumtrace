@@ -1773,6 +1773,7 @@ def test_phase45_clip_consent_and_budget() -> None:
     zipper_over = zipper.split("if size > MediaBudget.maxZipBytes")[1].split("func writeZip")[0]
     assert "throw" not in zipper_over
     assert "Pack still" in zipper_over
+    assert "zipOverBudget" in zipper_over
     assert "discardPackIfOverBudget" in zipper_over
     assert "opted-in full transcript" in zipper_over
     assert zipper_over.index("opted-in full transcript") < zipper_over.index("Pack still")

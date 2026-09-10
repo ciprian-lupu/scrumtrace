@@ -140,8 +140,8 @@ struct SessionPackZipper {
                     folder = PackBudget.exportFolderBytes(sessionURL: sessionURL)
                 }
             }
-            let stillOver = size > MediaBudget.maxZipBytes || folder > MediaBudget.maxZipBytes
-            if stillOver {
+            let zipOverBudget = size > MediaBudget.maxZipBytes
+            if zipOverBudget {
                 omitted.append(
                     OmittedAsset(
                         path: "session-pack.zip",
