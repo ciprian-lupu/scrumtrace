@@ -163,7 +163,17 @@ struct ClipExporter {
             session.outputURL = temp
             session.outputFileType = .mp4
             session.shouldOptimizeForNetworkUse = true
-            let duration = (try? await asset.load(.duration)) ?? .invalid
+            let duration: CMTime
+            do {
+                duration = try await asset.load(.duration)
+            } catch {
+                ExportRel.removePrivateTemporaryURL(temp)
+                continue
+            }
+            guard duration.flags.contains(.valid), CMTimeGetSeconds(duration) > 0 else {
+                ExportRel.removePrivateTemporaryURL(temp)
+                continue
+            }
             session.fileLengthLimit = Int64(
                 Double(MediaBudget.clipVideoBitrate / 4) / 8.0 * max(CMTimeGetSeconds(duration), 1)
             )

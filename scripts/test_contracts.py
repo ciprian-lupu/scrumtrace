@@ -405,6 +405,8 @@ def test_clip_exporter_macos14() -> None:
     assert "regularFileByteCount" in tighten_file
     assert "unfollowedRegularFileByteCount" in tighten_file
     assert "attributesOfItem" not in tighten_file
+    assert "try? await asset.load(.duration)" not in tighten_file
+    assert "try await asset.load(.duration)" in tighten_file
     assert "existingSessionFile" in clip
     export_fn = clip.split("func export(")[1].split("func tightenExportClips")[0]
     assert "isUsableSessionRoot" in export_fn
@@ -720,9 +722,13 @@ def test_audio_split_and_brief_loader() -> None:
     append_video = recorder.split("func appendVideo")[1].split("func appendAudioToMovie")[0]
     assert "noteRemapFailure" in append_video
     assert "remapFailStreak = 0" in append_video
+    assert "noteVideoBackpressure" in append_video
+    assert "videoBackpressureStreak = 0" in append_video
     append_audio = recorder.split("func appendAudioToMovie")[1].split("func remappedBuffer")[0]
     assert "noteRemapFailure" in append_audio
     assert "remapFailStreak = 0" in append_audio
+    assert "noteAudioBackpressure" in append_audio
+    assert "audioBackpressureStreak = 0" in append_audio
     remap_fail = recorder.split("func noteRemapFailure")[1].split("func writeWav")[0]
     assert "failCaptureWrite" in remap_fail
     assert "Could not timestamp capture samples" in remap_fail
@@ -733,6 +739,8 @@ def test_audio_split_and_brief_loader() -> None:
     freeze = recorder.split("func freezeWriters")[1].split("func persistCaptureLayout")[0]
     assert "remapFailStreak = 0" in freeze
     assert "wavFormatFailStreak = 0" in freeze
+    assert "videoBackpressureStreak = 0" in freeze
+    assert "audioBackpressureStreak = 0" in freeze
     assert "if error == nil, converted.frameLength > 0" not in recorder
     fail_write = recorder.split("func failCaptureWrite")[1].split("func persistWav")[0]
     assert "freezeWriters" in fail_write

@@ -48,6 +48,11 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
     /// Consecutive WAV format-parse failures. One odd buffer is a glitch;
     /// a streak means room/system audio is not being persisted (C1).
     private var wavFormatFailStreak = 0
+    /// Consecutive `isReadyForMoreMediaData == false` while the writer is
+    /// `.writing`. Brief backpressure is realtime; a multi-second stall
+    /// means the master movie is no longer receiving samples (C1).
+    private var videoBackpressureStreak = 0
+    private var audioBackpressureStreak = 0
 
     init(sessionURL: URL, clock: ClockSynchronizer) {
         self.sessionURL = sessionURL
@@ -253,6 +258,8 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             self.started = false
             self.remapFailStreak = 0
             self.wavFormatFailStreak = 0
+            self.videoBackpressureStreak = 0
+            self.audioBackpressureStreak = 0
             self.clock.markRecordingStopped()
         }
     }
@@ -418,7 +425,12 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             )
             return
         }
-        guard writer.status == .writing, videoInput.isReadyForMoreMediaData else { return }
+        guard writer.status == .writing else { return }
+        guard videoInput.isReadyForMoreMediaData else {
+            noteVideoBackpressure()
+            return
+        }
+        videoBackpressureStreak = 0
         guard let remapped = remappedBuffer(sampleBuffer, sampleClock: sampleClock) else {
             noteRemapFailure()
             return
@@ -440,7 +452,12 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             )
             return
         }
-        guard writer.status == .writing, audioInput.isReadyForMoreMediaData else { return }
+        guard writer.status == .writing else { return }
+        guard audioInput.isReadyForMoreMediaData else {
+            noteAudioBackpressure()
+            return
+        }
+        audioBackpressureStreak = 0
         guard let remapped = remappedBuffer(sampleBuffer, sampleClock: sampleClock) else {
             noteRemapFailure()
             return
@@ -490,6 +507,20 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         wavFormatFailStreak += 1
         if wavFormatFailStreak >= 12 {
             failCaptureWrite("Could not decode audio samples for archive/audio.wav.")
+        }
+    }
+
+    private func noteVideoBackpressure() {
+        videoBackpressureStreak += 1
+        if videoBackpressureStreak >= 90 {
+            failCaptureWrite("Could not write archive/session.mp4: video writer was not ready.")
+        }
+    }
+
+    private func noteAudioBackpressure() {
+        audioBackpressureStreak += 1
+        if audioBackpressureStreak >= 90 {
+            failCaptureWrite("Could not write archive/session.mp4: audio writer was not ready.")
         }
     }
 
