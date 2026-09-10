@@ -130,7 +130,7 @@ struct SessionPackZipper {
     }
 
     /// Weigh the zip with `openat`/`fstat`. Following a dest symlink would
-    /// count a planted `export/session-pack.zip` as `archive/session.mp4` (C3).
+    /// count a planted pack file as the private master movie (C3).
     private func measuredPackBytes(sessionURL: URL) throws -> Int {
         guard let size = ExportRel.regularFileByteCount(relative: ScrumTracePath.packZip, sessionURL: sessionURL),
               size > 0 else {
