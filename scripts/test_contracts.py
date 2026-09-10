@@ -701,6 +701,21 @@ def test_audio_split_and_brief_loader() -> None:
     assert "try? wavFile.write" not in recorder
     assert "Could not write archive/audio.wav" in recorder
     assert "audioWriteFailure" in recorder
+    assert "_ = videoInput.append" not in recorder
+    assert "_ = audioInput.append" not in recorder
+    assert "Could not write archive/session.mp4" in recorder
+    assert "videoInput.append(remapped)" in recorder
+    assert "audioInput.append(remapped)" in recorder
+    assert "func failCaptureWrite" in recorder
+    assert "if error == nil, converted.frameLength > 0" not in recorder
+    fail_write = recorder.split("func failCaptureWrite")[1].split("func persistWav")[0]
+    assert "freezeWriters" in fail_write
+    assert "scrumTraceCaptureFailed" in fail_write
+    assert fail_write.index("freezeWriters") < fail_write.index("scrumTraceCaptureFailed")
+    assert "captureWriteFailed" in fail_write
+    persist_wav = recorder.split("func persistWav")[1].split("func prepareWriters")[0]
+    assert "failCaptureWrite" in persist_wav
+    assert "try? file.write" not in persist_wav
     assert "microphoneWav" in recorder
     assert "CaptureAudioLayout" in recorder
     assert "try layout.write" in recorder

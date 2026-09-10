@@ -40,8 +40,8 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
     /// still recreate the original UUID path — reclaim the larger file.
     private var liveMovieRel: String?
     private var liveWavRel: String?
-    private var wavWriteFailed = false
-    private var wavWriteMessage: String?
+    private var captureWriteFailed = false
+    private var captureWriteMessage: String?
 
     init(sessionURL: URL, clock: ClockSynchronizer) {
         self.sessionURL = sessionURL
@@ -63,10 +63,10 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         syncWriter { paused }
     }
 
-    /// Disk-full / AVAudioFile write failure. Start checks this if the
-    /// capture-failed notification landed before `phase` was `.recording`.
+    /// Disk-full / AVAudioFile / AVAssetWriter failure. Start checks this if
+    /// the capture-failed notification landed before `phase` was `.recording`.
     var audioWriteFailure: String? {
-        syncWriter { wavWriteMessage }
+        syncWriter { captureWriteMessage }
     }
 
     func start(shouldPauseCapture: @escaping () -> Bool = { false }) async throws {
@@ -383,17 +383,37 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
 
     private func appendVideo(_ sampleBuffer: CMSampleBuffer, sampleClock: CMClock?) {
         guard !paused, started, CMSampleBufferDataIsReady(sampleBuffer) else { return }
-        guard let writer, writer.status == .writing, let videoInput, videoInput.isReadyForMoreMediaData else { return }
+        guard let writer, let videoInput else { return }
+        if writer.status == .failed {
+            failCaptureWrite(
+                "Could not write archive/session.mp4: \(writer.error?.localizedDescription ?? "AVAssetWriter failed.")"
+            )
+            return
+        }
+        guard writer.status == .writing, videoInput.isReadyForMoreMediaData else { return }
         guard let remapped = remappedBuffer(sampleBuffer, sampleClock: sampleClock) else { return }
-        _ = videoInput.append(remapped)
+        if !videoInput.append(remapped) {
+            failCaptureWrite(
+                "Could not write archive/session.mp4: \(writer.error?.localizedDescription ?? "AVAssetWriter rejected a video sample.")"
+            )
+        }
     }
 
     private func appendAudioToMovie(_ sampleBuffer: CMSampleBuffer, sampleClock: CMClock?) {
         guard !paused, started, CMSampleBufferDataIsReady(sampleBuffer) else { return }
-        if let writer, writer.status == .writing, let audioInput, audioInput.isReadyForMoreMediaData {
-            if let remapped = remappedBuffer(sampleBuffer, sampleClock: sampleClock) {
-                _ = audioInput.append(remapped)
-            }
+        guard let writer, let audioInput else { return }
+        if writer.status == .failed {
+            failCaptureWrite(
+                "Could not write archive/session.mp4: \(writer.error?.localizedDescription ?? "AVAssetWriter failed.")"
+            )
+            return
+        }
+        guard writer.status == .writing, audioInput.isReadyForMoreMediaData else { return }
+        guard let remapped = remappedBuffer(sampleBuffer, sampleClock: sampleClock) else { return }
+        if !audioInput.append(remapped) {
+            failCaptureWrite(
+                "Could not write archive/session.mp4: \(writer.error?.localizedDescription ?? "AVAssetWriter rejected an audio sample.")"
+            )
         }
     }
 
@@ -462,23 +482,37 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             status.pointee = .haveData
             return buffer
         }
-        if error == nil, converted.frameLength > 0 {
+        if let error {
+            failCaptureWrite("Could not write archive/audio.wav: \(error.localizedDescription)")
+            return
+        }
+        if converted.frameLength > 0 {
             persistWav(converted, file: wavFile)
         }
+    }
+
+    /// WAV and movie writes share one failure so Start's `audioWriteFailure`
+    /// catch covers a disk-full AVAssetWriter during startCapture (C1).
+    private func failCaptureWrite(_ message: String) {
+        let shouldNotify: Bool = syncWriter {
+            guard !self.captureWriteFailed else { return false }
+            self.captureWriteFailed = true
+            self.captureWriteMessage = message
+            return true
+        }
+        guard shouldNotify else { return }
+        freezeWriters()
+        NotificationCenter.default.post(
+            name: .scrumTraceCaptureFailed,
+            object: message
+        )
     }
 
     private func persistWav(_ buffer: AVAudioPCMBuffer, file: AVAudioFile) {
         do {
             try file.write(from: buffer)
         } catch {
-            guard !wavWriteFailed else { return }
-            wavWriteFailed = true
-            wavWriteMessage = "Could not write archive/audio.wav: \(error.localizedDescription)"
-            freezeWriters()
-            NotificationCenter.default.post(
-                name: .scrumTraceCaptureFailed,
-                object: wavWriteMessage
-            )
+            failCaptureWrite("Could not write archive/audio.wav: \(error.localizedDescription)")
         }
     }
 
@@ -722,7 +756,11 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             status.pointee = .haveData
             return buffer
         }
-        if error == nil, converted.frameLength > 0 {
+        if let error {
+            failCaptureWrite("Could not write archive/audio.wav: \(error.localizedDescription)")
+            return
+        }
+        if converted.frameLength > 0 {
             persistWav(converted, file: wavFile)
         }
     }
