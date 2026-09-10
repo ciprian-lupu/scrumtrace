@@ -74,6 +74,11 @@ private func scrumtracePosixSpawn(
     _ envp: UnsafePointer<UnsafeMutablePointer<CChar>?>?
 ) -> Int32
 
+/// macOS 26 SDK `strdup` takes `UnsafePointer<CChar>?`, not `String`.
+private func scrumtraceDuplicatedCString(_ value: String) -> UnsafeMutablePointer<CChar>? {
+    value.withCString { ptr in strdup(ptr) }
+}
+
 extension Notification.Name {
     static let scrumTraceCaptureGate = Notification.Name("ScrumTrace.captureGate")
     static let scrumTraceHUDSuppress = Notification.Name("ScrumTrace.hudSuppress")
@@ -1703,7 +1708,7 @@ enum ExportRel {
             throw SessionVaultError.writeFailed("spawn")
         }
 
-        var argv: [UnsafeMutablePointer<CChar>?] = ([executable] + arguments).map { strdup($0) }
+        var argv: [UnsafeMutablePointer<CChar>?] = ([executable] + arguments).map(scrumtraceDuplicatedCString)
         argv.append(nil)
         defer {
             for ptr in argv {
@@ -1715,7 +1720,7 @@ enum ExportRel {
             Darwin.close(writeFd)
             throw SessionVaultError.writeFailed("spawn")
         }
-        var env: [UnsafeMutablePointer<CChar>?] = ["PATH=/usr/bin:/bin", "LANG=C"].map { strdup($0) }
+        var env: [UnsafeMutablePointer<CChar>?] = ["PATH=/usr/bin:/bin", "LANG=C"].map(scrumtraceDuplicatedCString)
         env.append(nil)
         defer {
             for ptr in env {

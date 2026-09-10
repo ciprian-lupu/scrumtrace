@@ -21,16 +21,25 @@ else
 fi
 
 DERIVED="${SCRUMTRACE_DERIVED:-$HOME/Library/Developer/Xcode/DerivedData/ScrumTraceGate}"
+LOG="${TMPDIR:-/tmp}/scrumtrace-xcodebuild.log"
 echo "building scheme ScrumTrace -> $DERIVED"
+set +e
 xcodebuild \
   -project ScrumTrace.xcodeproj \
   -scheme ScrumTrace \
   -configuration Debug \
   -derivedDataPath "$DERIVED" \
-  -destination 'platform=macOS' \
+  -destination 'platform=macOS,arch=arm64' \
   CODE_SIGN_IDENTITY=- \
   CODE_SIGNING_REQUIRED=NO \
-  build
+  build 2>&1 | tee "$LOG"
+status=${PIPESTATUS[0]}
+set -e
+if [[ "$status" -ne 0 ]]; then
+  echo "---- swift diagnostics ----"
+  grep -E 'error:|warning:.*this is an error' "$LOG" || true
+  exit "$status"
+fi
 
 APP="$DERIVED/Build/Products/Debug/ScrumTrace.app"
 echo "app=$APP"

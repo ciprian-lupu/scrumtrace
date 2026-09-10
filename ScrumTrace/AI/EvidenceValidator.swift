@@ -271,15 +271,15 @@ enum EvidenceValidator {
             let paths = shot.stillCandidates
                 + [shot.rawPath]
                 + [shot.annotatedPath, shot.exportPath].compactMap { $0 }
-            if paths.contains { candidate in
+            if paths.contains(where: { candidate in
                 !candidate.isEmpty && (candidate == path || isSameSessionPath(path, candidate))
-            } {
+            }) {
                 return true
             }
             guard let want = shotStillStem(path) else { return false }
-            return paths.contains { candidate in
+            return paths.contains(where: { candidate in
                 shotStillStem(candidate) == want
-            }
+            })
         }
     }
 

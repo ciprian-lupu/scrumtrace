@@ -2161,6 +2161,8 @@ def test_write_contained_data_refuses_directory_symlinks() -> None:
     assert "UnsafeMutableRawPointer.allocate" in spawn_fn
     assert "posix_spawn_file_actions_t()" not in spawn_fn
     assert "PATH=/usr/bin:/bin" in spawn_fn
+    assert "scrumtraceDuplicatedCString" in spawn_fn
+    assert "strdup($0)" not in models
     assert "ProcessInfo.processInfo.environment" not in spawn_fn
     assert "EINTR" in spawn_fn
     assert "waitpid" in spawn_fn
