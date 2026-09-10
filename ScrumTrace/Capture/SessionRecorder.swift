@@ -35,6 +35,11 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
     private var paused = false
     private var started = false
     private var microphoneWav = false
+    /// Unique names used for AVAssetWriter / AVAudioFile create. After the
+    /// immediate renameat onto `session.mp4` / `audio.wav`, finishWriting may
+    /// still recreate the original UUID path — reclaim the larger file.
+    private var liveMovieRel: String?
+    private var liveWavRel: String?
 
     init(sessionURL: URL, clock: ClockSynchronizer) {
         self.sessionURL = sessionURL
@@ -175,6 +180,7 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             self.writer = nil
             self.videoInput = nil
             self.audioInput = nil
+            self.discardLiveCaptureLocked()
         }
     }
 
@@ -248,16 +254,68 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
                 continuation.resume()
             }
         }
+        reclaimLiveCaptureIfRewritten()
+    }
+
+    /// If AVAssetWriter / AVAudioFile reopened the UUID path at finishWriting,
+    /// keep the larger regular file on the canonical archive names (C2).
+    private func reclaimLiveCaptureIfRewritten() {
+        syncWriter {
+            self.reclaimLiveCaptureIfRewrittenLocked()
+        }
+    }
+
+    private func reclaimLiveCaptureIfRewrittenLocked() {
+        if let rel = liveMovieRel {
+            adoptLargerLiveFile(rel, destRelative: ScrumTracePath.sessionMovie)
+        }
+        if let rel = liveWavRel {
+            adoptLargerLiveFile(rel, destRelative: ScrumTracePath.audioWav)
+        }
+        liveMovieRel = nil
+        liveWavRel = nil
+    }
+
+    private func adoptLargerLiveFile(_ rel: String, destRelative: String) {
+        let live = sessionURL.appendingPathComponent(rel)
+        let dest = sessionURL.appendingPathComponent(destRelative)
+        guard ExportRel.isContainedRegularFile(live, sessionRoot: sessionURL) else { return }
+        let liveBytes = ExportRel.regularFileByteCount(live, sessionRoot: sessionURL) ?? 0
+        let destBytes = ExportRel.regularFileByteCount(dest, sessionRoot: sessionURL) ?? 0
+        if liveBytes > destBytes {
+            try? ExportRel.moveIntoSession(from: live, relative: destRelative, sessionURL: sessionURL)
+        } else {
+            try? ExportRel.removeItemIfRegularFile(live, sessionRoot: sessionURL)
+        }
+    }
+
+    /// Cancel / deinit: drop leftover UUID files. Do not overwrite session.mp4.
+    private func discardLiveCaptureLocked() {
+        if let rel = liveMovieRel {
+            try? ExportRel.removeItemIfRegularFile(
+                sessionURL.appendingPathComponent(rel),
+                sessionRoot: sessionURL
+            )
+        }
+        if let rel = liveWavRel {
+            try? ExportRel.removeItemIfRegularFile(
+                sessionURL.appendingPathComponent(rel),
+                sessionRoot: sessionURL
+            )
+        }
+        liveMovieRel = nil
+        liveWavRel = nil
     }
 
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
         // Pause drops every ScreenCaptureKit output: screen, system audio, microphone.
         guard !paused, started else { return }
+        let sampleClock = stream.synchronizationClock
         switch type {
         case .screen:
-            appendVideo(sampleBuffer)
+            appendVideo(sampleBuffer, sampleClock: sampleClock)
         case .audio:
-            appendAudioToMovie(sampleBuffer)
+            appendAudioToMovie(sampleBuffer, sampleClock: sampleClock)
             if !microphoneWav {
                 writeWav(from: sampleBuffer)
             }
@@ -276,24 +334,24 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         )
     }
 
-    private func appendVideo(_ sampleBuffer: CMSampleBuffer) {
+    private func appendVideo(_ sampleBuffer: CMSampleBuffer, sampleClock: CMClock?) {
         guard !paused, started, CMSampleBufferDataIsReady(sampleBuffer) else { return }
         guard let writer, writer.status == .writing, let videoInput, videoInput.isReadyForMoreMediaData else { return }
-        guard let remapped = remappedBuffer(sampleBuffer) else { return }
+        guard let remapped = remappedBuffer(sampleBuffer, sampleClock: sampleClock) else { return }
         _ = videoInput.append(remapped)
     }
 
-    private func appendAudioToMovie(_ sampleBuffer: CMSampleBuffer) {
+    private func appendAudioToMovie(_ sampleBuffer: CMSampleBuffer, sampleClock: CMClock?) {
         guard !paused, started, CMSampleBufferDataIsReady(sampleBuffer) else { return }
         if let writer, writer.status == .writing, let audioInput, audioInput.isReadyForMoreMediaData {
-            if let remapped = remappedBuffer(sampleBuffer) {
+            if let remapped = remappedBuffer(sampleBuffer, sampleClock: sampleClock) {
                 _ = audioInput.append(remapped)
             }
         }
     }
 
-    private func remappedBuffer(_ sampleBuffer: CMSampleBuffer) -> CMSampleBuffer? {
-        let media = clock.mediaTime(forSampleBuffer: sampleBuffer)
+    private func remappedBuffer(_ sampleBuffer: CMSampleBuffer, sampleClock: CMClock?) -> CMSampleBuffer? {
+        let media = clock.mediaTime(forSampleBuffer: sampleBuffer, sampleClock: sampleClock)
         let rawDuration = CMSampleBufferGetDuration(sampleBuffer)
         let duration: CMTime
         if rawDuration.flags.contains(.valid), CMTimeGetSeconds(rawDuration) > 0 {
@@ -459,6 +517,7 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             try? ExportRel.removeItemIfRegularFile(movieURL, sessionRoot: sessionURL)
             throw SessionRecorderError.writerFailed("archive capture paths escaped the session folder.")
         }
+        self.liveMovieRel = liveMovieRel
         writer.startSession(atSourceTime: .zero)
         self.writer = writer
         self.videoInput = videoInput
@@ -479,6 +538,7 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             self.videoInput = nil
             self.audioInput = nil
             wavFile = nil
+            discardLiveCaptureLocked()
             try? ExportRel.removeItemIfRegularFile(movieURL, sessionRoot: sessionURL)
             try? ExportRel.removeItemIfRegularFile(liveWavURL, sessionRoot: sessionURL)
             throw SessionRecorderError.writerFailed("archive capture paths escaped the session folder.")
@@ -491,6 +551,7 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             self.videoInput = nil
             self.audioInput = nil
             wavFile = nil
+            discardLiveCaptureLocked()
             try? ExportRel.removeItemIfRegularFile(movieURL, sessionRoot: sessionURL)
             try? ExportRel.removeItemIfRegularFile(liveWavURL, sessionRoot: sessionURL)
             throw SessionRecorderError.writerFailed("archive capture paths escaped the session folder.")
@@ -501,10 +562,12 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             self.videoInput = nil
             self.audioInput = nil
             wavFile = nil
+            discardLiveCaptureLocked()
             try? ExportRel.removeItemIfRegularFile(movieURL, sessionRoot: sessionURL)
             try? ExportRel.removeItemIfRegularFile(wavURL, sessionRoot: sessionURL)
             throw SessionRecorderError.writerFailed("archive capture paths escaped the session folder.")
         }
+        self.liveWavRel = liveWavRel
         paused = false
         started = false
     }
@@ -623,6 +686,7 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             self.writer = nil
             self.videoInput = nil
             self.audioInput = nil
+            self.discardLiveCaptureLocked()
             return (stream, engine)
         }
         snapshot.engine?.stop()

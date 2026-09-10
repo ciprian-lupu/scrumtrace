@@ -160,13 +160,16 @@ final class ClockSynchronizer: @unchecked Sendable {
         return CMTime(seconds: media, preferredTimescale: 600)
     }
 
-    func mediaTime(forSampleBuffer buffer: CMSampleBuffer) -> CMTime {
+    func mediaTime(forSampleBuffer buffer: CMSampleBuffer, sampleClock: CMClock? = nil) -> CMTime {
         let pts = CMSampleBufferGetPresentationTimeStamp(buffer)
         guard pts.isValid, startHostValid() else {
             return mediaTime(forHostTime: CMClockGetTime(hostClock))
         }
-        // D2: sample PTS is converted onto CMClockGetHostTimeClock() before t_media.
-        let aligned = CMSyncConvertTime(pts, CMClockGetHostTimeClock(), hostClock)
+        // D2: convert SCStream PTS onto CMClockGetHostTimeClock() before t_media.
+        // Host→host is a no-op; pass stream.synchronizationClock when the
+        // sample clock is not already the host clock.
+        let fromClock = sampleClock ?? CMClockGetHostTimeClock()
+        let aligned = CMSyncConvertTime(pts, fromClock, hostClock)
         let source = aligned.flags.contains(.valid) ? aligned : pts
         return mediaTime(forHostTime: source)
     }
