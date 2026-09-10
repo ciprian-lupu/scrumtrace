@@ -407,15 +407,15 @@ enum ExportRel {
         }
     }
 
-    /// `O_EXCL` so a planted temp-path symlink cannot be followed. Caller deletes
-    /// `tmp` if the later `moveIntoSession` fails.
+    /// `O_EXCL | O_NOFOLLOW` so a planted temp-path symlink cannot be followed.
+    /// Caller deletes `tmp` if the later `moveIntoSession` fails.
     private static func writeExclusiveTemporaryFile(_ data: Data, prefix: String) throws -> URL {
         let tmp = FileManager.default.temporaryDirectory.appendingPathComponent(
             "\(prefix)-\(UUID().uuidString)"
         )
         let fd = tmp.withUnsafeFileSystemRepresentation { ptr -> Int32 in
             guard let ptr else { return -1 }
-            return Darwin.open(ptr, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0o600)
+            return Darwin.open(ptr, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, 0o600)
         }
         guard fd >= 0 else {
             throw SessionVaultError.writeFailed(prefix)
@@ -668,7 +668,7 @@ enum ExportRel {
         }
         let destFd = dest.withUnsafeFileSystemRepresentation { ptr -> Int32 in
             guard let ptr else { return -1 }
-            return Darwin.open(ptr, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0o600)
+            return Darwin.open(ptr, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, 0o600)
         }
         guard destFd >= 0 else {
             throw SessionVaultError.writeFailed(relative)
@@ -712,7 +712,7 @@ enum ExportRel {
         }
         let destFd = dest.withUnsafeFileSystemRepresentation { ptr -> Int32 in
             guard let ptr else { return -1 }
-            return Darwin.open(ptr, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0o600)
+            return Darwin.open(ptr, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, 0o600)
         }
         guard destFd >= 0 else {
             throw SessionVaultError.writeFailed(prefix)

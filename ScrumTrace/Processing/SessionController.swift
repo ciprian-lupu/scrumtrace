@@ -746,8 +746,12 @@ final class SessionController: ObservableObject {
     }
 
     private func flashStatus() {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) { [weak self] in
-            guard let self, self.phase == .recording, self.captureState.allowsNewCapture else { return }
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 1_600_000_000)
+            guard let self else { return }
+            // Pause/privacy can land while this task is sleeping. Restoring
+            // "Recording" then would look like the session is still live.
+            guard self.phase == .recording, self.captureState.allowsNewCapture else { return }
             self.statusLine = "Recording"
         }
     }

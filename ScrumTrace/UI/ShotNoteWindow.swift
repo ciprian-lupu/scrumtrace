@@ -147,7 +147,7 @@ final class ShotTalkState: ObservableObject {
         if Thread.isMainThread {
             canTalk = allowed
         } else {
-            DispatchQueue.main.async { [weak self] in
+            Task { @MainActor [weak self] in
                 guard let self else { return }
                 self.canTalk = allowed
                 if !allowed {

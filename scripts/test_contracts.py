@@ -426,6 +426,8 @@ def test_pause_gate_hold_to_talk() -> None:
     assert "posted?.allowsNewCapture" in gate
     assert "abortTalk()" in gate
     assert "Thread.isMainThread" in gate
+    assert "Task { @MainActor" in gate
+    assert "DispatchQueue.main" not in gate
     stop_talk = shot.split("func stopTalk()")[1].split("struct ShotNoteView")[0]
     assert "guard live, !saved" not in stop_talk
     assert "guard allowsNewCapture(), !saved" not in stop_talk
@@ -438,6 +440,11 @@ def test_pause_gate_hold_to_talk() -> None:
     assert "notification.object as? CaptureSessionState" in shot
     hud = (ROOT / "ScrumTrace" / "UI" / "RecordingHUDWindow.swift").read_text()
     assert "allowsNewCapture" in hud
+    hotkeys = (ROOT / "ScrumTrace" / "UI" / "HotkeyManager.swift").read_text()
+    handle = hotkeys.split("private func handle(")[1].split("private func perform")[0]
+    assert "Task { @MainActor" in handle
+    assert "DispatchQueue.main" not in handle
+    assert "@MainActor\n    private func perform" in hotkeys
 
 
 def test_retry_failed_slices_and_pins() -> None:
@@ -839,6 +846,9 @@ def test_pause_privacy_and_metadata_gate() -> None:
     flash = controller.split("private func flashStatus")[1].split("static func clock")[0]
     assert "captureState.allowsNewCapture" in flash
     assert "phase == .recording" in flash
+    assert "Task { @MainActor" in flash
+    assert "DispatchQueue.main" not in flash
+    assert "Task.sleep" in flash
     agent = (ROOT / "ScrumTrace" / "Export" / "AgentContextRenderer.swift").read_text()
     assert "this export folder" in agent
     assert "Never open the private capture folder" in agent
@@ -1433,6 +1443,7 @@ def test_write_contained_data_refuses_directory_symlinks() -> None:
     copy_fn = models.split("static func copyContainedToTemporaryFile")[1].split("private static func openatFile")[0]
     assert "openatFile" in copy_fn
     assert "O_EXCL" in copy_fn
+    assert "O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW" in copy_fn
     assert "scrumtraceFcopyfile" in copy_fn
     assert "pathExtension" in copy_fn
     assert "Darwin.fsync" in copy_fn
@@ -1441,6 +1452,7 @@ def test_write_contained_data_refuses_directory_symlinks() -> None:
     assert "O_NOFOLLOW" in unf
     assert "scrumtraceFcopyfile" in unf
     assert "O_EXCL" in unf
+    assert "O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW" in unf
     assert "/tmp" in unf
     assert "O_NOFOLLOW" in models.split("private static func openatFile")[1]
     pack_size = models.split("static func regularFileByteCount(relative:")[1].split(
@@ -1471,6 +1483,8 @@ def test_write_contained_data_refuses_directory_symlinks() -> None:
     assert "options: .atomic" not in write_fn
     assert "writeExclusiveTemporaryFile" in write_fn
     assert "O_EXCL" in write_fn
+    assert "O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW" in write_fn
+    assert "O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC," not in write_fn
     assert "fsyncRegularFile" in write_fn
     assert "Darwin.fsync" in write_fn
     assert "O_NOFOLLOW" in write_fn

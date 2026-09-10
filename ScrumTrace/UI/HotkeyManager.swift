@@ -91,6 +91,7 @@ final class HotkeyManager {
         return noErr
     }
 
+    @MainActor
     private func perform(_ action: Action) {
         switch action {
         case .pin:
