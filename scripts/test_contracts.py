@@ -782,7 +782,8 @@ def test_pipeline_timing_stays_in_archive() -> None:
     assert "unlinkLastComponentUnfollowed(copy)" in run_zip
     assert "FileManager.default.removeItem(at: temp)" not in run_zip
     assert "FileManager.default.removeItem(at: copy)" not in run_zip
-    assert "FileManager.default.removeItem(at: stage)" in run_zip
+    assert "FileManager.default.removeItem(at: stage)" not in run_zip
+    assert "removePrivateTemporaryDirectory" in run_zip
     zip_fn = zipper.split("func zip(")[1].split("func writeZip")[0]
     assert "isUsableSessionRoot" in zip_fn
     assert "removeEscapingExportLinks" in zip_fn
@@ -1467,6 +1468,9 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "self.liveMovieRel = liveMovieRel" in prepare
     assert "self.liveWavRel = liveWavRel" in prepare
     assert "discardLiveCaptureLocked" in prepare
+    assert "paused = false" not in prepare
+    assert "clock.beginPause" in prepare
+    assert "if paused" in prepare
     assert "config.width = size.width" in start_fn
     assert "config.height = size.height" in start_fn
     assert "AVVideoWidthKey: w" in recorder
@@ -1738,18 +1742,27 @@ def test_write_contained_data_refuses_directory_symlinks() -> None:
     assert "scrumtraceUnlinkat" not in names_fn
     assert "static func makePrivateTemporaryURL" in models
     assert "static func removePrivateTemporaryURL" in models
+    assert "static func removePrivateTemporaryDirectory" in models
     private_temp = models.split("static func makePrivateTemporaryURL")[1].split("static func removePrivateTemporaryURL")[0]
     assert "Darwin.mkdtemp" in private_temp
     assert "XXXXXX" in private_temp
     assert "openUnfollowedDirectory" in private_temp
     assert "isSymbolicLink" in private_temp
+    assert "removePrivateTemporaryDirectory" in private_temp
+    assert "FileManager.default.removeItem(at: stage)" not in private_temp
     remove_priv = models.split("static func removePrivateTemporaryURL")[1].split("private static func openatDirectory")[0]
     assert 'hasPrefix("scrumtrace-")' in remove_priv
     assert "temporaryDirectory" in remove_priv
-    assert "removeItem(at: parent)" in remove_priv
+    assert "removePrivateTemporaryDirectory" in remove_priv
+    assert "removeItem(at: parent)" not in remove_priv
     assert "removeItem(at: url)" in remove_priv
     assert "unlinkLastComponentUnfollowed(url)" in remove_priv
     assert remove_priv.index("unlinkLastComponentUnfollowed(url)") < remove_priv.index("removeItem(at: url)")
+    helper_dir = models.split("static func removePrivateTemporaryDirectory")[1].split("private static func openatDirectory")[0]
+    assert "wipeOpenedDirectory" in helper_dir
+    assert "O_NOFOLLOW" in helper_dir
+    assert "scrumtraceATRemoveDir" in helper_dir
+    assert "FileManager.default.removeItem" not in helper_dir
     assert "static func moveIntoSession" in models
     rel = models.split("static func containedRelative(_ path: String, sessionURL: URL)")[1].split("static func existingSessionFile")[0]
     assert "isSymbolicLink" in rel

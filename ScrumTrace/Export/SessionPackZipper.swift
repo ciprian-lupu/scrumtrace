@@ -205,9 +205,9 @@ struct SessionPackZipper {
             throw SessionRecorderError.writerFailed("export/ is a symbolic link.")
         }
         let stage = URL(fileURLWithPath: String(cString: stageBytes))
-        defer { try? FileManager.default.removeItem(at: stage) }
+        defer { ExportRel.removePrivateTemporaryDirectory(stage) }
         if (try? stage.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
-            try? FileManager.default.removeItem(at: stage)
+            ExportRel.removePrivateTemporaryDirectory(stage)
             throw SessionRecorderError.writerFailed("export/ is a symbolic link.")
         }
         guard let stageFd = ExportRel.openUnfollowedDirectory(stage) else {

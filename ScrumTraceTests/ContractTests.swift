@@ -667,6 +667,22 @@ final class ContractTests: XCTestCase {
         )
     }
 
+    func testRemovePrivateTemporaryDirectoryDoesNotFollowSymlink() throws {
+        let shared = FileManager.default.temporaryDirectory
+        let secret = shared.appendingPathComponent("scrumtrace-secret-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: secret, withIntermediateDirectories: true)
+        let keep = secret.appendingPathComponent("keep.bin")
+        try Data("KEEP".utf8).write(to: keep)
+        defer { try? FileManager.default.removeItem(at: secret) }
+        let planted = shared.appendingPathComponent("scrumtrace-zip-stage-\(UUID().uuidString)")
+        try FileManager.default.createSymbolicLink(at: planted, withDestinationURL: secret)
+        defer { try? FileManager.default.removeItem(at: planted) }
+        ExportRel.removePrivateTemporaryDirectory(planted)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: planted.path))
+        XCTAssertEqual(try String(contentsOf: keep, encoding: .utf8), "KEEP")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: secret.path))
+    }
+
     func testContainedRegularFileRejectsSymlinkEvenIfTargetIsInsideSession() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("scrumtrace-regular-\(UUID().uuidString)")
         let shots = root.appendingPathComponent("archive/shots")

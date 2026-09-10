@@ -1054,11 +1054,11 @@ enum ExportRel {
         }
         let stage = URL(fileURLWithPath: String(cString: stageBytes), isDirectory: true)
         if (try? stage.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
-            try? FileManager.default.removeItem(at: stage)
+            removePrivateTemporaryDirectory(stage)
             throw SessionVaultError.writeFailed("temporary directory")
         }
         guard let dirFd = openUnfollowedDirectory(stage) else {
-            try? FileManager.default.removeItem(at: stage)
+            removePrivateTemporaryDirectory(stage)
             throw SessionVaultError.writeFailed("temporary directory")
         }
         Darwin.close(dirFd)
@@ -1077,7 +1077,42 @@ enum ExportRel {
             try? FileManager.default.removeItem(at: url)
             return
         }
-        try? FileManager.default.removeItem(at: parent)
+        removePrivateTemporaryDirectory(parent)
+    }
+
+    /// Wipe a `scrumtrace-*` mkdtemp folder under the process temp directory.
+    /// `FileManager.removeItem` follows a TOCTOU swap of that name for a
+    /// symlink into `archive/` or another tree (C2).
+    static func removePrivateTemporaryDirectory(_ directory: URL) {
+        let name = directory.lastPathComponent
+        guard name.hasPrefix("scrumtrace-"),
+              !name.contains("/"),
+              !name.contains("\0") else { return }
+        let parent = directory.deletingLastPathComponent().standardizedFileURL
+        let shared = FileManager.default.temporaryDirectory.standardizedFileURL
+        guard parent == shared else { return }
+        let parentFd = parent.withUnsafeFileSystemRepresentation { ptr -> Int32 in
+            guard let ptr else { return -1 }
+            // Shared temp may be `/tmp` → `/private/tmp`. Do not O_NOFOLLOW.
+            return Darwin.open(ptr, O_RDONLY | O_DIRECTORY | O_CLOEXEC)
+        }
+        guard parentFd >= 0 else { return }
+        defer { Darwin.close(parentFd) }
+        let childFd = name.withCString { ptr in
+            Darwin.openat(parentFd, ptr, O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW)
+        }
+        if childFd >= 0 {
+            wipeOpenedDirectory(childFd, depth: 0)
+            wipeOpenedDirectory(childFd, depth: 0)
+            Darwin.close(childFd)
+            _ = name.withCString { ptr in
+                scrumtraceUnlinkat(parentFd, ptr, scrumtraceATRemoveDir)
+            }
+            return
+        }
+        _ = name.withCString { ptr in
+            scrumtraceUnlinkat(parentFd, ptr, 0)
+        }
     }
 
     /// Open a contained directory with `O_NOFOLLOW` on every component. Empty
