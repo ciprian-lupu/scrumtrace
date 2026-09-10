@@ -449,8 +449,8 @@ enum ExportRel {
     }
 
     /// `O_NOFOLLOW` + `fsync` so a planted temp symlink is refused and Whisper JSON
-    /// is durable before `moveIntoSession`.
-    private static func fsyncRegularFile(_ url: URL, relative: String) throws {
+    /// / zip bytes are durable before `moveIntoSession`.
+    static func fsyncRegularFile(_ url: URL, relative: String) throws {
         if (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
             throw SessionVaultError.writeFailed(relative)
         }
@@ -621,7 +621,11 @@ enum ExportRel {
             var offset = 0
             while offset < size {
                 let n = Darwin.read(fd, base.advanced(by: offset), size - offset)
-                if n <= 0 { return n == 0 ? offset : -1 }
+                if n < 0 {
+                    if Darwin.errno == EINTR { continue }
+                    return -1
+                }
+                if n == 0 { return offset }
                 offset += Int(n)
             }
             return offset
@@ -805,7 +809,11 @@ enum ExportRel {
             var offset = 0
             while offset < size {
                 let n = Darwin.read(fd, base.advanced(by: offset), size - offset)
-                if n <= 0 { return n == 0 ? offset : -1 }
+                if n < 0 {
+                    if Darwin.errno == EINTR { continue }
+                    return -1
+                }
+                if n == 0 { return offset }
                 offset += Int(n)
             }
             return offset

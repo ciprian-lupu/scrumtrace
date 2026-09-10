@@ -266,6 +266,7 @@ struct SessionPackZipper {
             throw SessionRecorderError.writerFailed("zip failed with status -1.")
         }
         do {
+            try ExportRel.fsyncRegularFile(temp, relative: destRel)
             try ExportRel.moveIntoSession(from: temp, relative: destRel, sessionURL: sessionURL)
         } catch {
             try? FileManager.default.removeItem(at: temp)

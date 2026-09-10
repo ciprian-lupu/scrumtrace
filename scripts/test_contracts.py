@@ -669,6 +669,9 @@ def test_pipeline_timing_stays_in_archive() -> None:
     assert "Process(" not in run_zip
     assert "process.run()" not in run_zip
     assert "spawnWithDirectoryFd" in run_zip
+    assert "fsyncRegularFile" in run_zip
+    assert run_zip.index("spawnWithDirectoryFd") < run_zip.index("fsyncRegularFile")
+    assert run_zip.index("fsyncRegularFile") < run_zip.index("moveIntoSession")
     assert "scrumtrace-zip-stage" in run_zip
     assert "mkdtemp" in run_zip
     assert "scrumtrace-zip-stage-XXXXXX" in run_zip
@@ -1410,6 +1413,8 @@ def test_write_contained_data_refuses_directory_symlinks() -> None:
     assert "O_EXCL" in models
     read_fn = models.split("static func readContainedData(relative:")[1].split("static func readContainedData(_ file")[0]
     assert "openatFile" in read_fn
+    assert "EINTR" in read_fn
+    assert "Darwin.read" in read_fn
     assert "openatFile" in models
     assert "openatRead" not in models
     assert "O_NOFOLLOW" in models
@@ -1439,6 +1444,7 @@ def test_write_contained_data_refuses_directory_symlinks() -> None:
     utf8_read = models.split("static func unfollowedUTF8Text")[1].split("enum MediaBudget")[0]
     assert "O_NOFOLLOW" in utf8_read
     assert "Darwin.read" in utf8_read
+    assert "EINTR" in utf8_read.split("static func openUnfollowedDirectory")[0]
     assert "String(data:" in utf8_read
     assert "String(contentsOf:" not in utf8_read
     prepare = models.split("static func prepareContainedWrite")[1].split("static func writeContainedData")[0]
