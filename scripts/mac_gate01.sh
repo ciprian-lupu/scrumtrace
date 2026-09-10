@@ -14,7 +14,7 @@ echo "macos=$(sw_vers -productVersion)"
 echo "chip=$(sysctl -n machdep.cpu.brand_string)"
 echo "bundle=com.str8minds.ScrumTrace"
 
-if rg -q 'ENABLE_APP_SANDBOX = NO' ScrumTrace.xcodeproj/project.pbxproj; then
+if grep -q 'ENABLE_APP_SANDBOX = NO' ScrumTrace.xcodeproj/project.pbxproj; then
   echo "sandbox_project=off"
 else
   echo "sandbox_project=UNKNOWN"
@@ -34,10 +34,12 @@ xcodebuild \
 
 APP="$DERIVED/Build/Products/Debug/ScrumTrace.app"
 echo "app=$APP"
-if [[ -d "$APP" ]]; then
-  defaults read "$APP/Contents/Info.plist" LSUIElement || true
-  codesign -d --entitlements - "$APP" 2>/dev/null | rg -n 'app-sandbox|audio-input|microphone' || true
+if [[ ! -x "$APP/Contents/MacOS/ScrumTrace" ]]; then
+  echo "build produced no executable at $APP/Contents/MacOS/ScrumTrace" >&2
+  exit 1
 fi
+defaults read "$APP/Contents/Info.plist" LSUIElement || true
+codesign -d --entitlements - "$APP" 2>/dev/null | grep -E 'app-sandbox|audio-input|microphone' || true
 
 echo "sessions_root=$HOME/Movies/ScrumTrace/sessions"
 ls -1 "$HOME/Movies/ScrumTrace/sessions" 2>/dev/null | tail -5 || echo "no sessions yet"

@@ -37,7 +37,7 @@ final class SessionController: ObservableObject {
     private var terminateRequested = false
     let captureFreeze: CaptureFreeze
 
-    init(settings: AppSettings = .shared, vault: SessionVault = SessionVault()) {
+    init(settings: AppSettings, vault: SessionVault = SessionVault()) {
         self.settings = settings
         self.vault = vault
         self.processor = SessionProcessor(vault: vault, transcriber: transcriber)

@@ -3,8 +3,19 @@ import AppKit
 import ApplicationServices
 import SwiftUI
 
+@MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    let controller = SessionController()
+    private var controllerStorage: SessionController?
+    /// Built on first MainActor access. A stored `SessionController()` hits NSObject's
+    /// nonisolated `init` and fails Swift concurrency on Xcode 26.
+    var controller: SessionController {
+        if let controllerStorage {
+            return controllerStorage
+        }
+        let created = SessionController(settings: AppSettings.shared)
+        controllerStorage = created
+        return created
+    }
     private var menuBar: MenuBarController?
     private var hud: RecordingHUDWindow?
     private var hotkeys: HotkeyManager?
