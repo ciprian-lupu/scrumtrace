@@ -170,10 +170,12 @@ enum EvidenceValidator {
 
     private static func shotOwning(_ path: String, in shots: [ShotRecord]) -> ShotRecord? {
         shots.first { shot in
-            shot.stillCandidates.contains(path)
-                || shot.rawPath == path
-                || shot.annotatedPath == path
-                || shot.exportPath == path
+            let paths = shot.stillCandidates
+                + [shot.rawPath]
+                + [shot.annotatedPath, shot.exportPath].compactMap { $0 }
+            return paths.contains { candidate in
+                !candidate.isEmpty && (candidate == path || isSameSessionPath(path, candidate))
+            }
         }
     }
 
