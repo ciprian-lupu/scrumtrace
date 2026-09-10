@@ -2574,6 +2574,32 @@ final class ContractTests: XCTestCase {
         XCTAssertNil(stripped.shots[0].annotatedPath)
     }
 
+    func testStripOmittedMapsTaskEvidenceToRemainingShotTwin() {
+        var manifest = SessionManifest.makeNew(sessionId: "s", product: .empty)
+        manifest.tasks = [
+            TaskRecord(
+                taskId: "TASK-01",
+                sourceSliceId: "slice-01",
+                kind: .bug,
+                status: .confirmed,
+                title: "Save",
+                observed: "x",
+                stated: "",
+                inferred: "",
+                agentInstructions: "inspect",
+                quotes: [],
+                evidenceMedia: ["shots/001.annotated.jpg"],
+                confidence: 0.9
+            )
+        ]
+        let stripped = PackBudget.stripOmitted(
+            [OmittedAsset(path: "shots/001.annotated.jpg", reason: "Pack over 35 MB; dropped by priority")],
+            from: manifest
+        )
+        XCTAssertEqual(stripped.tasks[0].evidenceMedia, ["shots/001.jpg"])
+        XCTAssertEqual(stripped.tasks[0].status, .confirmed)
+    }
+
     func testSessionBriefShowsMappedArchiveShot() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("scrumtrace-brief-shot-\(UUID().uuidString)")
         let shots = root.appendingPathComponent("export/shots")

@@ -735,6 +735,13 @@ enum PackBudget {
 
     static func stripOmitted(_ omitted: [OmittedAsset], from manifest: SessionManifest) -> SessionManifest {
         let dropped = Set(omitted.map { ExportRel.toExportRoot($0.path) })
+        func keptShotTwin(_ path: String) -> String? {
+            guard let stem = EvidenceValidator.shotStillStem(path) else { return nil }
+            let twins = ["shots/\(stem).jpg", "shots/\(stem).annotated.jpg"]
+            return twins.first { twin in
+                !dropped.contains(twin) && !dropped.contains("export/\(twin)")
+            }
+        }
         var copy = manifest
         copy.slices = copy.slices.map { slice in
             var next = slice
@@ -749,7 +756,12 @@ enum PackBudget {
                     }
                 }
             }
-            next.stills = next.stills.filter { !droppedHandoff($0, dropped: dropped) }
+            next.stills = slice.stills.compactMap { path -> String? in
+                if !droppedHandoff(path, dropped: dropped) {
+                    return path
+                }
+                return keptShotTwin(path)
+            }
             return next
         }
         copy.shots = copy.shots.map { shot in
@@ -767,7 +779,20 @@ enum PackBudget {
         }
         copy.tasks = copy.tasks.map { task in
             var next = task
-            next.evidenceMedia = task.evidenceMedia.filter { !droppedHandoff($0, dropped: dropped) }
+            var seen = Set<String>()
+            next.evidenceMedia = task.evidenceMedia.compactMap { path -> String? in
+                let kept: String
+                if !droppedHandoff(path, dropped: dropped) {
+                    kept = path
+                } else if let twin = keptShotTwin(path) {
+                    kept = twin
+                } else {
+                    return nil
+                }
+                let key = ExportRel.toExportRoot(kept)
+                guard seen.insert(key).inserted else { return nil }
+                return kept
+            }
             if next.status == .confirmed && next.evidenceMedia.isEmpty {
                 next.status = .needsReview
             }
