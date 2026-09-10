@@ -126,12 +126,17 @@ def test_html_escaper_order() -> None:
     assert "\\n" in gen.split("def contained_export_member")[1].split("def remove_escaping_export_links")[0]
     stage_fn = gen.split("def stage_export_zip_members")[1].split("def write_export_zip")[0]
     assert '"\\n" in member' in stage_fn
-    assert "mkstemp" in gen
+    assert "mkstemp" not in gen
     assert "scrumtrace-zip-" in gen
     assert "scrumtrace-zip-stage-" in gen
     assert "shutil.move" in gen
     assert "cwd=EXPORT" not in gen
     zip_fn = gen.split("def write_export_zip")[1].split("def export_zip_members")[0]
+    assert 'mkdtemp(prefix="scrumtrace-zip-")' in zip_fn
+    assert "mkstemp" not in zip_fn
+    assert "O_EXCL" in zip_fn
+    assert "_remove_private_temp_dir(stage)" in zip_fn
+    assert "shutil.rmtree(stage" not in zip_fn
     assert "os.close(fd)" in zip_fn
     assert "tmp.unlink(missing_ok=True)" in zip_fn
     assert zip_fn.index("tmp.unlink") > zip_fn.index('["zip"')
@@ -145,6 +150,9 @@ def test_html_escaper_order() -> None:
     assert "fchdir" in zip_fn
     assert "preexec_fn" in zip_fn
     assert "cwd=None" in zip_fn
+    copy_fn = gen.split("def _copy_unfollowed")[1].split("def stage_export_zip_members")[0]
+    assert "O_EXCL" in copy_fn
+    assert "O_NOFOLLOW" in copy_fn
 
 
 def test_brief_template_does_not_rescan_values() -> None:
@@ -244,6 +252,29 @@ def test_write_export_zip_skips_symlinks_and_packs_relative_members() -> None:
             raise AssertionError("write_export_zip must refuse a planted export/ symlink")
         assert not planted_pack.exists()
         assert secret.read_bytes() == b"MASTER-MOVIE"
+
+
+def test_remove_private_temp_dir_does_not_follow_symlink() -> None:
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "generate_mock_session", ROOT / "scripts" / "generate_mock_session.py"
+    )
+    assert spec and spec.loader
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        secret = root / "scrumtrace-secret-keep"
+        secret.mkdir()
+        keep = secret / "keep.bin"
+        keep.write_bytes(b"KEEP")
+        planted = root / "scrumtrace-zip-stage-planted"
+        planted.symlink_to(secret)
+        mod._remove_private_temp_dir(planted)
+        assert not planted.exists()
+        assert keep.read_bytes() == b"KEEP"
+        assert secret.exists()
 
 
 def test_zipper_never_deletes_archive() -> None:

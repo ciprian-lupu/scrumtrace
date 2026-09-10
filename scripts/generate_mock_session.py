@@ -208,6 +208,86 @@ def iter_export_files(root: Path):
                 yield path
 
 
+def _wipe_opened_dir(dir_fd: int, depth: int = 0) -> None:
+    if depth > 24:
+        return
+    try:
+        names = os.listdir(dir_fd)
+    except OSError:
+        return
+    dir_flags = (
+        os.O_RDONLY
+        | os.O_DIRECTORY
+        | getattr(os, "O_CLOEXEC", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+    )
+    for name in names:
+        if name in (".", "..") or "/" in name or "\0" in name:
+            continue
+        try:
+            child = os.open(name, dir_flags, dir_fd=dir_fd)
+        except OSError:
+            try:
+                os.unlink(name, dir_fd=dir_fd)
+            except OSError:
+                pass
+            continue
+        try:
+            _wipe_opened_dir(child, depth + 1)
+        finally:
+            os.close(child)
+        try:
+            os.rmdir(name, dir_fd=dir_fd)
+        except OSError:
+            try:
+                os.unlink(name, dir_fd=dir_fd)
+            except OSError:
+                pass
+
+
+def _remove_private_temp_dir(path: Path) -> None:
+    """Unlink a scrumtrace-* mkdtemp folder without following a swapped symlink."""
+    name = path.name
+    if not name.startswith("scrumtrace-") or "/" in name or "\0" in name:
+        return
+    try:
+        parent_fd = os.open(
+            path.parent,
+            os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_CLOEXEC", 0),
+        )
+    except OSError:
+        return
+    try:
+        flags = (
+            os.O_RDONLY
+            | os.O_DIRECTORY
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NOFOLLOW", 0)
+        )
+        try:
+            child_fd = os.open(name, flags, dir_fd=parent_fd)
+        except OSError:
+            try:
+                os.unlink(name, dir_fd=parent_fd)
+            except OSError:
+                pass
+            return
+        try:
+            _wipe_opened_dir(child_fd, 0)
+            _wipe_opened_dir(child_fd, 0)
+        finally:
+            os.close(child_fd)
+        try:
+            os.rmdir(name, dir_fd=parent_fd)
+        except OSError:
+            try:
+                os.unlink(name, dir_fd=parent_fd)
+            except OSError:
+                pass
+    finally:
+        os.close(parent_fd)
+
+
 def _copy_unfollowed(src: Path, dest: Path) -> None:
     flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
     src_fd = os.open(src, flags)
@@ -215,7 +295,14 @@ def _copy_unfollowed(src: Path, dest: Path) -> None:
         dest.parent.mkdir(parents=True, exist_ok=True)
         if dest.parent.is_symlink() or dest.is_symlink():
             raise SystemExit("export/ is a symbolic link")
-        dest_fd = os.open(dest, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        dest_flags = (
+            os.O_WRONLY
+            | os.O_CREAT
+            | os.O_EXCL
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NOFOLLOW", 0)
+        )
+        dest_fd = os.open(dest, dest_flags, 0o600)
         try:
             while True:
                 chunk = os.read(src_fd, 1024 * 1024)
@@ -255,6 +342,7 @@ def write_export_zip(export: Path, packed: Path, members: list[str]) -> None:
     if export.is_symlink():
         raise SystemExit("export/ is a symbolic link")
     stage = Path(tempfile.mkdtemp(prefix="scrumtrace-zip-stage-"))
+    zip_dir: Path | None = None
     fd = -1
     zip_out = -1
     tmp: Path | None = None
@@ -264,8 +352,16 @@ def write_export_zip(export: Path, packed: Path, members: list[str]) -> None:
             raise SystemExit("export/ allow-list is empty; nothing to zip.")
         flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
         fd = os.open(stage, flags)
-        zip_out, tmp_name = tempfile.mkstemp(prefix="scrumtrace-zip-", suffix=".zip")
-        tmp = Path(tmp_name)
+        zip_dir = Path(tempfile.mkdtemp(prefix="scrumtrace-zip-"))
+        tmp = zip_dir / "file.zip"
+        dest_flags = (
+            os.O_WRONLY
+            | os.O_CREAT
+            | os.O_EXCL
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NOFOLLOW", 0)
+        )
+        zip_out = os.open(tmp, dest_flags, 0o600)
         if export.is_symlink() or stage.is_symlink():
             raise SystemExit("export/ is a symbolic link")
 
@@ -292,9 +388,11 @@ def write_export_zip(export: Path, packed: Path, members: list[str]) -> None:
             os.close(fd)
         if zip_out >= 0:
             os.close(zip_out)
-        shutil.rmtree(stage, ignore_errors=True)
+        _remove_private_temp_dir(stage)
         if tmp is not None:
             tmp.unlink(missing_ok=True)
+        if zip_dir is not None:
+            _remove_private_temp_dir(zip_dir)
 
 
 def export_zip_members(export: Path) -> list[str]:
@@ -323,6 +421,8 @@ def export_zip_members(export: Path) -> list[str]:
 
 
 def main() -> None:
+    if EXPORT.is_symlink():
+        raise SystemExit("export/ is a symbolic link")
     if EXPORT.exists():
         shutil.rmtree(EXPORT)
     shots = EXPORT / "shots"
