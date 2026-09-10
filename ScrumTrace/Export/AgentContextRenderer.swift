@@ -79,7 +79,7 @@ struct AgentContextRenderer {
         lines.append("- Observed: \(PromptTemplates.wrapUntrustedInline(task.observed))")
         lines.append("- Stated: \(PromptTemplates.wrapUntrustedInline(task.stated))")
         lines.append("- Inferred: \(PromptTemplates.wrapUntrustedInline(task.inferred))")
-        lines.append("- Agent instructions: \(task.agentInstructions)")
+        lines.append("- Agent instructions: \(Self.handoffAgentInstructions(task.agentInstructions))")
         if !task.quotes.isEmpty {
             lines.append("- Quotes:")
             for quote in task.quotes {
@@ -102,6 +102,18 @@ struct AgentContextRenderer {
             }
         }
         return lines
+    }
+
+    /// Template text is trusted. Wrap only the model-notes tail so a leaked
+    /// draft cannot sit outside `<untrusted_meeting_data>` (D13).
+    static func handoffAgentInstructions(_ text: String) -> String {
+        let marker = "\n\n## Model notes (untrusted)\n"
+        guard let range = text.range(of: marker) else {
+            return text
+        }
+        let head = String(text[..<range.lowerBound])
+        let tail = String(text[range.upperBound...])
+        return head + marker + PromptTemplates.wrapUntrustedInline(tail)
     }
 
     private func displayPath(_ shot: ShotRecord, sessionURL: URL) -> String? {

@@ -1246,6 +1246,10 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "buffer.frameLength" in recorder_engine
     agent = (ROOT / "ScrumTrace" / "Export" / "AgentContextRenderer.swift").read_text()
     assert "omittedHandoffPath" in agent
+    assert "handoffAgentInstructions" in agent
+    assert "wrapUntrustedInline" in agent.split("func handoffAgentInstructions")[1].split("func displayPath")[0]
+    assert "Model notes (untrusted)" in agent
+    assert 'lines.append("- Agent instructions: \\(task.agentInstructions)")' not in agent
     brief_omit = brief_src.split("private func omittedHTML")[1].split("private static func clock")[0]
     assert "omittedHandoffPath" in brief_omit
     assert "isAuthFailure" in protocol_src
@@ -1317,6 +1321,8 @@ def test_write_contained_data_refuses_directory_symlinks() -> None:
     assert "func placeIntoOpenedDirectory" in models
     assert "func spawnWithDirectoryFd" in models
     assert "posix_spawn_file_actions_addfchdir_np" in models
+    assert "scrumtraceAddFchdir" in models
+    assert "scrumtracePosixSpawn" in models
     assert "mkdirat" in models
     place_fn = models.split("static func placeIntoOpenedDirectory")[1].split(
         "static func spawnWithDirectoryFd"

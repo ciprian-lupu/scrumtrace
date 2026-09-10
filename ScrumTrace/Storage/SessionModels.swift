@@ -964,6 +964,11 @@ enum ExportRel {
                 if let ptr { free(ptr) }
             }
         }
+        if argv.dropLast().contains(where: { $0 == nil }) {
+            Darwin.close(readFd)
+            Darwin.close(writeFd)
+            throw SessionVaultError.writeFailed("spawn")
+        }
         var env: [UnsafeMutablePointer<CChar>?] = ProcessInfo.processInfo.environment.map { key, value in
             strdup("\(key)=\(value)")
         }
@@ -972,6 +977,11 @@ enum ExportRel {
             for ptr in env {
                 if let ptr { free(ptr) }
             }
+        }
+        if env.dropLast().contains(where: { $0 == nil }) {
+            Darwin.close(readFd)
+            Darwin.close(writeFd)
+            throw SessionVaultError.writeFailed("spawn")
         }
 
         var pid: pid_t = 0
