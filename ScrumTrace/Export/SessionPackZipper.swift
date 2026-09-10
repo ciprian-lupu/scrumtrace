@@ -149,6 +149,16 @@ struct SessionPackZipper {
                     )
                 )
             }
+            // C3: zip can be under 35 MB while uncompressed export/ is not.
+            // Do not list the zip as omitted in that case; do name the folder.
+            if folder > MediaBudget.maxZipBytes {
+                omitted.append(
+                    OmittedAsset(
+                        path: "export-folder",
+                        reason: "Folder handoff still \(folder) bytes after dropping all droppable export media; protected docs remain."
+                    )
+                )
+            }
         }
         omitted = uniquedOmitted(omitted)
         do {

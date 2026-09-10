@@ -1785,6 +1785,8 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "folder > MediaBudget.maxZipBytes" in zipper_over
     assert "dropOversizedFolderMedia" in zipper_over
     assert zipper_over.index("dropOversizedFolderMedia") < zipper_over.index("opted-in full transcript")
+    assert "export-folder" in zipper_over
+    assert zipper_over.index("zipOverBudget") < zipper_over.index("export-folder")
     folder_fn = zipper.split("static func exportFolderBytes")[1].split("static func exportStillContainsSymlink")[0]
     assert "session-pack.zip" in folder_fn
     assert "skipDescendants" in folder_fn
