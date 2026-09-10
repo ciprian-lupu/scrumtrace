@@ -774,12 +774,14 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             UnsafeMutablePointer(mutating: buffer.audioBufferList)
         )
         let dstBuffers = UnsafeMutableAudioBufferListPointer(copy.mutableAudioBufferList)
+        var copied = false
         for index in 0..<min(srcBuffers.count, dstBuffers.count) {
             guard let srcData = srcBuffers[index].mData, let dstData = dstBuffers[index].mData else { continue }
             memcpy(dstData, srcData, Int(srcBuffers[index].mDataByteSize))
             dstBuffers[index].mDataByteSize = srcBuffers[index].mDataByteSize
+            copied = true
         }
-        return copy
+        return copied ? copy : nil
     }
 
     private func writeEngineBuffer(_ buffer: AVAudioPCMBuffer) {

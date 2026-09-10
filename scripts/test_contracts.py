@@ -775,6 +775,9 @@ def test_audio_split_and_brief_loader() -> None:
     assert "failCaptureWrite" in tap
     assert "Could not copy microphone PCM" in tap
     assert "else { return }" not in tap.split("copyPCM(buffer)")[1].split("writerQueue.async")[0]
+    copy_pcm = recorder.split("func copyPCM")[1].split("func writeEngineBuffer")[0]
+    assert "copied ? copy : nil" in copy_pcm
+    assert "return copy" in copy_pcm
     brief = (ROOT / "ScrumTrace" / "Export" / "SessionBriefRenderer.swift").read_text()
     assert "Export/Resources" in brief
     loader = brief.split("enum BriefTemplateLoader")[1].split("enum HTMLEscaper")[0]
