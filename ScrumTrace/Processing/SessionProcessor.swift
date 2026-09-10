@@ -731,6 +731,7 @@ final class SessionProcessor: @unchecked Sendable {
         var out: [String] = []
         for path in paths where !path.isEmpty {
             guard let contained = ExportRel.existingSessionFile(path, sessionURL: sessionURL),
+                  ExportRel.isVisualEvidence(contained),
                   seen.insert(contained).inserted else { continue }
             out.append(contained)
         }

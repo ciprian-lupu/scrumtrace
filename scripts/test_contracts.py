@@ -728,8 +728,11 @@ def test_audio_split_and_brief_loader() -> None:
     assert "CMSampleBufferDataIsReady" in write_wav
     assert "noteWavSampleNotReady" in write_wav
     assert "wavSampleNotReadyStreak = 0" in write_wav
+    assert "WAV writer is missing" in write_wav
     engine_buf = recorder.split("func writeEngineBuffer")[1].split("func requestPermission")[0]
     assert "format conversion failed" in engine_buf
+    assert "WAV writer is missing" in engine_buf
+    assert "guard !paused, started else { return }" in engine_buf
     assert "_ = videoInput.append" not in recorder
     assert "_ = audioInput.append" not in recorder
     assert "Could not write archive/session.mp4" in recorder
@@ -745,6 +748,9 @@ def test_audio_split_and_brief_loader() -> None:
     assert "CMSampleBufferDataIsReady" in append_video
     assert "noteVideoSampleNotReady" in append_video
     assert "videoSampleNotReadyStreak = 0" in append_video
+    assert "movie writer is missing" in append_video
+    assert "noteVideoWriterNotWriting" in append_video
+    assert "videoWriterNotWritingStreak = 0" in append_video
     append_audio = recorder.split("func appendAudioToMovie")[1].split("func remappedBuffer")[0]
     assert "noteRemapFailure" in append_audio
     assert "remapFailStreak = 0" in append_audio
@@ -754,6 +760,9 @@ def test_audio_split_and_brief_loader() -> None:
     assert "CMSampleBufferDataIsReady" in append_audio
     assert "noteAudioSampleNotReady" in append_audio
     assert "audioSampleNotReadyStreak = 0" in append_audio
+    assert "movie writer is missing" in append_audio
+    assert "noteAudioWriterNotWriting" in append_audio
+    assert "audioWriterNotWritingStreak = 0" in append_audio
     remap_fail = recorder.split("func noteRemapFailure")[1].split("func writeWav")[0]
     assert "failCaptureWrite" in remap_fail
     assert "Could not timestamp capture samples" in remap_fail
@@ -769,6 +778,8 @@ def test_audio_split_and_brief_loader() -> None:
     assert "videoSampleNotReadyStreak = 0" in freeze
     assert "audioSampleNotReadyStreak = 0" in freeze
     assert "wavSampleNotReadyStreak = 0" in freeze
+    assert "videoWriterNotWritingStreak = 0" in freeze
+    assert "audioWriterNotWritingStreak = 0" in freeze
     not_ready = recorder.split("func noteVideoSampleNotReady")[1].split("func writeWav")[0]
     assert "failCaptureWrite" in not_ready
     assert "video sample was not ready" in not_ready
@@ -1817,6 +1828,7 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "sessionURL: sessionURL" in tasks_fn.split("let uniqueEvidence")[1].split("var instructions")[0]
     uniqued_fn = processor.split("private func uniquedPaths")[1].split("private func abortedForAuth")[0]
     assert "existingSessionFile" in uniqued_fn
+    assert "isVisualEvidence" in uniqued_fn
     assert "sessionURL" in uniqued_fn
     assert "!shots.isEmpty" in tasks_fn
     assert "func reviewTasks" in tasks_fn

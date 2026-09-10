@@ -59,6 +59,10 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
     private var videoSampleNotReadyStreak = 0
     private var audioSampleNotReadyStreak = 0
     private var wavSampleNotReadyStreak = 0
+    /// Consecutive `AVAssetWriter.status != .writing` while capture is live.
+    /// `.unknown` can be a glitch; a stall means the master movie stopped (C1).
+    private var videoWriterNotWritingStreak = 0
+    private var audioWriterNotWritingStreak = 0
 
     init(sessionURL: URL, clock: ClockSynchronizer) {
         self.sessionURL = sessionURL
@@ -256,6 +260,8 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             self.videoSampleNotReadyStreak = 0
             self.audioSampleNotReadyStreak = 0
             self.wavSampleNotReadyStreak = 0
+            self.videoWriterNotWritingStreak = 0
+            self.audioWriterNotWritingStreak = 0
             if next {
                 self.clock.beginPause()
             } else {
@@ -276,6 +282,8 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             self.videoSampleNotReadyStreak = 0
             self.audioSampleNotReadyStreak = 0
             self.wavSampleNotReadyStreak = 0
+            self.videoWriterNotWritingStreak = 0
+            self.audioWriterNotWritingStreak = 0
             self.clock.markRecordingStopped()
         }
     }
@@ -439,14 +447,21 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             return
         }
         videoSampleNotReadyStreak = 0
-        guard let writer, let videoInput else { return }
+        guard let writer, let videoInput else {
+            failCaptureWrite("Could not write archive/session.mp4: movie writer is missing.")
+            return
+        }
         if writer.status == .failed {
             failCaptureWrite(
                 "Could not write archive/session.mp4: \(writer.error?.localizedDescription ?? "AVAssetWriter failed.")"
             )
             return
         }
-        guard writer.status == .writing else { return }
+        guard writer.status == .writing else {
+            noteVideoWriterNotWriting()
+            return
+        }
+        videoWriterNotWritingStreak = 0
         guard videoInput.isReadyForMoreMediaData else {
             noteVideoBackpressure()
             return
@@ -471,14 +486,21 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             return
         }
         audioSampleNotReadyStreak = 0
-        guard let writer, let audioInput else { return }
+        guard let writer, let audioInput else {
+            failCaptureWrite("Could not write archive/session.mp4: movie writer is missing.")
+            return
+        }
         if writer.status == .failed {
             failCaptureWrite(
                 "Could not write archive/session.mp4: \(writer.error?.localizedDescription ?? "AVAssetWriter failed.")"
             )
             return
         }
-        guard writer.status == .writing else { return }
+        guard writer.status == .writing else {
+            noteAudioWriterNotWriting()
+            return
+        }
+        audioWriterNotWritingStreak = 0
         guard audioInput.isReadyForMoreMediaData else {
             noteAudioBackpressure()
             return
@@ -571,6 +593,20 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         }
     }
 
+    private func noteVideoWriterNotWriting() {
+        videoWriterNotWritingStreak += 1
+        if videoWriterNotWritingStreak >= 90 {
+            failCaptureWrite("Could not write archive/session.mp4: video writer was not writing.")
+        }
+    }
+
+    private func noteAudioWriterNotWriting() {
+        audioWriterNotWritingStreak += 1
+        if audioWriterNotWritingStreak >= 90 {
+            failCaptureWrite("Could not write archive/session.mp4: audio writer was not writing.")
+        }
+    }
+
     private func writeWav(from sampleBuffer: CMSampleBuffer) {
         guard !paused, started else { return }
         guard CMSampleBufferDataIsReady(sampleBuffer) else {
@@ -578,7 +614,10 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             return
         }
         wavSampleNotReadyStreak = 0
-        guard let wavFile else { return }
+        guard let wavFile else {
+            failCaptureWrite("Could not write archive/audio.wav: WAV writer is missing.")
+            return
+        }
         guard let formatDesc = CMSampleBufferGetFormatDescription(sampleBuffer),
               let asbdPtr = CMAudioFormatDescriptionGetStreamBasicDescription(formatDesc) else {
             noteWavFormatFailure()
@@ -886,7 +925,11 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
     }
 
     private func writeEngineBuffer(_ buffer: AVAudioPCMBuffer) {
-        guard !paused, started, let wavFile else { return }
+        guard !paused, started else { return }
+        guard let wavFile else {
+            failCaptureWrite("Could not write archive/audio.wav: WAV writer is missing.")
+            return
+        }
         let frames = buffer.frameLength
         guard frames > 0 else { return }
         let target = wavFile.processingFormat
