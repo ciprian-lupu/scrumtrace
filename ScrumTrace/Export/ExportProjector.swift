@@ -188,7 +188,10 @@ struct ExportProjector {
         // symlink must be unlinked first or createDirectory fails and the
         // destination tree can be removed (C2).
         if (try? export.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
-            try fileManager.removeItem(at: export)
+            try ExportRel.removeItemIfRegularFile(export, sessionRoot: sessionURL)
+            if (try? export.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+                throw SessionVaultError.writeFailed("export/")
+            }
         } else {
             var isDir: ObjCBool = false
             if fileManager.fileExists(atPath: export.path, isDirectory: &isDir) {
@@ -197,7 +200,7 @@ struct ExportProjector {
         }
         try fileManager.createDirectory(at: export, withIntermediateDirectories: true)
         if (try? export.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
-            try? fileManager.removeItem(at: export)
+            try? ExportRel.removeItemIfRegularFile(export, sessionRoot: sessionURL)
             throw SessionVaultError.writeFailed("export/")
         }
         let shots = sessionURL.appendingPathComponent(ScrumTracePath.exportShots)
@@ -210,7 +213,7 @@ struct ExportProjector {
             throw SessionVaultError.writeFailed("export/")
         }
         if (try? shots.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
-            try? fileManager.removeItem(at: shots)
+            try? ExportRel.removeItemIfRegularFile(shots, sessionRoot: sessionURL)
             throw SessionVaultError.writeFailed(ScrumTracePath.exportShots)
         }
         let media = sessionURL.appendingPathComponent(ScrumTracePath.media)
@@ -220,7 +223,7 @@ struct ExportProjector {
             throw SessionVaultError.writeFailed("export/")
         }
         if (try? media.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
-            try? fileManager.removeItem(at: media)
+            try? ExportRel.removeItemIfRegularFile(media, sessionRoot: sessionURL)
             throw SessionVaultError.writeFailed(ScrumTracePath.media)
         }
     }

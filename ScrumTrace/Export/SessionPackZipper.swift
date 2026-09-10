@@ -18,7 +18,7 @@ struct SessionPackZipper {
         PackBudget.removeEscapingExportLinks(exportDir: exportDir)
         try FileManager.default.createDirectory(at: exportDir, withIntermediateDirectories: true)
         if (try? exportDir.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
-            try? FileManager.default.removeItem(at: exportDir)
+            try? ExportRel.removeItemIfRegularFile(exportDir, sessionRoot: sessionURL)
             throw SessionRecorderError.writerFailed("export/ is a symbolic link.")
         }
         if ExportRel.containsSymlinkComponent(ScrumTracePath.export, sessionURL: sessionURL) {
@@ -115,7 +115,7 @@ struct SessionPackZipper {
         PackBudget.removeEscapingExportLinks(exportDir: exportDir)
         try FileManager.default.createDirectory(at: exportDir, withIntermediateDirectories: true)
         if (try? exportDir.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
-            try? FileManager.default.removeItem(at: exportDir)
+            try? ExportRel.removeItemIfRegularFile(exportDir, sessionRoot: sessionURL)
             throw SessionRecorderError.writerFailed("export/ is a symbolic link.")
         }
         if ExportRel.containsSymlinkComponent(ScrumTracePath.export, sessionURL: sessionURL) {
@@ -315,17 +315,22 @@ enum PackBudget {
     /// cannot follow a planted `shots/` or `media/` link into `archive/` (C2).
     /// The zip allow-list already skips links; this matches folder-handoff to zip.
     static func removeEscapingExportLinks(exportDir: URL) {
-        let fm = FileManager.default
+        let sessionRoot = exportDir.deletingLastPathComponent()
         let linkKey = URLResourceKey.isSymbolicLinkKey
         if (try? exportDir.resourceValues(forKeys: [linkKey]).isSymbolicLink) == true {
-            try? fm.removeItem(at: exportDir)
-            try? fm.createDirectory(at: exportDir, withIntermediateDirectories: true)
+            try? ExportRel.removeItemIfRegularFile(exportDir, sessionRoot: sessionRoot)
+            ExportRel.unlinkLastComponentUnfollowed(exportDir)
             if (try? exportDir.resourceValues(forKeys: [linkKey]).isSymbolicLink) == true {
-                try? fm.removeItem(at: exportDir)
+                return
+            }
+            try? FileManager.default.createDirectory(at: exportDir, withIntermediateDirectories: true)
+            if (try? exportDir.resourceValues(forKeys: [linkKey]).isSymbolicLink) == true {
+                try? ExportRel.removeItemIfRegularFile(exportDir, sessionRoot: sessionRoot)
+                ExportRel.unlinkLastComponentUnfollowed(exportDir)
             }
             return
         }
-        guard let enumerator = fm.enumerator(
+        guard let enumerator = FileManager.default.enumerator(
             at: exportDir,
             includingPropertiesForKeys: [linkKey],
             options: []
@@ -338,7 +343,8 @@ enum PackBudget {
             }
         }
         for link in links.reversed() {
-            try? fm.removeItem(at: link)
+            try? ExportRel.removeItemIfRegularFile(link, sessionRoot: sessionRoot)
+            ExportRel.unlinkLastComponentUnfollowed(link)
         }
     }
 
@@ -377,7 +383,8 @@ enum PackBudget {
             // Enumerator follows a directory symlink. Delete it instead of
             // walking `export/media` → `archive/` (C2).
             if (try? root.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
-                try? FileManager.default.removeItem(at: root)
+                try? ExportRel.removeItemIfRegularFile(root, sessionRoot: sessionRoot)
+                ExportRel.unlinkLastComponentUnfollowed(root)
                 continue
             }
             guard let enumerator = FileManager.default.enumerator(

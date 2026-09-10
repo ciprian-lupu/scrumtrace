@@ -262,6 +262,10 @@ def test_zipper_never_deletes_archive() -> None:
     assert "skipDescendants" in allow
     remove_links = zipper.split("static func removeEscapingExportLinks")[1].split("static func allowList")[0]
     assert "skipDescendants" in remove_links
+    assert "removeItemIfRegularFile" in remove_links
+    assert "unlinkLastComponentUnfollowed" in remove_links
+    assert "fm.removeItem(at: exportDir)" not in remove_links
+    assert "fm.removeItem(at: link)" not in remove_links
     recreate = remove_links.split("createDirectory")[1].split("guard let enumerator")[0]
     assert "isSymbolicLink" in recreate
     assert "removeItem" in recreate
@@ -276,7 +280,9 @@ def test_zipper_never_deletes_archive() -> None:
     assert '"full_transcript.json"' in protected
     folder_loop = allow.split('for folder in ["shots", "media"]')[1]
     assert folder_loop.index("isSymbolicLink") < folder_loop.index("enumerator")
-    assert "removeItem(at: root)" in folder_loop
+    assert "removeItemIfRegularFile(root" in folder_loop
+    assert "unlinkLastComponentUnfollowed(root" in folder_loop
+    assert "FileManager.default.removeItem(at: root)" not in folder_loop
     models = (ROOT / "ScrumTrace" / "Storage" / "SessionModels.swift").read_text()
     member = models.split("static func containedExportMember")[1].split("static func handoffFileIfPresent")[0]
     assert "isSymbolicLink" in member
@@ -293,12 +299,17 @@ def test_zipper_never_deletes_archive() -> None:
     assert "fileExists(atPath: export.path, isDirectory:" in reset
     assert "isUsableSessionRoot" in reset
     assert reset.count("isSymbolicLink") >= 4
-    assert reset.index("createDirectory(at: export") < reset.index('writeFailed("export/")')
+    assert "removeItemIfRegularFile(export" in reset
+    assert reset.index("removeItemIfRegularFile(export") < reset.index("createDirectory(at: export")
+    mkdir_export = reset.split("createDirectory(at: export")[1]
+    assert 'writeFailed("export/")' in mkdir_export
     assert "containsSymlinkComponent" in reset
     shots_mkdir = reset.split("createDirectory(at: shots")[1].split("createDirectory(at: media")[0]
     assert "containsSymlinkComponent" in shots_mkdir
     assert 'writeFailed("export/")' in shots_mkdir
-    assert shots_mkdir.index("containsSymlinkComponent") < shots_mkdir.index("removeItem(at: shots)")
+    assert shots_mkdir.index("containsSymlinkComponent") < shots_mkdir.index("removeItemIfRegularFile(shots")
+    assert "FileManager.default.removeItem(at: shots)" not in shots_mkdir
+    assert "fileManager.removeItem(at: shots)" not in shots_mkdir
     omit_md = zipper.split("func writeOmittedMarkdown")[1].split("private func uniquedOmitted")[0]
     assert "omittedHandoffPath" in omit_md
     assert "writeExportText" in omit_md
@@ -542,6 +553,8 @@ def test_retry_failed_slices_and_pins() -> None:
     assert "testMakePrivateTemporaryURLUsesMkdirNotSharedTempFile" in contracts
     assert "testRemoveItemIfRegularFileDoesNotRecurseIntoDirectory" in contracts
     assert "testPrepareContainedWriteDoesNotRecurseIntoDestDirectory" in contracts
+    assert "testUnlinkLastComponentUnfollowedDoesNotRecurseIntoDirectory" in contracts
+    assert "testUnlinkLastComponentUnfollowedUnlinksSymlinkWithoutFollowing" in contracts
     models = (ROOT / "ScrumTrace" / "Storage" / "SessionModels.swift").read_text()
     existing_media = models.split("func withExistingMedia")[1].split("enum CodingKeys")[0]
     assert "existingSessionFile" in existing_media
@@ -727,7 +740,8 @@ def test_pipeline_timing_stays_in_archive() -> None:
     assert 'export/ is a symbolic link' in zip_fn
     assert zip_fn.index("createDirectory") < zip_fn.index("is a symbolic link")
     assert "containsSymlinkComponent" in zip_fn
-    assert "removeItem(at: exportDir)" in zip_fn
+    assert "removeItemIfRegularFile(exportDir" in zip_fn
+    assert "FileManager.default.removeItem(at: exportDir)" not in zip_fn
     assert zip_fn.count("try writeOmittedMarkdown") >= 2
     assert "try runZip" in zip_fn
     write_zip = zipper.split("func writeZip")[1].split("func writeOmittedMarkdown")[0]
@@ -737,7 +751,8 @@ def test_pipeline_timing_stays_in_archive() -> None:
     assert "export/ is a symbolic link" in write_zip
     assert write_zip.index("createDirectory") < write_zip.index("is a symbolic link")
     assert "containsSymlinkComponent" in write_zip
-    assert "removeItem(at: exportDir)" in write_zip
+    assert "removeItemIfRegularFile(exportDir" in write_zip
+    assert "FileManager.default.removeItem(at: exportDir)" not in write_zip
     drop = zipper.split("for path in dropList")[1].split("if size > MediaBudget.maxZipBytes")[0]
     assert "isContainedRegularFile" in drop
     assert "isSymbolicLink" in drop
@@ -1514,12 +1529,15 @@ def test_write_contained_data_refuses_directory_symlinks() -> None:
     assert "pathExtension" in copy_fn
     assert "Darwin.fsync" in copy_fn
     assert "copyUnfollowedToTemporaryFile" in copy_fn
+    copy_only = models.split("static func copyContainedToTemporaryFile")[1].split("static func copyUnfollowedToTemporaryFile")[0]
+    assert "FileManager.default.removeItem(at: dest)" not in copy_only.split("guard destFd")[0]
     unf = models.split("static func copyUnfollowedToTemporaryFile")[1].split("private static func openatDirectory")[0]
     assert "O_NOFOLLOW" in unf
     assert "scrumtraceFcopyfile" in unf
     assert "O_EXCL" in unf
     assert "O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW" in unf
     assert "/tmp" in unf
+    assert "FileManager.default.removeItem(at: dest)" not in unf.split("guard destFd")[0]
     assert "O_NOFOLLOW" in models.split("private static func openatFile")[1]
     pack_size = models.split("static func regularFileByteCount(relative:")[1].split(
         "static func regularFileByteCount(_ file"
@@ -1579,6 +1597,13 @@ def test_write_contained_data_refuses_directory_symlinks() -> None:
     assert "S_IFREG" in rm_fn
     assert "FileManager.default.removeItem(at: file)" not in rm_fn
     assert "isContainedRegularFile(file, sessionRoot: sessionRoot)" not in rm_fn
+    assert "static func unlinkLastComponentUnfollowed" in models
+    unlink_last = models.split("static func unlinkLastComponentUnfollowed")[1].split("static func readContainedData(relative:")[0]
+    assert "scrumtraceUnlinkat" in unlink_last
+    assert "openUnfollowedDirectory" in unlink_last
+    assert "ELOOP" in unlink_last
+    assert "S_IFREG" in unlink_last
+    assert "FileManager.default.removeItem" not in unlink_last
     assert "static func makePrivateTemporaryURL" in models
     assert "static func removePrivateTemporaryURL" in models
     private_temp = models.split("static func makePrivateTemporaryURL")[1].split("static func removePrivateTemporaryURL")[0]

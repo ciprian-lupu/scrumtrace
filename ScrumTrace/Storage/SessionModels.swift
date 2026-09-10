@@ -630,6 +630,33 @@ enum ExportRel {
         }
     }
 
+    /// Unlink a trailing symlink or regular file via `unlinkat` on its parent
+    /// directory fd. Used when the parent is not a session root (`export/` in
+    /// tests, zip staging). Never recurses into a directory.
+    static func unlinkLastComponentUnfollowed(_ file: URL) {
+        let name = file.lastPathComponent
+        guard !name.isEmpty, name != ".", name != "..",
+              !name.contains("/"), !name.contains("\0") else { return }
+        guard let dirFd = openUnfollowedDirectory(file.deletingLastPathComponent()) else { return }
+        defer { Darwin.close(dirFd) }
+        let probe = name.withCString { ptr in
+            Darwin.openat(dirFd, ptr, O_RDONLY | O_CLOEXEC | O_NOFOLLOW)
+        }
+        if probe >= 0 {
+            defer { Darwin.close(probe) }
+            var info = stat()
+            guard Darwin.fstat(probe, &info) == 0, (info.st_mode & S_IFMT) == S_IFREG else { return }
+        } else {
+            guard Darwin.errno == ELOOP else { return }
+        }
+        var rc: Int32 = -1
+        repeat {
+            rc = name.withCString { ptr in
+                scrumtraceUnlinkat(dirFd, ptr, 0)
+            }
+        } while rc != 0 && Darwin.errno == EINTR
+    }
+
     /// Read bytes without following a dest or intermediate symlink. `Data(contentsOf:)`
     /// and `NSImage(contentsOf:)` follow a link planted after `isReadableSessionFile`.
     static func readContainedData(relative: String, sessionURL: URL) -> Data? {
@@ -691,9 +718,6 @@ enum ExportRel {
         let dest = FileManager.default.temporaryDirectory.appendingPathComponent(
             "\(prefix)-\(UUID().uuidString)\(suffix)"
         )
-        if (try? dest.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
-            try FileManager.default.removeItem(at: dest)
-        }
         let destFd = dest.withUnsafeFileSystemRepresentation { ptr -> Int32 in
             guard let ptr else { return -1 }
             return Darwin.open(ptr, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, 0o600)
@@ -735,9 +759,6 @@ enum ExportRel {
         let dest = FileManager.default.temporaryDirectory.appendingPathComponent(
             "\(prefix)-\(UUID().uuidString)\(suffix)"
         )
-        if (try? dest.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
-            try FileManager.default.removeItem(at: dest)
-        }
         let destFd = dest.withUnsafeFileSystemRepresentation { ptr -> Int32 in
             guard let ptr else { return -1 }
             return Darwin.open(ptr, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, 0o600)

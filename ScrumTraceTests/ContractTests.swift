@@ -244,6 +244,32 @@ final class ContractTests: XCTestCase {
         XCTAssertEqual(try String(contentsOf: inside, encoding: .utf8), "KEEP")
     }
 
+    func testUnlinkLastComponentUnfollowedDoesNotRecurseIntoDirectory() throws {
+        let parent = FileManager.default.temporaryDirectory.appendingPathComponent("st-unlink-last-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: parent) }
+        let planted = parent.appendingPathComponent("media")
+        try FileManager.default.createDirectory(at: planted, withIntermediateDirectories: true)
+        let inside = planted.appendingPathComponent("inside.bin")
+        try Data("KEEP".utf8).write(to: inside)
+        ExportRel.unlinkLastComponentUnfollowed(planted)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: planted.path))
+        XCTAssertEqual(try String(contentsOf: inside, encoding: .utf8), "KEEP")
+    }
+
+    func testUnlinkLastComponentUnfollowedUnlinksSymlinkWithoutFollowing() throws {
+        let parent = FileManager.default.temporaryDirectory.appendingPathComponent("st-unlink-link-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: parent) }
+        let secret = parent.appendingPathComponent("secret.mp4")
+        try Data("MASTER".utf8).write(to: secret)
+        let planted = parent.appendingPathComponent("leak.mp4")
+        try FileManager.default.createSymbolicLink(at: planted, withDestinationURL: secret)
+        ExportRel.unlinkLastComponentUnfollowed(planted)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: planted.path))
+        XCTAssertEqual(try String(contentsOf: secret, encoding: .utf8), "MASTER")
+    }
+
     func testVaultWriteReplacesManifestSymlinkWithoutFollowing() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("st-vault-man-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: root) }
