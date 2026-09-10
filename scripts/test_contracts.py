@@ -353,6 +353,8 @@ def test_clip_exporter_macos14() -> None:
     assert "isAllowedClipDest" in tighten_file
     assert "isReadableSessionFile" in tighten_file
     assert "scrumtrace-tighten" in tighten_file
+    assert "unlinkLastComponentUnfollowed(work)" in tighten_file
+    assert "FileManager.default.removeItem(at: work)" not in tighten_file
     assert "replaceItemAt" not in tighten_file
     assert "regularFileByteCount" in tighten_file
     assert "unfollowedRegularFileByteCount" in tighten_file
@@ -362,6 +364,8 @@ def test_clip_exporter_macos14() -> None:
     assert "isUsableSessionRoot" in export_fn
     assert "isReadableSessionFile" in export_fn
     assert "copyContainedToTemporaryFile" in export_fn
+    assert "unlinkLastComponentUnfollowed(movieCopy)" in export_fn
+    assert "FileManager.default.removeItem(at: movieCopy)" not in export_fn
     assert "extractStill(source: movieCopy" in export_fn
     assert "extractStill(source: source" not in export_fn
     assert "reencode(\n            source: movieCopy" in export_fn or "source: movieCopy" in export_fn
@@ -672,6 +676,14 @@ def test_dual_transcript_merge_wired() -> None:
     assert "transcribeFile(at: movieCopy)" in movie_audio
     assert "transcribeFile(at: movie," not in movie_audio
     assert "transcribeFile(at: movie)" not in movie_audio
+    assert "unlinkLastComponentUnfollowed(movieCopy)" in movie_audio
+    assert "FileManager.default.removeItem(at: movieCopy)" not in movie_audio
+    extract = speech.split("func extractAudio")[1].split("func lockKit")[0]
+    assert "unlinkLastComponentUnfollowed(dest)" in extract
+    assert "FileManager.default.removeItem(at: dest)" not in extract
+    transcribe_file = speech.split("func transcribeFile")[1].split("func transcribeVoiceNote")[0]
+    assert "unlinkLastComponentUnfollowed(work)" in transcribe_file
+    assert "FileManager.default.removeItem(at: work)" not in transcribe_file
     processor = (ROOT / "ScrumTrace" / "Processing" / "SessionProcessor.swift").read_text()
     assert "shouldTranscribeMovie" in processor
     assert "transcribeMovieAudio" in processor

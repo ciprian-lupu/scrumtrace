@@ -82,7 +82,7 @@ final class WhisperTranscriber: @unchecked Sendable {
                 prefix: "scrumtrace-whisper"
             )
         }
-        defer { try? FileManager.default.removeItem(at: work) }
+        defer { ExportRel.unlinkLastComponentUnfollowed(work) }
         let local = lockKit()
         guard let local else {
             throw NSError(
@@ -127,7 +127,7 @@ final class WhisperTranscriber: @unchecked Sendable {
             sessionURL: sessionURL,
             prefix: "scrumtrace-movie"
         )
-        defer { try? FileManager.default.removeItem(at: movieCopy) }
+        defer { ExportRel.unlinkLastComponentUnfollowed(movieCopy) }
         let dest: URL
         do {
             dest = try ExportRel.makePrivateTemporaryURL(prefix: "scrumtrace-system-audio", ext: "m4a")
@@ -145,7 +145,9 @@ final class WhisperTranscriber: @unchecked Sendable {
     }
 
     func extractAudio(from movie: URL, to dest: URL) async throws {
-        try? FileManager.default.removeItem(at: dest)
+        // AVAssetExportSession follows a dest symlink. Unlink a planted file
+        // or trailing link; do not recurse if the name is a directory.
+        ExportRel.unlinkLastComponentUnfollowed(dest)
         let asset = AVURLAsset(url: movie)
         guard let session = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetAppleM4A) else {
             throw NSError(

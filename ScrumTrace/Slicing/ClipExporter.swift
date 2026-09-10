@@ -30,7 +30,7 @@ struct ClipExporter {
         } catch {
             throw SessionRecorderError.writerFailed("session.mp4 is missing.")
         }
-        defer { try? FileManager.default.removeItem(at: movieCopy) }
+        defer { ExportRel.unlinkLastComponentUnfollowed(movieCopy) }
         guard let relativeClip = slice.clipPath else {
             throw SessionRecorderError.writerFailed("Slice is missing clip_path.")
         }
@@ -139,7 +139,7 @@ struct ClipExporter {
         } catch {
             return
         }
-        defer { try? FileManager.default.removeItem(at: work) }
+        defer { ExportRel.unlinkLastComponentUnfollowed(work) }
         guard let before = ExportRel.regularFileByteCount(url, sessionRoot: sessionURL), before > 0 else {
             return
         }
