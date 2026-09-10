@@ -767,7 +767,14 @@ enum PackBudget {
         copy.shots = copy.shots.map { shot in
             var next = shot
             if let path = next.exportPath, droppedHandoff(path, dropped: dropped) {
-                next.exportPath = nil
+                let fallbacks = [next.annotatedPath, next.rawPath.isEmpty ? nil : next.rawPath].compactMap { $0 }
+                if let kept = fallbacks.first(where: { !droppedHandoff($0, dropped: dropped) }) {
+                    let mapped = ExportRel.shotsArchiveToExport(kept) ?? kept
+                    let root = ExportRel.toExportRoot(mapped)
+                    next.exportPath = root.isEmpty ? nil : root
+                } else {
+                    next.exportPath = nil
+                }
             }
             if let annotated = next.annotatedPath, droppedHandoff(annotated, dropped: dropped) {
                 next.annotatedPath = nil

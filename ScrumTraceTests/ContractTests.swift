@@ -2600,6 +2600,28 @@ final class ContractTests: XCTestCase {
         XCTAssertEqual(stripped.tasks[0].status, .confirmed)
     }
 
+    func testStripOmittedRemapsExportPathToRemainingRawJPEG() {
+        var manifest = SessionManifest.makeNew(sessionId: "s", product: .empty)
+        manifest.shots = [
+            ShotRecord(
+                id: "shot-001",
+                tMedia: 8,
+                rawPath: "archive/shots/001.png",
+                annotatedPath: "archive/shots/001.annotated.png",
+                exportPath: "export/shots/001.annotated.jpg",
+                note: "ingest",
+                source: .typed
+            )
+        ]
+        let stripped = PackBudget.stripOmitted(
+            [OmittedAsset(path: "shots/001.annotated.jpg", reason: "Pack over 35 MB; dropped by priority")],
+            from: manifest
+        )
+        XCTAssertEqual(stripped.shots[0].exportPath, "shots/001.jpg")
+        XCTAssertEqual(stripped.shots[0].rawPath, "archive/shots/001.png")
+        XCTAssertNil(stripped.shots[0].annotatedPath)
+    }
+
     func testSessionBriefShowsMappedArchiveShot() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("scrumtrace-brief-shot-\(UUID().uuidString)")
         let shots = root.appendingPathComponent("export/shots")
