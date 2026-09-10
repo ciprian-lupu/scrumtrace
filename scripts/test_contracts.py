@@ -922,6 +922,8 @@ def test_audio_split_and_brief_loader() -> None:
     assert "unfollowedUTF8Text" in loader
     assert "String(contentsOf:" not in loader
     menu = (ROOT / "ScrumTrace" / "UI" / "MenuBarController.swift").read_text()
+    assert "@MainActor\nfinal class MenuBarController: NSObject" in menu
+    assert "Task { @MainActor" in menu
     assert "retryRecent" in menu
     assert "lastMenuSignature" in menu
     assert "isEnabled = !controller.isBusy" in menu
@@ -1361,7 +1363,7 @@ def test_pause_privacy_and_metadata_gate() -> None:
     assert "CMSyncConvertTime" in clock
     sample_fn = clock.split("func mediaTime(forSampleBuffer")[1].split("private func startHostValid")[0]
     assert "sampleClock" in sample_fn
-    assert "CMSyncConvertTime(pts, fromClock, hostClock)" in sample_fn
+    assert "CMSyncConvertTime(pts, from: fromClock, to: hostClock)" in sample_fn
     assert "CMClockGetHostTimeClock(), hostClock)" not in sample_fn
     privacy = (ROOT / "ScrumTrace" / "Capture" / "PrivacyGuard.swift").read_text()
     hud = (ROOT / "ScrumTrace" / "UI" / "RecordingHUDWindow.swift").read_text()

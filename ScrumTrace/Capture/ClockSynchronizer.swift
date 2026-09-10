@@ -169,8 +169,8 @@ final class ClockSynchronizer: @unchecked Sendable {
         // Host→host is a no-op; pass stream.synchronizationClock when the
         // sample clock is not already the host clock.
         let fromClock = sampleClock ?? CMClockGetHostTimeClock()
-        let aligned = CMSyncConvertTime(pts, fromClock, hostClock)
-        let source = aligned.flags.contains(.valid) ? aligned : pts
+        let aligned = CMSyncConvertTime(pts, from: fromClock, to: hostClock)
+        let source = aligned.isValid ? aligned : pts
         return mediaTime(forHostTime: source)
     }
 

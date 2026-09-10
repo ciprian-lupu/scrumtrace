@@ -2,7 +2,10 @@
 import AppKit
 import SwiftUI
 
-final class MenuBarController {
+/// Status-item UI. Isolated on the main actor so it can read `SessionController`
+/// on Xcode 26 / Swift 6. `@objc` selectors need `NSObject`.
+@MainActor
+final class MenuBarController: NSObject {
     private let controller: SessionController
     private let item: NSStatusItem
     private var hud: RecordingHUDWindow?
@@ -14,6 +17,7 @@ final class MenuBarController {
         self.controller = controller
         self.hud = hud
         item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        super.init()
         if let button = item.button {
             button.image = NSImage(systemSymbolName: "record.circle", accessibilityDescription: "ScrumTrace")
             button.image?.isTemplate = true
@@ -24,10 +28,14 @@ final class MenuBarController {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            self?.sync()
+            Task { @MainActor in
+                self?.sync()
+            }
         }
         Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
-            self?.sync()
+            Task { @MainActor in
+                self?.sync()
+            }
         }
     }
 
