@@ -586,11 +586,15 @@ def test_retry_failed_slices_and_pins() -> None:
     assert "containedRelative(ScrumTracePath.events" in append
     reveal = vault.split("func revealInFinder")[1].split("func removeAbandonedSession")[0]
     assert "isSymbolicLink" in reveal
-    assert "isDirectory" in reveal
+    assert "openUnfollowedDirectory" in reveal
+    assert "closeDescriptor" in reveal
+    assert "fileExists(atPath: export.path, isDirectory:" not in reveal
+    assert "isDirectoryKey" not in reveal
     assert "containsSymlinkComponent" in reveal
     assert reveal.count("containsSymlinkComponent") >= 2
     assert reveal.index("containsSymlinkComponent") < reveal.index("appendingPathComponent(ScrumTracePath.export)")
     assert reveal.rfind("containsSymlinkComponent") < reveal.index("activateFileViewerSelecting([export])")
+    assert reveal.index("openUnfollowedDirectory") < reveal.index("activateFileViewerSelecting([export])")
     assert "activateFileViewerSelecting([export])" in reveal
     abandon = vault.split("func removeAbandonedSession")[1].split("func pruneAbandonedStarts")[0]
     assert "isValidSessionId" in abandon
@@ -2003,6 +2007,8 @@ def test_write_contained_data_refuses_directory_symlinks() -> None:
     assert "isUsableSessionRoot(rootURL)" in reveal
     assert "isUsableSessionRoot(session)" in reveal
     assert "containsSymlinkComponent" in reveal
+    assert "openUnfollowedDirectory" in reveal
+    assert "fileExists(atPath: export.path, isDirectory:" not in reveal
     assert "removeAbandonedSession" in vault
     assert vault.count("isUsableSessionRoot(rootURL)") >= 9
 

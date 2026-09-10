@@ -347,10 +347,13 @@ final class SessionVault: @unchecked Sendable {
             return
         }
         let export = session.appendingPathComponent(ScrumTracePath.export)
-        let values = try? export.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
-        guard values?.isSymbolicLink != true else { return }
-        var isDir: ObjCBool = false
-        guard fileManager.fileExists(atPath: export.path, isDirectory: &isDir), isDir.boolValue else { return }
+        if (try? export.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+            return
+        }
+        // fileExists follows a planted export/ → archive/ link when
+        // resourceValues fails. O_NOFOLLOW does not (C2, Gate 6).
+        guard let exportFd = ExportRel.openUnfollowedDirectory(export) else { return }
+        ExportRel.closeDescriptor(exportFd)
         if (try? export.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
             return
         }
