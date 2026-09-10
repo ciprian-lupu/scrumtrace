@@ -936,6 +936,8 @@ def test_pipeline_timing_stays_in_archive() -> None:
     assert "clock.reset()" in start_rec
     assert "captureFreeze.attach(nil)" in start_rec
     assert "pipelineStatus = phase" in start_rec
+    assert "try? vault.write" not in start_rec
+    assert start_rec.index("pipelineStatus = phase") < start_rec.index("try vault.write(manifest: &local)")
     assert start_rec.index("try await recorder.start(") < start_rec.index("pipelineStatus = phase")
     assert start_rec.index("try await recorder.start(") < start_rec.index("lastSessionId = created.manifest.sessionId")
     assert start_rec.index("try await recorder.start(") < start_rec.index("pinTimes = []")
@@ -1076,7 +1078,10 @@ def test_pause_privacy_and_metadata_gate() -> None:
     assert "kickMetadataSample" in toggle
     persist_live = controller.split("func persistLivePipelineStatus")[1].split("func flashStatus")[0]
     assert "captureState == .paused" in persist_live
-    assert "try? vault.write" in persist_live
+    assert "try? vault.write" not in persist_live
+    assert "try vault.write(manifest: &local)" in persist_live
+    assert "lastError" in persist_live
+    assert "try? vault.write" not in controller
     assert "pipelineStatus = .idle" not in persist_live
     assert "Stills and transcript excerpts" in controller
     assert "clip audio will leave this Mac" in controller

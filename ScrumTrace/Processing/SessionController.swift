@@ -317,7 +317,11 @@ final class SessionController: ObservableObject {
             }
             if var local = manifest {
                 local.pipelineStatus = phase
-                try? vault.write(manifest: &local)
+                do {
+                    try vault.write(manifest: &local)
+                } catch {
+                    lastError = error.localizedDescription
+                }
                 manifest = local
             }
             startTimer()
@@ -789,7 +793,11 @@ final class SessionController: ObservableObject {
         } else {
             local.pipelineStatus = phase
         }
-        try? vault.write(manifest: &local)
+        do {
+            try vault.write(manifest: &local)
+        } catch {
+            lastError = error.localizedDescription
+        }
         manifest = local
     }
 
