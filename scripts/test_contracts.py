@@ -2035,6 +2035,7 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "shots: shots" in confirm_call
     assert "framesOverlapSlice" in tasks_fn.split("let resolvedFrames")[1].split("let uniqueEvidence")[0]
     assert "ownedByOtherAssociatedShot" in tasks_fn.split("let resolvedFrames")[1].split("let uniqueEvidence")[0]
+    assert "citedOther.count == cited.count" in tasks_fn.split("let resolvedFrames")[1].split("let uniqueEvidence")[0]
     assert "EvidenceValidator.ownedByOtherAssociatedShot" in tasks_fn
     assert "func ownedByOtherAssociatedShot" not in tasks_fn
     uniqued_fn = processor.split("private func uniquedPaths")[1].split("private func abortedForAuth")[0]

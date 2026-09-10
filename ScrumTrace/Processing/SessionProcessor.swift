@@ -691,9 +691,18 @@ final class SessionProcessor: @unchecked Sendable {
             if !issues.isEmpty && status == .confirmed {
                 status = .needsReview
             }
-            let resolvedFrames = EvidenceValidator.existingPaths(candidate.frameReferences, sessionURL: sessionURL)
+            let cited = EvidenceValidator.existingPaths(candidate.frameReferences, sessionURL: sessionURL)
+            let resolvedFrames = cited
                 .filter { EvidenceValidator.framesOverlapSlice([$0], slice: slice, shots: shots, sessionURL: sessionURL) }
                 .filter { !EvidenceValidator.ownedByOtherAssociatedShot($0, slice: slice, shots: shots) }
+            if resolvedFrames.isEmpty, !cited.isEmpty {
+                let citedOther = cited.filter {
+                    EvidenceValidator.ownedByOtherAssociatedShot($0, slice: slice, shots: shots)
+                }
+                if citedOther.count == cited.count {
+                    continue
+                }
+            }
             let uniqueEvidence = uniquedPaths(
                 resolvedFrames
                     + slice.stills.filter { still in
