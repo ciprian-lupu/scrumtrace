@@ -880,6 +880,7 @@ enum ExportRel {
         directoryFd: Int32,
         stdin payload: Data
     ) throws {
+        // Process.currentDirectoryURL re-resolves cwd at launch.
         guard directoryFd >= 0 else {
             throw SessionVaultError.writeFailed("spawn")
         }
