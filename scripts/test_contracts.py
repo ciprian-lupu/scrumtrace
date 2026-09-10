@@ -529,10 +529,10 @@ def test_pause_gate_hold_to_talk() -> None:
     handle = hotkeys.split("private func handle(")[1].split("private func perform")[0]
     assert "Task { @MainActor" in handle
     assert "DispatchQueue.main" not in handle
-    assert "freezeIfAttached" in handle
+    assert "freezeForPauseHotkey" in handle
     assert "applyHotkeyPause" in handle
-    assert handle.index("freezeIfAttached") < handle.index("Task { @MainActor")
-    assert handle.index("freezeIfAttached") < handle.index("applyHotkeyPause")
+    assert handle.index("freezeForPauseHotkey") < handle.index("Task { @MainActor")
+    assert handle.index("freezeForPauseHotkey") < handle.index("applyHotkeyPause")
     assert "@MainActor\n    private func perform" in hotkeys
     assert "captureFreeze: CaptureFreeze" in hotkeys
     hud_pause = hud.split("func pauseClicked")[1].split("func stopClicked")[0]
@@ -942,8 +942,11 @@ def test_pipeline_timing_stays_in_archive() -> None:
     assert "!startInFlight" in start_btn
     assert "startInFlight = true" in start_btn
     assert start_btn.index("startInFlight = true") < start_btn.index("startRecordingAsync")
+    assert "markStartInFlight(true)" in start_btn
+    assert start_btn.index("startInFlight = true") < start_btn.index("markStartInFlight(true)")
     start_rec = controller.split("func startRecordingAsync")[1].split("func stopRecordingAsync")[0]
     assert "defer { startInFlight = false }" in start_rec
+    assert "markStartInFlight(false)" in start_rec
     assert "requestTrust(prompt: true)" in start_rec
     assert "clock.reset()" in start_rec
     assert "captureFreeze.attach(nil)" in start_rec
@@ -967,6 +970,11 @@ def test_pipeline_timing_stays_in_archive() -> None:
     assert "terminateRequested" in start_rec
     assert start_rec.index("try await recorder.start(") < start_rec.index("if terminateRequested")
     assert start_rec.index("if terminateRequested") < start_rec.index("if recorder.isPaused")
+    assert "consumeHoldThroughStart" in start_rec
+    assert start_rec.index("if terminateRequested") < start_rec.index("consumeHoldThroughStart")
+    assert start_rec.index("consumeHoldThroughStart") < start_rec.index("if recorder.isPaused")
+    assert "isHeldThroughStart" in start_rec
+    assert "isCurrentlyTripped || privacy.currentCredentialApp" in start_rec
     assert start_rec.index("captureFreeze.attach(recorder)") < start_rec.index("privacy.start()")
     assert start_rec.index("privacy.start()") < start_rec.index("try await recorder.start(")
     assert start_rec.count("privacy.start()") == 1
@@ -1081,12 +1089,19 @@ def test_pause_privacy_and_metadata_gate() -> None:
     assert "alreadyPaused" in freeze_body
     assert freeze_body.index("alreadyPaused") < freeze_body.index("scrumTraceCaptureGate")
     assert "func freezeIfAttached" in privacy
-    freeze_if = privacy.split("func freezeIfAttached")[1]
+    freeze_if = privacy.split("func freezeIfAttached")[1].split("func markStartInFlight")[0]
     assert "guard let rec else { return false }" in freeze_if
     assert "setPaused(true)" in freeze_if
     assert freeze_if.index("setPaused(true)") < freeze_if.index("scrumTraceCaptureGate")
+    assert "func freezeForPauseHotkey" in privacy
+    freeze_hot = privacy.split("func freezeForPauseHotkey")[1]
+    assert "startInFlight" in freeze_hot
+    assert "holdThroughStart" in freeze_hot
+    assert "freezeIfAttached()" in freeze_hot
     hotkey_pause = controller.split("func applyHotkeyPause")[1].split("func haltCaptureForTermination")[0]
     assert "didFreezeWriters" in hotkey_pause
+    assert "startInFlight" in hotkey_pause
+    assert "holdPauseThroughStart" in hotkey_pause
     assert "togglePause()" in hotkey_pause
     assert "phase = .paused" in hotkey_pause
     assert "phase == .paused" not in hotkey_pause
@@ -1125,6 +1140,9 @@ def test_pause_privacy_and_metadata_gate() -> None:
     finish = controller.split("private func finishShot")[1].split("private func privacyPause")[0]
     assert "firstIndex(where: { $0.id == stored.id })" in finish
     assert "Could not write the annotated Shot" in finish
+    assert "encoder.encode(stored)" in finish
+    assert "try? JSONSerialization.data" not in finish
+    assert "sidecar JSON write failed" in finish
     clock = (ROOT / "ScrumTrace" / "Capture" / "ClockSynchronizer.swift").read_text()
     assert "CMSyncConvertTime" in clock
     sample_fn = clock.split("func mediaTime(forSampleBuffer")[1].split("private func startHostValid")[0]

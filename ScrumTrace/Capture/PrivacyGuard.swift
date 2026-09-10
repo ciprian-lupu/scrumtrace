@@ -108,6 +108,8 @@ final class CaptureFreeze: @unchecked Sendable {
     private let lock = NSLock()
     private weak var recorder: SessionRecorder?
     private let sampler: MetadataSampler
+    private var startInFlight = false
+    private var holdThroughStart = false
 
     init(sampler: MetadataSampler) {
         self.sampler = sampler
@@ -153,5 +155,45 @@ final class CaptureFreeze: @unchecked Sendable {
             object: CaptureSessionState.paused
         )
         return true
+    }
+
+    func markStartInFlight(_ live: Bool) {
+        lock.lock()
+        startInFlight = live
+        if !live {
+            holdThroughStart = false
+        }
+        lock.unlock()
+    }
+
+    var isHeldThroughStart: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return holdThroughStart
+    }
+
+    func holdPauseThroughStart() {
+        lock.lock()
+        holdThroughStart = true
+        lock.unlock()
+    }
+
+    func consumeHoldThroughStart() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        let held = holdThroughStart
+        holdThroughStart = false
+        return held
+    }
+
+    /// Carbon Pause: freeze writers and, during Start, remember the hold so
+    /// `start()` cannot unpause after the permission sheet (C1).
+    func freezeForPauseHotkey() -> Bool {
+        lock.lock()
+        if startInFlight {
+            holdThroughStart = true
+        }
+        lock.unlock()
+        return freezeIfAttached()
     }
 }

@@ -88,7 +88,7 @@ final class HotkeyManager {
         }
         if action == .pause {
             // Freeze screen/audio/mic/metadata before the MainActor hop (C1).
-            let froze = captureFreeze.freezeIfAttached()
+            let froze = captureFreeze.freezeForPauseHotkey()
             Task { @MainActor [weak self] in
                 self?.controller?.applyHotkeyPause(didFreezeWriters: froze)
             }

@@ -81,6 +81,7 @@ final class SessionController: ObservableObject {
     func startRecording() {
         guard !isRecording, !isBusy, !startInFlight else { return }
         startInFlight = true
+        captureFreeze.markStartInFlight(true)
         Task { await startRecordingAsync() }
     }
 
@@ -188,6 +189,11 @@ final class SessionController: ObservableObject {
     /// Opt+⌘P already froze writers on the Carbon thread. Do not treat that
     /// freeze as Resume (`captureState` follows `recorder.isPaused`).
     func applyHotkeyPause(didFreezeWriters: Bool) {
+        if startInFlight && !isRecording {
+            captureFreeze.holdPauseThroughStart()
+            sampler.isSuspended = true
+            return
+        }
         guard isRecording else { return }
         if didFreezeWriters {
             pausedByPrivacy = false
@@ -261,7 +267,7 @@ final class SessionController: ObservableObject {
     }
 
     private func startRecordingAsync() async {
-        defer { startInFlight = false }
+        defer { startInFlight = false; captureFreeze.markStartInFlight(false) }
         guard !isRecording, !isBusy else { return }
         lastError = nil
         var abandonedId: String?
@@ -282,8 +288,8 @@ final class SessionController: ObservableObject {
             // Tick before startCapture: a credential app during the permission
             // sheet must freeze writers, not wait until start() returns (C1).
             privacy.start()
-            try await recorder.start(shouldPauseCapture: { [privacy] in
-                privacy.isCurrentlyTripped || privacy.currentCredentialApp() != nil
+            try await recorder.start(shouldPauseCapture: { [privacy, captureFreeze] in
+                privacy.isCurrentlyTripped || privacy.currentCredentialApp() != nil || captureFreeze.isHeldThroughStart
             })
             abandonedId = nil
             self.recorder = recorder
@@ -297,7 +303,19 @@ final class SessionController: ObservableObject {
                 haltCaptureForTermination()
                 return
             }
-            if let bundle = privacy.currentCredentialApp() {
+            if captureFreeze.consumeHoldThroughStart() {
+                recorder.setPaused(true)
+                sampler.isSuspended = true
+                pausedByPrivacy = false
+                phase = .paused
+                statusLine = "Paused — nothing is written"
+                log(.pause, ["source": "hotkey"])
+                persistLivePipelineStatus()
+                NotificationCenter.default.post(
+                    name: .scrumTraceCaptureGate,
+                    object: CaptureSessionState.paused
+                )
+            } else if let bundle = privacy.currentCredentialApp() {
                 recorder.setPaused(true)
                 sampler.isSuspended = true
                 pausedByPrivacy = true
@@ -623,24 +641,21 @@ final class SessionController: ObservableObject {
             lastError = "Could not encode the annotated Shot."
             return
         }
-        let json: [String: Any] = [
-            "id": record.id,
-            "t_media": record.tMedia,
-            "note": note,
-            "source": source.rawValue
-        ]
         let jsonRel = "\(ScrumTracePath.shots)/\(stemFrom(record.id)).json"
-        if let data = try? JSONSerialization.data(withJSONObject: json, options: [.prettyPrinted]) {
-            do {
-                try ExportRel.writeContainedData(data, relative: jsonRel, sessionURL: sessionURL)
-            } catch {
-                lastError = error.localizedDescription
-            }
-        }
         var stored = record
         stored.note = note
         stored.source = source
         stored.annotatedPath = annotatedPath
+        var sidecarFailed = false
+        do {
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            let data = try encoder.encode(stored)
+            try ExportRel.writeContainedData(data, relative: jsonRel, sessionURL: sessionURL)
+        } catch {
+            sidecarFailed = true
+            lastError = error.localizedDescription
+        }
         if let idx = manifest.shots.firstIndex(where: { $0.id == stored.id }) {
             manifest.shots[idx] = stored
         } else {
@@ -649,8 +664,12 @@ final class SessionController: ObservableObject {
         self.manifest = manifest
         do {
             try vault.write(manifest: &manifest)
-            lastError = nil
-            statusLine = "Shot \(stored.id) saved"
+            if sidecarFailed {
+                statusLine = "Shot annotated; sidecar JSON write failed."
+            } else {
+                lastError = nil
+                statusLine = "Shot \(stored.id) saved"
+            }
         } catch {
             lastError = error.localizedDescription
             statusLine = "Shot annotated; catalog write failed. Stop still keeps this Shot."
