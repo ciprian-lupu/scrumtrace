@@ -108,6 +108,9 @@ def test_html_escaper_order() -> None:
     assert "normalizedComponents" in models
     assert 'part == ".."' in models
     assert "resolvingSymlinksInPath" in models
+    norm_fn = models.split("func normalizedComponents")[1].split("func isUnderSession")[0]
+    assert "isNewline" in norm_fn
+    assert "part.contains(\"\\\\\")" in norm_fn
     gen = (ROOT / "scripts" / "generate_mock_session.py").read_text()
     assert "def fill_template" in gen
     assert "html.replace(key, value)" not in gen
@@ -119,6 +122,9 @@ def test_html_escaper_order() -> None:
     assert '"-y"' in gen
     assert "is_symlink" in gen
     assert "followlinks=False" in gen
+    assert "\\n" in gen.split("def contained_export_member")[1].split("def remove_escaping_export_links")[0]
+    stage_fn = gen.split("def stage_export_zip_members")[1].split("def write_export_zip")[0]
+    assert '"\\n" in member' in stage_fn
     assert "mkstemp" in gen
     assert "scrumtrace-zip-" in gen
     assert "scrumtrace-zip-stage-" in gen
@@ -206,6 +212,18 @@ def test_write_export_zip_skips_symlinks_and_packs_relative_members() -> None:
             assert "archive-session.mp4" not in names
             assert zf.read("AGENT_CONTEXT.md") == b"# ctx\n"
             assert zf.read("shots/ok.png") == b"still"
+
+        packed_nl = root / "newline.zip"
+        mod.write_export_zip(
+            export,
+            packed_nl,
+            ["AGENT_CONTEXT.md", "shots/ok.png\nsecret"],
+        )
+        with zipfile.ZipFile(packed_nl) as zf:
+            names = zf.namelist()
+            assert "AGENT_CONTEXT.md" in names
+            assert "shots/ok.png" not in names
+            assert "secret" not in names
 
         archive = root / "archive"
         archive.mkdir()
@@ -655,6 +673,7 @@ def test_pipeline_timing_stays_in_archive() -> None:
     assert "copyContainedToTemporaryFile" in run_zip
     assert "placeIntoOpenedDirectory" in run_zip
     assert "openUnfollowedDirectory" in run_zip
+    assert "isNewline" in run_zip
     assert "posix_spawn_file_actions_addfchdir_np" in run_zip
     assert run_zip.index("isSymbolicLink") < run_zip.index("spawnWithDirectoryFd")
     assert run_zip.count("isSymbolicLink") >= 3
@@ -1371,6 +1390,8 @@ def test_write_contained_data_refuses_directory_symlinks() -> None:
     assert "posix_spawn(" not in spawn_fn
     assert "Process(" not in spawn_fn
     assert "UnsafeMutableRawPointer" in spawn_fn
+    assert "PATH=/usr/bin:/bin" in spawn_fn
+    assert "ProcessInfo.processInfo.environment" not in spawn_fn
     assert "O_EXCL" in models
     read_fn = models.split("static func readContainedData(relative:")[1].split("static func readContainedData(_ file")[0]
     assert "openatFile" in read_fn

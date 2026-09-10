@@ -167,6 +167,8 @@ def contained_export_member(file: Path, export_dir: Path) -> str | None:
     parts = [part for part in rel.as_posix().split("/") if part]
     if not parts or ".." in parts or "archive" in parts:
         return None
+    if any("\n" in part or "\r" in part or "\0" in part for part in parts):
+        return None
     return "/".join(parts)
 
 
@@ -231,6 +233,8 @@ def stage_export_zip_members(export: Path, members: list[str], stage: Path) -> l
         raise SystemExit("export/ is a symbolic link")
     staged: list[str] = []
     for member in members:
+        if "\n" in member or "\r" in member or "\0" in member:
+            continue
         src = export / member
         if src.is_symlink() or not src.is_file():
             continue

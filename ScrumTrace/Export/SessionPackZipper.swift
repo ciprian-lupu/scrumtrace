@@ -206,6 +206,7 @@ struct SessionPackZipper {
         defer { ExportRel.closeDescriptor(stageFd) }
         var staged: [String] = []
         for member in members {
+            guard !member.contains(where: { $0.isNewline || $0 == "\0" }) else { continue }
             let copy: URL
             do {
                 copy = try ExportRel.copyContainedToTemporaryFile(

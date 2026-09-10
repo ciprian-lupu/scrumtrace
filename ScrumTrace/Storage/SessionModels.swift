@@ -123,6 +123,7 @@ enum ExportRel {
                 continue
             }
             if part.contains("\\") { return nil }
+            if part.contains(where: { $0.isNewline || $0 == "\0" }) { return nil }
             stack.append(String(part))
         }
         return stack.isEmpty ? nil : stack
@@ -306,7 +307,7 @@ enum ExportRel {
         if parts.contains(where: { $0 == "." || $0 == ".." }) { return nil }
         let joined = parts.joined(separator: "/")
         if joined.contains(":") || joined.contains("\\") { return nil }
-        if joined.contains(where: { "()[]<>`".contains($0) }) { return nil }
+        if joined.contains(where: { $0.isNewline || $0 == "\0" || "()[]<>`".contains($0) }) { return nil }
         return joined
     }
 
@@ -969,9 +970,7 @@ enum ExportRel {
             Darwin.close(writeFd)
             throw SessionVaultError.writeFailed("spawn")
         }
-        var env: [UnsafeMutablePointer<CChar>?] = ProcessInfo.processInfo.environment.map { key, value in
-            strdup("\(key)=\(value)")
-        }
+        var env: [UnsafeMutablePointer<CChar>?] = ["PATH=/usr/bin:/bin", "LANG=C"].map { strdup($0) }
         env.append(nil)
         defer {
             for ptr in env {
