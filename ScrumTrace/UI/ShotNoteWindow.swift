@@ -175,10 +175,12 @@ final class ShotTalkState: ObservableObject {
     func startTalk() {
         guard !holdingTalk, recorder == nil else { return }
         guard allowsNewCapture() else { return }
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent(
-            "scrumtrace-note-\(UUID().uuidString).wav"
-        )
-        try? FileManager.default.removeItem(at: url)
+        let url: URL
+        do {
+            url = try ExportRel.makePrivateTemporaryURL(prefix: "scrumtrace-note", ext: "wav")
+        } catch {
+            return
+        }
         let settings: [String: Any] = [
             AVFormatIDKey: kAudioFormatLinearPCM,
             AVSampleRateKey: 16_000,
@@ -186,12 +188,15 @@ final class ShotTalkState: ObservableObject {
             AVLinearPCMBitDepthKey: 16,
             AVLinearPCMIsFloatKey: false
         ]
-        guard let rec = try? AVAudioRecorder(url: url, settings: settings) else { return }
+        guard let rec = try? AVAudioRecorder(url: url, settings: settings) else {
+            ExportRel.removePrivateTemporaryURL(url)
+            return
+        }
         // Bind the recorder before record() so Pause can abort in-flight (C1).
         recorder = rec
         guard rec.record() else {
             recorder = nil
-            try? FileManager.default.removeItem(at: url)
+            ExportRel.removePrivateTemporaryURL(url)
             return
         }
         holdingTalk = true
@@ -204,7 +209,7 @@ final class ShotTalkState: ObservableObject {
         holdingTalk = false
         recorder?.stop()
         if let url = recorder?.url {
-            try? FileManager.default.removeItem(at: url)
+            ExportRel.removePrivateTemporaryURL(url)
         }
         recorder = nil
     }
@@ -219,7 +224,7 @@ final class ShotTalkState: ObservableObject {
         // while Whisper is reading it (C1: finish the pre-pause annotation).
         recorder = nil
         guard let url else { return }
-        defer { try? FileManager.default.removeItem(at: url) }
+        defer { ExportRel.removePrivateTemporaryURL(url) }
         // Pause after release is not a new capture. Still transcribe audio
         // recorded while the gate was open.
         guard live else { return }

@@ -128,15 +128,18 @@ final class WhisperTranscriber: @unchecked Sendable {
             prefix: "scrumtrace-movie"
         )
         defer { try? FileManager.default.removeItem(at: movieCopy) }
-        let dest = FileManager.default.temporaryDirectory.appendingPathComponent(
-            "scrumtrace-system-audio-\(UUID().uuidString).m4a"
-        )
+        let dest: URL
+        do {
+            dest = try ExportRel.makePrivateTemporaryURL(prefix: "scrumtrace-system-audio", ext: "m4a")
+        } catch {
+            return try await transcribeFile(at: movieCopy)
+        }
         do {
             try await extractAudio(from: movieCopy, to: dest)
-            defer { try? FileManager.default.removeItem(at: dest) }
+            defer { ExportRel.removePrivateTemporaryURL(dest) }
             return try await transcribeFile(at: dest)
         } catch {
-            try? FileManager.default.removeItem(at: dest)
+            ExportRel.removePrivateTemporaryURL(dest)
             return try await transcribeFile(at: movieCopy)
         }
     }

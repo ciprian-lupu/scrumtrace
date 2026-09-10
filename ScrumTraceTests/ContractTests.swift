@@ -511,6 +511,25 @@ final class ContractTests: XCTestCase {
         XCTAssertEqual(try String(contentsOf: outside.appendingPathComponent("001.png"), encoding: .utf8), "SECRET-PNG")
     }
 
+    func testMakePrivateTemporaryURLUsesMkdirNotSharedTempFile() throws {
+        let url = try ExportRel.makePrivateTemporaryURL(prefix: "scrumtrace-clip", ext: "mp4")
+        let parent = url.deletingLastPathComponent()
+        defer { ExportRel.removePrivateTemporaryURL(url) }
+        XCTAssertTrue(parent.lastPathComponent.hasPrefix("scrumtrace-clip-"))
+        XCTAssertNotEqual(
+            parent.standardizedFileURL,
+            FileManager.default.temporaryDirectory.standardizedFileURL
+        )
+        var isDir: ObjCBool = false
+        XCTAssertTrue(FileManager.default.fileExists(atPath: parent.path, isDirectory: &isDir) && isDir.boolValue)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
+        ExportRel.removePrivateTemporaryURL(url)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: parent.path))
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: FileManager.default.temporaryDirectory.path)
+        )
+    }
+
     func testContainedRegularFileRejectsSymlinkEvenIfTargetIsInsideSession() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("scrumtrace-regular-\(UUID().uuidString)")
         let shots = root.appendingPathComponent("archive/shots")

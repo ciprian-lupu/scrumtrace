@@ -52,10 +52,10 @@ struct SessionPackZipper {
             let url = sessionURL.appendingPathComponent(path)
             let plantedLink = (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true
             if plantedLink {
-                try? FileManager.default.removeItem(at: url)
+                try? ExportRel.removeItemIfRegularFile(url, sessionRoot: sessionURL)
             } else {
                 guard ExportRel.isContainedRegularFile(url, sessionRoot: sessionURL) else { continue }
-                try? FileManager.default.removeItem(at: url)
+                try? ExportRel.removeItemIfRegularFile(url, sessionRoot: sessionURL)
             }
             omitted.append(OmittedAsset(path: ExportRel.toExportRoot(path), reason: "Pack over 35 MB; dropped by priority"))
             do {

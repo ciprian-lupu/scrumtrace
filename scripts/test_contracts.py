@@ -332,7 +332,7 @@ def test_clip_exporter_macos14() -> None:
     assert "attributesOfItem" not in tighten
     assert "removeEscapingExportLinks" in tighten
     tighten_file = clip.split("func tighten(file")[1].split("func reencode")[0]
-    assert "temporaryDirectory" in tighten_file
+    assert "makePrivateTemporaryURL" in tighten_file
     assert "copyContainedToTemporaryFile" in tighten_file
     assert "moveIntoSession" in tighten_file
     assert "writeContainedData" not in tighten_file
@@ -370,7 +370,8 @@ def test_clip_exporter_macos14() -> None:
     reencode = clip.split("func reencode")[1].split("func clipTimeRange")[0]
     assert "moveIntoSession" in reencode
     assert "scrumtrace-clip" in reencode
-    assert "temporaryDirectory" in reencode
+    assert "makePrivateTemporaryURL" in reencode
+    assert "removePrivateTemporaryURL" in reencode
     assert "try? FileManager.default.removeItem(at: destination)" not in reencode
     assert "sessionURL: URL" in reencode
     assert "writeMainProfileClip" in clip
@@ -415,6 +416,8 @@ def test_pause_gate_hold_to_talk() -> None:
     assert "talk.persist()" in close_fn
     assert close_fn.index("talk.persist()") < close_fn.index("super.close()")
     start_talk = shot.split("func startTalk()")[1].split("func abortTalk()")[0]
+    assert "makePrivateTemporaryURL" in start_talk
+    assert "scrumtrace-note" in start_talk
     assert "holdingTalk = true" in start_talk
     assert start_talk.index("guard let rec") < start_talk.index("holdingTalk = true")
     assert start_talk.index("guard rec.record()") < start_talk.index("holdingTalk = true")
@@ -422,7 +425,8 @@ def test_pause_gate_hold_to_talk() -> None:
     assert start_talk.index("holdingTalk = true") < start_talk.index("abortTalk()")
     abort = shot.split("func abortTalk()")[1].split("func stopTalk")[0]
     assert "guard holdingTalk else { return }" not in abort
-    assert "removeItem(at: url)" in abort
+    assert "removePrivateTemporaryURL" in abort
+    assert "removeItem(at: url)" not in abort
     persist = shot.split("func persist()")[1].split("func startTalk()")[0]
     assert "abortTalk()" in persist
     assert "guard !saved else { return }" in persist
@@ -535,6 +539,7 @@ def test_retry_failed_slices_and_pins() -> None:
     assert "testPruneAbandonedStartsKeepsShotPNGWhenManifestIsMissing" in contracts
     assert "testPruneAbandonedStartsDeletesEmptyIdleSession" in contracts
     assert "testPruneAbandonedStartsIgnoresPlantedShotsDirectorySymlink" in contracts
+    assert "testMakePrivateTemporaryURLUsesMkdirNotSharedTempFile" in contracts
     models = (ROOT / "ScrumTrace" / "Storage" / "SessionModels.swift").read_text()
     existing_media = models.split("func withExistingMedia")[1].split("enum CodingKeys")[0]
     assert "existingSessionFile" in existing_media
@@ -737,6 +742,8 @@ def test_pipeline_timing_stays_in_archive() -> None:
     assert "fileExists(atPath: url.path)" not in drop
     assert drop.index("isSymbolicLink") < drop.index("omitted.append")
     assert "plantedLink" in drop
+    assert "removeItemIfRegularFile" in drop
+    assert "FileManager.default.removeItem(at: url)" not in drop
     assert "measuredPackBytes" in zip_fn
     assert "regularFileByteCount" in zipper
     assert "attributesOfItem" not in zipper
@@ -755,7 +762,8 @@ def test_pipeline_timing_stays_in_archive() -> None:
     assert "syncWriter" in pause_fn
     assert "writerQueue.async" not in pause_fn
     speech = (ROOT / "ScrumTrace" / "Speech" / "WhisperTranscriber.swift").read_text()
-    assert "temporaryDirectory" in speech
+    assert "makePrivateTemporaryURL" in speech
+    assert "scrumtrace-system-audio" in speech
     assert "private var ready = false" in speech
     recorder = (ROOT / "ScrumTrace" / "Capture" / "SessionRecorder.swift").read_text()
     assert "AVCaptureDevice.requestAccess(for: .audio)" in recorder
@@ -1264,7 +1272,8 @@ def test_phase45_clip_consent_and_budget() -> None:
     recorder = (ROOT / "ScrumTrace" / "Capture" / "SessionRecorder.swift").read_text()
     assert "withCheckedContinuation" in recorder
     assert "100_000_000" in controller
-    assert "scrumtrace-note-" in shot
+    assert "makePrivateTemporaryURL" in shot
+    assert "scrumtrace-note" in shot
     brief_src = (ROOT / "ScrumTrace" / "Export" / "SessionBriefRenderer.swift").read_text()
     assert "t_media" in brief_src.split("task.quotes.map")[1].split("return \"\"\"")[0]
     models = (ROOT / "ScrumTrace" / "Storage" / "SessionModels.swift").read_text()
@@ -1539,6 +1548,18 @@ def test_write_contained_data_refuses_directory_symlinks() -> None:
     assert "temporaryDirectory" in write_fn
     assert "scrumtrace-write" in write_fn
     assert "static func removeItemIfRegularFile" in models
+    assert "static func makePrivateTemporaryURL" in models
+    assert "static func removePrivateTemporaryURL" in models
+    private_temp = models.split("static func makePrivateTemporaryURL")[1].split("static func removePrivateTemporaryURL")[0]
+    assert "Darwin.mkdtemp" in private_temp
+    assert "XXXXXX" in private_temp
+    assert "openUnfollowedDirectory" in private_temp
+    assert "isSymbolicLink" in private_temp
+    remove_priv = models.split("static func removePrivateTemporaryURL")[1].split("private static func openatDirectory")[0]
+    assert 'hasPrefix("scrumtrace-")' in remove_priv
+    assert "temporaryDirectory" in remove_priv
+    assert "removeItem(at: parent)" in remove_priv
+    assert "removeItem(at: url)" in remove_priv
     assert "static func moveIntoSession" in models
     rel = models.split("static func containedRelative(_ path: String, sessionURL: URL)")[1].split("static func existingSessionFile")[0]
     assert "isSymbolicLink" in rel

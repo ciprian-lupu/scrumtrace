@@ -145,12 +145,17 @@ struct ClipExporter {
         }
         let presets = [AVAssetExportPreset640x480, AVAssetExportPresetLowQuality]
         for preset in presets {
-            let temp = FileManager.default.temporaryDirectory.appendingPathComponent(
-                "scrumtrace-tighten-\(UUID().uuidString).mp4"
-            )
-            try? FileManager.default.removeItem(at: temp)
+            let temp: URL
+            do {
+                temp = try ExportRel.makePrivateTemporaryURL(prefix: "scrumtrace-tighten", ext: "mp4")
+            } catch {
+                continue
+            }
             let asset = AVURLAsset(url: work)
-            guard let session = AVAssetExportSession(asset: asset, presetName: preset) else { continue }
+            guard let session = AVAssetExportSession(asset: asset, presetName: preset) else {
+                ExportRel.removePrivateTemporaryURL(temp)
+                continue
+            }
             session.outputURL = temp
             session.outputFileType = .mp4
             session.shouldOptimizeForNetworkUse = true
@@ -162,20 +167,21 @@ struct ClipExporter {
                 session.exportAsynchronously { continuation.resume() }
             }
             guard session.status == .completed else {
-                try? FileManager.default.removeItem(at: temp)
+                ExportRel.removePrivateTemporaryURL(temp)
                 continue
             }
             let after = ExportRel.unfollowedRegularFileByteCount(temp) ?? before
             if after < before {
                 do {
                     try ExportRel.moveIntoSession(from: temp, relative: rel, sessionURL: sessionURL)
+                    ExportRel.removePrivateTemporaryURL(temp)
                     return
                 } catch {
-                    try? FileManager.default.removeItem(at: temp)
+                    ExportRel.removePrivateTemporaryURL(temp)
                     continue
                 }
             }
-            try? FileManager.default.removeItem(at: temp)
+            ExportRel.removePrivateTemporaryURL(temp)
         }
     }
 
@@ -186,22 +192,29 @@ struct ClipExporter {
         mediaDuration: TimeInterval,
         sessionURL: URL
     ) async throws {
-        let temp = FileManager.default.temporaryDirectory.appendingPathComponent(
-            "scrumtrace-clip-\(UUID().uuidString).mp4"
-        )
-        try? FileManager.default.removeItem(at: temp)
         let range = try clipTimeRange(slice: slice, mediaDuration: mediaDuration)
+        let temp = try ExportRel.makePrivateTemporaryURL(prefix: "scrumtrace-clip", ext: "mp4")
         let asset = AVURLAsset(url: source)
         do {
             try await writeMainProfileClip(asset: asset, destination: temp, timeRange: range)
         } catch {
-            try? FileManager.default.removeItem(at: temp)
-            try await exportPresetClip(asset: asset, destination: temp, timeRange: range)
+            ExportRel.removePrivateTemporaryURL(temp)
+            let retry = try ExportRel.makePrivateTemporaryURL(prefix: "scrumtrace-clip", ext: "mp4")
+            do {
+                try await exportPresetClip(asset: asset, destination: retry, timeRange: range)
+                try ExportRel.moveIntoSession(from: retry, relative: destRelative, sessionURL: sessionURL)
+                ExportRel.removePrivateTemporaryURL(retry)
+                return
+            } catch {
+                ExportRel.removePrivateTemporaryURL(retry)
+                throw error
+            }
         }
         do {
             try ExportRel.moveIntoSession(from: temp, relative: destRelative, sessionURL: sessionURL)
+            ExportRel.removePrivateTemporaryURL(temp)
         } catch {
-            try? FileManager.default.removeItem(at: temp)
+            ExportRel.removePrivateTemporaryURL(temp)
             throw error
         }
     }

@@ -456,6 +456,9 @@ final class SessionVault: @unchecked Sendable {
             includingPropertiesForKeys: [.isSymbolicLinkKey, .isRegularFileKey],
             options: [.skipsHiddenFiles]
         ) else { return false }
+        if (try? archive.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+            return false
+        }
         for url in children {
             if (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
                 continue

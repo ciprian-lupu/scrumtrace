@@ -743,6 +743,55 @@ enum ExportRel {
         return dest
     }
 
+    /// AVAssetWriter / AVAssetExportSession / AVAudioRecorder need a dest path
+    /// that does not already exist. A UUID name in the shared temp folder can
+    /// be replaced with a symlink between unlink and create. `mkdtemp` makes a
+    /// 0700 directory so that dest cannot be planted.
+    static func makePrivateTemporaryURL(prefix: String, ext: String) throws -> URL {
+        let cleanedPrefix = prefix
+            .replacingOccurrences(of: "/", with: "-")
+            .replacingOccurrences(of: "\0", with: "")
+        let safeExt = ext
+            .replacingOccurrences(of: "/", with: "")
+            .replacingOccurrences(of: ".", with: "")
+        let template = FileManager.default.temporaryDirectory
+            .appendingPathComponent("\(cleanedPrefix)-XXXXXX")
+            .path
+        var stageBytes = Array(template.utf8CString)
+        let made = stageBytes.withUnsafeMutableBufferPointer { buf -> Bool in
+            guard let base = buf.baseAddress else { return false }
+            return Darwin.mkdtemp(base) != nil
+        }
+        guard made else {
+            throw SessionVaultError.writeFailed("temporary directory")
+        }
+        let stage = URL(fileURLWithPath: String(cString: stageBytes), isDirectory: true)
+        if (try? stage.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+            try? FileManager.default.removeItem(at: stage)
+            throw SessionVaultError.writeFailed("temporary directory")
+        }
+        guard let dirFd = openUnfollowedDirectory(stage) else {
+            try? FileManager.default.removeItem(at: stage)
+            throw SessionVaultError.writeFailed("temporary directory")
+        }
+        Darwin.close(dirFd)
+        let name = safeExt.isEmpty ? "file" : "file.\(safeExt)"
+        return stage.appendingPathComponent(name)
+    }
+
+    /// Removes the private `mkdtemp` directory that contains `url`, never the
+    /// shared temp folder.
+    static func removePrivateTemporaryURL(_ url: URL) {
+        let parent = url.deletingLastPathComponent()
+        let shared = FileManager.default.temporaryDirectory.standardizedFileURL
+        guard parent.lastPathComponent.hasPrefix("scrumtrace-"),
+              parent.standardizedFileURL != shared else {
+            try? FileManager.default.removeItem(at: url)
+            return
+        }
+        try? FileManager.default.removeItem(at: parent)
+    }
+
     /// Open a contained directory with `O_NOFOLLOW` on every component. Empty
     /// `parts` is the session root. Caller closes.
     private static func openatDirectory(parts: [String], root: URL) -> Int32? {
