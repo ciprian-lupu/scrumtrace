@@ -33,6 +33,12 @@ def test_quote_window() -> None:
     assert "frame_references outside this slice window" in confirm
     assert "shots: [ShotRecord]" in confirm
     assert "framesOverlapSlice" in confirm
+    overlap = validator.split("static func framesOverlapSlice")[1].split("static func applyExportEvidence")[0]
+    assert "tMedia" in overlap
+    assert "startMedia" in overlap
+    assert "endMedia" in overlap
+    assert "shotOwning" in overlap
+    assert "allowed = slice.stills" not in overlap
     controller = (ROOT / "ScrumTrace" / "Processing" / "SessionController.swift").read_text()
     capture = controller.split("private func captureShot")[1].split("private func finishShot")[0]
     assert "writeContainedData(png, relative: rawPath" in capture

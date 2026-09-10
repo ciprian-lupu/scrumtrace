@@ -677,10 +677,25 @@ final class SessionProcessor: @unchecked Sendable {
                 .filter { EvidenceValidator.framesOverlapSlice([$0], slice: slice, shots: shots, sessionURL: sessionURL) }
             let uniqueEvidence = uniquedPaths(
                 resolvedFrames
-                    + slice.stills
+                    + slice.stills.filter {
+                        EvidenceValidator.framesOverlapSlice(
+                            [$0],
+                            slice: slice,
+                            shots: shots,
+                            sessionURL: sessionURL
+                        )
+                    }
                     + [slice.exportClipPath, slice.clipPath].compactMap { $0 }
                     + shots.flatMap { shot in
-                        [shot.exportPath].compactMap { $0 } + shot.stillCandidates
+                        ([shot.exportPath].compactMap { $0 } + shot.stillCandidates)
+                            .filter {
+                                EvidenceValidator.framesOverlapSlice(
+                                    [$0],
+                                    slice: slice,
+                                    shots: shots,
+                                    sessionURL: sessionURL
+                                )
+                            }
                     },
                 sessionURL: sessionURL
             )
@@ -969,7 +984,9 @@ final class SessionProcessor: @unchecked Sendable {
         }
         let uncovered = manifest.slices.filter { slice in
             !coveredIds.contains(slice.sliceId)
-                && (!slice.stills.isEmpty || !(slice.clipPath ?? "").isEmpty)
+                && (!slice.stills.isEmpty
+                    || !(slice.clipPath ?? "").isEmpty
+                    || !(slice.exportClipPath ?? "").isEmpty)
         }
         for slice in uncovered {
             tasks.append(

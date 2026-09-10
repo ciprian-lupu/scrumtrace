@@ -116,27 +116,51 @@ enum EvidenceValidator {
     }
 
     /// C5: a still from another moment is not evidence for this slice, even
-    /// when the PNG exists under archive/shots.
+    /// when the PNG exists under archive/shots. After overlap-merge clamps the
+    /// window, unioned Shot stills whose `t_media` fell outside are dropped.
     static func framesOverlapSlice(
         _ frames: [String],
         slice: SliceRecord,
         shots: [ShotRecord],
         sessionURL: URL
     ) -> Bool {
-        var allowed = slice.stills
+        var allowed: [String] = []
         if let clip = slice.exportClipPath ?? slice.clipPath {
             allowed.append(clip)
         }
+        for still in slice.stills {
+            if let owner = shotOwning(still, in: shots),
+               owner.tMedia < slice.startMedia || owner.tMedia > slice.endMedia {
+                continue
+            }
+            allowed.append(still)
+        }
         for shot in shots {
+            guard shot.tMedia >= slice.startMedia && shot.tMedia <= slice.endMedia else { continue }
             allowed.append(contentsOf: shot.stillCandidates)
             if let exportPath = shot.exportPath {
                 allowed.append(exportPath)
+            }
+            if !shot.rawPath.isEmpty {
+                allowed.append(shot.rawPath)
+            }
+            if let annotated = shot.annotatedPath {
+                allowed.append(annotated)
             }
         }
         let allowedResolved = Set(existingPaths(allowed, sessionURL: sessionURL))
         let allowedContained = Set(allowed.compactMap { ExportRel.existingSessionFile($0, sessionURL: sessionURL) })
         return frames.contains { frame in
             allowedResolved.contains(frame) || allowedContained.contains(frame)
+        }
+    }
+
+    private static func shotOwning(_ path: String, in shots: [ShotRecord]) -> ShotRecord? {
+        shots.first { shot in
+            shot.stillCandidates.contains(path)
+                || shot.rawPath == path
+                || shot.annotatedPath == path
+                || shot.exportPath == path
         }
     }
 

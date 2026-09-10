@@ -696,6 +696,7 @@ def test_retry_failed_slices_and_pins() -> None:
     assert "testApplyExportEvidenceDemotesInvertedAndOutOfSliceQuotes" in contracts
     assert "testPackMediaHandoffDropsOmittedExportFile" in contracts
     assert "testCanConfirmRejectsFrameFromAnotherSlice" in contracts
+    assert "testCanConfirmRejectsStillOutsideClampedWindow" in contracts
     assert "testMergeCanonicalStatusesKeepsArchiveEvidence" in contracts
     models = (ROOT / "ScrumTrace" / "Storage" / "SessionModels.swift").read_text()
     existing_media = models.split("func withExistingMedia")[1].split("enum CodingKeys")[0]
@@ -1519,6 +1520,10 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "exportClipPath" in local
     assert "exportPath" in local
     assert "uncovered" in local
+    uncovered_fn = local.split("let uncovered")[1].split("for slice in uncovered")[0]
+    assert "exportClipPath" in uncovered_fn
+    assert "clipPath" in uncovered_fn
+    assert "stills.isEmpty" in uncovered_fn
     assert "coveredIds" in local
     assert "sliceMatching" in local
     assert "slice-\\(shot.id)" in local
