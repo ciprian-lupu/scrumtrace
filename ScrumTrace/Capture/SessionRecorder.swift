@@ -45,6 +45,9 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
     /// Consecutive `CMSampleBufferCreateCopyWithNewTiming` failures. One
     /// dropped frame is a glitch; a streak means the master clock is gone (D2).
     private var remapFailStreak = 0
+    /// Consecutive WAV format-parse failures. One odd buffer is a glitch;
+    /// a streak means room/system audio is not being persisted (C1).
+    private var wavFormatFailStreak = 0
 
     init(sessionURL: URL, clock: ClockSynchronizer) {
         self.sessionURL = sessionURL
@@ -249,6 +252,7 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             self.paused = true
             self.started = false
             self.remapFailStreak = 0
+            self.wavFormatFailStreak = 0
             self.clock.markRecordingStopped()
         }
     }
@@ -482,13 +486,27 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         }
     }
 
+    private func noteWavFormatFailure() {
+        wavFormatFailStreak += 1
+        if wavFormatFailStreak >= 12 {
+            failCaptureWrite("Could not decode audio samples for archive/audio.wav.")
+        }
+    }
+
     private func writeWav(from sampleBuffer: CMSampleBuffer) {
         guard !paused, started else { return }
         guard let wavFile else { return }
         guard let formatDesc = CMSampleBufferGetFormatDescription(sampleBuffer),
-              let asbdPtr = CMAudioFormatDescriptionGetStreamBasicDescription(formatDesc) else { return }
+              let asbdPtr = CMAudioFormatDescriptionGetStreamBasicDescription(formatDesc) else {
+            noteWavFormatFailure()
+            return
+        }
         var asbd = asbdPtr.pointee
-        guard let format = AVAudioFormat(streamDescription: &asbd) else { return }
+        guard let format = AVAudioFormat(streamDescription: &asbd) else {
+            noteWavFormatFailure()
+            return
+        }
+        wavFormatFailStreak = 0
         let frames = AVAudioFrameCount(CMSampleBufferGetNumSamples(sampleBuffer))
         guard frames > 0 else { return }
         guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frames) else {
