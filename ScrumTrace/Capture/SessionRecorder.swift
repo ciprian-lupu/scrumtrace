@@ -1,4 +1,5 @@
 import AVFoundation
+import CoreGraphics
 import CoreMedia
 import CoreVideo
 import Darwin
@@ -7,13 +8,17 @@ import ScreenCaptureKit
 
 enum SessionRecorderError: LocalizedError {
     case permissionDenied
+    case microphoneDenied
     case writerFailed(String)
 
     var errorDescription: String? {
         switch self {
         case .permissionDenied:
-            return "Screen Recording permission is required in System Settings. After allowing ScrumTrace, quit and reopen the app, then press Record again."
-        case .writerFailed(let message): return message
+            return "Screen Recording is off for this ScrumTrace binary — that is not the Accessibility list. Open System Settings → Privacy & Security → Screen Recording, enable the ScrumTrace you just launched, quit the app completely, reopen that same binary, then press Record."
+        case .microphoneDenied:
+            return "Microphone is off for this ScrumTrace binary. Open System Settings → Privacy & Security → Microphone, enable ScrumTrace, quit and reopen this same app, then press Record."
+        case .writerFailed(let message):
+            return message
         }
     }
 }
@@ -96,6 +101,12 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
     }
 
     func start(shouldPauseCapture: @escaping @Sendable () -> Bool = { false }) async throws {
+        // SCShareableContent re-prompts Screen Recording whenever preflight is
+        // false. Ad-hoc Debug rebuilds look like a new TCC client, which the
+        // user sees as a permission loop. Never call it until TCC already says yes.
+        if !CGPreflightScreenCaptureAccess() {
+            throw SessionRecorderError.permissionDenied
+        }
         try await requestPermission()
         // Never fetch shareable content on the MainActor. TCC presents a sheet
         // that cannot drain if Record is waiting on this same run loop — the
@@ -1052,11 +1063,23 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         noteWavEmptyConvert()
     }
 
-    /// Do not call the blocking CoreGraphics screen-access request on the
-    /// MainActor — it deadlocks the TCC sheet (force-quit after Record).
-    /// Screen permission is prompted by SCShareableContent off the main thread.
+    /// Microphone only. Screen Recording is preflighted before this runs so
+    /// we never pop the looping Screen Recording sheet from Record.
+    /// `requestAccess` on an already-denied client re-prompts every Start.
     private func requestPermission() async throws {
-        _ = await AVCaptureDevice.requestAccess(for: .audio)
+        switch AVCaptureDevice.authorizationStatus(for: .audio) {
+        case .authorized:
+            return
+        case .notDetermined:
+            let granted = await AVCaptureDevice.requestAccess(for: .audio)
+            if !granted {
+                throw SessionRecorderError.microphoneDenied
+            }
+        case .denied, .restricted:
+            throw SessionRecorderError.microphoneDenied
+        @unknown default:
+            throw SessionRecorderError.microphoneDenied
+        }
     }
 
     private static func shareableContentOffMain() async throws -> SCShareableContent {

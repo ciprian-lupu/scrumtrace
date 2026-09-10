@@ -2,6 +2,8 @@ import Combine
 import Foundation
 #if os(macOS)
 import AppKit
+import AVFoundation
+import CoreGraphics
 #endif
 
 @MainActor
@@ -80,6 +82,32 @@ final class SessionController: ObservableObject {
 
     func startRecording() {
         guard !isRecording, !isBusy, !startInFlight else { return }
+        #if os(macOS)
+        // Do not call SCShareableContent until TCC already says yes. That API
+        // re-prompts Screen Recording on every Start for ad-hoc Debug builds
+        // and looks like a permission loop.
+        if !CGPreflightScreenCaptureAccess() {
+            let message = SessionRecorderError.permissionDenied.errorDescription
+                ?? "Screen Recording permission is required."
+            lastError = message
+            statusLine = message
+            Self.openScreenCaptureSettings()
+            return
+        }
+        switch AVCaptureDevice.authorizationStatus(for: .audio) {
+        case .denied, .restricted:
+            let message = SessionRecorderError.microphoneDenied.errorDescription
+                ?? "Microphone permission is required."
+            lastError = message
+            statusLine = message
+            Self.openMicrophoneSettings()
+            return
+        case .authorized, .notDetermined:
+            break
+        @unknown default:
+            break
+        }
+        #endif
         startInFlight = true
         captureFreeze.markStartInFlight(true)
         statusLine = "Starting capture…"
@@ -301,10 +329,9 @@ final class SessionController: ObservableObject {
             lastMetaSignature = ""
             pausedByPrivacy = false
             clock.reset()
-            // Do not prompt Accessibility here. Record only needs Screen
-            // Recording + Microphone. AX prompt:true on every Start loops
-            // on ad-hoc Debug rebuilds (TCC treats each binary as new).
-            MetadataSampler.requestTrust(prompt: false)
+            // Do not touch Accessibility on Record. Silent AX checks belong
+            // in MetadataSampler.readFrontmost. prompt:true lives only on
+            // the Settings button. Screen Recording is preflighted above.
             let recorder = SessionRecorder(sessionURL: created.url, clock: clock)
             captureFreeze.attach(recorder)
             // Tick before startCapture: a credential app during the permission
@@ -897,6 +924,16 @@ final class SessionController: ObservableObject {
         }
     }
 
+    #if os(macOS)
+    static func openScreenCaptureSettings() {
+        SystemPrivacySettings.openScreenRecording()
+    }
+
+    static func openMicrophoneSettings() {
+        SystemPrivacySettings.openMicrophone()
+    }
+    #endif
+
     static func clock(_ seconds: TimeInterval) -> String {
         let total = Int(max(0, seconds).rounded())
         let h = total / 3600
@@ -939,6 +976,33 @@ final class SessionController: ObservableObject {
         shotId.replacingOccurrences(of: "shot-", with: "")
     }
 }
+
+#if os(macOS)
+enum SystemPrivacySettings {
+    static func openScreenRecording() {
+        open(
+            "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_ScreenCapture",
+            fallback: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"
+        )
+    }
+
+    static func openMicrophone() {
+        open(
+            "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_Microphone",
+            fallback: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone"
+        )
+    }
+
+    private static func open(_ primary: String, fallback: String) {
+        if let url = URL(string: primary), NSWorkspace.shared.open(url) {
+            return
+        }
+        if let url = URL(string: fallback) {
+            NSWorkspace.shared.open(url)
+        }
+    }
+}
+#endif
 
 enum ScreenSnap {
     static func capture() -> NSImage? {

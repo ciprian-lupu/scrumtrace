@@ -50,6 +50,22 @@ fi
 defaults read "$APP/Contents/Info.plist" LSUIElement || true
 codesign -d --entitlements - "$APP" 2>/dev/null | grep -E 'app-sandbox|audio-input|microphone' || true
 
+# DerivedData paths change and ad-hoc Debug signing looks like a new TCC
+# client on every rebuild. Copy to a stable path and re-sign with the
+# bundle id so Screen Recording / Microphone toggles can survive rebuilds.
+STABLE="${SCRUMTRACE_STABLE:-$HOME/Applications/ScrumTrace.app}"
+mkdir -p "$(dirname "$STABLE")"
+rm -rf "$STABLE"
+ditto "$APP" "$STABLE"
+if codesign --force --deep --sign - --identifier com.str8minds.ScrumTrace "$STABLE"; then
+  echo "stable_app=$STABLE"
+else
+  echo "warning: codesign of $STABLE failed; Screen Recording TCC may reset on the next rebuild" >&2
+  echo "stable_app=$STABLE"
+fi
+echo "Open this copy (quit any other ScrumTrace first):"
+echo "  open \"$STABLE\""
+
 echo "sessions_root=$HOME/Movies/ScrumTrace/sessions"
 ls -1 "$HOME/Movies/ScrumTrace/sessions" 2>/dev/null | tail -5 || echo "no sessions yet"
 echo "mac_gate01 build step ok"

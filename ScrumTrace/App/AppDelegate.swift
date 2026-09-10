@@ -41,7 +41,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let hosting = NSHostingController(rootView: SettingsView(settings: controller.settings))
             let window = NSWindow(contentViewController: hosting)
             window.title = "ScrumTrace Settings"
-            window.setContentSize(NSSize(width: 540, height: 780))
+            window.setContentSize(NSSize(width: 540, height: 860))
             window.styleMask = [.titled, .closable, .miniaturizable]
             settingsWindow = window
         }

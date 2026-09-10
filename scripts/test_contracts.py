@@ -1119,6 +1119,12 @@ def test_pipeline_timing_stays_in_archive() -> None:
     assert "private var ready = false" in speech
     recorder = (ROOT / "ScrumTrace" / "Capture" / "SessionRecorder.swift").read_text()
     assert "AVCaptureDevice.requestAccess(for: .audio)" in recorder
+    assert "authorizationStatus(for: .audio)" in recorder
+    assert "case microphoneDenied" in recorder
+    gate01 = (ROOT / "scripts" / "mac_gate01.sh").read_text()
+    assert "Applications/ScrumTrace.app" in gate01
+    assert "com.str8minds.ScrumTrace" in gate01
+    assert "codesign --force --deep --sign -" in gate01
     sampler = (ROOT / "ScrumTrace" / "Capture" / "MetadataSampler.swift").read_text()
     assert "ResumeOnce" in sampler
     assert "requestTrust" in sampler
@@ -1143,10 +1149,15 @@ def test_pipeline_timing_stays_in_archive() -> None:
     start_btn = controller.split("func startRecording()")[1].split("func stopRecording()")[0]
     assert "Starting capture" in start_btn
     assert "!startInFlight" in start_btn
+    assert "CGPreflightScreenCaptureAccess" in start_btn
+    assert "openScreenCaptureSettings" in start_btn
+    assert start_btn.index("CGPreflightScreenCaptureAccess") < start_btn.index("startInFlight = true")
     assert "startInFlight = true" in start_btn
     assert start_btn.index("startInFlight = true") < start_btn.index("startRecordingAsync")
     assert "markStartInFlight(true)" in start_btn
     assert start_btn.index("startInFlight = true") < start_btn.index("markStartInFlight(true)")
+    assert "authorizationStatus(for: .audio)" in start_btn
+    assert start_btn.index("authorizationStatus(for: .audio)") < start_btn.index("startInFlight = true")
     stop_btn = controller.split("func stopRecording()")[1].split("func handleCaptureStreamFailure")[0]
     assert "freezeWriters" in stop_btn
     assert "scrumTraceCaptureGate" in stop_btn
@@ -1156,7 +1167,8 @@ def test_pipeline_timing_stays_in_archive() -> None:
     assert "defer { startInFlight = false }" in start_rec
     assert "markStartInFlight(false)" in start_rec
     assert "requestTrust(prompt: true)" not in start_rec
-    assert "requestTrust(prompt: false)" in start_rec
+    assert "requestTrust(prompt: false)" not in start_rec
+    assert "requestTrust" not in start_rec
     assert "clock.reset()" in start_rec
     assert "captureFreeze.attach(nil)" in start_rec
     assert "pipelineStatus = phase" in start_rec
@@ -1260,7 +1272,7 @@ def test_pause_privacy_and_metadata_gate() -> None:
     app = (ROOT / "ScrumTrace" / "App" / "AppDelegate.swift").read_text()
     assert "haltCaptureForTermination" in app
     assert "captureFreeze: controller.captureFreeze" in app
-    assert "height: 780" in app
+    assert "height: 860" in app
     menu = (ROOT / "ScrumTrace" / "UI" / "MenuBarController.swift").read_text()
     quit_fn = menu.split("func quit()")[1].split("func openRecent")[0]
     assert "stopRecording()" not in quit_fn
@@ -1503,6 +1515,11 @@ def test_phase45_clip_consent_and_budget() -> None:
     settings = (ROOT / "ScrumTrace" / "UI" / "SettingsView.swift").read_text()
     assert "requestTrust(prompt: true)" in settings
     assert "Enable browser URL metadata (Accessibility)" in settings
+    assert "Open Screen Recording settings" in settings
+    assert "Open Microphone settings" in settings
+    controller_src = (ROOT / "ScrumTrace" / "Processing" / "SessionController.swift").read_text()
+    assert "Privacy_ScreenCapture" in controller_src
+    assert "enum SystemPrivacySettings" in controller_src
     assert "capabilities.acceptsText" in settings
     assert "willUploadClip" in settings
     assert "Save key" in settings
@@ -1922,6 +1939,10 @@ def test_phase45_clip_consent_and_budget() -> None:
     recorder = (ROOT / "ScrumTrace" / "Capture" / "SessionRecorder.swift").read_text()
     start_fn = recorder.split("func start(shouldPauseCapture")[1].split("func abortFailedStart")[0]
     assert "CGRequestScreenCaptureAccess" not in recorder
+    assert "CGPreflightScreenCaptureAccess" in start_fn
+    assert start_fn.index("CGPreflightScreenCaptureAccess") < start_fn.index("shareableContentOffMain")
+    assert start_fn.index("CGPreflightScreenCaptureAccess") < start_fn.index("requestPermission")
+    assert "authorizationStatus(for: .audio)" in recorder.split("func requestPermission")[1]
     assert "shareableContentOffMain" in start_fn
     assert "startCaptureOffMain" in start_fn
     assert "self.started = true" in start_fn

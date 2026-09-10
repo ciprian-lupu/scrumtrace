@@ -32,10 +32,15 @@ Cloud / Linux agents use `.cursor/environment.json` (regenerate the mock pack, s
 ## Build (macOS 14+, Apple Silicon recommended)
 
 ```bash
-open ScrumTrace.xcodeproj
+bash scripts/mac_gate01.sh
+open ~/Applications/ScrumTrace.app
 ```
 
-Xcode resolves WhisperKit **0.11.0** on first open (`Package.resolved` is not checked in). Grant Screen Recording and Microphone. First WhisperKit launch downloads `large-v3-turbo`.
+The script copies the Debug build to `~/Applications/ScrumTrace.app` and ad-hoc signs it with `com.str8minds.ScrumTrace` so Screen Recording and Microphone TCC can stick across rebuilds. Open **that** copy, not the DerivedData path.
+
+Grant **Privacy & Security → Screen Recording** and **Microphone** for the running binary, then quit and reopen once. Accessibility is optional (window titles / browser URLs) and is not required to Record.
+
+Xcode resolves WhisperKit **0.11.0** on first open (`Package.resolved` is not checked in). First WhisperKit launch downloads `large-v3-turbo`.
 
 ## Hotkeys
 

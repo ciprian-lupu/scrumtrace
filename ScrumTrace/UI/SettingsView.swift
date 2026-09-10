@@ -81,16 +81,25 @@ struct SettingsView: View {
                 Text("HUD shows t_media. Pause discards screen frames, system audio, microphone PCM, metadata, Shot, and Hold-to-Talk. After Stop, WhisperKit transcribes the room mic and the movie’s system-audio track, then merges on t_media.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                Button("Open Screen Recording settings") {
+                    SystemPrivacySettings.openScreenRecording()
+                }
+                Button("Open Microphone settings") {
+                    SystemPrivacySettings.openMicrophone()
+                }
+                Text("Record needs those two toggles for the binary you just opened. A Debug rebuild is a new TCC client — enable the ScrumTrace that is running now, then quit and reopen that same app. DerivedData copies do not inherit the toggle. Prefer ~/Applications/ScrumTrace.app after mac_gate01.sh.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 Button("Enable browser URL metadata (Accessibility)") {
                     MetadataSampler.requestTrust(prompt: true)
                 }
-                Text("Optional. Record needs Screen Recording and Microphone only. Accessibility adds window titles and browser URLs. A new Debug build can look like a different app to macOS — toggle this for the binary you just opened, then quit and reopen once.")
+                Text("Optional. Accessibility is not required to Record. It only adds window titles and browser URLs. The looping system sheet on Record is Screen Recording, not this list.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
-        .frame(width: 520, height: 780)
+        .frame(width: 520, height: 860)
         .padding()
     }
 
