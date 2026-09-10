@@ -35,7 +35,7 @@ final class SessionController: ObservableObject {
     private var lastMetaSignature = ""
     private var startInFlight = false
     private var terminateRequested = false
-    private let captureFreeze: CaptureFreeze
+    let captureFreeze: CaptureFreeze
 
     init(settings: AppSettings = .shared, vault: SessionVault = SessionVault()) {
         self.settings = settings
@@ -183,6 +183,22 @@ final class SessionController: ObservableObject {
         if let id = lastSessionId ?? manifest?.sessionId {
             vault.revealInFinder(sessionId: id)
         }
+    }
+
+    /// Opt+⌘P already froze writers on the Carbon thread. Do not treat that
+    /// freeze as Resume (`captureState` follows `recorder.isPaused`).
+    func applyHotkeyPause(didFreezeWriters: Bool) {
+        guard isRecording else { return }
+        if didFreezeWriters {
+            pausedByPrivacy = false
+            sampler.isSuspended = true
+            phase = .paused
+            statusLine = "Paused — nothing is written"
+            log(.pause, ["source": "hotkey"])
+            persistLivePipelineStatus()
+            return
+        }
+        togglePause()
     }
 
     /// Process is quitting: freeze capture. Do not start Whisper/AI on a dying process.

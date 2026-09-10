@@ -135,4 +135,23 @@ final class CaptureFreeze: @unchecked Sendable {
             object: CaptureSessionState.paused
         )
     }
+
+    /// Carbon Pause hotkey: freeze writers on the event thread before the
+    /// MainActor hop. Idle Opt+⌘P must not suspend metadata with no session.
+    @discardableResult
+    func freezeIfAttached() -> Bool {
+        lock.lock()
+        let rec = recorder
+        lock.unlock()
+        guard let rec else { return false }
+        let alreadyPaused = rec.isPaused
+        rec.setPaused(true)
+        sampler.isSuspended = true
+        if alreadyPaused { return false }
+        NotificationCenter.default.post(
+            name: .scrumTraceCaptureGate,
+            object: CaptureSessionState.paused
+        )
+        return true
+    }
 }

@@ -529,7 +529,15 @@ def test_pause_gate_hold_to_talk() -> None:
     handle = hotkeys.split("private func handle(")[1].split("private func perform")[0]
     assert "Task { @MainActor" in handle
     assert "DispatchQueue.main" not in handle
+    assert "freezeIfAttached" in handle
+    assert "applyHotkeyPause" in handle
+    assert handle.index("freezeIfAttached") < handle.index("Task { @MainActor")
+    assert handle.index("freezeIfAttached") < handle.index("applyHotkeyPause")
     assert "@MainActor\n    private func perform" in hotkeys
+    assert "captureFreeze: CaptureFreeze" in hotkeys
+    hud_pause = hud.split("func pauseClicked")[1].split("func stopClicked")[0]
+    assert "togglePause()" in hud_pause
+    assert "Task { @MainActor" not in hud_pause
 
 
 def test_retry_failed_slices_and_pins() -> None:
@@ -708,6 +716,10 @@ def test_audio_split_and_brief_loader() -> None:
     assert "liveBytes > destBytes" in stop_rec
     assert "regularFileByteCount" in stop_rec
     assert stop_rec.index("finishWriting") < stop_rec.index("reclaimLiveCaptureIfRewritten")
+    assert "try ExportRel.moveIntoSession(from: live" in stop_rec
+    assert "try? ExportRel.moveIntoSession(from: live" not in recorder
+    assert stop_rec.count("persistCaptureLayout(microphoneWav: snapshot.mic)") >= 2
+    assert stop_rec.rindex("persistCaptureLayout") > stop_rec.index("reclaimLiveCaptureIfRewritten")
     assert "synchronizationClock" in recorder
     assert "sampleClock" in recorder
     assert "guard !paused, started else { return }" in recorder
@@ -1019,6 +1031,7 @@ def test_pause_privacy_and_metadata_gate() -> None:
     assert "pipelineStatus = .idle" in persist
     app = (ROOT / "ScrumTrace" / "App" / "AppDelegate.swift").read_text()
     assert "haltCaptureForTermination" in app
+    assert "captureFreeze: controller.captureFreeze" in app
     assert "height: 780" in app
     menu = (ROOT / "ScrumTrace" / "UI" / "MenuBarController.swift").read_text()
     quit_fn = menu.split("func quit()")[1].split("func openRecent")[0]
@@ -1067,6 +1080,17 @@ def test_pause_privacy_and_metadata_gate() -> None:
     assert freeze_body.index("setPaused(true)") < freeze_body.index("scrumTraceCaptureGate")
     assert "alreadyPaused" in freeze_body
     assert freeze_body.index("alreadyPaused") < freeze_body.index("scrumTraceCaptureGate")
+    assert "func freezeIfAttached" in privacy
+    freeze_if = privacy.split("func freezeIfAttached")[1]
+    assert "guard let rec else { return false }" in freeze_if
+    assert "setPaused(true)" in freeze_if
+    assert freeze_if.index("setPaused(true)") < freeze_if.index("scrumTraceCaptureGate")
+    hotkey_pause = controller.split("func applyHotkeyPause")[1].split("func haltCaptureForTermination")[0]
+    assert "didFreezeWriters" in hotkey_pause
+    assert "togglePause()" in hotkey_pause
+    assert "phase = .paused" in hotkey_pause
+    assert "phase == .paused" not in hotkey_pause
+    assert hotkey_pause.index("didFreezeWriters") < hotkey_pause.index("togglePause()")
     toggle = controller.split("func togglePause()")[1].split("func pin()")[0]
     assert "captureState == .paused" in toggle
     assert "phase == .paused" not in toggle

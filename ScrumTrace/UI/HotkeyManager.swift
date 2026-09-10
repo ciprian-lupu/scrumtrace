@@ -15,10 +15,12 @@ final class HotkeyManager {
     private var refs: [EventHotKeyRef?] = []
     private var handler: EventHandlerRef?
     private weak var controller: SessionController?
+    private let captureFreeze: CaptureFreeze
     private let signature: OSType = 0x53547263
 
-    init(controller: SessionController) {
+    init(controller: SessionController, captureFreeze: CaptureFreeze) {
         self.controller = controller
+        self.captureFreeze = captureFreeze
     }
 
     func register() {
@@ -82,6 +84,14 @@ final class HotkeyManager {
             &hotKeyID
         )
         guard hotKeyID.signature == signature, let action = Action(rawValue: hotKeyID.id) else {
+            return noErr
+        }
+        if action == .pause {
+            // Freeze screen/audio/mic/metadata before the MainActor hop (C1).
+            let froze = captureFreeze.freezeIfAttached()
+            Task { @MainActor [weak self] in
+                self?.controller?.applyHotkeyPause(didFreezeWriters: froze)
+            }
             return noErr
         }
         Task { @MainActor [weak self] in

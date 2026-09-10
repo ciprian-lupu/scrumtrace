@@ -15,7 +15,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let hud = RecordingHUDWindow(controller: controller)
         self.hud = hud
         menuBar = MenuBarController(controller: controller, hud: hud)
-        hotkeys = HotkeyManager(controller: controller)
+        hotkeys = HotkeyManager(controller: controller, captureFreeze: controller.captureFreeze)
         hotkeys?.register()
         MetadataSampler.requestTrust(prompt: false)
     }

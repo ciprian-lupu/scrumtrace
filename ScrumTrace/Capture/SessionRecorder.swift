@@ -268,36 +268,61 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
                 continuation.resume()
             }
         }
-        reclaimLiveCaptureIfRewritten()
+        var stopError: Error?
+        do {
+            try reclaimLiveCaptureIfRewritten()
+        } catch {
+            stopError = error
+        }
+        do {
+            try persistCaptureLayout(microphoneWav: snapshot.mic)
+        } catch {
+            if stopError == nil { stopError = error }
+        }
+        if let stopError {
+            throw stopError
+        }
     }
 
     /// If AVAssetWriter / AVAudioFile reopened the UUID path at finishWriting,
     /// keep the larger regular file on the canonical archive names (C2).
-    private func reclaimLiveCaptureIfRewritten() {
-        syncWriter {
-            self.reclaimLiveCaptureIfRewrittenLocked()
+    private func reclaimLiveCaptureIfRewritten() throws {
+        try syncWriter {
+            try self.reclaimLiveCaptureIfRewrittenLocked()
         }
     }
 
-    private func reclaimLiveCaptureIfRewrittenLocked() {
+    private func reclaimLiveCaptureIfRewrittenLocked() throws {
+        var firstError: Error?
         if let rel = liveMovieRel {
-            adoptLargerLiveFile(rel, destRelative: ScrumTracePath.sessionMovie)
+            do {
+                try adoptLargerLiveFile(rel, destRelative: ScrumTracePath.sessionMovie)
+            } catch {
+                firstError = error
+            }
         }
         if let rel = liveWavRel {
-            adoptLargerLiveFile(rel, destRelative: ScrumTracePath.audioWav)
+            do {
+                try adoptLargerLiveFile(rel, destRelative: ScrumTracePath.audioWav)
+            } catch {
+                firstError = firstError ?? error
+            }
         }
         liveMovieRel = nil
         liveWavRel = nil
+        if let firstError {
+            throw firstError
+        }
     }
 
-    private func adoptLargerLiveFile(_ rel: String, destRelative: String) {
+    private func adoptLargerLiveFile(_ rel: String, destRelative: String) throws {
         let live = sessionURL.appendingPathComponent(rel)
         let dest = sessionURL.appendingPathComponent(destRelative)
         guard ExportRel.isContainedRegularFile(live, sessionRoot: sessionURL) else { return }
         let liveBytes = ExportRel.regularFileByteCount(live, sessionRoot: sessionURL) ?? 0
         let destBytes = ExportRel.regularFileByteCount(dest, sessionRoot: sessionURL) ?? 0
         if liveBytes > destBytes {
-            try? ExportRel.moveIntoSession(from: live, relative: destRelative, sessionURL: sessionURL)
+            try ExportRel.moveIntoSession(from: live, relative: destRelative, sessionURL: sessionURL)
         } else {
             try? ExportRel.removeItemIfRegularFile(live, sessionRoot: sessionURL)
         }

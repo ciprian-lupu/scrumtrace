@@ -158,27 +158,19 @@ final class RecordingHUDWindow: NSPanel {
     }
 
     @objc private func shotClicked() {
-        Task { @MainActor in
-            self.controller.openShot()
-        }
+        controller.openShot()
     }
 
     @objc private func pinClicked() {
-        Task { @MainActor in
-            self.controller.pin()
-        }
+        controller.pin()
     }
 
     @objc private func pauseClicked() {
-        Task { @MainActor in
-            self.controller.togglePause()
-        }
+        controller.togglePause()
     }
 
     @objc private func stopClicked() {
-        Task { @MainActor in
-            self.controller.stopRecording()
-        }
+        controller.stopRecording()
     }
 
     override func makeKeyAndOrderFront(_ sender: Any?) {
