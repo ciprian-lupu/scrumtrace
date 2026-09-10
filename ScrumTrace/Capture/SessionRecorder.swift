@@ -8,15 +8,18 @@ import ScreenCaptureKit
 
 enum SessionRecorderError: LocalizedError {
     case permissionDenied
+    case relaunchRequired
     case microphoneDenied
     case writerFailed(String)
 
     var errorDescription: String? {
         switch self {
         case .permissionDenied:
-            return "Screen Recording is off for this ScrumTrace binary — that is not the Accessibility list. Open System Settings → Privacy & Security → Screen Recording, enable the ScrumTrace you just launched, quit the app completely, reopen that same binary, then press Record."
+            return CaptureReadiness.screenDenied.userMessage
+        case .relaunchRequired:
+            return CaptureReadiness.screenGrantedNeedsRelaunch.userMessage
         case .microphoneDenied:
-            return "Microphone is off for this ScrumTrace binary. Open System Settings → Privacy & Security → Microphone, enable ScrumTrace, quit and reopen this same app, then press Record."
+            return CaptureReadiness.microphoneDenied.userMessage
         case .writerFailed(let message):
             return message
         }
@@ -101,10 +104,14 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
     }
 
     func start(shouldPauseCapture: @escaping @Sendable () -> Bool = { false }) async throws {
-        // SCShareableContent re-prompts Screen Recording whenever preflight is
-        // false. Ad-hoc Debug rebuilds look like a new TCC client, which the
-        // user sees as a permission loop. Never call it until TCC already says yes.
-        if !CGPreflightScreenCaptureAccess() {
+        // Never call SCShareableContent unless Screen Recording was attached
+        // at process start. A Settings toggle that flipped mid-process, or a
+        // grant for a different Debug copy, makes this API show the system
+        // sheet again on every Record.
+        if !CapturePermissions.screenGrantedAtLaunch {
+            if CapturePermissions.currentScreenGranted() {
+                throw SessionRecorderError.relaunchRequired
+            }
             throw SessionRecorderError.permissionDenied
         }
         try await requestPermission()

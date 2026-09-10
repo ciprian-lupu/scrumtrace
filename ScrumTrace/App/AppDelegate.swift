@@ -22,6 +22,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var settingsWindow: NSWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        CapturePermissions.snapshotLaunchState()
         NSApp.setActivationPolicy(.accessory)
         let hud = RecordingHUDWindow(controller: controller)
         self.hud = hud
@@ -41,7 +42,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let hosting = NSHostingController(rootView: SettingsView(settings: controller.settings))
             let window = NSWindow(contentViewController: hosting)
             window.title = "ScrumTrace Settings"
-            window.setContentSize(NSSize(width: 540, height: 860))
+            window.setContentSize(NSSize(width: 540, height: 980))
             window.styleMask = [.titled, .closable, .miniaturizable]
             settingsWindow = window
         }

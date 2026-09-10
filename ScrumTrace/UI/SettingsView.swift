@@ -75,19 +75,31 @@ struct SettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            Section("Capture") {
-                Text("Shot  ⌥⌘S    Pin  ⌥⌘Space    Pause  ⌥⌘P")
-                    .font(.system(.body, design: .monospaced))
-                Text("HUD shows t_media. Pause discards screen frames, system audio, microphone PCM, metadata, Shot, and Hold-to-Talk. After Stop, WhisperKit transcribes the room mic and the movie’s system-audio track, then merges on t_media.")
+            Section("This process") {
+                LabeledContent("Screen Recording", value: screenRecordingLabel)
+                LabeledContent("Microphone", value: CapturePermissions.microphoneStatus())
+                LabeledContent("App path", value: CapturePermissions.runningAppPath())
+                Text(CapturePermissions.readiness().userMessage)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
                 Button("Open Screen Recording settings") {
                     SystemPrivacySettings.openScreenRecording()
                 }
                 Button("Open Microphone settings") {
                     SystemPrivacySettings.openMicrophone()
                 }
-                Text("Record needs those two toggles for the binary you just opened. A Debug rebuild is a new TCC client — enable the ScrumTrace that is running now, then quit and reopen that same app. DerivedData copies do not inherit the toggle. Prefer ~/Applications/ScrumTrace.app after mac_gate01.sh.")
+                Button("Relaunch ScrumTrace") {
+                    CapturePermissions.relaunchRunningApp()
+                }
+                Text("macOS lists every Debug copy as “ScrumTrace”. A toggle that is already on is often a different binary. After mac_gate01.sh, open ~/Applications/ScrumTrace.app only. Enabling Screen Recording never applies until this app quits.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Section("Capture") {
+                Text("Shot  ⌥⌘S    Pin  ⌥⌘Space    Pause  ⌥⌘P")
+                    .font(.system(.body, design: .monospaced))
+                Text("HUD shows t_media. Pause discards screen frames, system audio, microphone PCM, metadata, Shot, and Hold-to-Talk. After Stop, WhisperKit transcribes the room mic and the movie’s system-audio track, then merges on t_media.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Button("Enable browser URL metadata (Accessibility)") {
@@ -99,11 +111,21 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 520, height: 860)
+        .frame(width: 520, height: 980)
         .padding()
     }
 
     private var capabilities: AIProviderConfiguration {
         settings.providerConfiguration()
+    }
+
+    private var screenRecordingLabel: String {
+        if CapturePermissions.screenGrantedAtLaunch {
+            return "allowed for this process"
+        }
+        if CapturePermissions.currentScreenGranted() {
+            return "on — relaunch required"
+        }
+        return "not this process"
     }
 }

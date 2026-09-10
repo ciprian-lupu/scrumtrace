@@ -57,20 +57,23 @@ final class MenuBarController: NSObject {
         }
         // Do not include statusLine — rebuilding the menu closes it. Update the
         // disabled status item in place while processing.
+        let readiness = CapturePermissions.readiness()
         let signature = [
             controller.captureState == .paused ? "paused" : "live",
             controller.isRecording ? "1" : "0",
             controller.lastSessionId ?? "",
             controller.isBusy ? "1" : "0",
             controller.captureState.rawValue,
-            controller.privacy.isCurrentlyTripped ? "priv" : "ok"
+            controller.privacy.isCurrentlyTripped ? "priv" : "ok",
+            readiness.menuLabel,
+            controller.lastError == nil ? "ok" : "err"
         ].joined(separator: "|")
         if signature != lastMenuSignature {
             lastMenuSignature = signature
             rebuild()
         }
         statusMenuItem?.title = controller.statusLine
-        statusMenuItem?.isHidden = !controller.isBusy
+        statusMenuItem?.isHidden = false
     }
 
     private func rebuild() {
@@ -93,14 +96,23 @@ final class MenuBarController: NSObject {
             menu.addItem(actionItem("Stop & process", #selector(stop)))
         } else {
             let start = actionItem("Start recording", #selector(start))
-            start.isEnabled = !controller.isBusy
+            start.isEnabled = !controller.isBusy && CapturePermissions.readiness().allowsStart
             menu.addItem(start)
         }
         let status = NSMenuItem(title: controller.statusLine, action: nil, keyEquivalent: "")
         status.isEnabled = false
-        status.isHidden = !controller.isBusy
+        status.isHidden = false
         menu.addItem(status)
         statusMenuItem = status
+        let readiness = CapturePermissions.readiness()
+        let perm = NSMenuItem(title: readiness.menuLabel, action: nil, keyEquivalent: "")
+        perm.isEnabled = false
+        menu.addItem(perm)
+        if !readiness.allowsStart {
+            let relaunch = actionItem("Relaunch ScrumTrace", #selector(relaunch))
+            relaunch.isEnabled = !controller.isRecording && !controller.isBusy
+            menu.addItem(relaunch)
+        }
         menu.addItem(.separator())
         let retry = actionItem("Retry analysis", #selector(retry))
         retry.isEnabled = controller.lastSessionId != nil && !controller.isBusy && !controller.isRecording
@@ -169,6 +181,9 @@ final class MenuBarController: NSObject {
     @objc private func settings() {
         NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+    @objc private func relaunch() {
+        controller.relaunchForPermissions()
     }
     @objc private func quit() {
         // applicationWillTerminate freezes writers. Do not start the

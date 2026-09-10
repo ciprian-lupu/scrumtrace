@@ -2,7 +2,6 @@ import Combine
 import Foundation
 #if os(macOS)
 import AppKit
-import AVFoundation
 import CoreGraphics
 #endif
 
@@ -83,29 +82,14 @@ final class SessionController: ObservableObject {
     func startRecording() {
         guard !isRecording, !isBusy, !startInFlight else { return }
         #if os(macOS)
-        // Do not call SCShareableContent until TCC already says yes. That API
-        // re-prompts Screen Recording on every Start for ad-hoc Debug builds
-        // and looks like a permission loop.
-        if !CGPreflightScreenCaptureAccess() {
-            let message = SessionRecorderError.permissionDenied.errorDescription
-                ?? "Screen Recording permission is required."
-            lastError = message
-            statusLine = message
-            Self.openScreenCaptureSettings()
+        // Do not open System Settings or call ScreenCaptureKit here. Those
+        // both look like "the app is asking again" when the user already
+        // flipped a ScrumTrace row that belongs to a different binary.
+        let readiness = CapturePermissions.readiness()
+        if !readiness.allowsStart {
+            lastError = readiness.userMessage
+            statusLine = readiness.menuLabel
             return
-        }
-        switch AVCaptureDevice.authorizationStatus(for: .audio) {
-        case .denied, .restricted:
-            let message = SessionRecorderError.microphoneDenied.errorDescription
-                ?? "Microphone permission is required."
-            lastError = message
-            statusLine = message
-            Self.openMicrophoneSettings()
-            return
-        case .authorized, .notDetermined:
-            break
-        @unknown default:
-            break
         }
         #endif
         startInFlight = true
@@ -931,6 +915,10 @@ final class SessionController: ObservableObject {
 
     static func openMicrophoneSettings() {
         SystemPrivacySettings.openMicrophone()
+    }
+
+    func relaunchForPermissions() {
+        CapturePermissions.relaunchRunningApp()
     }
     #endif
 

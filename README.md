@@ -36,9 +36,9 @@ bash scripts/mac_gate01.sh
 open ~/Applications/ScrumTrace.app
 ```
 
-The script copies the Debug build to `~/Applications/ScrumTrace.app` and ad-hoc signs it with `com.str8minds.ScrumTrace` so Screen Recording and Microphone TCC can stick across rebuilds. Open **that** copy, not the DerivedData path.
+The script copies the Debug build to `~/Applications/ScrumTrace.app` and signs it with a local **ScrumTrace Debug** identity (created once in your login keychain). Ad-hoc Xcode builds look like a new app to macOS on every rebuild, which is why Screen Recording and Microphone keep asking after you already flipped the toggle.
 
-Grant **Privacy & Security → Screen Recording** and **Microphone** for the running binary, then quit and reopen once. Accessibility is optional (window titles / browser URLs) and is not required to Record.
+Open **that** copy only. In System Settings, remove extra ScrumTrace rows, enable Screen Recording and Microphone for this app, then **Relaunch** from the menu. A grant never applies to the process that was already running. Accessibility is optional.
 
 Xcode resolves WhisperKit **0.11.0** on first open (`Package.resolved` is not checked in). First WhisperKit launch downloads `large-v3-turbo`.
 

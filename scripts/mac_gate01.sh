@@ -50,20 +50,36 @@ fi
 defaults read "$APP/Contents/Info.plist" LSUIElement || true
 codesign -d --entitlements - "$APP" 2>/dev/null | grep -E 'app-sandbox|audio-input|microphone' || true
 
-# DerivedData paths change and ad-hoc Debug signing looks like a new TCC
-# client on every rebuild. Copy to a stable path and re-sign with the
-# bundle id so Screen Recording / Microphone toggles can survive rebuilds.
+# Ad-hoc (`-`) signing keys TCC to the binary hash. Re-sign the build and
+# the stable copy with one local identity so Screen Recording / Microphone
+# survive the next rebuild.
+IDENTITY=""
+if IDENTITY="$(bash "$(dirname "$0")/ensure_debug_signing_identity.sh")"; then
+  echo "sign_identity=$IDENTITY"
+else
+  echo "warning: could not create '$IDENTITY' signing identity; TCC will reset on every rebuild" >&2
+  IDENTITY=""
+fi
+
+sign_app() {
+  local target="$1"
+  if [[ -n "$IDENTITY" ]]; then
+    codesign --force --deep --sign "$IDENTITY" --identifier com.str8minds.ScrumTrace "$target"
+  else
+    codesign --force --deep --sign - --identifier com.str8minds.ScrumTrace "$target"
+  fi
+}
+
+sign_app "$APP"
+
 STABLE="${SCRUMTRACE_STABLE:-$HOME/Applications/ScrumTrace.app}"
 mkdir -p "$(dirname "$STABLE")"
 rm -rf "$STABLE"
 ditto "$APP" "$STABLE"
-if codesign --force --deep --sign - --identifier com.str8minds.ScrumTrace "$STABLE"; then
-  echo "stable_app=$STABLE"
-else
-  echo "warning: codesign of $STABLE failed; Screen Recording TCC may reset on the next rebuild" >&2
-  echo "stable_app=$STABLE"
-fi
-echo "Open this copy (quit any other ScrumTrace first):"
+sign_app "$STABLE"
+echo "stable_app=$STABLE"
+codesign -dv --verbose=2 "$STABLE" 2>&1 | grep -E 'Authority|Identifier|Signature' || true
+echo "Force-quit every other ScrumTrace, then open this copy only:"
 echo "  open \"$STABLE\""
 
 echo "sessions_root=$HOME/Movies/ScrumTrace/sessions"
