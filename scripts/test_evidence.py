@@ -55,6 +55,7 @@ def test_quote_window() -> None:
     assert "exportRelativeStillPaths" in overlap
     assert "exportRelativeHandoffPaths" in overlap
     assert "mediaWorkToExportClip" in overlap
+    assert "shotStillStem" in overlap
     assert "exportClipPath ?? slice.clipPath" not in overlap
     controller = (ROOT / "ScrumTrace" / "Processing" / "SessionController.swift").read_text()
     capture = controller.split("private func captureShot")[1].split("private func finishShot")[0]

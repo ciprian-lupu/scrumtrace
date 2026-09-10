@@ -234,13 +234,31 @@ enum EvidenceValidator {
         return out
     }
 
+    /// Shot JPEGs, PNGs, and `001.annotated.jpg` collapse to the same stem so
+    /// mergeUncoveredReview does not emit a second D7 row for the annotated twin.
+    static func shotStillStem(_ path: String) -> String? {
+        guard path.lowercased().contains("shots/") else { return nil }
+        var stem = URL(fileURLWithPath: path).deletingPathExtension().lastPathComponent
+        let suffix = ".annotated"
+        if stem.lowercased().hasSuffix(suffix) {
+            stem = String(stem.dropLast(suffix.count))
+        }
+        return stem.isEmpty ? nil : stem
+    }
+
     private static func shotOwning(_ path: String, in shots: [ShotRecord]) -> ShotRecord? {
         shots.first { shot in
             let paths = shot.stillCandidates
                 + [shot.rawPath]
                 + [shot.annotatedPath, shot.exportPath].compactMap { $0 }
-            return paths.contains { candidate in
+            if paths.contains { candidate in
                 !candidate.isEmpty && (candidate == path || isSameSessionPath(path, candidate))
+            } {
+                return true
+            }
+            guard let want = shotStillStem(path) else { return false }
+            return paths.contains { candidate in
+                shotStillStem(candidate) == want
             }
         }
     }

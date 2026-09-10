@@ -1031,10 +1031,12 @@ final class SessionProcessor: @unchecked Sendable {
         manifest.tasks = rankedTasks(kept + extra)
     }
 
+    /// `001.annotated.jpg` and `001.png` share a stem so the annotated twin
+    /// is not a second D7 review row.
     private func shotStems(_ paths: [String]) -> Set<String> {
         Set(paths.compactMap { path in
             guard path.lowercased().contains("shots/") else { return nil }
-            return URL(fileURLWithPath: path).deletingPathExtension().lastPathComponent
+            return EvidenceValidator.shotStillStem(path)
         })
     }
 

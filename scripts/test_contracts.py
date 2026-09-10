@@ -705,6 +705,7 @@ def test_retry_failed_slices_and_pins() -> None:
     assert "testRemoveOwnedSessionFolderDoesNotFollowSessionSymlink" in contracts
     assert "testApplyExportEvidenceDemotesInvertedAndOutOfSliceQuotes" in contracts
     assert "testApplyExportEvidenceDropsOtherAssociatedShotFromConfirmed" in contracts
+    assert "testShotStillStemCollapsesAnnotatedTwin" in contracts
     assert "testPackMediaHandoffDropsOmittedExportFile" in contracts
     assert "testCanConfirmRejectsFrameFromAnotherSlice" in contracts
     assert "testCanConfirmRejectsStillOutsideClampedWindow" in contracts
@@ -2023,6 +2024,8 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "shotStems" in merge_fn
     assert "covered.contains" in merge_fn
     assert "shots/" in merge_fn
+    assert "shotStillStem" in merge_fn
+    assert ".annotated" in merge_fn
     eval_slice = processor.split("private func evaluateSlice")[1].split("private func tasks(")[0]
     assert eval_slice.count("abortedForAuth") >= 3
     assert eval_slice.rfind("abortedForAuth") < eval_slice.find("provider.evaluate")

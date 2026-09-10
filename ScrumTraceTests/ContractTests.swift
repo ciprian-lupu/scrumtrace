@@ -1971,6 +1971,65 @@ final class ContractTests: XCTestCase {
         XCTAssertTrue(applied[1].evidenceMedia.isEmpty)
     }
 
+    func testShotStillStemCollapsesAnnotatedTwin() {
+        XCTAssertEqual(EvidenceValidator.shotStillStem("shots/001.annotated.jpg"), "001")
+        XCTAssertEqual(EvidenceValidator.shotStillStem("archive/shots/001.annotated.png"), "001")
+        XCTAssertEqual(EvidenceValidator.shotStillStem("export/shots/001.jpg"), "001")
+        XCTAssertEqual(EvidenceValidator.shotStillStem("archive/shots/001.png"), "001")
+        XCTAssertEqual(EvidenceValidator.shotStillStem("shots/002.ANNOTATED.JPEG"), "002")
+        XCTAssertNil(EvidenceValidator.shotStillStem("export/media/task-01/clip.mp4"))
+        XCTAssertNil(EvidenceValidator.shotStillStem("archive/media-work/task-01/clip.mp4"))
+        XCTAssertNil(EvidenceValidator.shotStillStem("media/task-01/shot-1.jpg"))
+        let slice = SliceRecord(
+            sliceId: "slice-01",
+            startMedia: 0,
+            endMedia: 40,
+            trigger: .shot,
+            associatedShotId: "shot-001",
+            clipPath: nil,
+            stills: ["archive/shots/001.annotated.png", "archive/shots/002.annotated.png"],
+            analysisStatus: .success,
+            score: 1
+        )
+        let associated = ShotRecord(
+            id: "shot-001",
+            tMedia: 12,
+            rawPath: "archive/shots/001.png",
+            annotatedPath: "archive/shots/001.annotated.png",
+            note: "associated",
+            source: .typed
+        )
+        let merged = ShotRecord(
+            id: "shot-002",
+            tMedia: 28,
+            rawPath: "archive/shots/002.png",
+            annotatedPath: "archive/shots/002.annotated.png",
+            note: "merged in window",
+            source: .typed
+        )
+        XCTAssertFalse(
+            EvidenceValidator.ownedByOtherAssociatedShot(
+                "shots/001.annotated.jpg",
+                slice: slice,
+                shots: [associated, merged]
+            )
+        )
+        XCTAssertTrue(
+            EvidenceValidator.ownedByOtherAssociatedShot(
+                "shots/002.annotated.jpg",
+                slice: slice,
+                shots: [associated, merged]
+            )
+        )
+        XCTAssertTrue(
+            EvidenceValidator.ownedByOtherAssociatedShot(
+                "export/shots/002.jpg",
+                slice: slice,
+                shots: [associated, merged]
+            )
+        )
+    }
+
     func testApplyExportEvidenceDropsOtherAssociatedShotFromConfirmed() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("st-export-other-\(UUID().uuidString)")
         let shotsDir = root.appendingPathComponent("export/shots")
