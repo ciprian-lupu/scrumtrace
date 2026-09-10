@@ -1080,9 +1080,19 @@ final class SessionProcessor: @unchecked Sendable {
                                 guard shot.tMedia >= slice.startMedia && shot.tMedia <= slice.endMedia else {
                                     return false
                                 }
-                                return shot.stillCandidates.contains(still)
+                                if shot.stillCandidates.contains(still)
                                     || shot.rawPath == still
                                     || shot.annotatedPath == still
+                                    || shot.exportPath == still {
+                                    return true
+                                }
+                                guard let want = EvidenceValidator.shotStillStem(still) else {
+                                    return false
+                                }
+                                let paths = shot.stillCandidates
+                                    + [shot.rawPath]
+                                    + [shot.annotatedPath, shot.exportPath].compactMap { $0 }
+                                return paths.contains { EvidenceValidator.shotStillStem($0) == want }
                             }
                             + [slice?.exportClipPath, slice?.clipPath].compactMap { $0 }.filter { _ in
                                 guard let slice else { return false }
@@ -1175,7 +1185,17 @@ final class SessionProcessor: @unchecked Sendable {
         }
         return manifest.slices.first { slice in
             slice.stills.contains { still in
-                shot.stillCandidates.contains(still) || shot.rawPath == still || shot.annotatedPath == still
+                if shot.stillCandidates.contains(still) || shot.rawPath == still || shot.annotatedPath == still {
+                    return true
+                }
+                if let exportPath = shot.exportPath, exportPath == still {
+                    return true
+                }
+                guard let want = EvidenceValidator.shotStillStem(still) else { return false }
+                let paths = shot.stillCandidates
+                    + [shot.rawPath]
+                    + [shot.annotatedPath, shot.exportPath].compactMap { $0 }
+                return paths.contains { EvidenceValidator.shotStillStem($0) == want }
             }
         }
     }

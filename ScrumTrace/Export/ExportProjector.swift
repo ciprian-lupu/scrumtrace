@@ -147,6 +147,14 @@ struct ExportProjector {
                         return exportRoot
                     }
                 }
+                // D7: `001.annotated.png` and `001.png` are one Shot. If JPEG
+                // transcode only placed the twin, keep that file as evidence.
+                if let stem = EvidenceValidator.shotStillStem(path) {
+                    let twins = ["shots/\(stem).annotated.jpg", "shots/\(stem).jpg"]
+                    if let hit = twins.first(where: { Set(placed.values).contains($0) }) {
+                        return hit
+                    }
+                }
                 omitted.append(OmittedAsset(path: path, reason: "Not present under export/ after projection"))
                 return nil
             }

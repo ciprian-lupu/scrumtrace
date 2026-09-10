@@ -342,6 +342,8 @@ def test_zipper_never_deletes_archive() -> None:
     assert "Set(placed.values).contains" in evidence_map
     assert "existingSessionFile(session, sessionURL: sessionURL)" not in evidence_map
     assert "rewriteEvidence(path)" in evidence_map
+    assert "shotStillStem" in evidence_map
+    assert ".annotated.jpg" in evidence_map
     reset = projector.split("func resetExportTree")[1].split("func writeProjectionManifest")[0]
     assert "wipeContainedDirectory" in reset
     assert "removeItem(at: export)" not in reset
@@ -1679,6 +1681,8 @@ def test_phase45_clip_consent_and_budget() -> None:
     match_fn = processor.split("func sliceMatching")[1].split("func refreshShotsFromDisk")[0]
     assert "associatedShotId == shot.id" in match_fn
     assert "tMedia >= slice.startMedia" not in match_fn
+    assert "shotStillStem" in match_fn
+    assert "stillCandidates" in match_fn
     append = processor.split("func appendImage")[1].split("if !configuration.acceptsImages")[0]
     assert "existingSessionFile" in append
     assert "fileExists(atPath: url.path)" not in append
