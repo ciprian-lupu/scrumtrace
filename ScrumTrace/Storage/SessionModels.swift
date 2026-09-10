@@ -589,17 +589,43 @@ enum ExportRel {
         return (try? parent.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true
     }
 
-    /// Deletes `file` only when it is a symbolic link (the link inode, not the
-    /// target) or a regular file still inside `sessionRoot`. Used instead of
-    /// `replaceItemAt` / unguarded `removeItem` so a planted dest cannot steer
-    /// a write into `archive/` or a sibling tree.
+    /// Unlinks a last-component symlink (the link inode) or a regular file.
+    /// `unlinkat` does not follow the dest and does not recurse if the name
+    /// was replaced with a directory (C2).
     static func removeItemIfRegularFile(_ file: URL, sessionRoot: URL) throws {
-        if (try? file.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
-            try FileManager.default.removeItem(at: file)
-            return
+        guard isUsableSessionRoot(sessionRoot) else { return }
+        guard let rel = unfollowedRelative(file, sessionRoot: sessionRoot) else { return }
+        guard let parts = normalizedComponents(rel), let name = parts.last, !name.isEmpty else { return }
+        if name.contains("/") || name.contains("\0") { return }
+        let parentParts = Array(parts.dropLast())
+        if !parentParts.isEmpty {
+            let parentRel = parentParts.joined(separator: "/")
+            if containsSymlinkComponent(parentRel, sessionURL: sessionRoot) { return }
         }
-        guard isContainedRegularFile(file, sessionRoot: sessionRoot) else { return }
-        try FileManager.default.removeItem(at: file)
+        guard let dirFd = openatDirectory(parts: parentParts, root: sessionRoot) else { return }
+        defer { Darwin.close(dirFd) }
+        let probe = name.withCString { ptr in
+            Darwin.openat(dirFd, ptr, O_RDONLY | O_CLOEXEC | O_NOFOLLOW)
+        }
+        if probe >= 0 {
+            defer { Darwin.close(probe) }
+            var info = stat()
+            guard Darwin.fstat(probe, &info) == 0, (info.st_mode & S_IFMT) == S_IFREG else { return }
+        } else {
+            // Trailing symlink: `O_NOFOLLOW` fails with ELOOP. Unlink the link.
+            guard Darwin.errno == ELOOP else { return }
+        }
+        var rc: Int32 = -1
+        repeat {
+            rc = name.withCString { ptr in
+                scrumtraceUnlinkat(dirFd, ptr, 0)
+            }
+        } while rc != 0 && Darwin.errno == EINTR
+        if rc != 0 {
+            let err = Darwin.errno
+            if err == ENOENT || err == EISDIR { return }
+            throw SessionVaultError.writeFailed(rel)
+        }
     }
 
     /// Read bytes without following a dest or intermediate symlink. `Data(contentsOf:)`

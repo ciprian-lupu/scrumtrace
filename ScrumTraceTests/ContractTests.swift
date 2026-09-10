@@ -215,6 +215,20 @@ final class ContractTests: XCTestCase {
         try? FileManager.default.removeItem(at: root)
     }
 
+    func testRemoveItemIfRegularFileDoesNotRecurseIntoDirectory() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("st-rm-dir-\(UUID().uuidString)")
+        let export = root.appendingPathComponent("export")
+        try FileManager.default.createDirectory(at: export, withIntermediateDirectories: true)
+        let planted = export.appendingPathComponent("session-pack.zip")
+        try FileManager.default.createDirectory(at: planted, withIntermediateDirectories: true)
+        let inside = planted.appendingPathComponent("inside.bin")
+        try Data("KEEP".utf8).write(to: inside)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try ExportRel.removeItemIfRegularFile(planted, sessionRoot: root)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: planted.path))
+        XCTAssertEqual(try String(contentsOf: inside, encoding: .utf8), "KEEP")
+    }
+
     func testVaultWriteReplacesManifestSymlinkWithoutFollowing() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("st-vault-man-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: root) }

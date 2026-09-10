@@ -540,6 +540,7 @@ def test_retry_failed_slices_and_pins() -> None:
     assert "testPruneAbandonedStartsDeletesEmptyIdleSession" in contracts
     assert "testPruneAbandonedStartsIgnoresPlantedShotsDirectorySymlink" in contracts
     assert "testMakePrivateTemporaryURLUsesMkdirNotSharedTempFile" in contracts
+    assert "testRemoveItemIfRegularFileDoesNotRecurseIntoDirectory" in contracts
     models = (ROOT / "ScrumTrace" / "Storage" / "SessionModels.swift").read_text()
     existing_media = models.split("func withExistingMedia")[1].split("enum CodingKeys")[0]
     assert "existingSessionFile" in existing_media
@@ -1551,6 +1552,15 @@ def test_write_contained_data_refuses_directory_symlinks() -> None:
     assert "temporaryDirectory" in write_fn
     assert "scrumtrace-write" in write_fn
     assert "static func removeItemIfRegularFile" in models
+    rm_fn = models.split("static func removeItemIfRegularFile")[1].split("static func readContainedData(relative:")[0]
+    assert "scrumtraceUnlinkat" in rm_fn
+    assert "openatDirectory" in rm_fn
+    assert "O_NOFOLLOW" in rm_fn
+    assert "ELOOP" in rm_fn
+    assert "EINTR" in rm_fn
+    assert "S_IFREG" in rm_fn
+    assert "FileManager.default.removeItem(at: file)" not in rm_fn
+    assert "isContainedRegularFile(file, sessionRoot: sessionRoot)" not in rm_fn
     assert "static func makePrivateTemporaryURL" in models
     assert "static func removePrivateTemporaryURL" in models
     private_temp = models.split("static func makePrivateTemporaryURL")[1].split("static func removePrivateTemporaryURL")[0]
