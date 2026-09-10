@@ -824,6 +824,27 @@ enum ExportRel {
         return false
     }
 
+    /// Pack omit reserved set: `archive/media-work/…/clip.mp4` and
+    /// `media/…/clip.mp4` name the same export MP4 as `export/media/…/clip.mp4`.
+    static func mediaWorkToExportClip(_ path: String) -> String? {
+        guard let parts = normalizedComponents(path), parts.last == "clip.mp4" else {
+            return nil
+        }
+        if parts[0] == "export", parts.count >= 3, parts[1] == "media" {
+            let mapped = parts.joined(separator: "/")
+            return isAllowedClipDest(mapped) ? mapped : nil
+        }
+        if parts[0] == "media", parts.count >= 2 {
+            let mapped = (["export"] + parts).joined(separator: "/")
+            return isAllowedClipDest(mapped) ? mapped : nil
+        }
+        if let idx = parts.firstIndex(of: "media-work"), idx + 1 < parts.count {
+            let mapped = (["export", "media"] + Array(parts[(idx + 1)...])).joined(separator: "/")
+            return isAllowedClipDest(mapped) ? mapped : nil
+        }
+        return nil
+    }
+
     static func parentIsSymbolicLink(_ file: URL) -> Bool {
         let parent = file.deletingLastPathComponent()
         return (try? parent.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true

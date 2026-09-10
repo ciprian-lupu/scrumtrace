@@ -168,7 +168,7 @@ enum EvidenceValidator {
     }
 
     /// A stale `export_clip_path` must not hide the archive clip after omit (C5).
-    private static func sliceClipPaths(_ slice: SliceRecord) -> [String] {
+    static func sliceClipPaths(_ slice: SliceRecord) -> [String] {
         var paths: [String] = []
         if let exported = slice.exportClipPath, !exported.isEmpty {
             paths.append(exported)
@@ -177,6 +177,19 @@ enum EvidenceValidator {
             paths.append(clip)
         }
         return paths
+    }
+
+    /// C3: leftover omit matches files under `export/`. A stale
+    /// `export_clip_path` must not hide `clip_path`'s mapped export MP4.
+    static func exportRelativeClipPaths(for slice: SliceRecord) -> [String] {
+        var seen = Set<String>()
+        var out: [String] = []
+        for path in sliceClipPaths(slice) {
+            if let mapped = ExportRel.mediaWorkToExportClip(path), seen.insert(mapped).inserted {
+                out.append(mapped)
+            }
+        }
+        return out
     }
 
     private static func shotOwning(_ path: String, in shots: [ShotRecord]) -> ShotRecord? {

@@ -380,6 +380,9 @@ def test_zipper_never_deletes_archive() -> None:
     assert "isContainedRegularFile" in omit_fn
     assert "fileExists(atPath: sessionURL.appendingPathComponent($0).path)" not in omit_fn
     assert "regularFileByteCount" in omit_fn
+    assert "exportRelativeClipPaths" in omit_fn
+    assert "exportClipPath ?? slice.clipPath" not in omit_fn
+    assert "exportClipPath ?? $0.clipPath" not in omit_fn
 
 
 def test_clip_exporter_macos14() -> None:
@@ -1795,6 +1798,9 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "containedExportMember" in folder_fn
     strip_omit = zipper.split("static func stripOmitted")[1].split("static func exportMediaSessionPaths")[0]
     assert "includeFullTranscriptInZip = false" in strip_omit
+    assert "exportRelativeClipPaths" in strip_omit
+    assert "mediaWorkToExportClip" in strip_omit
+    assert "exportClipPath ?? next.clipPath" not in strip_omit
     zip_fn = zipper.split("func zip(")[1].split("func writeZip")[0]
     assert zip_fn.count("if size > MediaBudget.maxZipBytes") == 1
     assert "discardPackIfOverBudget" in zip_fn

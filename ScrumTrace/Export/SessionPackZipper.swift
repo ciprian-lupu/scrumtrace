@@ -662,9 +662,8 @@ enum PackBudget {
         var reservedClips: [String] = []
         for task in manifest.tasks where kept.contains(task.status) {
             guard let slice = manifest.slices.first(where: { $0.sliceId == task.sourceSliceId }) else { continue }
-            if let clip = slice.exportClipPath ?? slice.clipPath {
-                let path = ExportRel.sessionPath(clip)
-                if ExportRel.isUnderExport(path) { reservedClips.append(path) }
+            for clip in EvidenceValidator.exportRelativeClipPaths(for: slice) where ExportRel.isUnderExport(clip) {
+                reservedClips.append(clip)
             }
         }
         let reservedClipSet = Set(reservedClips)
@@ -673,8 +672,7 @@ enum PackBudget {
         let keyword = manifest.slices
             .filter { $0.trigger == .keyword }
             .sorted { $0.score < $1.score }
-            .compactMap { $0.exportClipPath ?? $0.clipPath }
-            .map(ExportRel.sessionPath)
+            .flatMap { EvidenceValidator.exportRelativeClipPaths(for: $0) }
             .filter { ExportRel.isUnderExport($0) && !reservedClipSet.contains($0) }
 
         let evidenceShotsNewestFirst = manifest.shots
@@ -695,8 +693,7 @@ enum PackBudget {
 
         let extraClips = manifest.slices
             .filter { $0.trigger != .keyword }
-            .compactMap { $0.exportClipPath ?? $0.clipPath }
-            .map(ExportRel.sessionPath)
+            .flatMap { EvidenceValidator.exportRelativeClipPaths(for: $0) }
             .filter { ExportRel.isUnderExport($0) && !evidence.contains($0) && !reservedClipSet.contains($0) }
 
         let listed = Set(keyword + extraStills + extraClips + extraShots + reservedClips + evidenceShotsNewestFirst)
@@ -723,11 +720,15 @@ enum PackBudget {
         var copy = manifest
         copy.slices = copy.slices.map { slice in
             var next = slice
-            if let clip = next.exportClipPath ?? next.clipPath,
-               dropped.contains(ExportRel.toExportRoot(clip)) {
+            let exportClips = EvidenceValidator.exportRelativeClipPaths(for: slice)
+            if exportClips.contains(where: { dropped.contains(ExportRel.toExportRoot($0)) }) {
                 next.exportClipPath = nil
-                if let clipPath = next.clipPath, dropped.contains(ExportRel.toExportRoot(clipPath)) {
-                    next.clipPath = nil
+                if let clipPath = next.clipPath {
+                    let mapped = ExportRel.mediaWorkToExportClip(clipPath)
+                    if dropped.contains(ExportRel.toExportRoot(clipPath))
+                        || (mapped.map { dropped.contains(ExportRel.toExportRoot($0)) } ?? false) {
+                        next.clipPath = nil
+                    }
                 }
             }
             next.stills = next.stills.filter { !dropped.contains(ExportRel.toExportRoot($0)) }
