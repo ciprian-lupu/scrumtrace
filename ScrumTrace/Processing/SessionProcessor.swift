@@ -368,7 +368,12 @@ final class SessionProcessor: @unchecked Sendable {
         var slice = slice
         let linked = shotsLinked(to: slice, in: manifest)
         let shotNote = linked.map(\.note).filter { !$0.isEmpty }.joined(separator: "\n")
-        if let aborted = abortedForAuth(slice: slice, shots: linked, product: manifest.productContext) {
+        if let aborted = abortedForAuth(
+            slice: slice,
+            shots: linked,
+            product: manifest.productContext,
+            sessionURL: sessionURL
+        ) {
             return aborted
         }
         var excerpt = TranscriptQuery.excerpt(from: transcript, start: slice.startMedia, end: slice.endMedia)
@@ -422,9 +427,20 @@ final class SessionProcessor: @unchecked Sendable {
             && !hasStill && excerpt.isEmpty && shotNote.isEmpty {
             slice.analysisStatus = .skipped
             let skipped = AIProviderError.skippedNoSendableMedia
-            return (slice, reviewTasks(shots: linked, slice: slice, error: skipped, product: manifest.productContext))
+            return (slice, reviewTasks(
+                shots: linked,
+                slice: slice,
+                error: skipped,
+                product: manifest.productContext,
+                sessionURL: sessionURL
+            ))
         }
-        if let aborted = abortedForAuth(slice: slice, shots: linked, product: manifest.productContext) {
+        if let aborted = abortedForAuth(
+            slice: slice,
+            shots: linked,
+            product: manifest.productContext,
+            sessionURL: sessionURL
+        ) {
             return aborted
         }
         let request = SliceEvaluationRequest(
@@ -441,7 +457,12 @@ final class SessionProcessor: @unchecked Sendable {
             clipURL: clipURL,
             sessionURL: sessionURL
         )
-        if let aborted = abortedForAuth(slice: slice, shots: linked, product: manifest.productContext) {
+        if let aborted = abortedForAuth(
+            slice: slice,
+            shots: linked,
+            product: manifest.productContext,
+            sessionURL: sessionURL
+        ) {
             return aborted
         }
         do {
@@ -462,7 +483,13 @@ final class SessionProcessor: @unchecked Sendable {
                 markEvalAuthFailed()
             }
             slice.analysisStatus = .offlineFailed
-            return (slice, reviewTasks(shots: linked, slice: slice, error: error, product: manifest.productContext))
+            return (slice, reviewTasks(
+                shots: linked,
+                slice: slice,
+                error: error,
+                product: manifest.productContext,
+                sessionURL: sessionURL
+            ))
         }
     }
 
@@ -507,8 +534,9 @@ final class SessionProcessor: @unchecked Sendable {
             }
             let resolvedFrames = EvidenceValidator.existingPaths(candidate.frameReferences, sessionURL: sessionURL)
             let uniqueEvidence = uniquedPaths(
-                resolvedFrames + slice.stills + [slice.clipPath].compactMap { $0 } + shots.flatMap(\.stillCandidates)
-            ).compactMap { ExportRel.existingSessionFile($0, sessionURL: sessionURL) }
+                resolvedFrames + slice.stills + [slice.clipPath].compactMap { $0 } + shots.flatMap(\.stillCandidates),
+                sessionURL: sessionURL
+            )
             var instructions = AgentInstructionTemplate.render(
                 kind: candidate.kind,
                 product: product
@@ -546,7 +574,8 @@ final class SessionProcessor: @unchecked Sendable {
                         shots: shots,
                         slice: slice,
                         error: AIProviderError.noKeepableCandidate,
-                        product: product
+                        product: product,
+                        sessionURL: sessionURL
                     )
                 )
             }
@@ -559,14 +588,15 @@ final class SessionProcessor: @unchecked Sendable {
         shots: [ShotRecord],
         slice: SliceRecord,
         error: Error?,
-        product: ProductContext
+        product: ProductContext,
+        sessionURL: URL
     ) -> [TaskRecord] {
         if shots.isEmpty {
             let err = error ?? AIProviderError.noKeepableCandidate
-            return [fallbackOffline(slice: slice, error: err, product: product)]
+            return [fallbackOffline(slice: slice, error: err, product: product, sessionURL: sessionURL)]
         }
         return shots.enumerated().map { index, shot in
-            var task = fallbackTask(shot: shot, slice: slice, error: error, product: product)
+            var task = fallbackTask(shot: shot, slice: slice, error: error, product: product, sessionURL: sessionURL)
             task.taskId = String(format: "TASK-%02d", index + 1)
             return task
         }
@@ -585,7 +615,13 @@ final class SessionProcessor: @unchecked Sendable {
         }
     }
 
-    private func fallbackTask(shot: ShotRecord, slice: SliceRecord, error: Error?, product: ProductContext) -> TaskRecord {
+    private func fallbackTask(
+        shot: ShotRecord,
+        slice: SliceRecord,
+        error: Error?,
+        product: ProductContext,
+        sessionURL: URL
+    ) -> TaskRecord {
         var evidence = slice.stills
         evidence.append(contentsOf: shot.stillCandidates)
         if let clip = slice.clipPath {
@@ -602,12 +638,17 @@ final class SessionProcessor: @unchecked Sendable {
             inferred: error.map { "Analysis unavailable: \($0.localizedDescription)" } ?? "Requires manual review.",
             agentInstructions: "[Requires Manual Review - API Offline] \(AgentInstructionTemplate.render(kind: .bug, product: product))",
             quotes: [],
-            evidenceMedia: uniquedPaths(evidence),
+            evidenceMedia: uniquedPaths(evidence, sessionURL: sessionURL),
             confidence: 0
         )
     }
 
-    private func fallbackOffline(slice: SliceRecord, error: Error, product: ProductContext) -> TaskRecord {
+    private func fallbackOffline(
+        slice: SliceRecord,
+        error: Error,
+        product: ProductContext,
+        sessionURL: URL
+    ) -> TaskRecord {
         TaskRecord(
             taskId: "TASK-OFFLINE",
             sourceSliceId: slice.sliceId,
@@ -619,7 +660,10 @@ final class SessionProcessor: @unchecked Sendable {
             inferred: error.localizedDescription,
             agentInstructions: "[Requires Manual Review - API Offline] \(AgentInstructionTemplate.render(kind: .unknown, product: product))",
             quotes: [],
-            evidenceMedia: uniquedPaths(slice.stills + [slice.clipPath].compactMap { $0 }),
+            evidenceMedia: uniquedPaths(
+                slice.stills + [slice.clipPath].compactMap { $0 },
+                sessionURL: sessionURL
+            ),
             confidence: 0
         )
     }
@@ -647,11 +691,13 @@ final class SessionProcessor: @unchecked Sendable {
         return out
     }
 
-    private func uniquedPaths(_ paths: [String]) -> [String] {
+    private func uniquedPaths(_ paths: [String], sessionURL: URL) -> [String] {
         var seen = Set<String>()
         var out: [String] = []
-        for path in paths where !path.isEmpty && seen.insert(path).inserted {
-            out.append(path)
+        for path in paths where !path.isEmpty {
+            guard let contained = ExportRel.existingSessionFile(path, sessionURL: sessionURL),
+                  seen.insert(contained).inserted else { continue }
+            out.append(contained)
         }
         return out
     }
@@ -659,7 +705,8 @@ final class SessionProcessor: @unchecked Sendable {
     private func abortedForAuth(
         slice: SliceRecord,
         shots: [ShotRecord],
-        product: ProductContext
+        product: ProductContext,
+        sessionURL: URL
     ) -> (SliceRecord, [TaskRecord])? {
         guard evalAuthHasFailed() else { return nil }
         var slice = slice
@@ -668,7 +715,13 @@ final class SessionProcessor: @unchecked Sendable {
             401,
             "Skipped remaining slices after provider authentication failed."
         )
-        return (slice, reviewTasks(shots: shots, slice: slice, error: skipped, product: product))
+        return (slice, reviewTasks(
+            shots: shots,
+            slice: slice,
+            error: skipped,
+            product: product,
+            sessionURL: sessionURL
+        ))
     }
 
     private func resetEvalAuthGate() {
@@ -732,6 +785,7 @@ final class SessionProcessor: @unchecked Sendable {
 
     private func localReviewTasks(manifest: SessionManifest) -> [TaskRecord] {
         let prefix = "[Requires Manual Review - API Offline] "
+        let sessionURL = vault.sessionURL(id: manifest.sessionId)
         var coveredIds = Set<String>()
         var tasks: [TaskRecord] = []
         for shot in manifest.shots {
@@ -752,7 +806,8 @@ final class SessionProcessor: @unchecked Sendable {
                     agentInstructions: prefix + AgentInstructionTemplate.render(kind: .bug, product: manifest.productContext),
                     quotes: [],
                     evidenceMedia: uniquedPaths(
-                        shot.stillCandidates + (slice?.stills ?? []) + [slice?.clipPath].compactMap { $0 }
+                        shot.stillCandidates + (slice?.stills ?? []) + [slice?.clipPath].compactMap { $0 },
+                        sessionURL: sessionURL
                     ),
                     confidence: 0
                 )
@@ -775,7 +830,10 @@ final class SessionProcessor: @unchecked Sendable {
                     inferred: "Triggered by \(slice.trigger.rawValue). Provider evaluation skipped.",
                     agentInstructions: prefix + AgentInstructionTemplate.render(kind: .unknown, product: manifest.productContext),
                     quotes: [],
-                    evidenceMedia: uniquedPaths(slice.stills + [slice.clipPath].compactMap { $0 }),
+                    evidenceMedia: uniquedPaths(
+                        slice.stills + [slice.clipPath].compactMap { $0 },
+                        sessionURL: sessionURL
+                    ),
                     confidence: 0
                 )
             )
@@ -796,7 +854,8 @@ final class SessionProcessor: @unchecked Sendable {
                     evidenceMedia: uniquedPaths(
                         manifest.slices.flatMap { slice in
                             slice.stills + [slice.clipPath].compactMap { $0 }
-                        }
+                        },
+                        sessionURL: sessionURL
                     ),
                     confidence: 0
                 )
