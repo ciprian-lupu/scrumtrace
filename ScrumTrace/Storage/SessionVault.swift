@@ -236,7 +236,9 @@ final class SessionVault: @unchecked Sendable {
             if values?.isSymbolicLink == true {
                 return nil
             }
-            guard values?.isDirectory == true else { return nil }
+            if values?.isDirectory == false {
+                return nil
+            }
             let id = url.lastPathComponent
             guard Self.isValidSessionId(id) else { return nil }
             return id

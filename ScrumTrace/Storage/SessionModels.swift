@@ -120,9 +120,12 @@ enum ExportRel {
         }
         // `open(2)` follows intermediate parents. A planted `sessions` →
         // `/tmp` link would otherwise bless `sessions/<id>` as a real directory
-        // inside the target. Refuse when the immediate parent is a symlink.
+        // inside the target. Only this parent name is checked so a user who
+        // aliases `Movies/ScrumTrace` onto another volume still works, and so
+        // `ensureRoot` can create `…/sessions` when that folder is still missing.
         let parent = sessionURL.deletingLastPathComponent()
         if parent.path != sessionURL.path,
+           parent.lastPathComponent == "sessions",
            (try? parent.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
             return false
         }

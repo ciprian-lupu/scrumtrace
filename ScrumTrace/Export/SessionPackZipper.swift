@@ -260,6 +260,7 @@ enum PackBudget {
     /// Membership is resolved-path containment, not a string prefix strip.
     static func allowList(exportDir: URL, includeFullTranscript: Bool = false) -> [String] {
         removeEscapingExportLinks(exportDir: exportDir)
+        let sessionRoot = exportDir.deletingLastPathComponent()
         let named = [
             "AGENT_CONTEXT.md",
             "SESSION_BRIEF.html",
@@ -299,6 +300,11 @@ enum PackBudget {
             ) else { continue }
             for case let url as URL in enumerator {
                 if (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+                    enumerator.skipDescendants()
+                    continue
+                }
+                if let rel = ExportRel.unfollowedRelative(url, sessionRoot: sessionRoot),
+                   ExportRel.containsSymlinkComponent(rel, sessionURL: sessionRoot) {
                     enumerator.skipDescendants()
                     continue
                 }
@@ -434,6 +440,11 @@ enum PackBudget {
         var out: [String] = []
         for case let url as URL in enumerator {
             if (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+                enumerator.skipDescendants()
+                continue
+            }
+            if let rel = ExportRel.unfollowedRelative(url, sessionRoot: sessionURL),
+               ExportRel.containsSymlinkComponent(rel, sessionURL: sessionURL) {
                 enumerator.skipDescendants()
                 continue
             }

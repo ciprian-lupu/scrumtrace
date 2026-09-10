@@ -169,6 +169,7 @@ def test_zipper_never_deletes_archive() -> None:
     assert "includeFullTranscript" in allow
     assert "if includeFullTranscript" in allow
     assert "containedExportMember" in allow
+    assert "containsSymlinkComponent" in allow
     assert "removeEscapingExportLinks" in allow
     assert "skipDescendants" in allow
     remove_links = zipper.split("static func removeEscapingExportLinks")[1].split("static func allowList")[0]
@@ -179,6 +180,7 @@ def test_zipper_never_deletes_archive() -> None:
     assert "replacingOccurrences(of: prefix" not in allow
     leftover = zipper.split("static func exportMediaSessionPaths")[1].split("private static func uniqued")[0]
     assert "containedExportMember" in leftover
+    assert "containsSymlinkComponent" in leftover
     assert "replacingOccurrences(of: prefix" not in leftover
     assert leftover.index("isSymbolicLink") < leftover.index("enumerator")
     assert leftover.index("removeEscapingExportLinks") < leftover.index("enumerator")
@@ -387,6 +389,7 @@ def test_retry_failed_slices_and_pins() -> None:
     assert "contentsOfDirectory(atPath:" not in listed_ids
     assert "isSymbolicLink" in listed_ids
     assert "isDirectory" in listed_ids
+    assert "isDirectory == false" in listed_ids
     assert "isValidSessionId" in listed_ids
     events_fn = vault.split("private func events")[1].split("func revealInFinder")[0]
     assert "isContainedRegularFile" in events_fn
@@ -1334,6 +1337,7 @@ def test_write_contained_data_refuses_directory_symlinks() -> None:
     assert "O_NOFOLLOW" in usable
     assert "O_DIRECTORY" in usable
     assert "deletingLastPathComponent" in usable
+    assert 'lastPathComponent == "sessions"' in usable
     prepare = models.split("static func prepareContainedWrite")[1].split("static func writeContainedData")[0]
     assert "isUsableSessionRoot" in prepare
     assert "ScrumTracePath.manifest" in prepare
