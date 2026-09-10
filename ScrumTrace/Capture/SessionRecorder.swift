@@ -42,6 +42,9 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
     private var liveWavRel: String?
     private var captureWriteFailed = false
     private var captureWriteMessage: String?
+    /// Consecutive `CMSampleBufferCreateCopyWithNewTiming` failures. One
+    /// dropped frame is a glitch; a streak means the master clock is gone (D2).
+    private var remapFailStreak = 0
 
     init(sessionURL: URL, clock: ClockSynchronizer) {
         self.sessionURL = sessionURL
@@ -234,6 +237,7 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         syncWriter {
             self.paused = true
             self.started = false
+            self.remapFailStreak = 0
             self.clock.markRecordingStopped()
         }
     }
@@ -400,7 +404,11 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             return
         }
         guard writer.status == .writing, videoInput.isReadyForMoreMediaData else { return }
-        guard let remapped = remappedBuffer(sampleBuffer, sampleClock: sampleClock) else { return }
+        guard let remapped = remappedBuffer(sampleBuffer, sampleClock: sampleClock) else {
+            noteRemapFailure()
+            return
+        }
+        remapFailStreak = 0
         if !videoInput.append(remapped) {
             failCaptureWrite(
                 "Could not write archive/session.mp4: \(writer.error?.localizedDescription ?? "AVAssetWriter rejected a video sample.")"
@@ -418,7 +426,11 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             return
         }
         guard writer.status == .writing, audioInput.isReadyForMoreMediaData else { return }
-        guard let remapped = remappedBuffer(sampleBuffer, sampleClock: sampleClock) else { return }
+        guard let remapped = remappedBuffer(sampleBuffer, sampleClock: sampleClock) else {
+            noteRemapFailure()
+            return
+        }
+        remapFailStreak = 0
         if !audioInput.append(remapped) {
             failCaptureWrite(
                 "Could not write archive/session.mp4: \(writer.error?.localizedDescription ?? "AVAssetWriter rejected an audio sample.")"
@@ -450,6 +462,13 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         )
         guard status == noErr else { return nil }
         return output
+    }
+
+    private func noteRemapFailure() {
+        remapFailStreak += 1
+        if remapFailStreak >= 12 {
+            failCaptureWrite("Could not timestamp capture samples for the master clock.")
+        }
     }
 
     private func writeWav(from sampleBuffer: CMSampleBuffer) {

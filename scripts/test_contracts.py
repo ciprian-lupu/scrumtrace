@@ -715,6 +715,17 @@ def test_audio_split_and_brief_loader() -> None:
     assert "videoInput.append(remapped)" in recorder
     assert "audioInput.append(remapped)" in recorder
     assert "func failCaptureWrite" in recorder
+    append_video = recorder.split("func appendVideo")[1].split("func appendAudioToMovie")[0]
+    assert "noteRemapFailure" in append_video
+    assert "remapFailStreak = 0" in append_video
+    append_audio = recorder.split("func appendAudioToMovie")[1].split("func remappedBuffer")[0]
+    assert "noteRemapFailure" in append_audio
+    assert "remapFailStreak = 0" in append_audio
+    remap_fail = recorder.split("func noteRemapFailure")[1].split("func writeWav")[0]
+    assert "failCaptureWrite" in remap_fail
+    assert "Could not timestamp capture samples" in remap_fail
+    freeze = recorder.split("func freezeWriters")[1].split("func persistCaptureLayout")[0]
+    assert "remapFailStreak = 0" in freeze
     assert "if error == nil, converted.frameLength > 0" not in recorder
     fail_write = recorder.split("func failCaptureWrite")[1].split("func persistWav")[0]
     assert "freezeWriters" in fail_write
