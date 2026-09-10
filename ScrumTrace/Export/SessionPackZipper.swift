@@ -17,6 +17,7 @@ struct SessionPackZipper {
         PackBudget.removeEscapingExportLinks(exportDir: exportDir)
         try FileManager.default.createDirectory(at: exportDir, withIntermediateDirectories: true)
         if (try? exportDir.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+            try? FileManager.default.removeItem(at: exportDir)
             throw SessionRecorderError.writerFailed("export/ is a symbolic link.")
         }
         let zipURL = sessionURL.appendingPathComponent(ScrumTracePath.packZip)
@@ -95,6 +96,7 @@ struct SessionPackZipper {
         PackBudget.removeEscapingExportLinks(exportDir: exportDir)
         try FileManager.default.createDirectory(at: exportDir, withIntermediateDirectories: true)
         if (try? exportDir.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+            try? FileManager.default.removeItem(at: exportDir)
             throw SessionRecorderError.writerFailed("export/ is a symbolic link.")
         }
         try runZip(
@@ -216,6 +218,9 @@ enum PackBudget {
         if (try? exportDir.resourceValues(forKeys: [linkKey]).isSymbolicLink) == true {
             try? fm.removeItem(at: exportDir)
             try? fm.createDirectory(at: exportDir, withIntermediateDirectories: true)
+            if (try? exportDir.resourceValues(forKeys: [linkKey]).isSymbolicLink) == true {
+                try? fm.removeItem(at: exportDir)
+            }
             return
         }
         guard let enumerator = fm.enumerator(

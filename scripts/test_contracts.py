@@ -173,6 +173,9 @@ def test_zipper_never_deletes_archive() -> None:
     assert "skipDescendants" in allow
     remove_links = zipper.split("static func removeEscapingExportLinks")[1].split("static func allowList")[0]
     assert "skipDescendants" in remove_links
+    recreate = remove_links.split("createDirectory")[1].split("guard let enumerator")[0]
+    assert "isSymbolicLink" in recreate
+    assert "removeItem" in recreate
     assert "replacingOccurrences(of: prefix" not in allow
     leftover = zipper.split("static func exportMediaSessionPaths")[1].split("private static func uniqued")[0]
     assert "containedExportMember" in leftover
@@ -541,6 +544,7 @@ def test_pipeline_timing_stays_in_archive() -> None:
     assert "removeEscapingExportLinks" in zip_fn
     assert 'export/ is a symbolic link' in zip_fn
     assert zip_fn.index("createDirectory") < zip_fn.index("is a symbolic link")
+    assert "removeItem(at: exportDir)" in zip_fn
     assert zip_fn.count("try writeOmittedMarkdown") >= 2
     assert "try runZip" in zip_fn
     write_zip = zipper.split("func writeZip")[1].split("func writeOmittedMarkdown")[0]
@@ -549,6 +553,7 @@ def test_pipeline_timing_stays_in_archive() -> None:
     assert "createDirectory" in write_zip
     assert "export/ is a symbolic link" in write_zip
     assert write_zip.index("createDirectory") < write_zip.index("is a symbolic link")
+    assert "removeItem(at: exportDir)" in write_zip
     drop = zipper.split("for path in dropList")[1].split("if size > MediaBudget.maxZipBytes")[0]
     assert "isContainedRegularFile" in drop
     assert "isSymbolicLink" in drop
