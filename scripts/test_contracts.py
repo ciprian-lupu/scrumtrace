@@ -1997,6 +1997,10 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "reviewTasks(" in eval_slice
     assert "shots: linked" in eval_slice
     assert "let shot = linked.first" not in eval_slice
+    shot_note = eval_slice.split("let shotNote")[1].split("if let aborted")[0]
+    assert "tMedia >= slice.startMedia" in shot_note
+    assert "tMedia <= slice.endMedia" in shot_note
+    assert r"linked.map(\.note)" not in eval_slice
     tasks_fn = processor.split("private func tasks(")[1].split("private func rankedTasks")[0]
     assert "noKeepableCandidate" in tasks_fn
     assert "fallbackOffline" in tasks_fn

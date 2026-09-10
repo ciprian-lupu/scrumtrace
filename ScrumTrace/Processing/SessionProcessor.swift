@@ -507,7 +507,11 @@ final class SessionProcessor: @unchecked Sendable {
     ) async -> (SliceRecord, [TaskRecord]) {
         var slice = slice
         let linked = shotsLinked(to: slice, in: manifest)
-        let shotNote = linked.map(\.note).filter { !$0.isEmpty }.joined(separator: "\n")
+        let shotNote = linked
+            .filter { $0.tMedia >= slice.startMedia && $0.tMedia <= slice.endMedia }
+            .map(\.note)
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n")
         if let aborted = abortedForAuth(
             slice: slice,
             shots: linked,
@@ -1015,7 +1019,14 @@ final class SessionProcessor: @unchecked Sendable {
                     agentInstructions: prefix + AgentInstructionTemplate.render(kind: .unknown, product: manifest.productContext),
                     quotes: [],
                     evidenceMedia: uniquedPaths(
-                        slice.stills + [slice.exportClipPath, slice.clipPath].compactMap { $0 },
+                        slice.stills.filter {
+                            EvidenceValidator.framesOverlapSlice(
+                                [$0],
+                                slice: slice,
+                                shots: shotsLinked(to: slice, in: manifest),
+                                sessionURL: sessionURL
+                            )
+                        } + [slice.exportClipPath, slice.clipPath].compactMap { $0 },
                         sessionURL: sessionURL
                     ),
                     confidence: 0
@@ -1037,7 +1048,14 @@ final class SessionProcessor: @unchecked Sendable {
                     quotes: [],
                     evidenceMedia: uniquedPaths(
                         manifest.slices.flatMap { slice in
-                            slice.stills + [slice.exportClipPath, slice.clipPath].compactMap { $0 }
+                            slice.stills.filter {
+                                EvidenceValidator.framesOverlapSlice(
+                                    [$0],
+                                    slice: slice,
+                                    shots: shotsLinked(to: slice, in: manifest),
+                                    sessionURL: sessionURL
+                                )
+                            } + [slice.exportClipPath, slice.clipPath].compactMap { $0 }
                         },
                         sessionURL: sessionURL
                     ),
