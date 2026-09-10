@@ -1666,6 +1666,13 @@ def test_write_contained_data_refuses_directory_symlinks() -> None:
     assert "scrumtraceATRemoveDir" in wipe_fn
     assert "scrumtraceATSymlinkNofollow" in wipe_fn
     assert "openUnfollowedDirectory" in wipe_fn
+    assert "directoryNames" in wipe_fn
+    wipe_open = models.split("static func wipeOpenedDirectory")[1].split("static func directoryNames")[0]
+    assert wipe_open.index("directoryNames") < wipe_open.index("scrumtraceUnlinkat")
+    assert "scrumtraceReaddir" not in wipe_open
+    names_fn = models.split("static func directoryNames")[1].split("static func directoryEntryName")[0]
+    assert "scrumtraceReaddir" in names_fn
+    assert "scrumtraceUnlinkat" not in names_fn
     assert "static func makePrivateTemporaryURL" in models
     assert "static func removePrivateTemporaryURL" in models
     private_temp = models.split("static func makePrivateTemporaryURL")[1].split("static func removePrivateTemporaryURL")[0]

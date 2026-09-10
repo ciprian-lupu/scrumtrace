@@ -731,6 +731,9 @@ enum ExportRel {
             throw SessionVaultError.writeFailed(relative)
         }
         if mode == S_IFDIR {
+            // Snapshot names, then unlink. Unlinking during `readdir` can skip
+            // entries and leave stale export media in the next pack (C2/C3).
+            wipeOpenedDirectory(probe, depth: 0)
             wipeOpenedDirectory(probe, depth: 0)
             Darwin.close(probe)
             try unlinkatName(name, dirFd: sessionFd, flag: scrumtraceATRemoveDir, relative: relative)
@@ -765,17 +768,7 @@ enum ExportRel {
 
     private static func wipeOpenedDirectory(_ dirFd: Int32, depth: Int) {
         guard depth < 24 else { return }
-        let cloned = Darwin.dup(dirFd)
-        guard cloned >= 0 else { return }
-        guard let dir = scrumtraceFdopendir(cloned) else {
-            Darwin.close(cloned)
-            return
-        }
-        defer { _ = scrumtraceClosedir(dir) }
-        while let ent = scrumtraceReaddir(dir) {
-            guard let child = directoryEntryName(ent) else { continue }
-            guard child != ".", child != "..",
-                  !child.contains("/"), !child.contains("\0") else { continue }
+        for child in directoryNames(dirFd) {
             var info = stat()
             let st = child.withCString { ptr in
                 scrumtraceFstatat(dirFd, ptr, &info, scrumtraceATSymlinkNofollow)
@@ -803,6 +796,26 @@ enum ExportRel {
                 }
             }
         }
+    }
+
+    /// Collect names first. `readdir` + `unlinkat` of the current entry can
+    /// skip the following name, leaving files under `export/` (C2/C3).
+    private static func directoryNames(_ dirFd: Int32) -> [String] {
+        let cloned = Darwin.dup(dirFd)
+        guard cloned >= 0 else { return [] }
+        guard let dir = scrumtraceFdopendir(cloned) else {
+            Darwin.close(cloned)
+            return []
+        }
+        defer { _ = scrumtraceClosedir(dir) }
+        var names: [String] = []
+        while let ent = scrumtraceReaddir(dir) {
+            guard let child = directoryEntryName(ent) else { continue }
+            guard child != ".", child != "..",
+                  !child.contains("/"), !child.contains("\0") else { continue }
+            names.append(child)
+        }
+        return names
     }
 
     private static func directoryEntryName(_ entry: UnsafeMutablePointer<dirent>) -> String? {
