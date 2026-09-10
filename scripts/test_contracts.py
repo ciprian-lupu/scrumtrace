@@ -1655,6 +1655,12 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "try writeExportDocuments" in loop_zip
     assert "stripOmitted" in loop_zip
     assert "applyExportEvidence" in loop_zip
+    discard_docs = processor.split("zipBytes = zipper.discardPackIfOverBudget")[1].split("timing.zipBytes")[0]
+    assert "Pack exceeded 35 MB after rebuild" in discard_docs
+    assert "try writeExportDocuments" in discard_docs
+    assert "try zipper.writeOmittedMarkdown" in discard_docs
+    assert "try? zipper.writeOmittedMarkdown" not in discard_docs
+    assert "applyExportEvidence" not in discard_docs
     zipper_over = zipper.split("if size > MediaBudget.maxZipBytes")[1].split("func writeZip")[0]
     assert "throw" not in zipper_over
     assert "Pack still" in zipper_over

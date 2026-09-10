@@ -305,6 +305,31 @@ final class SessionProcessor: @unchecked Sendable {
             }
         }
         zipBytes = zipper.discardPackIfOverBudget(sessionURL: sessionURL)
+        // writeZip can recreate an over-budget pack after zip() already
+        // omitted. Discard removes that file; OMITTED.md / AGENT_CONTEXT
+        // must not still imply the zip is in the folder (Gate 6).
+        if zipBytes == 0 || zipBytes > MediaBudget.maxZipBytes {
+            if !zipResult.omitted.contains(where: {
+                ExportRel.toExportRoot($0.path) == "session-pack.zip"
+            }) {
+                zipResult.omitted.append(
+                    OmittedAsset(
+                        path: "session-pack.zip",
+                        reason: zipBytes == 0
+                            ? "Pack exceeded 35 MB after rebuild; zip was removed. Folder handoff kept."
+                            : "Pack still \(zipBytes) bytes after dropping all droppable export media; protected docs remain."
+                    )
+                )
+            }
+            projection.manifest.omitted = zipResult.omitted
+            try writeExportDocuments(
+                sessionURL: sessionURL,
+                projected: projection.manifest,
+                excerpts: excerpts,
+                projector: projector
+            )
+            try zipper.writeOmittedMarkdown(sessionURL: sessionURL, omitted: zipResult.omitted)
+        }
         timing.zipBytes = zipBytes
         timing.omittedCount = zipResult.omitted.count
         try timing.write(sessionURL: sessionURL)
