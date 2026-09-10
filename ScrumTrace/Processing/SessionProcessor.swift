@@ -720,8 +720,8 @@ final class SessionProcessor: @unchecked Sendable {
                 }
             }
             let uniqueEvidence = uniquedPaths(
-                resolvedFrames
-                    + slice.stills.filter { still in
+                {
+                    let overlappingStills: [String] = slice.stills.filter { still in
                         guard EvidenceValidator.framesOverlapSlice(
                             [still],
                             slice: slice,
@@ -730,23 +730,27 @@ final class SessionProcessor: @unchecked Sendable {
                         ) else { return false }
                         return !EvidenceValidator.ownedByOtherAssociatedShot(still, slice: slice, shots: shots)
                     }
-                    + [slice.exportClipPath.flatMap { exported in
+                    let exportedClip: String? = slice.exportClipPath.flatMap { exported in
                         ExportRel.existingSessionFile(exported, sessionURL: sessionURL) == nil ? nil : exported
-                    } ?? slice.clipPath].compactMap { $0 }
-                    + shots.flatMap { shot in
+                    }
+                    let clipEvidence: [String] = [exportedClip ?? slice.clipPath].compactMap { $0 }
+                    let associatedShotEvidence: [String] = shots.flatMap { (shot: ShotRecord) -> [String] in
                         guard let associated = slice.associatedShotId, shot.id == associated else {
-                            return []
+                            return [String]()
                         }
-                        return ([shot.exportPath].compactMap { $0 } + shot.stillCandidates)
-                            .filter {
-                                EvidenceValidator.framesOverlapSlice(
-                                    [$0],
-                                    slice: slice,
-                                    shots: shots,
-                                    sessionURL: sessionURL
-                                )
-                            }
-                    },
+                        let exportPaths: [String] = [shot.exportPath].compactMap { $0 }
+                        let combined: [String] = exportPaths + shot.stillCandidates
+                        return combined.filter { path in
+                            EvidenceValidator.framesOverlapSlice(
+                                [path],
+                                slice: slice,
+                                shots: shots,
+                                sessionURL: sessionURL
+                            )
+                        }
+                    }
+                    return resolvedFrames + overlappingStills + clipEvidence + associatedShotEvidence
+                }(),
                 sessionURL: sessionURL
             )
             var instructions = AgentInstructionTemplate.render(
@@ -891,16 +895,21 @@ final class SessionProcessor: @unchecked Sendable {
             agentInstructions: "[Requires Manual Review - API Offline] \(AgentInstructionTemplate.render(kind: .unknown, product: product))",
             quotes: [],
             evidenceMedia: uniquedPaths(
-                slice.stills.filter {
-                    EvidenceValidator.framesOverlapSlice(
-                        [$0],
-                        slice: slice,
-                        shots: [],
-                        sessionURL: sessionURL
-                    )
-                } + [slice.exportClipPath.flatMap { exported in
-                    ExportRel.existingSessionFile(exported, sessionURL: sessionURL) == nil ? nil : exported
-                } ?? slice.clipPath].compactMap { $0 },
+                {
+                    let overlappingStills: [String] = slice.stills.filter {
+                        EvidenceValidator.framesOverlapSlice(
+                            [$0],
+                            slice: slice,
+                            shots: [],
+                            sessionURL: sessionURL
+                        )
+                    }
+                    let exportedClip: String? = slice.exportClipPath.flatMap { exported in
+                        ExportRel.existingSessionFile(exported, sessionURL: sessionURL) == nil ? nil : exported
+                    }
+                    let clipEvidence: [String] = [exportedClip ?? slice.clipPath].compactMap { $0 }
+                    return overlappingStills + clipEvidence
+                }(),
                 sessionURL: sessionURL
             ),
             confidence: 0
@@ -1073,9 +1082,10 @@ final class SessionProcessor: @unchecked Sendable {
                     agentInstructions: prefix + AgentInstructionTemplate.render(kind: .bug, product: manifest.productContext),
                     quotes: [],
                     evidenceMedia: uniquedPaths(
-                        [shot.exportPath].compactMap { $0 }
-                            + shot.stillCandidates
-                            + (slice?.stills ?? []).filter { still in
+                        {
+                            let exportPaths: [String] = [shot.exportPath].compactMap { $0 }
+                            let shotStills: [String] = shot.stillCandidates
+                            let overlappingSliceStills: [String] = (slice?.stills ?? []).filter { still in
                                 guard let slice else { return false }
                                 guard shot.tMedia >= slice.startMedia && shot.tMedia <= slice.endMedia else {
                                     return false
@@ -1089,15 +1099,16 @@ final class SessionProcessor: @unchecked Sendable {
                                 guard let want = EvidenceValidator.shotStillStem(still) else {
                                     return false
                                 }
-                                let paths = shot.stillCandidates
-                                    + [shot.rawPath]
-                                    + [shot.annotatedPath, shot.exportPath].compactMap { $0 }
+                                let annotatedAndExport: [String] = [shot.annotatedPath, shot.exportPath].compactMap { $0 }
+                                let paths: [String] = shot.stillCandidates + [shot.rawPath] + annotatedAndExport
                                 return paths.contains { EvidenceValidator.shotStillStem($0) == want }
                             }
-                            + [slice?.exportClipPath, slice?.clipPath].compactMap { $0 }.filter { _ in
+                            let clipEvidence: [String] = [slice?.exportClipPath, slice?.clipPath].compactMap { $0 }.filter { _ in
                                 guard let slice else { return false }
                                 return shot.tMedia >= slice.startMedia && shot.tMedia <= slice.endMedia
-                            },
+                            }
+                            return exportPaths + shotStills + overlappingSliceStills + clipEvidence
+                        }(),
                         sessionURL: sessionURL
                     ),
                     confidence: 0
@@ -1124,16 +1135,21 @@ final class SessionProcessor: @unchecked Sendable {
                     agentInstructions: prefix + AgentInstructionTemplate.render(kind: .unknown, product: manifest.productContext),
                     quotes: [],
                     evidenceMedia: uniquedPaths(
-                        slice.stills.filter {
-                            EvidenceValidator.framesOverlapSlice(
-                                [$0],
-                                slice: slice,
-                                shots: shotsLinked(to: slice, in: manifest),
-                                sessionURL: sessionURL
-                            )
-                        } + [slice.exportClipPath.flatMap { exported in
-                            ExportRel.existingSessionFile(exported, sessionURL: sessionURL) == nil ? nil : exported
-                        } ?? slice.clipPath].compactMap { $0 },
+                        {
+                            let overlappingStills: [String] = slice.stills.filter {
+                                EvidenceValidator.framesOverlapSlice(
+                                    [$0],
+                                    slice: slice,
+                                    shots: shotsLinked(to: slice, in: manifest),
+                                    sessionURL: sessionURL
+                                )
+                            }
+                            let exportedClip: String? = slice.exportClipPath.flatMap { exported in
+                                ExportRel.existingSessionFile(exported, sessionURL: sessionURL) == nil ? nil : exported
+                            }
+                            let clipEvidence: [String] = [exportedClip ?? slice.clipPath].compactMap { $0 }
+                            return overlappingStills + clipEvidence
+                        }(),
                         sessionURL: sessionURL
                     ),
                     confidence: 0
@@ -1154,17 +1170,20 @@ final class SessionProcessor: @unchecked Sendable {
                     agentInstructions: prefix + AgentInstructionTemplate.render(kind: .unknown, product: manifest.productContext),
                     quotes: [],
                     evidenceMedia: uniquedPaths(
-                        manifest.slices.flatMap { slice in
-                            slice.stills.filter {
+                        manifest.slices.flatMap { (slice: SliceRecord) -> [String] in
+                            let overlappingStills: [String] = slice.stills.filter {
                                 EvidenceValidator.framesOverlapSlice(
                                     [$0],
                                     slice: slice,
                                     shots: shotsLinked(to: slice, in: manifest),
                                     sessionURL: sessionURL
                                 )
-                            } + [slice.exportClipPath.flatMap { exported in
+                            }
+                            let exportedClip: String? = slice.exportClipPath.flatMap { exported in
                                 ExportRel.existingSessionFile(exported, sessionURL: sessionURL) == nil ? nil : exported
-                            } ?? slice.clipPath].compactMap { $0 }
+                            }
+                            let clipEvidence: [String] = [exportedClip ?? slice.clipPath].compactMap { $0 }
+                            return overlappingStills + clipEvidence
                         },
                         sessionURL: sessionURL
                     ),

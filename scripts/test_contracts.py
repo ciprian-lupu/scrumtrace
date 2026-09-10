@@ -2078,6 +2078,7 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "fallbackOffline" in tasks_fn
     assert "shots: [ShotRecord]" in tasks_fn
     assert "shots.flatMap" in tasks_fn
+    assert "([shot.exportPath].compactMap { $0 } + shot.stillCandidates)" not in processor
     assert "sessionURL: sessionURL" in tasks_fn.split("let uniqueEvidence")[1].split("var instructions")[0]
     assert "exportClipPath" in tasks_fn.split("let uniqueEvidence")[1].split("var instructions")[0]
     assert "exportPath" in tasks_fn.split("let uniqueEvidence")[1].split("var instructions")[0]
