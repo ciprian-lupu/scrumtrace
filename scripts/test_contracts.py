@@ -375,6 +375,9 @@ def test_retry_failed_slices_and_pins() -> None:
     next_shot = vault.split("func nextShotIndex")[1].split("func loadPinTimes")[0]
     assert "isSymbolicLink" in next_shot
     assert "containsSymlinkComponent" in next_shot
+    assert "contentsOfDirectory(at: shots" in next_shot
+    assert "contentsOfDirectory(atPath: shots.path)" not in next_shot
+    assert next_shot.count("isSymbolicLink") >= 3
     assert ".probe" not in next_shot
     events_fn = vault.split("private func events")[1].split("func revealInFinder")[0]
     assert "isContainedRegularFile" in events_fn
@@ -870,6 +873,7 @@ def test_phase45_clip_consent_and_budget() -> None:
     fallback = processor.split("func fallbackTask")[1].split("func fallbackOffline")[0]
     assert "AgentInstructionTemplate.render(kind: .bug, product: product)" in fallback
     assert "Inspect the linked evidence only" not in fallback
+    assert "sessionURL: sessionURL" in fallback
     local = processor.split("func localReviewTasks")[1].split("func refreshShotsFromDisk")[0]
     assert "selectForPack" in local
     assert "[Requires Manual Review - API Offline]" in local
@@ -1090,6 +1094,11 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "removeItemIfRegularFile(movieURL, sessionRoot: sessionURL)" in prepare
     assert "removeItemIfRegularFile(wavURL, sessionRoot: sessionURL)" in prepare
     assert "try? FileManager.default.removeItem(at: movieURL)" not in prepare
+    assert "isContainedRegularFile(movieURL" in prepare
+    assert "isContainedRegularFile(wavURL" in prepare
+    assert prepare.index("AVAssetWriter") < prepare.index("isContainedRegularFile(movieURL")
+    assert prepare.index("AVAudioFile") < prepare.index("isContainedRegularFile(wavURL")
+    assert "cancelWriting" in prepare
     assert "config.width = size.width" in start_fn
     assert "config.height = size.height" in start_fn
     assert "AVVideoWidthKey: w" in recorder

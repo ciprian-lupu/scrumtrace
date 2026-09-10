@@ -416,6 +416,11 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         guard writer.startWriting() else {
             throw SessionRecorderError.writerFailed(writer.error?.localizedDescription ?? "Writer failed.")
         }
+        guard ExportRel.isContainedRegularFile(movieURL, sessionRoot: sessionURL) else {
+            writer.cancelWriting()
+            try? ExportRel.removeItemIfRegularFile(movieURL, sessionRoot: sessionURL)
+            throw SessionRecorderError.writerFailed("archive capture paths escaped the session folder.")
+        }
         writer.startSession(atSourceTime: .zero)
         self.writer = writer
         self.videoInput = videoInput
@@ -430,6 +435,16 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             AVLinearPCMIsBigEndianKey: false
         ]
         wavFile = try AVAudioFile(forWriting: wavURL, settings: wavSettings)
+        guard ExportRel.isContainedRegularFile(wavURL, sessionRoot: sessionURL) else {
+            writer.cancelWriting()
+            self.writer = nil
+            self.videoInput = nil
+            self.audioInput = nil
+            wavFile = nil
+            try? ExportRel.removeItemIfRegularFile(movieURL, sessionRoot: sessionURL)
+            try? ExportRel.removeItemIfRegularFile(wavURL, sessionRoot: sessionURL)
+            throw SessionRecorderError.writerFailed("archive capture paths escaped the session folder.")
+        }
         paused = false
         started = false
     }

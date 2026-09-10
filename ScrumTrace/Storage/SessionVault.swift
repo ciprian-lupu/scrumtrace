@@ -234,9 +234,19 @@ final class SessionVault: @unchecked Sendable {
         if (try? shots.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
             return 1
         }
-        let names = (try? fileManager.contentsOfDirectory(atPath: shots.path)) ?? []
-        let numbers = names.compactMap { name -> Int? in
-            let stem = (name as NSString).deletingPathExtension
+        let children = (try? fileManager.contentsOfDirectory(
+            at: shots,
+            includingPropertiesForKeys: [.isSymbolicLinkKey],
+            options: [.skipsHiddenFiles]
+        )) ?? []
+        if (try? shots.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+            return 1
+        }
+        let numbers = children.compactMap { url -> Int? in
+            if (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+                return nil
+            }
+            let stem = url.deletingPathExtension().lastPathComponent
             let token = stem.split(separator: ".").first.map(String.init) ?? stem
             return Int(token)
         }
