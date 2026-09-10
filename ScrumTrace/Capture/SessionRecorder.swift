@@ -198,8 +198,19 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
                 do {
                     try await live.stopCapture()
                 } catch {
-                    // start() still rethrows the original error. Cancel writers below
-                    // so a live SCStream cannot keep appending after abort (C1).
+                    // start() still rethrows the original error. Keep retrying
+                    // stopCapture so a live SCStream cannot keep the capture
+                    // indicator after abort (C1).
+                    Task.detached {
+                        do {
+                            try await live.stopCapture()
+                        } catch {
+                            NotificationCenter.default.post(
+                                name: .scrumTraceCaptureFailed,
+                                object: "Could not stop ScreenCaptureKit: \(error.localizedDescription)"
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -840,7 +851,18 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         snapshot.engine?.stop()
         if let live = snapshot.stream {
             Task.detached {
-                try? await live.stopCapture()
+                do {
+                    try await live.stopCapture()
+                } catch {
+                    do {
+                        try await live.stopCapture()
+                    } catch {
+                        NotificationCenter.default.post(
+                            name: .scrumTraceCaptureFailed,
+                            object: "Could not stop ScreenCaptureKit: \(error.localizedDescription)"
+                        )
+                    }
+                }
             }
         }
     }

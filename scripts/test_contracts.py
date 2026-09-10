@@ -377,6 +377,8 @@ def test_clip_exporter_macos14() -> None:
     tighten = clip.split("func tightenExportClips")[1].split("func tighten(file")[0]
     assert "dropLast" in tighten
     assert "files.dropLast" in tighten
+    assert "try? await tighten" not in tighten
+    assert "try await tighten" in tighten
     assert "containedExportMember" in tighten
     assert "containsSymlinkComponent" in tighten
     assert "skipDescendants" in tighten
@@ -1646,6 +1648,9 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "self.started = false" in deinit_fn
     assert "syncWriter" in deinit_fn
     assert "discardLiveCaptureLocked" in deinit_fn
+    assert "try? await live.stopCapture()" not in deinit_fn
+    assert "try await live.stopCapture()" in deinit_fn
+    assert "scrumTraceCaptureFailed" in deinit_fn
     assert "DispatchSpecificKey" in recorder
     assert "getSpecific(key:" in recorder
     assert "try await writerQueue.sync" not in recorder
