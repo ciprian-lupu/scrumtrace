@@ -229,6 +229,7 @@ def test_clip_exporter_macos14() -> None:
     assert "dropLast" in tighten
     assert "files.dropLast" in tighten
     assert "containedExportMember" in tighten
+    assert "containsSymlinkComponent" in tighten
     assert "skipDescendants" in tighten
     assert tighten.index("isSymbolicLink") < tighten.index("enumerator")
     assert "sessionURL: sessionURL" in tighten
@@ -375,10 +376,18 @@ def test_retry_failed_slices_and_pins() -> None:
     next_shot = vault.split("func nextShotIndex")[1].split("func loadPinTimes")[0]
     assert "isSymbolicLink" in next_shot
     assert "containsSymlinkComponent" in next_shot
-    assert "contentsOfDirectory(at: shots" in next_shot
-    assert "contentsOfDirectory(atPath: shots.path)" not in next_shot
+    assert "contentsOfDirectory(" in next_shot
+    assert "at: shots" in next_shot
+    assert "contentsOfDirectory(atPath:" not in next_shot
     assert next_shot.count("isSymbolicLink") >= 3
     assert ".probe" not in next_shot
+    listed_ids = vault.split("func listedSessionIds")[1].split("func recentSessions")[0]
+    assert "contentsOfDirectory(" in listed_ids
+    assert "at: rootURL" in listed_ids
+    assert "contentsOfDirectory(atPath:" not in listed_ids
+    assert "isSymbolicLink" in listed_ids
+    assert "isDirectory" in listed_ids
+    assert "isValidSessionId" in listed_ids
     events_fn = vault.split("private func events")[1].split("func revealInFinder")[0]
     assert "isContainedRegularFile" in events_fn
     assert "isReadableSessionFile" in events_fn
@@ -408,6 +417,8 @@ def test_retry_failed_slices_and_pins() -> None:
     assert "removeAbandonedSession" in prune
     assert "isValidSessionId" in prune
     assert "isSymbolicLink" in prune
+    assert "listedSessionIds" in prune
+    assert "contentsOfDirectory(atPath:" not in prune
     models = (ROOT / "ScrumTrace" / "Storage" / "SessionModels.swift").read_text()
     existing_media = models.split("func withExistingMedia")[1].split("enum CodingKeys")[0]
     assert "existingSessionFile" in existing_media
@@ -1292,9 +1303,11 @@ def test_write_contained_data_refuses_directory_symlinks() -> None:
     assert "isSymbolicLink" in create_fn
     assert create_fn.count("isSymbolicLink") >= 2
     assert "isUsableSessionRoot(rootURL)" in create_fn
+    assert create_fn.count("isUsableSessionRoot(rootURL)") >= 2
     assert "isUsableSessionRoot(url)" in create_fn
     assert "removeItem(at: url)" in create_fn
     assert create_fn.index("try write(manifest: &manifest)") < create_fn.index("removeItem(at: url)")
+    assert "isUsableSessionRoot(rootURL)" in create_fn.split("createDirectory(at: url")[1]
     process_head = processor.split("func process(")[1].split("var timing")[0]
     assert "requireUsableSession" in process_head
     assert process_head.index("requireUsableSession") < process_head.index("loadManifest")
@@ -1320,6 +1333,7 @@ def test_write_contained_data_refuses_directory_symlinks() -> None:
     assert "fileExists(atPath: sessionURL.path, isDirectory:" in usable
     assert "O_NOFOLLOW" in usable
     assert "O_DIRECTORY" in usable
+    assert "deletingLastPathComponent" in usable
     prepare = models.split("static func prepareContainedWrite")[1].split("static func writeContainedData")[0]
     assert "isUsableSessionRoot" in prepare
     assert "ScrumTracePath.manifest" in prepare
@@ -1336,6 +1350,8 @@ def test_write_contained_data_refuses_directory_symlinks() -> None:
     assert "sessions folder" in ensure
     recent = vault.split("func recentSessions")[1].split("func nextShotIndex")[0]
     assert "isUsableSessionRoot(rootURL)" in recent
+    assert "listedSessionIds" in recent
+    assert "contentsOfDirectory(atPath:" not in recent
     reveal = vault.split("func revealInFinder")[1].split("func removeAbandonedSession")[0]
     assert "isUsableSessionRoot(rootURL)" in reveal
     assert "isUsableSessionRoot(session)" in reveal

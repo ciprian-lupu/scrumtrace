@@ -118,6 +118,14 @@ enum ExportRel {
         if (try? sessionURL.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
             return false
         }
+        // `open(2)` follows intermediate parents. A planted `sessions` →
+        // `/tmp` link would otherwise bless `sessions/<id>` as a real directory
+        // inside the target. Refuse when the immediate parent is a symlink.
+        let parent = sessionURL.deletingLastPathComponent()
+        if parent.path != sessionURL.path,
+           (try? parent.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+            return false
+        }
         let fd = sessionURL.withUnsafeFileSystemRepresentation { ptr -> Int32 in
             guard let ptr else { return -1 }
             return Darwin.open(ptr, O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW)

@@ -99,6 +99,10 @@ struct ClipExporter {
                 continue
             }
             guard url.pathExtension.lowercased() == "mp4" else { continue }
+            guard let rel = ExportRel.unfollowedRelative(url, sessionRoot: sessionURL),
+                  !ExportRel.containsSymlinkComponent(rel, sessionURL: sessionURL) else {
+                continue
+            }
             guard ExportRel.containedExportMember(file: url, exportDir: exportDir) != nil else { continue }
             files.append(url)
         }

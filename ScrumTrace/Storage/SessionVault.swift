@@ -86,6 +86,11 @@ final class SessionVault: @unchecked Sendable {
             throw SessionVaultError.writeFailed("session folder")
         }
         try fileManager.createDirectory(at: url, withIntermediateDirectories: true)
+        // Re-check the sessions folder. `createDirectory` follows a parent
+        // planted between `ensureRoot` and this mkdir (`sessions` → `/tmp`).
+        guard ExportRel.isUsableSessionRoot(rootURL) else {
+            throw SessionVaultError.writeFailed("sessions folder")
+        }
         if (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
             throw SessionVaultError.writeFailed("session folder")
         }
@@ -115,7 +120,10 @@ final class SessionVault: @unchecked Sendable {
             try write(manifest: &manifest)
             return (url, manifest)
         } catch {
-            if (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) != true {
+            // Do not `removeItem` through a planted sessions-folder symlink —
+            // that would delete the target's `<id>` directory.
+            if ExportRel.isUsableSessionRoot(rootURL),
+               (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) != true {
                 try? fileManager.removeItem(at: url)
             }
             throw error
@@ -163,6 +171,9 @@ final class SessionVault: @unchecked Sendable {
             throw SessionVaultError.writeFailed("session folder")
         }
         try fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
+        guard ExportRel.isUsableSessionRoot(rootURL) else {
+            throw SessionVaultError.writeFailed("sessions folder")
+        }
         guard ExportRel.isUsableSessionRoot(dir) else {
             throw SessionVaultError.writeFailed("session folder")
         }
@@ -209,12 +220,33 @@ final class SessionVault: @unchecked Sendable {
         try ExportRel.writeContainedData(payload, relative: ScrumTracePath.events, sessionURL: session)
     }
 
+    /// Real session-directory names only. `contentsOfDirectory(atPath:)` plus a
+    /// later `isUsableSessionRoot` still briefly treats a planted `<id>` symlink
+    /// as a candidate; skip those names here.
+    private func listedSessionIds() -> [String] {
+        guard ExportRel.isUsableSessionRoot(rootURL) else { return [] }
+        let children = (try? fileManager.contentsOfDirectory(
+            at: rootURL,
+            includingPropertiesForKeys: [.isSymbolicLinkKey, .isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        )) ?? []
+        guard ExportRel.isUsableSessionRoot(rootURL) else { return [] }
+        return children.compactMap { url in
+            let values = try? url.resourceValues(forKeys: [.isSymbolicLinkKey, .isDirectoryKey])
+            if values?.isSymbolicLink == true {
+                return nil
+            }
+            guard values?.isDirectory == true else { return nil }
+            let id = url.lastPathComponent
+            guard Self.isValidSessionId(id) else { return nil }
+            return id
+        }
+    }
+
     func recentSessions(limit: Int = 12) -> [SessionManifest] {
         guard ExportRel.isUsableSessionRoot(rootURL) else { return [] }
-        guard let ids = try? fileManager.contentsOfDirectory(atPath: rootURL.path) else { return [] }
-        let loaded: [SessionManifest] = ids.compactMap { id in
-            guard Self.isValidSessionId(id) else { return nil }
-            return try? loadManifest(id: id)
+        let loaded: [SessionManifest] = listedSessionIds().compactMap { id in
+            try? loadManifest(id: id)
         }
         return Array(loaded.sorted { $0.createdAt > $1.createdAt }.prefix(limit))
     }
@@ -244,6 +276,10 @@ final class SessionVault: @unchecked Sendable {
         }
         let numbers = children.compactMap { url -> Int? in
             if (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+                return nil
+            }
+            let childRel = "\(ScrumTracePath.shots)/\(url.lastPathComponent)"
+            if ExportRel.containsSymlinkComponent(childRel, sessionURL: session) {
                 return nil
             }
             let stem = url.deletingPathExtension().lastPathComponent
@@ -334,8 +370,7 @@ final class SessionVault: @unchecked Sendable {
     /// (permission sheet, then Quit). Keep anything with a movie, WAV, or Shot.
     func pruneAbandonedStarts() {
         guard ExportRel.isUsableSessionRoot(rootURL) else { return }
-        guard let ids = try? fileManager.contentsOfDirectory(atPath: rootURL.path) else { return }
-        for id in ids {
+        for id in listedSessionIds() {
             guard Self.isValidSessionId(id) else { continue }
             let session = sessionURL(id: id)
             guard ExportRel.isUsableSessionRoot(session) else { continue }
