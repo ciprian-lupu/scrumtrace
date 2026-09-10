@@ -366,8 +366,9 @@ struct ExportProjector {
         }
         do {
             try ExportRel.moveIntoSession(from: temp, relative: prepared, sessionURL: sessionURL)
+            ExportRel.removePrivateTemporaryURL(temp)
         } catch {
-            ExportRel.unlinkLastComponentUnfollowed(temp)
+            ExportRel.removePrivateTemporaryURL(temp)
             omitted.append(OmittedAsset(path: destRelative, reason: "Copy destination escaped export/"))
             return nil
         }

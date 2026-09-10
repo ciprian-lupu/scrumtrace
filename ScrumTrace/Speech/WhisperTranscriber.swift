@@ -82,7 +82,7 @@ final class WhisperTranscriber: @unchecked Sendable {
                 prefix: "scrumtrace-whisper"
             )
         }
-        defer { ExportRel.unlinkLastComponentUnfollowed(work) }
+        defer { ExportRel.removePrivateTemporaryURL(work) }
         let local = lockKit()
         guard let local else {
             throw NSError(
@@ -127,7 +127,7 @@ final class WhisperTranscriber: @unchecked Sendable {
             sessionURL: sessionURL,
             prefix: "scrumtrace-movie"
         )
-        defer { ExportRel.unlinkLastComponentUnfollowed(movieCopy) }
+        defer { ExportRel.removePrivateTemporaryURL(movieCopy) }
         let dest: URL
         do {
             dest = try ExportRel.makePrivateTemporaryURL(prefix: "scrumtrace-system-audio", ext: "m4a")

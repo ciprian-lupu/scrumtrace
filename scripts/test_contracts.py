@@ -356,7 +356,8 @@ def test_clip_exporter_macos14() -> None:
     assert "isAllowedClipDest" in tighten_file
     assert "isReadableSessionFile" in tighten_file
     assert "scrumtrace-tighten" in tighten_file
-    assert "unlinkLastComponentUnfollowed(work)" in tighten_file
+    assert "unlinkLastComponentUnfollowed(work)" not in tighten_file
+    assert "removePrivateTemporaryURL(work)" in tighten_file
     assert "FileManager.default.removeItem(at: work)" not in tighten_file
     assert "replaceItemAt" not in tighten_file
     assert "regularFileByteCount" in tighten_file
@@ -367,7 +368,8 @@ def test_clip_exporter_macos14() -> None:
     assert "isUsableSessionRoot" in export_fn
     assert "isReadableSessionFile" in export_fn
     assert "copyContainedToTemporaryFile" in export_fn
-    assert "unlinkLastComponentUnfollowed(movieCopy)" in export_fn
+    assert "removePrivateTemporaryURL(movieCopy)" in export_fn
+    assert "unlinkLastComponentUnfollowed(movieCopy)" not in export_fn
     assert "FileManager.default.removeItem(at: movieCopy)" not in export_fn
     assert "extractStill(source: movieCopy" in export_fn
     assert "extractStill(source: source" not in export_fn
@@ -581,6 +583,14 @@ def test_retry_failed_slices_and_pins() -> None:
     assert "testPruneAbandonedStartsDeletesEmptyIdleSession" in contracts
     assert "testPruneAbandonedStartsIgnoresPlantedShotsDirectorySymlink" in contracts
     assert "testMakePrivateTemporaryURLUsesMkdirNotSharedTempFile" in contracts
+    assert "testRemovePrivateTemporaryDirectoryDoesNotFollowSymlink" in contracts
+    assert "testCopyContainedToTemporaryFileCopiesRegularFile" in contracts
+    copy_test = contracts.split("func testCopyContainedToTemporaryFileCopiesRegularFile")[1].split(
+        "func testCopyContainedToTemporaryFileRefusesDestSymlink"
+    )[0]
+    assert "removePrivateTemporaryURL(copy)" in copy_test
+    assert 'hasPrefix("scrumtrace-copy-test-")' in copy_test
+    assert "FileManager.default.removeItem(at: copy)" not in copy_test
     assert "testRemoveItemIfRegularFileDoesNotRecurseIntoDirectory" in contracts
     assert "testPrepareContainedWriteDoesNotRecurseIntoDestDirectory" in contracts
     assert "testUnlinkLastComponentUnfollowedDoesNotRecurseIntoDirectory" in contracts
@@ -708,13 +718,15 @@ def test_dual_transcript_merge_wired() -> None:
     assert "transcribeFile(at: movieCopy)" in movie_audio
     assert "transcribeFile(at: movie," not in movie_audio
     assert "transcribeFile(at: movie)" not in movie_audio
-    assert "unlinkLastComponentUnfollowed(movieCopy)" in movie_audio
+    assert "unlinkLastComponentUnfollowed(movieCopy)" not in movie_audio
+    assert "removePrivateTemporaryURL(movieCopy)" in movie_audio
     assert "FileManager.default.removeItem(at: movieCopy)" not in movie_audio
     extract = speech.split("func extractAudio")[1].split("func lockKit")[0]
     assert "unlinkLastComponentUnfollowed(dest)" in extract
     assert "FileManager.default.removeItem(at: dest)" not in extract
     transcribe_file = speech.split("func transcribeFile")[1].split("func transcribeVoiceNote")[0]
-    assert "unlinkLastComponentUnfollowed(work)" in transcribe_file
+    assert "removePrivateTemporaryURL(work)" in transcribe_file
+    assert "unlinkLastComponentUnfollowed(work)" not in transcribe_file
     assert "FileManager.default.removeItem(at: work)" not in transcribe_file
     processor = (ROOT / "ScrumTrace" / "Processing" / "SessionProcessor.swift").read_text()
     assert "shouldTranscribeMovie" in processor
@@ -778,8 +790,12 @@ def test_pipeline_timing_stays_in_archive() -> None:
     assert run_zip.rfind("isSymbolicLink") < run_zip.index("spawnWithDirectoryFd")
     assert 'writerFailed("export/ is a symbolic link.")' in run_zip
     assert "zip failed with status" in run_zip
-    assert "unlinkLastComponentUnfollowed(temp)" in run_zip
-    assert "unlinkLastComponentUnfollowed(copy)" in run_zip
+    assert "makePrivateTemporaryURL" in run_zip
+    assert "UUID().uuidString" not in run_zip
+    assert "unlinkLastComponentUnfollowed(temp)" not in run_zip
+    assert "unlinkLastComponentUnfollowed(copy)" not in run_zip
+    assert "removePrivateTemporaryURL(temp)" in run_zip
+    assert "removePrivateTemporaryURL(copy)" in run_zip
     assert "FileManager.default.removeItem(at: temp)" not in run_zip
     assert "FileManager.default.removeItem(at: copy)" not in run_zip
     assert "FileManager.default.removeItem(at: stage)" not in run_zip
@@ -1215,7 +1231,8 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "existingSessionFile" in copy_if
     assert "copyContainedToTemporaryFile" in copy_if
     assert "moveIntoSession" in copy_if
-    assert "unlinkLastComponentUnfollowed(temp)" in copy_if
+    assert "removePrivateTemporaryURL(temp)" in copy_if
+    assert "unlinkLastComponentUnfollowed(temp)" not in copy_if
     assert "FileManager.default.removeItem(at: temp)" not in copy_if
     assert "readContainedData" not in copy_if
     assert "writeContainedData" not in copy_if
@@ -1631,6 +1648,9 @@ def test_write_contained_data_refuses_directory_symlinks() -> None:
     assert "Darwin.fsync" in copy_fn
     assert "copyUnfollowedToTemporaryFile" in copy_fn
     copy_only = models.split("static func copyContainedToTemporaryFile")[1].split("static func copyUnfollowedToTemporaryFile")[0]
+    assert "makePrivateTemporaryURL" in copy_only
+    assert "removePrivateTemporaryURL" in copy_only
+    assert "FileManager.default.temporaryDirectory" not in copy_only
     assert "FileManager.default.removeItem(at: dest)" not in copy_only.split("guard destFd")[0]
     assert "FileManager.default.removeItem(at: dest)" not in copy_only
     assert "unlinkLastComponentUnfollowed(dest)" in copy_only
@@ -1640,9 +1660,13 @@ def test_write_contained_data_refuses_directory_symlinks() -> None:
     assert "O_EXCL" in unf
     assert "O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW" in unf
     assert "/tmp" in unf
+    assert "makePrivateTemporaryURL" in unf
     assert "FileManager.default.removeItem(at: dest)" not in unf.split("guard destFd")[0]
     assert "FileManager.default.removeItem(at: dest)" not in unf
     assert "unlinkLastComponentUnfollowed(dest)" in unf
+    unf_only = models.split("static func copyUnfollowedToTemporaryFile")[1].split("static func makePrivateTemporaryURL")[0]
+    assert "makePrivateTemporaryURL" in unf_only
+    assert "FileManager.default.temporaryDirectory" not in unf_only
     assert "O_NOFOLLOW" in models.split("private static func openatFile")[1]
     pack_size = models.split("static func regularFileByteCount(relative:")[1].split(
         "static func regularFileByteCount(_ file"
@@ -1671,6 +1695,7 @@ def test_write_contained_data_refuses_directory_symlinks() -> None:
     assert "FileManager.default.removeItem(at: next)" not in prepare
     write_fn = models.split("static func writeContainedData")[1].split("static func isAllowedClipDest")[0]
     assert "unlinkLastComponentUnfollowed(tmp)" in write_fn
+    assert "removePrivateTemporaryURL(tmp)" in write_fn
     assert "FileManager.default.removeItem(at: tmp)" not in write_fn
     assert "prepareContainedWrite" in write_fn
     assert "options: .atomic" not in write_fn
@@ -1692,8 +1717,14 @@ def test_write_contained_data_refuses_directory_symlinks() -> None:
     assert "scrumtraceUnlinkat" in write_fn
     assert "openatDirectory" in write_fn
     assert "st_ino" in write_fn
-    assert "temporaryDirectory" in write_fn
+    assert "makePrivateTemporaryURL" in write_fn
+    assert "temporaryDirectory.appendingPathComponent" not in write_fn
     assert "scrumtrace-write" in write_fn
+    write_excl = models.split("private static func writeExclusiveTemporaryFile")[1].split("static func fsyncRegularFile")[0]
+    assert "makePrivateTemporaryURL" in write_excl
+    assert "temporaryDirectory.appendingPathComponent" not in write_excl
+    assert "removePrivateTemporaryURL(tmp)" in write_excl
+    assert "UUID().uuidString" not in write_excl
     assert "static func removeItemIfRegularFile" in models
     rm_fn = models.split("static func removeItemIfRegularFile")[1].split("static func readContainedData(relative:")[0]
     assert "scrumtraceUnlinkat" in rm_fn

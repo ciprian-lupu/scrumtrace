@@ -158,7 +158,12 @@ final class ContractTests: XCTestCase {
             sessionURL: root,
             prefix: "scrumtrace-copy-test"
         )
-        defer { try? FileManager.default.removeItem(at: copy) }
+        defer { ExportRel.removePrivateTemporaryURL(copy) }
+        XCTAssertTrue(copy.deletingLastPathComponent().lastPathComponent.hasPrefix("scrumtrace-copy-test-"))
+        XCTAssertNotEqual(
+            copy.deletingLastPathComponent().standardizedFileURL,
+            FileManager.default.temporaryDirectory.standardizedFileURL
+        )
         XCTAssertEqual(try Data(contentsOf: copy), payload)
         XCTAssertEqual(copy.pathExtension, "wav")
         XCTAssertEqual(

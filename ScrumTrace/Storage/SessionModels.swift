@@ -448,23 +448,24 @@ enum ExportRel {
         do {
             try fsyncRegularFile(tmp, relative: relative)
             try moveIntoSession(from: tmp, relative: relative, sessionURL: sessionURL)
+            removePrivateTemporaryURL(tmp)
         } catch {
-            unlinkLastComponentUnfollowed(tmp)
+            removePrivateTemporaryURL(tmp)
             throw error
         }
     }
 
-    /// `O_EXCL | O_NOFOLLOW` so a planted temp-path symlink cannot be followed.
-    /// Caller deletes `tmp` if the later `moveIntoSession` fails.
+    /// `O_EXCL | O_NOFOLLOW` inside a private `mkdtemp` so a planted temp-path
+    /// symlink cannot be followed. Caller deletes `tmp` if the later
+    /// `moveIntoSession` fails.
     private static func writeExclusiveTemporaryFile(_ data: Data, prefix: String) throws -> URL {
-        let tmp = FileManager.default.temporaryDirectory.appendingPathComponent(
-            "\(prefix)-\(UUID().uuidString)"
-        )
+        let tmp = try makePrivateTemporaryURL(prefix: prefix, ext: "")
         let fd = tmp.withUnsafeFileSystemRepresentation { ptr -> Int32 in
             guard let ptr else { return -1 }
             return Darwin.open(ptr, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, 0o600)
         }
         guard fd >= 0 else {
+            removePrivateTemporaryURL(tmp)
             throw SessionVaultError.writeFailed(prefix)
         }
         let ok: Bool
@@ -490,6 +491,7 @@ enum ExportRel {
         Darwin.close(fd)
         guard ok else {
             unlinkLastComponentUnfollowed(tmp)
+            removePrivateTemporaryURL(tmp)
             throw SessionVaultError.writeFailed(prefix)
         }
         return tmp
@@ -932,9 +934,9 @@ enum ExportRel {
         return readContainedData(relative: rel, sessionURL: sessionRoot)
     }
 
-    /// Copy a contained session file to a unique temp URL using `fcopyfile` on an
-    /// `O_NOFOLLOW` fd. Whisper / AVAsset still need a path, but it must not be a
-    /// planted `archive/` link.
+    /// Copy a contained session file into a private `mkdtemp` folder using
+    /// `fcopyfile` on an `O_NOFOLLOW` fd. Whisper / AVAsset still need a
+    /// path; a UUID name in shared temp can be replaced with a symlink (C2).
     static func copyContainedToTemporaryFile(
         relative: String,
         sessionURL: URL,
@@ -946,62 +948,55 @@ enum ExportRel {
         guard isUnderSession(relative), let parts = normalizedComponents(relative) else {
             throw SessionVaultError.writeFailed(relative)
         }
-        var suffix = ""
+        var ext = ""
         if let last = parts.last {
-            let ext = URL(fileURLWithPath: last).pathExtension
-            if !ext.isEmpty {
-                suffix = ".\(ext)"
-            }
+            ext = URL(fileURLWithPath: last).pathExtension
         }
-        let dest = FileManager.default.temporaryDirectory.appendingPathComponent(
-            "\(prefix)-\(UUID().uuidString)\(suffix)"
-        )
+        let dest = try makePrivateTemporaryURL(prefix: prefix, ext: ext)
         let destFd = dest.withUnsafeFileSystemRepresentation { ptr -> Int32 in
             guard let ptr else { return -1 }
             return Darwin.open(ptr, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, 0o600)
         }
         guard destFd >= 0 else {
+            removePrivateTemporaryURL(dest)
             throw SessionVaultError.writeFailed(relative)
         }
         defer { Darwin.close(destFd) }
         guard let srcFd = openatFile(parts: parts, root: sessionURL) else {
             unlinkLastComponentUnfollowed(dest)
+            removePrivateTemporaryURL(dest)
             throw SessionVaultError.writeFailed(relative)
         }
         defer { Darwin.close(srcFd) }
         // COPYFILE_DATA (1 << 3): copy file bytes only, no xattrs.
         if scrumtraceFcopyfile(srcFd, destFd, nil, 1 << 3) != 0 {
             unlinkLastComponentUnfollowed(dest)
+            removePrivateTemporaryURL(dest)
             throw SessionVaultError.writeFailed(relative)
         }
         guard Darwin.fsync(destFd) == 0 else {
             unlinkLastComponentUnfollowed(dest)
+            removePrivateTemporaryURL(dest)
             throw SessionVaultError.writeFailed(relative)
         }
         return dest
     }
 
-    /// Copy a regular file by `O_NOFOLLOW` fd into an exclusive temp. WhisperKit
-    /// still needs a path; this keeps Hold-to-Talk / extracted AAC off a planted
-    /// file symlink. The parent may be `/tmp` (a symlink on macOS).
+    /// Copy a regular file by `O_NOFOLLOW` fd into a private `mkdtemp` dest.
+    /// WhisperKit still needs a path; this keeps Hold-to-Talk / extracted AAC
+    /// off a planted file symlink. The parent of the *source* may be `/tmp`
+    /// (a symlink on macOS).
     static func copyUnfollowedToTemporaryFile(_ url: URL, prefix: String) throws -> URL {
         if (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
             throw SessionVaultError.writeFailed(prefix)
         }
-        // Parent may be `/tmp` → `/private/tmp`. O_NOFOLLOW applies to the file.
-        var suffix = ""
-        let ext = url.pathExtension
-        if !ext.isEmpty {
-            suffix = ".\(ext)"
-        }
-        let dest = FileManager.default.temporaryDirectory.appendingPathComponent(
-            "\(prefix)-\(UUID().uuidString)\(suffix)"
-        )
+        let dest = try makePrivateTemporaryURL(prefix: prefix, ext: url.pathExtension)
         let destFd = dest.withUnsafeFileSystemRepresentation { ptr -> Int32 in
             guard let ptr else { return -1 }
             return Darwin.open(ptr, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, 0o600)
         }
         guard destFd >= 0 else {
+            removePrivateTemporaryURL(dest)
             throw SessionVaultError.writeFailed(prefix)
         }
         defer { Darwin.close(destFd) }
@@ -1011,20 +1006,24 @@ enum ExportRel {
         }
         guard srcFd >= 0 else {
             unlinkLastComponentUnfollowed(dest)
+            removePrivateTemporaryURL(dest)
             throw SessionVaultError.writeFailed(prefix)
         }
         defer { Darwin.close(srcFd) }
         var info = stat()
         guard Darwin.fstat(srcFd, &info) == 0, (info.st_mode & S_IFMT) == S_IFREG else {
             unlinkLastComponentUnfollowed(dest)
+            removePrivateTemporaryURL(dest)
             throw SessionVaultError.writeFailed(prefix)
         }
         if scrumtraceFcopyfile(srcFd, destFd, nil, 1 << 3) != 0 {
             unlinkLastComponentUnfollowed(dest)
+            removePrivateTemporaryURL(dest)
             throw SessionVaultError.writeFailed(prefix)
         }
         guard Darwin.fsync(destFd) == 0 else {
             unlinkLastComponentUnfollowed(dest)
+            removePrivateTemporaryURL(dest)
             throw SessionVaultError.writeFailed(prefix)
         }
         return dest
