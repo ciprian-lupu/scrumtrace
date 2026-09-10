@@ -1506,6 +1506,7 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "sessionURL: sessionURL" in fallback
     assert "exportClipPath" in fallback
     assert "exportPath" in fallback
+    assert "framesOverlapSlice" in fallback
     local = processor.split("func localReviewTasks")[1].split("func refreshShotsFromDisk")[0]
     assert "selectForPack" in local
     assert "[Requires Manual Review - API Offline]" in local
@@ -1659,6 +1660,8 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "fileExists(atPath: url.path)" not in append
     assert "for shot in linked" in append
     assert "for still in slice.stills" in append
+    assert "framesOverlapSlice" in append
+    assert "shots: linked" in append
     assert "let shot = linked.first" not in processor.split("private func evaluateSlice")[1].split("private func tasks(")[0]
     transcribe = processor.split("private func transcribe(")[1].split("private func loadTranscript")[0]
     assert "existingSessionFile(ScrumTracePath.audioWav" in transcribe

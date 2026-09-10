@@ -523,6 +523,12 @@ final class SessionProcessor: @unchecked Sendable {
         var images: [URL] = []
         var seenImage = Set<String>()
         func appendImage(_ relative: String) {
+            guard EvidenceValidator.framesOverlapSlice(
+                [relative],
+                slice: slice,
+                shots: linked,
+                sessionURL: sessionURL
+            ) else { return }
             guard let contained = ExportRel.existingSessionFile(relative, sessionURL: sessionURL) else { return }
             let url = sessionURL.appendingPathComponent(contained)
             guard seenImage.insert(url.path).inserted else { return }
@@ -784,7 +790,14 @@ final class SessionProcessor: @unchecked Sendable {
         product: ProductContext,
         sessionURL: URL
     ) -> TaskRecord {
-        var evidence = slice.stills
+        var evidence = slice.stills.filter {
+            EvidenceValidator.framesOverlapSlice(
+                [$0],
+                slice: slice,
+                shots: [shot],
+                sessionURL: sessionURL
+            )
+        }
         evidence.append(contentsOf: shot.stillCandidates)
         if let exportPath = shot.exportPath {
             evidence.append(exportPath)
