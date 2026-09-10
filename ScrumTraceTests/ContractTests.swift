@@ -959,6 +959,13 @@ final class ContractTests: XCTestCase {
         XCTAssertEqual(selected.count, 8)
         XCTAssertEqual(selected.first?.title, "TASK-S")
         XCTAssertTrue(selected.contains { $0.title == "TASK-K" })
+        let manyShots = (1...9).map { i in
+            task(id: "TASK-H\(i)", status: .needsReview, confidence: 0.2, evidence: ["shots/00\(i).jpg"])
+        }
+        let keptShots = TaskRanking.selectForPack(manyShots + extra, limit: 8)
+        XCTAssertEqual(keptShots.count, 9)
+        XCTAssertTrue(keptShots.allSatisfy { TaskRanking.isShotBacked($0) })
+        XCTAssertFalse(keptShots.contains { $0.title.hasPrefix("TASK-X") })
     }
 
     func testQuoteMustOverlapTranscriptSegment() {

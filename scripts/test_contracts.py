@@ -668,6 +668,7 @@ def test_retry_failed_slices_and_pins() -> None:
     assert "testPruneAbandonedStartsDeletesEmptyIdleSession" in contracts
     assert "testPruneAbandonedStartsIgnoresPlantedShotsDirectorySymlink" in contracts
     assert "testLoadShotSidecarsReadsAnnotatedJSONWhenCatalogOmitsIt" in contracts
+    assert "testTaskRankingPrefersHumanShotsAndConfirmed" in contracts
     assert "testMakePrivateTemporaryURLUsesMkdirNotSharedTempFile" in contracts
     assert "testRemovePrivateTemporaryDirectoryDoesNotFollowSymlink" in contracts
     assert "testCopyContainedToTemporaryFileCopiesRegularFile" in contracts
@@ -1477,6 +1478,10 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "AGENT_CONTEXT" not in visual
     assert "func writeExportText" in models
     assert "enum TaskRanking" in models
+    rank_fn = models.split("static func selectForPack")[1].split("static func isShotBacked")[0]
+    assert "isShotBacked($0)" in rank_fn
+    assert "rest.prefix(room)" in rank_fn
+    assert "sorted.prefix(limit)" not in rank_fn
     assert "stillCandidates" in models
     assert "scrumTraceSessionEnding" in models
     assert "selectForPack" in processor

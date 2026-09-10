@@ -2056,11 +2056,16 @@ struct TaskRecord: Codable, Sendable, Identifiable, Hashable {
 }
 
 /// D7: when the pack can only keep `maxTasks`, human shots and `confirmed` win.
+/// Shot-backed rows are never silently dropped; only keyword/clip extras trim.
 enum TaskRanking {
     static func selectForPack(_ tasks: [TaskRecord], limit: Int = MediaBudget.maxTasks) -> [TaskRecord] {
         let kept = tasks.filter { $0.status != .dropped }
         let sorted = kept.sorted(by: moreImportant)
-        return Array(sorted.prefix(limit)).enumerated().map { index, task in
+        let shotBacked = sorted.filter { isShotBacked($0) }
+        let rest = sorted.filter { !isShotBacked($0) }
+        let room = max(0, limit - shotBacked.count)
+        let selected = shotBacked + Array(rest.prefix(room))
+        return selected.enumerated().map { index, task in
             var copy = task
             copy.taskId = String(format: "TASK-%02d", index + 1)
             return copy
