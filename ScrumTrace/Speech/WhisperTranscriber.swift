@@ -60,8 +60,7 @@ final class WhisperTranscriber: @unchecked Sendable {
 
     func transcribeFile(at url: URL, sessionURL: URL? = nil) async throws -> FullTranscript {
         try Self.refuseSymlinkMedia(url, sessionRoot: sessionURL)
-        var work = url
-        var copied: URL?
+        let work: URL
         if let sessionURL {
             guard let rel = ExportRel.unfollowedRelative(url, sessionRoot: sessionURL) else {
                 throw NSError(
@@ -70,19 +69,20 @@ final class WhisperTranscriber: @unchecked Sendable {
                     userInfo: [NSLocalizedDescriptionKey: "Refusing to transcribe a symbolic link."]
                 )
             }
-            let temp = try ExportRel.copyContainedToTemporaryFile(
+            work = try ExportRel.copyContainedToTemporaryFile(
                 relative: rel,
                 sessionURL: sessionURL,
                 prefix: "scrumtrace-whisper"
             )
-            copied = temp
-            work = temp
+        } else {
+            // Hold-to-Talk and extracted AAC live under TMPDIR. `/tmp` is a
+            // symlink on macOS; copy via O_NOFOLLOW instead of refusing the parent.
+            work = try ExportRel.copyUnfollowedToTemporaryFile(
+                url,
+                prefix: "scrumtrace-whisper"
+            )
         }
-        defer {
-            if let copied {
-                try? FileManager.default.removeItem(at: copied)
-            }
-        }
+        defer { try? FileManager.default.removeItem(at: work) }
         let local = lockKit()
         guard let local else {
             throw NSError(
@@ -172,20 +172,24 @@ final class WhisperTranscriber: @unchecked Sendable {
     }
 
     private static func refuseSymlinkMedia(_ url: URL, sessionRoot: URL? = nil) throws {
-        if (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true
-            || ExportRel.parentIsSymbolicLink(url) {
+        if (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
             throw NSError(
                 domain: "ScrumTrace",
                 code: 4,
                 userInfo: [NSLocalizedDescriptionKey: "Refusing to transcribe a symbolic link."]
             )
         }
-        if let sessionRoot, !ExportRel.isReadableSessionFile(url, sessionRoot: sessionRoot) {
-            throw NSError(
-                domain: "ScrumTrace",
-                code: 4,
-                userInfo: [NSLocalizedDescriptionKey: "Refusing to transcribe a symbolic link."]
-            )
+        // `/tmp` is a symlink on macOS. Hold-to-Talk WAVs live there; do not
+        // refuse the parent unless this is a session-tree path.
+        if let sessionRoot {
+            if ExportRel.parentIsSymbolicLink(url)
+                || !ExportRel.isReadableSessionFile(url, sessionRoot: sessionRoot) {
+                throw NSError(
+                    domain: "ScrumTrace",
+                    code: 4,
+                    userInfo: [NSLocalizedDescriptionKey: "Refusing to transcribe a symbolic link."]
+                )
+            }
         }
     }
 

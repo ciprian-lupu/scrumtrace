@@ -691,6 +691,57 @@ enum ExportRel {
         return dest
     }
 
+    /// Copy a regular file by `O_NOFOLLOW` fd into an exclusive temp. WhisperKit
+    /// still needs a path; this keeps Hold-to-Talk / extracted AAC off a planted
+    /// file symlink. The parent may be `/tmp` (a symlink on macOS).
+    static func copyUnfollowedToTemporaryFile(_ url: URL, prefix: String) throws -> URL {
+        if (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+            throw SessionVaultError.writeFailed(prefix)
+        }
+        var suffix = ""
+        let ext = url.pathExtension
+        if !ext.isEmpty {
+            suffix = ".\(ext)"
+        }
+        let dest = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "\(prefix)-\(UUID().uuidString)\(suffix)"
+        )
+        if (try? dest.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+            try FileManager.default.removeItem(at: dest)
+        }
+        let destFd = dest.withUnsafeFileSystemRepresentation { ptr -> Int32 in
+            guard let ptr else { return -1 }
+            return Darwin.open(ptr, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0o600)
+        }
+        guard destFd >= 0 else {
+            throw SessionVaultError.writeFailed(prefix)
+        }
+        defer { Darwin.close(destFd) }
+        let srcFd = url.withUnsafeFileSystemRepresentation { ptr -> Int32 in
+            guard let ptr else { return -1 }
+            return Darwin.open(ptr, O_RDONLY | O_CLOEXEC | O_NOFOLLOW)
+        }
+        guard srcFd >= 0 else {
+            try? FileManager.default.removeItem(at: dest)
+            throw SessionVaultError.writeFailed(prefix)
+        }
+        defer { Darwin.close(srcFd) }
+        var info = stat()
+        guard Darwin.fstat(srcFd, &info) == 0, (info.st_mode & S_IFMT) == S_IFREG else {
+            try? FileManager.default.removeItem(at: dest)
+            throw SessionVaultError.writeFailed(prefix)
+        }
+        if scrumtraceFcopyfile(srcFd, destFd, nil, 1 << 3) != 0 {
+            try? FileManager.default.removeItem(at: dest)
+            throw SessionVaultError.writeFailed(prefix)
+        }
+        guard Darwin.fsync(destFd) == 0 else {
+            try? FileManager.default.removeItem(at: dest)
+            throw SessionVaultError.writeFailed(prefix)
+        }
+        return dest
+    }
+
     /// Open a contained directory with `O_NOFOLLOW` on every component. Empty
     /// `parts` is the session root. Caller closes.
     private static func openatDirectory(parts: [String], root: URL) -> Int32? {

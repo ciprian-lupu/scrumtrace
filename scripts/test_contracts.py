@@ -619,8 +619,13 @@ def test_dual_transcript_merge_wired() -> None:
     assert "scrumtrace-whisper" in speech
     transcribe_file = speech.split("func transcribeFile")[1].split("func transcribeVoiceNote")[0]
     assert "copyContainedToTemporaryFile" in transcribe_file
+    assert "copyUnfollowedToTemporaryFile" in transcribe_file
     assert "guard let rel" in transcribe_file
     assert "if let sessionURL," not in transcribe_file
+    assert "TMPDIR" in transcribe_file or "/tmp" in transcribe_file
+    refuse_fn = speech.split("func refuseSymlinkMedia")[1].split("func whisperKitModelName")[0]
+    assert "if let sessionRoot" in refuse_fn
+    assert refuse_fn.index("if let sessionRoot") < refuse_fn.index("parentIsSymbolicLink")
     movie_audio = speech.split("func transcribeMovieAudio")[1].split("func extractAudio")[0]
     assert "copyContainedToTemporaryFile" in movie_audio
     assert "scrumtrace-movie" in movie_audio
@@ -1426,6 +1431,12 @@ def test_write_contained_data_refuses_directory_symlinks() -> None:
     assert "scrumtraceFcopyfile" in copy_fn
     assert "pathExtension" in copy_fn
     assert "Darwin.fsync" in copy_fn
+    assert "copyUnfollowedToTemporaryFile" in copy_fn
+    unf = models.split("static func copyUnfollowedToTemporaryFile")[1].split("private static func openatDirectory")[0]
+    assert "O_NOFOLLOW" in unf
+    assert "scrumtraceFcopyfile" in unf
+    assert "O_EXCL" in unf
+    assert "/tmp" in unf
     assert "O_NOFOLLOW" in models.split("private static func openatFile")[1]
     pack_size = models.split("static func regularFileByteCount(relative:")[1].split(
         "static func regularFileByteCount(_ file"
