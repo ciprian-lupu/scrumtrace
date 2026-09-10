@@ -24,6 +24,16 @@ final class ContractTests: XCTestCase {
         XCTAssertEqual(ExportRel.handoffPath("export/../shots/001.jpg"), "shots/001.jpg")
         XCTAssertEqual(ExportRel.sessionPath("export/../archive/session.mp4"), "archive/session.mp4")
         XCTAssertNil(ExportRel.normalizedComponents("export/foo/../../.."))
+        XCTAssertTrue(ExportRel.isVisualEvidence("archive/shots/001.png"))
+        XCTAssertTrue(ExportRel.isVisualEvidence("export/shots/001.jpg"))
+        XCTAssertTrue(ExportRel.isVisualEvidence("shots/001.annotated.png"))
+        XCTAssertTrue(ExportRel.isVisualEvidence("export/media/task-01/clip.mp4"))
+        XCTAssertTrue(ExportRel.isVisualEvidence("archive/media-work/task-01/clip.mp4"))
+        XCTAssertFalse(ExportRel.isVisualEvidence("export/AGENT_CONTEXT.md"))
+        XCTAssertFalse(ExportRel.isVisualEvidence("archive/session.mp4"))
+        XCTAssertFalse(ExportRel.isVisualEvidence("archive/audio.wav"))
+        XCTAssertFalse(ExportRel.isVisualEvidence("export/SESSION_BRIEF.html"))
+        XCTAssertFalse(ExportRel.isVisualEvidence("session.manifest.json"))
     }
 
     func testHandoffFileIfPresentRequiresExportRegularFile() throws {
@@ -1095,6 +1105,13 @@ final class ContractTests: XCTestCase {
         XCTAssertFalse(
             EvidenceValidator.exportFileExists("export/../archive/shots/001.png", sessionURL: root)
         )
+        let export = root.appendingPathComponent("export")
+        try FileManager.default.createDirectory(at: export, withIntermediateDirectories: true)
+        try Data("#".utf8).write(to: export.appendingPathComponent("AGENT_CONTEXT.md"))
+        try Data("mp4".utf8).write(to: root.appendingPathComponent("archive/session.mp4"))
+        XCTAssertNil(EvidenceValidator.resolvePath("AGENT_CONTEXT.md", sessionURL: root))
+        XCTAssertNil(EvidenceValidator.resolvePath("export/AGENT_CONTEXT.md", sessionURL: root))
+        XCTAssertNil(EvidenceValidator.resolvePath("archive/session.mp4", sessionURL: root))
     }
 
     func testMergedSlicesStayWithinClipMax() {
@@ -1283,6 +1300,7 @@ final class ContractTests: XCTestCase {
         let shots = root.appendingPathComponent("export/shots")
         try FileManager.default.createDirectory(at: shots, withIntermediateDirectories: true)
         try Data("jpg".utf8).write(to: shots.appendingPathComponent("001.jpg"))
+        try Data("# ctx".utf8).write(to: root.appendingPathComponent("export/AGENT_CONTEXT.md"))
         defer { try? FileManager.default.removeItem(at: root) }
         let kept = TaskRecord(
             taskId: "TASK-01",
@@ -1340,8 +1358,22 @@ final class ContractTests: XCTestCase {
             evidenceMedia: ["shots/001.jpg"],
             confidence: 0.9
         )
+        let docOnly = TaskRecord(
+            taskId: "TASK-05",
+            sourceSliceId: "slice-05",
+            kind: .bug,
+            status: .confirmed,
+            title: "Markdown is not a still",
+            observed: "x",
+            stated: "",
+            inferred: "",
+            agentInstructions: "inspect",
+            quotes: [],
+            evidenceMedia: ["AGENT_CONTEXT.md"],
+            confidence: 0.9
+        )
         let applied = EvidenceValidator.applyExportEvidence(
-            tasks: [kept, missing, archiveOnly, noSlice],
+            tasks: [kept, missing, archiveOnly, noSlice, docOnly],
             sessionURL: root
         )
         XCTAssertEqual(applied[0].status, .confirmed)
@@ -1352,6 +1384,8 @@ final class ContractTests: XCTestCase {
         XCTAssertTrue(applied[2].evidenceMedia.isEmpty)
         XCTAssertEqual(applied[3].status, .needsReview)
         XCTAssertEqual(applied[3].evidenceMedia, ["shots/001.jpg"])
+        XCTAssertEqual(applied[4].status, .needsReview)
+        XCTAssertTrue(applied[4].evidenceMedia.isEmpty)
     }
 
     func testApplyExportEvidenceDemotesInvertedAndOutOfSliceQuotes() throws {

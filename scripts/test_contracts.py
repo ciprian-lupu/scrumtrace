@@ -1155,10 +1155,15 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "func handoffFileIfPresent" in models
     assert "func packMediaHandoff" in models
     assert "func packMediaRelative" in models
-    pack_rel = models.split("static func packMediaRelative")[1].split("static func writeExportText")[0]
+    assert "func isVisualEvidence" in models
+    pack_rel = models.split("static func packMediaRelative")[1].split("static func isVisualEvidence")[0]
     assert 'parts[0] == "shots"' in pack_rel
     assert 'parts[0] == "media"' in pack_rel
     assert '$0 == ".."' in pack_rel
+    visual = models.split("static func isVisualEvidence")[1].split("static func writeExportText")[0]
+    assert '"shots", "media", "media-work"' in visual
+    assert "png" in visual
+    assert "AGENT_CONTEXT" not in visual
     assert "func writeExportText" in models
     assert "enum TaskRanking" in models
     assert "stillCandidates" in models

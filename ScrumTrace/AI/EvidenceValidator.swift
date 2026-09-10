@@ -39,7 +39,8 @@ enum EvidenceValidator {
         }
         var seen = Set<String>()
         for rel in tries where seen.insert(rel).inserted {
-            if let existing = ExportRel.existingSessionFile(rel, sessionURL: sessionURL) {
+            if let existing = ExportRel.existingSessionFile(rel, sessionURL: sessionURL),
+               ExportRel.isVisualEvidence(existing) {
                 return existing
             }
         }
@@ -47,7 +48,8 @@ enum EvidenceValidator {
             if ExportRel.containsSymlinkComponent(folder, sessionURL: sessionURL) {
                 continue
             }
-            if let match = firstMatch(name: name, stem: stem, in: sessionURL.appendingPathComponent(folder), sessionURL: sessionURL) {
+            if let match = firstMatch(name: name, stem: stem, in: sessionURL.appendingPathComponent(folder), sessionURL: sessionURL),
+               ExportRel.isVisualEvidence(match) {
                 return match
             }
         }
@@ -123,7 +125,7 @@ enum EvidenceValidator {
         return tasks.map { task in
             var copy = task
             copy.evidenceMedia = task.evidenceMedia.filter { path in
-                exportFileExists(path, sessionURL: sessionURL)
+                ExportRel.packMediaHandoff(path, sessionURL: sessionURL) != nil
             }
             if copy.status == .confirmed {
                 if copy.evidenceMedia.isEmpty || copy.sourceSliceId.isEmpty {

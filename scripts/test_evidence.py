@@ -63,6 +63,8 @@ def test_export_rel_in_swift() -> None:
     assert "func omittedHandoffPath" in models
     assert "func handoffFileIfPresent" in models
     assert "func writeExportText" in models
+    assert "func isVisualEvidence" in models
+    assert 'rest[0] == "shots"' in models or '"shots", "media", "media-work"' in models
     clip = (ROOT / "ScrumTrace" / "Slicing" / "ClipExporter.swift").read_text()
     assert "tightenExportClips" in clip
     assert "containedExportMember" in clip
@@ -135,6 +137,7 @@ def test_frame_ref_basename_resolves() -> None:
     assert "replacingOccurrences(of: prefix" not in first_match
     resolve = validator.split("static func resolvePath")[1].split("static func existingPaths")[0]
     assert "containsSymlinkComponent" in resolve
+    assert "isVisualEvidence" in resolve
     assert "func resolvePath" in validator
     assert "func applyExportEvidence" in validator
     processor = (ROOT / "ScrumTrace" / "Processing" / "SessionProcessor.swift").read_text()
@@ -172,6 +175,8 @@ def test_frame_ref_basename_resolves() -> None:
     assert "sourceSliceId.isEmpty" in validator
     apply_fn = validator.split("static func applyExportEvidence")[1].split("static func exportFileExists")[0]
     assert "quoteMatchesTranscript" in apply_fn
+    assert "packMediaHandoff" in apply_fn
+    assert "exportFileExists(path" not in apply_fn
     assert "transcript: FullTranscript?" in apply_fn
     assert "slices: [SliceRecord]" in apply_fn
     assert "quote times are inverted" in apply_fn or "tMediaStart > quote.tMediaEnd" in apply_fn

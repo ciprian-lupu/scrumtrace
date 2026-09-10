@@ -332,6 +332,30 @@ enum ExportRel {
         return joined
     }
 
+    /// Stills and clips only. Manifests, markdown, WAV, and the master movie
+    /// cannot satisfy C5 `frame_references` / `evidence_media`.
+    static func isVisualEvidence(_ path: String) -> Bool {
+        guard let parts = normalizedComponents(path), parts.count >= 2 else { return false }
+        var rest = parts
+        if rest[0] == "export" || rest[0] == "archive" {
+            rest = Array(rest.dropFirst())
+        }
+        guard rest.count >= 2 else { return false }
+        switch rest[0] {
+        case "shots", "media", "media-work":
+            break
+        default:
+            return false
+        }
+        let ext = URL(fileURLWithPath: rest.last ?? "").pathExtension.lowercased()
+        switch ext {
+        case "png", "jpg", "jpeg", "mp4", "m4v", "mov", "webm":
+            return true
+        default:
+            return false
+        }
+    }
+
     /// Write UTF-8 into `export/`. A planted symlink at the dest is deleted first
     /// so the write cannot follow into `archive/` or overwrite a sibling via a link.
     static func writeExportText(_ text: String, relative: String, sessionURL: URL) throws {
