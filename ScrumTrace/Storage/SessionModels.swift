@@ -24,6 +24,35 @@ private func scrumtraceUnlinkat(
     _ flag: Int32
 ) -> Int32
 
+@_silgen_name("posix_spawn_file_actions_init")
+private func scrumtraceSpawnActionsInit(_ file_actions: UnsafeMutableRawPointer) -> Int32
+
+@_silgen_name("posix_spawn_file_actions_destroy")
+private func scrumtraceSpawnActionsDestroy(_ file_actions: UnsafeMutableRawPointer) -> Int32
+
+@_silgen_name("posix_spawn_file_actions_addfchdir_np")
+private func scrumtraceAddFchdir(_ file_actions: UnsafeMutableRawPointer, _ fd: Int32) -> Int32
+
+@_silgen_name("posix_spawn_file_actions_adddup2")
+private func scrumtraceAddDup2(
+    _ file_actions: UnsafeMutableRawPointer,
+    _ fd: Int32,
+    _ newfd: Int32
+) -> Int32
+
+@_silgen_name("posix_spawn_file_actions_addclose")
+private func scrumtraceAddClose(_ file_actions: UnsafeMutableRawPointer, _ fd: Int32) -> Int32
+
+@_silgen_name("posix_spawn")
+private func scrumtracePosixSpawn(
+    _ pid: UnsafeMutablePointer<pid_t>?,
+    _ file: UnsafePointer<CChar>?,
+    _ file_actions: UnsafeRawPointer?,
+    _ attrp: UnsafeRawPointer?,
+    _ argv: UnsafePointer<UnsafeMutablePointer<CChar>?>?,
+    _ envp: UnsafePointer<UnsafeMutablePointer<CChar>?>?
+) -> Int32
+
 extension Notification.Name {
     static let scrumTraceCaptureGate = Notification.Name("ScrumTrace.captureGate")
     static let scrumTraceHUDSuppress = Notification.Name("ScrumTrace.hudSuppress")
@@ -897,18 +926,32 @@ enum ExportRel {
         _ = Darwin.fcntl(readFd, F_SETFD, FD_CLOEXEC)
         _ = Darwin.fcntl(writeFd, F_SETFD, FD_CLOEXEC)
 
-        var actions: posix_spawn_file_actions_t? = nil
-        guard posix_spawn_file_actions_init(&actions) == 0 else {
+        // Overlay `posix_spawn_file_actions_t` vs `posix_spawn_file_actions_t?`
+        // disagrees across SDKs. Call the C symbols through silgen + raw pointers.
+        var actions = posix_spawn_file_actions_t()
+        let actionsReady = withUnsafeMutablePointer(to: &actions) { ptr in
+            scrumtraceSpawnActionsInit(UnsafeMutableRawPointer(ptr)) == 0
+        }
+        guard actionsReady else {
             Darwin.close(readFd)
             Darwin.close(writeFd)
             throw SessionVaultError.writeFailed("spawn")
         }
-        defer { posix_spawn_file_actions_destroy(&actions) }
+        defer {
+            _ = withUnsafeMutablePointer(to: &actions) { ptr in
+                scrumtraceSpawnActionsDestroy(UnsafeMutableRawPointer(ptr))
+            }
+        }
 
-        guard posix_spawn_file_actions_addfchdir_np(&actions, directoryFd) == 0,
-              posix_spawn_file_actions_adddup2(&actions, readFd, STDIN_FILENO) == 0,
-              posix_spawn_file_actions_addclose(&actions, readFd) == 0,
-              posix_spawn_file_actions_addclose(&actions, writeFd) == 0 else {
+        let wired = withUnsafeMutablePointer(to: &actions) { ptr -> Bool in
+            let raw = UnsafeMutableRawPointer(ptr)
+            // posix_spawn_file_actions_addfchdir_np binds cwd to directoryFd.
+            return scrumtraceAddFchdir(raw, directoryFd) == 0
+                && scrumtraceAddDup2(raw, readFd, STDIN_FILENO) == 0
+                && scrumtraceAddClose(raw, readFd) == 0
+                && scrumtraceAddClose(raw, writeFd) == 0
+        }
+        guard wired else {
             Darwin.close(readFd)
             Darwin.close(writeFd)
             throw SessionVaultError.writeFailed("spawn")
@@ -935,14 +978,16 @@ enum ExportRel {
         let spawned = argv.withUnsafeBufferPointer { argvBuf -> Int32 in
             env.withUnsafeBufferPointer { envBuf -> Int32 in
                 executable.withCString { path in
-                    posix_spawn(
-                        &pid,
-                        path,
-                        &actions,
-                        nil,
-                        argvBuf.baseAddress,
-                        envBuf.baseAddress
-                    )
+                    withUnsafePointer(to: &actions) { actionsPtr in
+                        scrumtracePosixSpawn(
+                            &pid,
+                            path,
+                            UnsafeRawPointer(actionsPtr),
+                            nil,
+                            argvBuf.baseAddress,
+                            envBuf.baseAddress
+                        )
+                    }
                 }
             }
         }

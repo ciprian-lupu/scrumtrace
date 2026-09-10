@@ -1327,9 +1327,12 @@ def test_write_contained_data_refuses_directory_symlinks() -> None:
     assert "scrumtraceRenameat" in place_fn
     spawn_fn = models.split("static func spawnWithDirectoryFd")[1].split("enum MediaBudget")[0]
     assert "posix_spawn_file_actions_addfchdir_np" in spawn_fn
+    assert "scrumtraceAddFchdir" in spawn_fn
+    assert "scrumtracePosixSpawn" in spawn_fn
     assert "currentDirectoryURL" in spawn_fn
-    assert "posix_spawn(" in spawn_fn
+    assert "posix_spawn(" not in spawn_fn
     assert "Process(" not in spawn_fn
+    assert "UnsafeMutableRawPointer" in spawn_fn
     assert "O_EXCL" in models
     read_fn = models.split("static func readContainedData(relative:")[1].split("static func readContainedData(_ file")[0]
     assert "openatFile" in read_fn
