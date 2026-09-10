@@ -1673,6 +1673,7 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "for still in slice.stills" in append
     assert "framesOverlapSlice" in append
     assert "shots: linked" in append
+    assert "ownedByOtherAssociatedShot" in append
     assert "let shot = linked.first" not in processor.split("private func evaluateSlice")[1].split("private func tasks(")[0]
     transcribe = processor.split("private func transcribe(")[1].split("private func loadTranscript")[0]
     assert "existingSessionFile(ScrumTracePath.audioWav" in transcribe
@@ -2020,7 +2021,11 @@ def test_phase45_clip_consent_and_budget() -> None:
     shot_note = eval_slice.split("let shotNote")[1].split("if let aborted")[0]
     assert "tMedia >= slice.startMedia" in shot_note
     assert "tMedia <= slice.endMedia" in shot_note
+    assert "associatedShotId" in shot_note
+    assert "shot.id == associated" in shot_note
     assert r"linked.map(\.note)" not in eval_slice
+    assert "ownedByOtherAssociatedShot" in eval_slice.split("func appendImage")[1].split("if !configuration.acceptsImages")[0]
+    assert "ownedByOtherAssociatedShot" in eval_slice.split("promptSlice.stills")[1].split("SliceEvaluationRequest")[0]
     tasks_fn = processor.split("private func tasks(")[1].split("private func rankedTasks")[0]
     assert "noKeepableCandidate" in tasks_fn
     assert "fallbackOffline" in tasks_fn

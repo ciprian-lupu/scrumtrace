@@ -512,6 +512,10 @@ final class SessionProcessor: @unchecked Sendable {
         let linked = shotsLinked(to: slice, in: manifest)
         let shotNote = linked
             .filter { $0.tMedia >= slice.startMedia && $0.tMedia <= slice.endMedia }
+            .filter { shot in
+                guard let associated = slice.associatedShotId else { return true }
+                return shot.id == associated
+            }
             .map(\.note)
             .filter { !$0.isEmpty }
             .joined(separator: "\n")
@@ -530,6 +534,11 @@ final class SessionProcessor: @unchecked Sendable {
         var images: [URL] = []
         var seenImage = Set<String>()
         func appendImage(_ relative: String) {
+            guard !EvidenceValidator.ownedByOtherAssociatedShot(
+                relative,
+                slice: slice,
+                shots: linked
+            ) else { return }
             guard EvidenceValidator.framesOverlapSlice(
                 [relative],
                 slice: slice,
@@ -603,7 +612,7 @@ final class SessionProcessor: @unchecked Sendable {
                 slice: slice,
                 shots: linked,
                 sessionURL: sessionURL
-            )
+            ) && !EvidenceValidator.ownedByOtherAssociatedShot($0, slice: slice, shots: linked)
         }
         let request = SliceEvaluationRequest(
             product: manifest.productContext,
