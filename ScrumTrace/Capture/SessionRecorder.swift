@@ -269,7 +269,11 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
     }
 
     func stream(_ stream: SCStream, didStopWithError error: Error) {
-        NSLog("ScrumTrace stream stopped: \(error.localizedDescription)")
+        freezeWriters()
+        NotificationCenter.default.post(
+            name: .scrumTraceCaptureFailed,
+            object: error.localizedDescription
+        )
     }
 
     private func appendVideo(_ sampleBuffer: CMSampleBuffer) {

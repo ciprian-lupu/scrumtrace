@@ -424,6 +424,10 @@ def test_audio_split_and_brief_loader() -> None:
     assert "try layout.write" in recorder
     assert "try? layout.write" not in recorder
     assert "func persistCaptureLayout" in recorder
+    failed = recorder.split("didStopWithError")[1].split("func appendVideo")[0]
+    assert "freezeWriters" in failed
+    assert "scrumTraceCaptureFailed" in failed
+    assert failed.index("freezeWriters") < failed.index("scrumTraceCaptureFailed")
     stop_rec = recorder.split("func stop() async throws")[1].split("func stream(")[0]
     assert "self.microphoneWav" in stop_rec
     assert "snapshot.mic" in stop_rec
@@ -630,6 +634,10 @@ def test_pause_privacy_and_metadata_gate() -> None:
     assert halt.index("persistCaptureLayout") < halt.index("persistInterruptedCapture")
     assert "scrumTraceSessionEnding" in halt
     assert "scrumTraceCaptureGate" in halt
+    fail_fn = controller.split("func handleCaptureStreamFailure")[1].split("func togglePause")[0]
+    assert "guard isRecording else { return }" in fail_fn
+    assert "stopRecording()" in fail_fn
+    assert "scrumTraceCaptureFailed" in controller
     persist = controller.split("func persistInterruptedCapture")[1].split("func startRecordingAsync")[0]
     assert "try? vault.write" not in persist
     assert "pipelineStatus = .idle" in persist

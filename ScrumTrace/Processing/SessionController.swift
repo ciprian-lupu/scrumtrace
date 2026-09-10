@@ -54,6 +54,16 @@ final class SessionController: ObservableObject {
                 self?.privacyResume()
             }
         }
+        NotificationCenter.default.addObserver(
+            forName: .scrumTraceCaptureFailed,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            let message = (notification.object as? String) ?? "Screen capture stopped."
+            Task { @MainActor in
+                self?.handleCaptureStreamFailure(message)
+            }
+        }
         vault.pruneAbandonedStarts()
         if let recent = vault.recentSessions(limit: 1).first {
             lastSessionId = recent.sessionId
@@ -76,6 +86,15 @@ final class SessionController: ObservableObject {
 
     func stopRecording() {
         Task { await stopRecordingAsync() }
+    }
+
+    /// SCStream died. Freeze already happened on the writer queue. Finish the
+    /// session through Stop so Whisper still runs on whatever was captured.
+    private func handleCaptureStreamFailure(_ message: String) {
+        guard isRecording else { return }
+        lastError = message
+        statusLine = "Capture ended: \(message)"
+        stopRecording()
     }
 
     func togglePause() {

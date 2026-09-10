@@ -13,6 +13,7 @@ extension Notification.Name {
     static let scrumTraceCaptureGate = Notification.Name("ScrumTrace.captureGate")
     static let scrumTraceHUDSuppress = Notification.Name("ScrumTrace.hudSuppress")
     static let scrumTraceSessionEnding = Notification.Name("ScrumTrace.sessionEnding")
+    static let scrumTraceCaptureFailed = Notification.Name("ScrumTrace.captureFailed")
 }
 
 /// Paths agents see are relative to `export/` (`shots/…`, `media/…`).
