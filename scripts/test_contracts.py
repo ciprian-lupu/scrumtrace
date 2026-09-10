@@ -1051,6 +1051,8 @@ def test_pause_privacy_and_metadata_gate() -> None:
     assert "try await rec?.stop()" in halt
     assert "log(.error" in halt
     assert halt.index("lock.wait") < halt.index("log(.error")
+    assert "quit-stop-timeout" in halt
+    assert "timedOut" in halt
     assert "persistInterruptedCapture" in halt
     assert halt.index("freezeWriters") < halt.index("persistInterruptedCapture")
     assert "persistCaptureLayout" in halt

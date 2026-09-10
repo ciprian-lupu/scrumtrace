@@ -251,10 +251,13 @@ final class SessionController: ObservableObject {
             }
             lock.signal()
         }
-        _ = lock.wait(timeout: .now() + 5)
+        let waitResult = lock.wait(timeout: .now() + 5)
         if let message = stopBox.message {
             lastError = message
             log(.error, ["reason": "quit-stop", "error": message])
+        } else if waitResult == .timedOut {
+            lastError = "Quit wait for movie close timed out."
+            log(.error, ["reason": "quit-stop-timeout"])
         }
     }
 
