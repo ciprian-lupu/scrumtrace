@@ -383,6 +383,7 @@ def test_clip_exporter_macos14() -> None:
     assert "files.dropLast" in tighten
     assert "try? await tighten" not in tighten
     assert "try await tighten" in tighten
+    assert "files.count == 1" in tighten
     assert "containedExportMember" in tighten
     assert "containsSymlinkComponent" in tighten
     assert "skipDescendants" in tighten
@@ -1013,6 +1014,8 @@ def test_pipeline_timing_stays_in_archive() -> None:
     assert "removeItemIfRegularFile" in drop
     assert "FileManager.default.removeItem(at: url)" not in drop
     assert "try? ExportRel.removeItemIfRegularFile(url" not in drop
+    assert "unlinkLastComponentUnfollowed(url)" in drop
+    assert drop.count("unlinkLastComponentUnfollowed(url)") >= 2
     assert "measuredPackBytes" in zip_fn
     assert "regularFileByteCount" in zipper
     assert "attributesOfItem" not in zipper

@@ -112,8 +112,10 @@ struct ClipExporter {
             return left > right
         }
         // Leave the smallest clip at H.264 Main 720p so Gate 4 still has a
-        // Chrome-playable sample. Larger clips are the ones worth shrinking.
-        for url in files.dropLast() {
+        // Chrome-playable sample. A lone oversized clip still encodes harder
+        // before omit (C3).
+        let toTighten = files.count == 1 ? files : Array(files.dropLast())
+        for url in toTighten {
             do {
                 try await tighten(file: url, sessionURL: sessionURL)
             } catch {

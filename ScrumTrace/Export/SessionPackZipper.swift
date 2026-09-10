@@ -62,14 +62,18 @@ struct SessionPackZipper {
                 do {
                     try ExportRel.removeItemIfRegularFile(url, sessionRoot: sessionURL)
                 } catch {
-                    continue
+                    ExportRel.unlinkLastComponentUnfollowed(url)
+                    if (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+                        continue
+                    }
                 }
             } else {
                 guard ExportRel.isContainedRegularFile(url, sessionRoot: sessionURL) else { continue }
                 do {
                     try ExportRel.removeItemIfRegularFile(url, sessionRoot: sessionURL)
                 } catch {
-                    continue
+                    ExportRel.unlinkLastComponentUnfollowed(url)
+                    guard !ExportRel.isContainedRegularFile(url, sessionRoot: sessionURL) else { continue }
                 }
             }
             omitted.append(OmittedAsset(path: ExportRel.toExportRoot(path), reason: "Pack over 35 MB; dropped by priority"))
