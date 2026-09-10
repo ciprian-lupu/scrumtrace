@@ -690,6 +690,8 @@ def test_retry_failed_slices_and_pins() -> None:
     models = (ROOT / "ScrumTrace" / "Storage" / "SessionModels.swift").read_text()
     existing_media = models.split("func withExistingMedia")[1].split("enum CodingKeys")[0]
     assert "existingSessionFile" in existing_media
+    assert "exportClipPath" in existing_media
+    assert existing_media.count("existingSessionFile") >= 3
     assert "fileExists(atPath: sessionURL.appendingPathComponent(clip)" not in existing_media
     controller = (ROOT / "ScrumTrace" / "Processing" / "SessionController.swift").read_text()
     assert "mergePins" in controller
@@ -1391,6 +1393,11 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "forceReview" in processor
     assert "withExistingMedia" in processor
     assert "One bad" in processor or "must not abort the session" in processor
+    catch_clip = processor.split("One bad")[1].split("} else {")[0]
+    assert "failed.exportClipPath = nil" in catch_clip
+    assert "failed.withExistingMedia" in catch_clip
+    eval_clip = processor.split("private func evaluateSlice")[1].split("private func tasks(")[0]
+    assert "exportClipPath ?? slice.clipPath" in eval_clip
     projector = (ROOT / "ScrumTrace" / "Export" / "ExportProjector.swift").read_text()
     assert "MediaBudget.maxStills" in projector
     assert "Over extra-still budget" in projector
@@ -2165,6 +2172,9 @@ def test_write_contained_data_refuses_directory_symlinks() -> None:
     whisper_write = processor.split("transcript.sessionId = sessionId")[1].split("timing.whisperWallSeconds")[0]
     assert "writeContainedData" in whisper_write
     assert "data.write(to: fullTranscript" not in whisper_write
+    assert "persistablePass" in whisper_write
+    assert "existingSessionFile(ScrumTracePath.fullTranscript" in whisper_write
+    assert "writtenTranscript = transcript" in whisper_write
     had = processor.split("timing.whisperSources")[1].split("If Whisper never loaded")[0]
     assert "existingSessionFile(ScrumTracePath.audioWav" in had
     assert "existingSessionFile(ScrumTracePath.sessionMovie" in had

@@ -46,13 +46,20 @@ final class SessionProcessor: @unchecked Sendable {
             var transcript = await transcribe(sessionURL: sessionURL, model: whisperModel)
             transcript.sessionId = sessionId
             try requireUsableSession(sessionURL, id: sessionId)
-            let data = try JSONEncoder().encode(transcript)
-            try ExportRel.writeContainedData(
-                data,
-                relative: ScrumTracePath.fullTranscript,
-                sessionURL: sessionURL
-            )
-            writtenTranscript = transcript
+            let persistablePass = !(transcript.sources ?? []).isEmpty || !transcript.segments.isEmpty
+            // A failed Whisper pass must not replace a transcript already on
+            // disk. Retry can transcribe again; slicing waits until this stage
+            // completes (C5 / D14).
+            if persistablePass
+                || ExportRel.existingSessionFile(ScrumTracePath.fullTranscript, sessionURL: sessionURL) == nil {
+                let data = try JSONEncoder().encode(transcript)
+                try ExportRel.writeContainedData(
+                    data,
+                    relative: ScrumTracePath.fullTranscript,
+                    sessionURL: sessionURL
+                )
+                writtenTranscript = transcript
+            }
             timing.whisperWallSeconds = Date().timeIntervalSince(whisperStarted)
             timing.whisperSources = transcript.sources ?? []
             try timing.write(sessionURL: sessionURL)
@@ -107,8 +114,11 @@ final class SessionProcessor: @unchecked Sendable {
                             exported.append(clipped.withExistingMedia(sessionURL: sessionURL))
                         } catch {
                             // Keep the slice (shot stills, transcript window). One bad
-                            // clip must not abort the session.
-                            exported.append(slice.withExistingMedia(sessionURL: sessionURL))
+                            // clip must not abort the session. Do not keep a stale
+                            // export clip path from a prior projection (C5).
+                            var failed = slice
+                            failed.exportClipPath = nil
+                            exported.append(failed.withExistingMedia(sessionURL: sessionURL))
                         }
                     } else {
                         exported.append(slice.withExistingMedia(sessionURL: sessionURL))
@@ -493,7 +503,7 @@ final class SessionProcessor: @unchecked Sendable {
         }
         var clipURL: URL?
         if ProviderWireMedia.willUploadClip(configuration: configuration),
-           let clip = slice.clipPath,
+           let clip = slice.exportClipPath ?? slice.clipPath,
            let contained = ExportRel.existingSessionFile(clip, sessionURL: sessionURL) {
             clipURL = sessionURL.appendingPathComponent(contained)
         }

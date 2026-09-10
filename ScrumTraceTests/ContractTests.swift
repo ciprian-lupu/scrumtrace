@@ -1359,12 +1359,14 @@ final class ContractTests: XCTestCase {
             trigger: .pin,
             associatedShotId: nil,
             clipPath: "archive/media-work/task-01/clip.mp4",
+            exportClipPath: "export/media/task-01/clip.mp4",
             stills: ["archive/shots/001.png", "archive/media-work/task-01/shot-1.jpg"],
             analysisStatus: .pending,
             score: 80
         )
         let kept = slice.withExistingMedia(sessionURL: root)
         XCTAssertNil(kept.clipPath)
+        XCTAssertNil(kept.exportClipPath)
         XCTAssertEqual(kept.stills, ["archive/shots/001.png"])
     }
 

@@ -1910,6 +1910,9 @@ struct SliceRecord: Codable, Sendable, Identifiable, Hashable {
         if let clip = clipPath, ExportRel.existingSessionFile(clip, sessionURL: sessionURL) == nil {
             copy.clipPath = nil
         }
+        if let exported = exportClipPath, ExportRel.existingSessionFile(exported, sessionURL: sessionURL) == nil {
+            copy.exportClipPath = nil
+        }
         copy.stills = stills.filter { ExportRel.existingSessionFile($0, sessionURL: sessionURL) != nil }
         return copy
     }
