@@ -63,6 +63,10 @@ python3 scripts/serve_preview.py --port 43147
 
 Then open `samples/mock-session/export/SESSION_BRIEF.html`. The image-only failure code and the clip-only recovery sequence are **not** in `AGENT_CONTEXT.md` — they live in `shots/` and `media/task-02/clip.mp4`. See `samples/mock-session/HANDOFF_LOG.md`.
 
+## Agent debug loop
+
+The Mac writes `~/Library/Logs/ScrumTrace/agent.jsonl` and a LaunchAgent can pull, rebuild, and publish that log to `cursor/scrumtrace-agent-logs-0397`. Cloud agents read it with `bash scripts/fetch_agent_log.sh`. See [AGENT_DEBUG.md](AGENT_DEBUG.md).
+
 ## Next gates (must run on a Mac)
 
 Use the fill-in log at [`samples/GATE_LOG.md`](samples/GATE_LOG.md). Linux tests do **not** prove these.

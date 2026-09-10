@@ -157,6 +157,7 @@ final class MenuBarController: NSObject {
         recent.submenu = recentMenu
         menu.addItem(recent)
         menu.addItem(.separator())
+        menu.addItem(actionItem("Reveal agent log", #selector(revealLog)))
         menu.addItem(actionItem("Settings…", #selector(settings)))
         menu.addItem(actionItem("Quit ScrumTrace", #selector(quit)))
         for item in menu.items where item.action != nil && item.target == nil {
@@ -178,6 +179,9 @@ final class MenuBarController: NSObject {
     @objc private func pin() { controller.pin() }
     @objc private func retry() { controller.retryAnalysis() }
     @objc private func reveal() { controller.revealLast() }
+    @objc private func revealLog() {
+        AgentLog.reveal()
+    }
     @objc private func settings() {
         NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
         NSApp.activate(ignoringOtherApps: true)

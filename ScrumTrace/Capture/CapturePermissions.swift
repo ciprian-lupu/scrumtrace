@@ -1,6 +1,7 @@
 import Foundation
 #if os(macOS)
 import AppKit
+import ApplicationServices
 import AVFoundation
 import CoreGraphics
 #endif
@@ -125,8 +126,38 @@ enum CapturePermissions {
         Bundle.main.bundlePath
     }
 
+    /// Technical fields only — never titles, URLs, notes, or keys.
+    static func logFields() -> [String: String] {
+        var fields = [
+            "screen_at_launch": screenGrantedAtLaunch ? "1" : "0",
+            "screen_now": currentScreenGranted() ? "1" : "0",
+            "mic": microphoneStatus(),
+            "readiness": readinessLabel(),
+            "path": runningAppPath(),
+            "macos": ProcessInfo.processInfo.operatingSystemVersionString,
+        ]
+        #if os(macOS)
+        fields["ax"] = AXIsProcessTrusted() ? "1" : "0"
+        #endif
+        return fields
+    }
+
+    static func readinessLabel() -> String {
+        switch readiness() {
+        case .ready:
+            return "ready"
+        case .screenDenied:
+            return "screenDenied"
+        case .screenGrantedNeedsRelaunch:
+            return "screenGrantedNeedsRelaunch"
+        case .microphoneDenied:
+            return "microphoneDenied"
+        }
+    }
+
     #if os(macOS)
     static func relaunchRunningApp() {
+        AgentLog.event("relaunch_requested", [:])
         let url = Bundle.main.bundleURL
         let configuration = NSWorkspace.OpenConfiguration()
         configuration.createsNewApplicationInstance = true

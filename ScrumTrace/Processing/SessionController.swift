@@ -80,7 +80,14 @@ final class SessionController: ObservableObject {
     }
 
     func startRecording() {
-        guard !isRecording, !isBusy, !startInFlight else { return }
+        guard !isRecording, !isBusy, !startInFlight else {
+            AgentLog.event("start_ignored", [
+                "recording": isRecording ? "1" : "0",
+                "busy": isBusy ? "1" : "0",
+                "inflight": startInFlight ? "1" : "0",
+            ])
+            return
+        }
         #if os(macOS)
         // Do not open System Settings or call ScreenCaptureKit here. Those
         // both look like "the app is asking again" when the user already
@@ -89,12 +96,14 @@ final class SessionController: ObservableObject {
         if !readiness.allowsStart {
             lastError = readiness.userMessage
             statusLine = readiness.menuLabel
+            AgentLog.event("start_blocked", ["reason": CapturePermissions.readinessLabel()])
             return
         }
         #endif
         startInFlight = true
         captureFreeze.markStartInFlight(true)
         statusLine = "Starting capture…"
+        AgentLog.event("start_requested", [:])
         Task { await startRecordingAsync() }
     }
 
@@ -113,6 +122,7 @@ final class SessionController: ObservableObject {
         guard isRecording else { return }
         lastError = message
         statusLine = "Capture ended: \(message)"
+        AgentLog.event("capture_stream_failed", ["error": message])
         stopRecording()
     }
 
@@ -228,6 +238,8 @@ final class SessionController: ObservableObject {
     /// Process is quitting: freeze capture. Do not start Whisper/AI on a dying process.
     func haltCaptureForTermination() {
         terminateRequested = true
+        AgentLog.event("halt", ["recording": isRecording ? "1" : "0", "inflight": startInFlight ? "1" : "0"])
+        AgentLog.setRecording(false, sessionId: nil)
         if !isRecording {
             // Start is awaiting Screen Recording permission / startCapture.
             // Freeze the attached recorder so writers cannot outlive Quit.
@@ -331,6 +343,8 @@ final class SessionController: ObservableObject {
             abandonedId = nil
             self.recorder = recorder
             lastSessionId = created.manifest.sessionId
+            AgentLog.setRecording(true, sessionId: created.manifest.sessionId)
+            AgentLog.event("start_ok", ["session": created.manifest.sessionId])
             pinTimes = []
             pinTimesSessionId = created.manifest.sessionId
             // Quit may have frozen writers while start() was still awaiting.
@@ -431,6 +445,7 @@ final class SessionController: ObservableObject {
             }
             lastError = error.localizedDescription
             statusLine = error.localizedDescription
+            AgentLog.event("start_fail", ["error": error.localizedDescription])
         }
     }
 
@@ -438,6 +453,8 @@ final class SessionController: ObservableObject {
         guard isRecording else { return }
         isBusy = true
         statusLine = "Stopping capture"
+        AgentLog.event("stop_requested", ["session": manifest?.sessionId ?? ""])
+        AgentLog.setRecording(false, sessionId: nil)
         privacy.stop()
         sampler.isSuspended = true
         // Freeze writers immediately without resuming a paused session (C1).

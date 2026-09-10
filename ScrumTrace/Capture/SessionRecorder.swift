@@ -110,18 +110,23 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         // sheet again on every Record.
         if !CapturePermissions.screenGrantedAtLaunch {
             if CapturePermissions.currentScreenGranted() {
+                AgentLog.event("recorder_blocked", ["reason": "relaunchRequired"])
                 throw SessionRecorderError.relaunchRequired
             }
+            AgentLog.event("recorder_blocked", ["reason": "permissionDenied"])
             throw SessionRecorderError.permissionDenied
         }
         try await requestPermission()
+        AgentLog.event("recorder_sckit_begin", [:])
         // Never fetch shareable content on the MainActor. TCC presents a sheet
         // that cannot drain if Record is waiting on this same run loop — the
         // app beachballs and has to be force-quit.
         let content: SCShareableContent
         do {
             content = try await Self.shareableContentOffMain()
+            AgentLog.event("recorder_sckit_ok", ["displays": String(content.displays.count)])
         } catch {
+            AgentLog.event("recorder_sckit_fail", ["error": error.localizedDescription])
             if !CGPreflightScreenCaptureAccess() {
                 throw SessionRecorderError.permissionDenied
             }
@@ -1076,15 +1081,20 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
     private func requestPermission() async throws {
         switch AVCaptureDevice.authorizationStatus(for: .audio) {
         case .authorized:
+            AgentLog.event("mic_already_authorized", [:])
             return
         case .notDetermined:
+            AgentLog.event("mic_request", [:])
             let granted = await AVCaptureDevice.requestAccess(for: .audio)
+            AgentLog.event("mic_request_done", ["granted": granted ? "1" : "0"])
             if !granted {
                 throw SessionRecorderError.microphoneDenied
             }
         case .denied, .restricted:
+            AgentLog.event("mic_denied", [:])
             throw SessionRecorderError.microphoneDenied
         @unknown default:
+            AgentLog.event("mic_unknown", [:])
             throw SessionRecorderError.microphoneDenied
         }
     }

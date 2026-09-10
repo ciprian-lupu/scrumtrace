@@ -23,6 +23,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         CapturePermissions.snapshotLaunchState()
+        AgentLog.eventSync("launch", ["ax_silent": MetadataSampler.requestTrust(prompt: false) ? "1" : "0"])
         NSApp.setActivationPolicy(.accessory)
         let hud = RecordingHUDWindow(controller: controller)
         self.hud = hud
@@ -33,6 +34,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        AgentLog.eventSync("terminate", [:])
+        AgentLog.setRecording(false, sessionId: nil)
         hotkeys?.unregister()
         controller.haltCaptureForTermination()
     }

@@ -1134,6 +1134,21 @@ def test_pipeline_timing_stays_in_archive() -> None:
     identity = (ROOT / "scripts" / "ensure_debug_signing_identity.sh").read_text()
     assert "ScrumTrace Debug" in identity
     assert "codeSigning" in identity
+    agent_log = (ROOT / "ScrumTrace" / "Capture" / "AgentLog.swift").read_text()
+    assert "agent.jsonl" in agent_log
+    assert "recording.lock" in agent_log
+    assert "windowTitle" not in agent_log
+    assert "apiKey" not in agent_log
+    assert "NSLog" in agent_log
+    loop = (ROOT / "scripts" / "mac_agent_loop.sh").read_text()
+    assert "recording.lock" in loop
+    assert "mac_publish_agent_log.sh" in loop
+    assert "mac_gate01.sh" in loop
+    publish = (ROOT / "scripts" / "mac_publish_agent_log.sh").read_text()
+    assert "cursor/scrumtrace-agent-logs-0397" in publish
+    fetch = (ROOT / "scripts" / "fetch_agent_log.sh").read_text()
+    assert "cursor/scrumtrace-agent-logs-0397" in fetch
+    assert (ROOT / "AGENT_DEBUG.md").is_file()
     sampler = (ROOT / "ScrumTrace" / "Capture" / "MetadataSampler.swift").read_text()
     assert "ResumeOnce" in sampler
     assert "requestTrust" in sampler
@@ -1154,12 +1169,16 @@ def test_pipeline_timing_stays_in_archive() -> None:
     assert "MetadataSampler.requestTrust" in app
     assert "requestTrust(prompt: false)" in app
     assert "requestTrust(prompt: true)" not in app
+    assert 'AgentLog.eventSync("launch"' in app
+    assert 'AgentLog.eventSync("terminate"' in app
     controller = (ROOT / "ScrumTrace" / "Processing" / "SessionController.swift").read_text()
     start_btn = controller.split("func startRecording()")[1].split("func stopRecording()")[0]
     assert "Starting capture" in start_btn
     assert "!startInFlight" in start_btn
     assert "CapturePermissions.readiness()" in start_btn
     assert "allowsStart" in start_btn
+    assert "start_blocked" in start_btn
+    assert "start_requested" in start_btn
     assert "openScreenCaptureSettings" not in start_btn
     assert "CGRequestScreenCaptureAccess" not in start_btn
     assert start_btn.index("CapturePermissions.readiness()") < start_btn.index("startInFlight = true")
@@ -1291,6 +1310,7 @@ def test_pause_privacy_and_metadata_gate() -> None:
     assert "Relaunch ScrumTrace" in menu
     assert "relaunchForPermissions" in menu
     assert "allowsStart" in menu
+    assert "Reveal agent log" in menu
     log_fn = controller.split("private func log(")[1].split("private func flashStatus")[0]
     assert "case .pin, .url, .window" in log_fn
     assert "try? vault.appendEvent" not in log_fn
@@ -1533,6 +1553,7 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "Open Microphone settings" in settings
     assert "This process" in settings
     assert "Relaunch ScrumTrace" in settings
+    assert "Reveal agent log" in settings
     assert "not this process" in settings
     controller_src = (ROOT / "ScrumTrace" / "Processing" / "SessionController.swift").read_text()
     assert "Privacy_ScreenCapture" in controller_src
@@ -1957,6 +1978,7 @@ def test_phase45_clip_consent_and_budget() -> None:
     start_fn = recorder.split("func start(shouldPauseCapture")[1].split("func abortFailedStart")[0]
     assert "CGRequestScreenCaptureAccess" not in recorder
     assert "screenGrantedAtLaunch" in start_fn
+    assert "recorder_sckit_begin" in start_fn
     assert start_fn.index("screenGrantedAtLaunch") < start_fn.index("shareableContentOffMain")
     assert start_fn.index("screenGrantedAtLaunch") < start_fn.index("requestPermission")
     assert "authorizationStatus(for: .audio)" in recorder.split("func requestPermission")[1]

@@ -92,6 +92,9 @@ struct SettingsView: View {
                 Button("Relaunch ScrumTrace") {
                     CapturePermissions.relaunchRunningApp()
                 }
+                Button("Reveal agent log") {
+                    AgentLog.reveal()
+                }
                 Text("macOS lists every Debug copy as “ScrumTrace”. A toggle that is already on is often a different binary. After mac_gate01.sh, open ~/Applications/ScrumTrace.app only. Enabling Screen Recording never applies until this app quits.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
