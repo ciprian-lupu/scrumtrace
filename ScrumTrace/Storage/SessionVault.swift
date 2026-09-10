@@ -47,7 +47,11 @@ final class SessionVault: @unchecked Sendable {
         if !ExportRel.isUsableSessionRoot(rootURL) {
             throw SessionVaultError.writeFailed("sessions folder")
         }
-        try fileManager.createDirectory(at: rootURL, withIntermediateDirectories: true)
+        if rootURL.lastPathComponent == "sessions" {
+            try ExportRel.ensureSessionsDirectory(sessionsURL: rootURL)
+        } else {
+            try fileManager.createDirectory(at: rootURL, withIntermediateDirectories: true)
+        }
         if !ExportRel.isUsableSessionRoot(rootURL) {
             throw SessionVaultError.writeFailed("sessions folder")
         }

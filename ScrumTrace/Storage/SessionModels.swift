@@ -536,6 +536,58 @@ enum ExportRel {
         }
     }
 
+    /// mkdirat the last component `sessions`. `FileManager.createDirectory`
+    /// follows a planted `sessions` → `/tmp` link (C2). The parent
+    /// (`Movies/ScrumTrace`) may be a volume alias, so it is opened without
+    /// `O_NOFOLLOW`. Missing parents are created with `createDirectory`.
+    static func ensureSessionsDirectory(sessionsURL: URL) throws {
+        let name = sessionsURL.lastPathComponent
+        guard name == "sessions", !name.contains("/"), !name.contains("\0") else {
+            throw SessionVaultError.writeFailed("sessions folder")
+        }
+        if (try? sessionsURL.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+            throw SessionVaultError.writeFailed("sessions folder")
+        }
+        let parent = sessionsURL.deletingLastPathComponent()
+        var isDir: ObjCBool = false
+        if !FileManager.default.fileExists(atPath: parent.path, isDirectory: &isDir) {
+            try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true)
+        } else if !isDir.boolValue {
+            throw SessionVaultError.writeFailed("sessions folder")
+        }
+        let parentFd = parent.withUnsafeFileSystemRepresentation { ptr -> Int32 in
+            guard let ptr else { return -1 }
+            return Darwin.open(ptr, O_RDONLY | O_DIRECTORY | O_CLOEXEC)
+        }
+        guard parentFd >= 0 else {
+            throw SessionVaultError.writeFailed("sessions folder")
+        }
+        defer { Darwin.close(parentFd) }
+        let existing = name.withCString { ptr in
+            Darwin.openat(parentFd, ptr, O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW)
+        }
+        if existing >= 0 {
+            Darwin.close(existing)
+            return
+        }
+        let made = name.withCString { ptr in
+            Darwin.mkdirat(parentFd, ptr, 0o700)
+        }
+        if made != 0 {
+            let err = Darwin.errno
+            guard err == EEXIST else {
+                throw SessionVaultError.writeFailed("sessions folder")
+            }
+        }
+        let created = name.withCString { ptr in
+            Darwin.openat(parentFd, ptr, O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW)
+        }
+        guard created >= 0 else {
+            throw SessionVaultError.writeFailed("sessions folder")
+        }
+        Darwin.close(created)
+    }
+
     /// Write bytes under the session folder. A dest symlink is removed first so
     /// the write cannot follow out of `archive/` or `export/`. Intermediate
     /// directory symlinks are refused (a planted `archive/` → `export/` link

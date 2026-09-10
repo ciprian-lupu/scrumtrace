@@ -634,6 +634,10 @@ def test_retry_failed_slices_and_pins() -> None:
     assert "testRemoveItemIfRegularFileDoesNotRecurseIntoDirectory" in contracts
     assert "testPrepareContainedWriteDoesNotRecurseIntoDestDirectory" in contracts
     assert "testPrepareContainedWriteRefusesArchiveDirectorySymlink" in contracts
+    assert "testEnsureContainedDirectoriesRefusesExportDirectorySymlink" in contracts
+    assert "testEnsureOwnedSessionDirectoryRefusesSessionIdSymlink" in contracts
+    assert "testEnsureRootCreatesSessionsDirectoryWhenMissing" in contracts
+    assert "testEnsureSessionsDirectoryRefusesSessionsSymlink" in contracts
     assert "testUnlinkLastComponentUnfollowedDoesNotRecurseIntoDirectory" in contracts
     assert "testUnlinkLastComponentUnfollowedUnlinksSymlinkWithoutFollowing" in contracts
     assert "testUnlinkLastComponentUnfollowedUnlinksRegularFile" in contracts
@@ -1734,7 +1738,7 @@ def test_write_contained_data_refuses_directory_symlinks() -> None:
     assert "EINTR" in utf8_read.split("static func openUnfollowedDirectory")[0]
     assert "String(data:" in utf8_read
     assert "String(contentsOf:" not in utf8_read
-    prepare = models.split("static func prepareContainedWrite")[1].split("static func writeContainedData")[0]
+    prepare = models.split("static func prepareContainedWrite")[1].split("static func ensureSessionsDirectory")[0]
     assert "isSymbolicLink" in prepare
     assert "mkdirat" in prepare
     assert "ensureContainedDirectory" in prepare
@@ -1936,7 +1940,7 @@ def test_write_contained_data_refuses_directory_symlinks() -> None:
     assert "O_DIRECTORY" in usable
     assert "deletingLastPathComponent" in usable
     assert 'lastPathComponent == "sessions"' in usable
-    prepare = models.split("static func prepareContainedWrite")[1].split("static func writeContainedData")[0]
+    prepare = models.split("static func prepareContainedWrite")[1].split("static func ensureSessionsDirectory")[0]
     assert "isUsableSessionRoot" in prepare
     assert "ScrumTracePath.manifest" in prepare
     assert "removeItemIfRegularFile" in prepare
@@ -1959,7 +1963,7 @@ def test_write_contained_data_refuses_directory_symlinks() -> None:
     assert "FileManager.default.createDirectory" not in dirs_mkdir
     assert "fileManager.createDirectory" not in dirs_mkdir
     owned_mkdir = models.split("static func ensureOwnedSessionDirectory")[1].split(
-        "static func writeContainedData"
+        "static func ensureSessionsDirectory"
     )[0]
     assert "mkdirat" in owned_mkdir
     assert "O_NOFOLLOW" in owned_mkdir
@@ -1967,6 +1971,17 @@ def test_write_contained_data_refuses_directory_symlinks() -> None:
     assert "SessionVault.isValidSessionId" in owned_mkdir
     assert "FileManager.default.createDirectory" not in owned_mkdir
     assert "fileManager.createDirectory" not in owned_mkdir
+    sessions_mkdir = models.split("static func ensureSessionsDirectory")[1].split(
+        "static func writeContainedData"
+    )[0]
+    assert "mkdirat" in sessions_mkdir
+    assert "O_NOFOLLOW" in sessions_mkdir
+    assert 'name == "sessions"' in sessions_mkdir
+    assert "FileManager.default.createDirectory(at: sessionsURL" not in sessions_mkdir
+    assert "createDirectory(at: parent" in sessions_mkdir
+    assert "O_RDONLY | O_DIRECTORY | O_CLOEXEC)" in sessions_mkdir
+    assert "O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW" in sessions_mkdir
+    assert sessions_mkdir.index("Darwin.open") < sessions_mkdir.index("mkdirat")
     assert "containsSymlinkComponent" in prepare
     contained_reg = models.split("static func isContainedRegularFile")[1].split("static func containedRelative(_ file")[0]
     assert "unfollowedRelative" in contained_reg
@@ -1976,6 +1991,10 @@ def test_write_contained_data_refuses_directory_symlinks() -> None:
     ensure = vault.split("func ensureRoot")[1].split("func makeSessionID")[0]
     assert "isUsableSessionRoot(rootURL)" in ensure
     assert "sessions folder" in ensure
+    assert 'lastPathComponent == "sessions"' in ensure
+    assert "ensureSessionsDirectory" in ensure
+    assert "createDirectory(at: rootURL)" in ensure
+    assert ensure.index('lastPathComponent == "sessions"') < ensure.index("ensureSessionsDirectory")
     recent = vault.split("func recentSessions")[1].split("func nextShotIndex")[0]
     assert "isUsableSessionRoot(rootURL)" in recent
     assert "listedSessionIds" in recent

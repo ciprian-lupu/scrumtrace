@@ -657,6 +657,44 @@ final class ContractTests: XCTestCase {
         XCTAssertEqual((try FileManager.default.contentsOfDirectory(atPath: outside.path)), [])
     }
 
+    func testEnsureRootCreatesSessionsDirectoryWhenMissing() throws {
+        let parent = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "st-ensure-sessions-\(UUID().uuidString)"
+        )
+        try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: parent) }
+        let root = parent.appendingPathComponent("sessions")
+        let vault = SessionVault(rootURL: root)
+        try vault.ensureRoot()
+        var isDir: ObjCBool = false
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: root.path, isDirectory: &isDir) && isDir.boolValue
+        )
+        XCTAssertNotEqual(
+            (try root.resourceValues(forKeys: [.isSymbolicLinkKey])).isSymbolicLink,
+            true
+        )
+    }
+
+    func testEnsureSessionsDirectoryRefusesSessionsSymlink() throws {
+        let parent = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "st-sessions-link-\(UUID().uuidString)"
+        )
+        try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: parent) }
+        let outside = parent.appendingPathComponent("outside")
+        try FileManager.default.createDirectory(at: outside, withIntermediateDirectories: true)
+        let secret = outside.appendingPathComponent("keep.bin")
+        try Data("KEEP".utf8).write(to: secret)
+        let planted = parent.appendingPathComponent("sessions")
+        try FileManager.default.createSymbolicLink(at: planted, withDestinationURL: outside)
+        XCTAssertThrowsError(
+            try ExportRel.ensureSessionsDirectory(sessionsURL: planted)
+        )
+        XCTAssertEqual(try String(contentsOf: secret, encoding: .utf8), "KEEP")
+        XCTAssertEqual((try FileManager.default.contentsOfDirectory(atPath: outside.path)), ["keep.bin"])
+    }
+
     func testPruneAbandonedStartsKeepsShotPNGWhenCatalogIsEmpty() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(
             "st-prune-shot-\(UUID().uuidString)"
