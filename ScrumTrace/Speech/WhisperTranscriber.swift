@@ -29,7 +29,7 @@ final class WhisperTranscriber: @unchecked Sendable {
             try await work.value
             return
         }
-        work = Task {
+        work = Task.detached {
             let config = WhisperKitConfig(
                 model: Self.whisperKitModelName(model),
                 verbose: false,

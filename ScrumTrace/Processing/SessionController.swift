@@ -82,6 +82,7 @@ final class SessionController: ObservableObject {
         guard !isRecording, !isBusy, !startInFlight else { return }
         startInFlight = true
         captureFreeze.markStartInFlight(true)
+        statusLine = "Starting capture…"
         Task { await startRecordingAsync() }
     }
 
@@ -306,9 +307,13 @@ final class SessionController: ObservableObject {
             // Tick before startCapture: a credential app during the permission
             // sheet must freeze writers, not wait until start() returns (C1).
             privacy.start()
-            try await recorder.start(shouldPauseCapture: { [privacy, captureFreeze] in
+            statusLine = "Starting ScreenCaptureKit…"
+            let pauseGate: @Sendable () -> Bool = { [privacy, captureFreeze] in
                 privacy.isCurrentlyTripped || privacy.currentCredentialApp() != nil || captureFreeze.isHeldThroughStart
-            })
+            }
+            // Await (do not Task.detached.value from MainActor). A detached
+            // wrapper that MainActor waits on deadlocks if SCKit hops to main.
+            try await recorder.start(shouldPauseCapture: pauseGate)
             abandonedId = nil
             self.recorder = recorder
             lastSessionId = created.manifest.sessionId
@@ -385,12 +390,16 @@ final class SessionController: ObservableObject {
             }
             startTimer()
             log(.start, [:])
+            let transcriber = self.transcriber
             let model = settings.whisperModel
-            Task {
+            Task.detached {
                 do {
                     try await transcriber.prepare(model: model)
                 } catch {
-                    lastError = error.localizedDescription
+                    let message = error.localizedDescription
+                    await MainActor.run { [weak self] in
+                        self?.lastError = message
+                    }
                 }
             }
         } catch {

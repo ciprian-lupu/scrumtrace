@@ -943,6 +943,8 @@ def test_audio_split_and_brief_loader() -> None:
 
 def test_dual_transcript_merge_wired() -> None:
     speech = (ROOT / "ScrumTrace" / "Speech" / "WhisperTranscriber.swift").read_text()
+    prepare_fn = speech.split("func prepare")[1].split("func transcribeFile")[0]
+    assert "Task.detached" in prepare_fn
     assert "func merge" in speech
     assert "func transcribeMovieAudio" in speech
     assert "AVAssetExportPresetAppleM4A" in speech
@@ -1138,6 +1140,7 @@ def test_pipeline_timing_stays_in_archive() -> None:
     assert "requestTrust(prompt: true)" not in app
     controller = (ROOT / "ScrumTrace" / "Processing" / "SessionController.swift").read_text()
     start_btn = controller.split("func startRecording()")[1].split("func stopRecording()")[0]
+    assert "Starting capture" in start_btn
     assert "!startInFlight" in start_btn
     assert "startInFlight = true" in start_btn
     assert start_btn.index("startInFlight = true") < start_btn.index("startRecordingAsync")
@@ -1204,6 +1207,7 @@ def test_pipeline_timing_stays_in_archive() -> None:
     assert "sampler.isSuspended = false" not in start_rec
     assert "isCurrentlyTripped || privacy.currentCredentialApp" in start_rec
     assert "transcriber.prepare" in controller
+    assert "Task.detached" in start_rec.split("log(.start")[1]
     hud = (ROOT / "ScrumTrace" / "UI" / "RecordingHUDWindow.swift").read_text()
     assert "wallElapsed" in hud
     assert "canBecomeKey: Bool { false }" in hud
@@ -1913,6 +1917,9 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "decodeIfPresent([QuoteRecord]" in task_decode
     recorder = (ROOT / "ScrumTrace" / "Capture" / "SessionRecorder.swift").read_text()
     start_fn = recorder.split("func start(shouldPauseCapture")[1].split("func abortFailedStart")[0]
+    assert "CGRequestScreenCaptureAccess" not in recorder
+    assert "shareableContentOffMain" in start_fn
+    assert "startCaptureOffMain" in start_fn
     assert "self.started = true" in start_fn
     assert "startCapture" in start_fn
     assert "shouldPauseCapture" in start_fn

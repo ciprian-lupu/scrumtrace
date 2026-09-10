@@ -11,7 +11,8 @@ enum SessionRecorderError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .permissionDenied: return "Screen Recording permission is required in System Settings."
+        case .permissionDenied:
+            return "Screen Recording permission is required in System Settings. After allowing ScrumTrace, quit and reopen the app, then press Record again."
         case .writerFailed(let message): return message
         }
     }
@@ -94,9 +95,20 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         syncWriter { captureWriteMessage }
     }
 
-    func start(shouldPauseCapture: @escaping () -> Bool = { false }) async throws {
+    func start(shouldPauseCapture: @escaping @Sendable () -> Bool = { false }) async throws {
         try await requestPermission()
-        let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+        // Never fetch shareable content on the MainActor. TCC presents a sheet
+        // that cannot drain if Record is waiting on this same run loop — the
+        // app beachballs and has to be force-quit.
+        let content: SCShareableContent
+        do {
+            content = try await Self.shareableContentOffMain()
+        } catch {
+            if !CGPreflightScreenCaptureAccess() {
+                throw SessionRecorderError.permissionDenied
+            }
+            throw SessionRecorderError.writerFailed(error.localizedDescription)
+        }
         guard let display = content.displays.first else {
             throw SessionRecorderError.writerFailed("No display available for capture.")
         }
@@ -165,7 +177,7 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             // Dual-pass Whisper reads this after crash/Quit. Write it before
             // the first buffer so a missing file cannot default to a room mic.
             try persistCaptureLayout()
-            try await stream.startCapture()
+            try await Self.startCaptureOffMain(stream)
             // startCapture can run for a long time. Freeze or a credential
             // app that appeared while the stream was starting must still
             // win — do not return with writers live (C1).
@@ -1040,15 +1052,23 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         noteWavEmptyConvert()
     }
 
+    /// `CGRequestScreenCaptureAccess()` is synchronous. On the MainActor it
+    /// deadlocks the TCC sheet (force-quit after Record). Screen permission
+    /// is prompted by `SCShareableContent` off the main thread instead.
     private func requestPermission() async throws {
-        if !CGPreflightScreenCaptureAccess() {
-            let granted = CGRequestScreenCaptureAccess()
-            if !granted {
-                throw SessionRecorderError.permissionDenied
-            }
-        }
-        // Mic is optional: deny → system-audio WAV only. Screen permission is required.
         _ = await AVCaptureDevice.requestAccess(for: .audio)
+    }
+
+    private static func shareableContentOffMain() async throws -> SCShareableContent {
+        try await Task.detached(priority: .userInitiated) {
+            try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+        }.value
+    }
+
+    private static func startCaptureOffMain(_ stream: SCStream) async throws {
+        try await Task.detached(priority: .userInitiated) {
+            try await stream.startCapture()
+        }.value
     }
 
     deinit {
