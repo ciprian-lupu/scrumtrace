@@ -1052,9 +1052,9 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         noteWavEmptyConvert()
     }
 
-    /// `CGRequestScreenCaptureAccess()` is synchronous. On the MainActor it
-    /// deadlocks the TCC sheet (force-quit after Record). Screen permission
-    /// is prompted by `SCShareableContent` off the main thread instead.
+    /// Do not call the blocking CoreGraphics screen-access request on the
+    /// MainActor — it deadlocks the TCC sheet (force-quit after Record).
+    /// Screen permission is prompted by SCShareableContent off the main thread.
     private func requestPermission() async throws {
         _ = await AVCaptureDevice.requestAccess(for: .audio)
     }

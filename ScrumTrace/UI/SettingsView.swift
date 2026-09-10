@@ -81,6 +81,12 @@ struct SettingsView: View {
                 Text("HUD shows t_media. Pause discards screen frames, system audio, microphone PCM, metadata, Shot, and Hold-to-Talk. After Stop, WhisperKit transcribes the room mic and the movie’s system-audio track, then merges on t_media.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                Button("Enable browser URL metadata (Accessibility)") {
+                    MetadataSampler.requestTrust(prompt: true)
+                }
+                Text("Optional. Record needs Screen Recording and Microphone only. Accessibility adds window titles and browser URLs. A new Debug build can look like a different app to macOS — toggle this for the binary you just opened, then quit and reopen once.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)

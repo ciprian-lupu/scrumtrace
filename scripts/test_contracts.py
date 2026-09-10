@@ -1122,6 +1122,7 @@ def test_pipeline_timing_stays_in_archive() -> None:
     sampler = (ROOT / "ScrumTrace" / "Capture" / "MetadataSampler.swift").read_text()
     assert "ResumeOnce" in sampler
     assert "requestTrust" in sampler
+    assert "requestTrust(prompt: false)" in sampler.split("func readFrontmost")[1]
     assert "private var suspended = false" in sampler
     sample_fn = sampler.split("func sample(")[1].split("func readFrontmost")[0]
     assert sample_fn.count("isSuspended") >= 3
@@ -1154,7 +1155,8 @@ def test_pipeline_timing_stays_in_archive() -> None:
     start_rec = controller.split("func startRecordingAsync")[1].split("func stopRecordingAsync")[0]
     assert "defer { startInFlight = false }" in start_rec
     assert "markStartInFlight(false)" in start_rec
-    assert "requestTrust(prompt: true)" in start_rec
+    assert "requestTrust(prompt: true)" not in start_rec
+    assert "requestTrust(prompt: false)" in start_rec
     assert "clock.reset()" in start_rec
     assert "captureFreeze.attach(nil)" in start_rec
     assert "pipelineStatus = phase" in start_rec
@@ -1499,6 +1501,8 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "sanitizeUntrusted(task.agentInstructions)" in brief.split("func taskCard")[1].split("func transcriptHTML")[0]
     assert "HTMLEscaper.escape(task.agentInstructions)" not in brief
     settings = (ROOT / "ScrumTrace" / "UI" / "SettingsView.swift").read_text()
+    assert "requestTrust(prompt: true)" in settings
+    assert "Enable browser URL metadata (Accessibility)" in settings
     assert "capabilities.acceptsText" in settings
     assert "willUploadClip" in settings
     assert "Save key" in settings

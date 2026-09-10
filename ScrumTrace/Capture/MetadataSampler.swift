@@ -24,9 +24,10 @@ final class MetadataSampler: @unchecked Sendable {
         }
     }
 
-    static func requestTrust(prompt: Bool = false) {
+    @discardableResult
+    static func requestTrust(prompt: Bool = false) -> Bool {
         let promptKey = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
-        _ = AXIsProcessTrustedWithOptions([promptKey: prompt] as CFDictionary)
+        return AXIsProcessTrustedWithOptions([promptKey: prompt] as CFDictionary)
     }
 
     func sample(timeoutMs: UInt64 = MediaBudget.metadataSampleTimeoutMs) async -> WindowMetadata? {
@@ -53,6 +54,10 @@ final class MetadataSampler: @unchecked Sendable {
 
     private func readFrontmost() -> WindowMetadata? {
         if isSuspended { return nil }
+        // Never prompt from the sampler. Untrusted AX still gets app name.
+        guard Self.requestTrust(prompt: false) else {
+            return isSuspended ? nil : NSWorkspaceFallback.frontmost()
+        }
         let system = AXUIElementCreateSystemWide()
         var focused: AnyObject?
         let focusedStatus = AXUIElementCopyAttributeValue(

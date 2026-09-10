@@ -301,7 +301,10 @@ final class SessionController: ObservableObject {
             lastMetaSignature = ""
             pausedByPrivacy = false
             clock.reset()
-            MetadataSampler.requestTrust(prompt: true)
+            // Do not prompt Accessibility here. Record only needs Screen
+            // Recording + Microphone. AX prompt:true on every Start loops
+            // on ad-hoc Debug rebuilds (TCC treats each binary as new).
+            MetadataSampler.requestTrust(prompt: false)
             let recorder = SessionRecorder(sessionURL: created.url, clock: clock)
             captureFreeze.attach(recorder)
             // Tick before startCapture: a credential app during the permission
