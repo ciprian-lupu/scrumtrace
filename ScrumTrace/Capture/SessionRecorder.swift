@@ -664,7 +664,10 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         }
         wavFormatFailStreak = 0
         let frames = AVAudioFrameCount(CMSampleBufferGetNumSamples(sampleBuffer))
-        guard frames > 0 else { return }
+        guard frames > 0 else {
+            noteWavEmptyConvert()
+            return
+        }
         guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frames) else {
             failCaptureWrite("Could not write archive/audio.wav: PCM buffer allocation failed.")
             return
@@ -969,7 +972,10 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             return
         }
         let frames = buffer.frameLength
-        guard frames > 0 else { return }
+        guard frames > 0 else {
+            noteWavEmptyConvert()
+            return
+        }
         let target = wavFile.processingFormat
         if buffer.format == target {
             wavEmptyConvertStreak = 0

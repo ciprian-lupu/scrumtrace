@@ -2198,7 +2198,7 @@ struct CaptureAudioLayout: Codable, Sendable, Hashable {
     static let both = CaptureAudioLayout(microphoneWav: true, systemAudioInMovie: true)
 
     static func load(sessionURL: URL) -> CaptureAudioLayout {
-        // Missing/unreadable layout: WAV may be the system-audio fallback
+        // Missing layout: WAV may be the system-audio fallback
         // (`if !microphoneWav { writeWav }`). `.both` would label that WAV as
         // room and also transcribe the movie (duplicate + wrong speaker).
         let unknownMic = CaptureAudioLayout(microphoneWav: false, systemAudioInMovie: true)
@@ -2210,7 +2210,10 @@ struct CaptureAudioLayout: Codable, Sendable, Hashable {
             sessionURL: sessionURL
         ),
               let layout = try? JSONDecoder().decode(CaptureAudioLayout.self, from: data) else {
-            return unknownMic
+            // File is present but unreadable: dual-pass rather than dropping
+            // movie system audio (Gate 3). Do not use `.both` here — tests
+            // pin that missing files must not take that path.
+            return CaptureAudioLayout(microphoneWav: true, systemAudioInMovie: true)
         }
         return layout
     }

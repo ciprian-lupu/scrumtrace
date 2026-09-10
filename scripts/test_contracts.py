@@ -736,12 +736,16 @@ def test_audio_split_and_brief_loader() -> None:
     assert "WAV writer is missing" in write_wav
     assert "noteWavEmptyConvert" in write_wav
     assert "wavEmptyConvertStreak = 0" in write_wav
+    assert "guard frames > 0 else { return }" not in write_wav
+    assert "noteWavEmptyConvert()" in write_wav.split("CMSampleBufferGetNumSamples")[1].split("AVAudioPCMBuffer")[0]
     engine_buf = recorder.split("func writeEngineBuffer")[1].split("func requestPermission")[0]
     assert "format conversion failed" in engine_buf
     assert "WAV writer is missing" in engine_buf
     assert "guard !paused, started else { return }" in engine_buf
     assert "noteWavEmptyConvert" in engine_buf
     assert "wavEmptyConvertStreak = 0" in engine_buf
+    assert "guard frames > 0 else { return }" not in engine_buf
+    assert "noteWavEmptyConvert()" in engine_buf.split("let frames = buffer.frameLength")[1].split("let target")[0]
     assert "_ = videoInput.append" not in recorder
     assert "_ = audioInput.append" not in recorder
     assert "Could not write archive/session.mp4" in recorder
@@ -1604,6 +1608,8 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "Data(contentsOf:" not in layout_load
     assert "microphoneWav: false" in layout_load
     assert "return .both" not in layout_load
+    assert "microphoneWav: true" in layout_load
+    assert layout_load.index("return unknownMic") < layout_load.index("microphoneWav: true")
     timing_load = models.split("static func load(sessionURL: URL) -> PipelineTiming?")[1].split("func write(sessionURL")[0]
     assert "readContainedData" in timing_load
     assert "Data(contentsOf:" not in timing_load
