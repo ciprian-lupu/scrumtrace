@@ -204,7 +204,11 @@ final class SessionController: ObservableObject {
         metadataTimer?.invalidate()
         metadataTimer = nil
         recorder?.freezeWriters()
-        try? recorder?.persistCaptureLayout()
+        do {
+            try recorder?.persistCaptureLayout()
+        } catch {
+            lastError = error.localizedDescription
+        }
         NotificationCenter.default.post(name: .scrumTraceCaptureGate, object: CaptureSessionState.paused)
         NotificationCenter.default.post(name: .scrumTraceSessionEnding, object: nil)
         persistInterruptedCapture()

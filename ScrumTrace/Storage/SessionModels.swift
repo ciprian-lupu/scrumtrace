@@ -405,18 +405,13 @@ enum ExportRel {
             } else if isLink {
                 throw SessionVaultError.writeFailed(relative)
             } else {
-                var isDir: ObjCBool = false
-                if FileManager.default.fileExists(atPath: next.path, isDirectory: &isDir) {
-                    if !isDir.boolValue {
-                        throw SessionVaultError.writeFailed(relative)
-                    }
-                } else {
-                    try FileManager.default.createDirectory(at: next, withIntermediateDirectories: false)
-                }
-                if (try? next.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
-                    try? removeItemIfRegularFile(next, sessionRoot: sessionURL)
-                    throw SessionVaultError.writeFailed(relative)
-                }
+                // FileManager.createDirectory follows a planted intermediate
+                // (`archive/` → outside). mkdirat + openat(O_NOFOLLOW) does not.
+                try ensureContainedDirectory(
+                    parts: Array(parts.prefix(index)),
+                    name: part,
+                    sessionURL: sessionURL
+                )
                 let walked = parts[0...index].joined(separator: "/")
                 if containsSymlinkComponent(walked, sessionURL: sessionURL) {
                     throw SessionVaultError.writeFailed(relative)
@@ -428,6 +423,41 @@ enum ExportRel {
             throw SessionVaultError.writeFailed(relative)
         }
         return destRel
+    }
+
+    /// mkdirat into a parent opened with `O_NOFOLLOW`. `FileManager.createDirectory`
+    /// follows a planted intermediate (`archive/` → `export/` or `/tmp`) (C2).
+    private static func ensureContainedDirectory(parts: [String], name: String, sessionURL: URL) throws {
+        if name.contains("/") || name.contains("\0") || name == "." || name == ".." {
+            throw SessionVaultError.writeFailed(name)
+        }
+        guard let parentFd = openatDirectory(parts: parts, root: sessionURL) else {
+            throw SessionVaultError.writeFailed(name)
+        }
+        defer { Darwin.close(parentFd) }
+        let existing = name.withCString { ptr in
+            Darwin.openat(parentFd, ptr, O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW)
+        }
+        if existing >= 0 {
+            Darwin.close(existing)
+            return
+        }
+        let made = name.withCString { ptr in
+            Darwin.mkdirat(parentFd, ptr, 0o700)
+        }
+        if made != 0 {
+            let err = Darwin.errno
+            guard err == EEXIST else {
+                throw SessionVaultError.writeFailed(name)
+            }
+        }
+        let created = name.withCString { ptr in
+            Darwin.openat(parentFd, ptr, O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW)
+        }
+        guard created >= 0 else {
+            throw SessionVaultError.writeFailed(name)
+        }
+        Darwin.close(created)
     }
 
     /// Write bytes under the session folder. A dest symlink is removed first so

@@ -624,6 +624,7 @@ def test_retry_failed_slices_and_pins() -> None:
     assert "FileManager.default.removeItem(at: copy)" not in copy_test
     assert "testRemoveItemIfRegularFileDoesNotRecurseIntoDirectory" in contracts
     assert "testPrepareContainedWriteDoesNotRecurseIntoDestDirectory" in contracts
+    assert "testPrepareContainedWriteRefusesArchiveDirectorySymlink" in contracts
     assert "testUnlinkLastComponentUnfollowedDoesNotRecurseIntoDirectory" in contracts
     assert "testUnlinkLastComponentUnfollowedUnlinksSymlinkWithoutFollowing" in contracts
     assert "testUnlinkLastComponentUnfollowedUnlinksRegularFile" in contracts
@@ -979,6 +980,8 @@ def test_pause_privacy_and_metadata_gate() -> None:
     assert "persistCaptureLayout" in halt
     assert halt.index("freezeWriters") < halt.index("persistCaptureLayout")
     assert halt.index("persistCaptureLayout") < halt.index("persistInterruptedCapture")
+    assert "try? recorder?.persistCaptureLayout" not in halt
+    assert "try? persistCaptureLayout" not in halt
     assert "scrumTraceSessionEnding" in halt
     assert "scrumTraceCaptureGate" in halt
     fail_fn = controller.split("func handleCaptureStreamFailure")[1].split("func togglePause")[0]
@@ -1721,7 +1724,9 @@ def test_write_contained_data_refuses_directory_symlinks() -> None:
     assert "String(contentsOf:" not in utf8_read
     prepare = models.split("static func prepareContainedWrite")[1].split("static func writeContainedData")[0]
     assert "isSymbolicLink" in prepare
-    assert "createDirectory" in prepare
+    assert "mkdirat" in prepare
+    assert "ensureContainedDirectory" in prepare
+    assert "FileManager.default.createDirectory" not in prepare
     assert "removeItemIfRegularFile" in prepare
     assert "FileManager.default.removeItem(at: next)" not in prepare
     write_fn = models.split("static func writeContainedData")[1].split("static func isAllowedClipDest")[0]
@@ -1917,10 +1922,13 @@ def test_write_contained_data_refuses_directory_symlinks() -> None:
     assert "ScrumTracePath.manifest" in prepare
     assert "removeItemIfRegularFile" in prepare
     assert "FileManager.default.removeItem(at: next)" not in prepare
-    mkdir_check = prepare.split("createDirectory")[1]
-    assert "isSymbolicLink" in mkdir_check
-    assert "removeItem" in mkdir_check
-    assert "containsSymlinkComponent" in mkdir_check
+    assert "FileManager.default.createDirectory" not in prepare
+    assert "mkdirat" in prepare
+    mkdir_check = prepare.split("ensureContainedDirectory")[1]
+    assert "mkdirat" in mkdir_check
+    assert "O_NOFOLLOW" in mkdir_check
+    assert "openatDirectory" in mkdir_check
+    assert "containsSymlinkComponent" in prepare
     contained_reg = models.split("static func isContainedRegularFile")[1].split("static func containedRelative(_ file")[0]
     assert "unfollowedRelative" in contained_reg
     assert "containsSymlinkComponent" in contained_reg

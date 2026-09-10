@@ -259,6 +259,25 @@ final class ContractTests: XCTestCase {
         XCTAssertEqual(try String(contentsOf: inside, encoding: .utf8), "KEEP")
     }
 
+    func testPrepareContainedWriteRefusesArchiveDirectorySymlink() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("st-prep-dirlink-\(UUID().uuidString)")
+        let export = root.appendingPathComponent("export")
+        try FileManager.default.createDirectory(at: export, withIntermediateDirectories: true)
+        try Data("inside".utf8).write(to: export.appendingPathComponent("full_transcript.json"))
+        try FileManager.default.createSymbolicLink(
+            at: root.appendingPathComponent("archive"),
+            withDestinationURL: export
+        )
+        defer { try? FileManager.default.removeItem(at: root) }
+        XCTAssertThrowsError(
+            try ExportRel.prepareContainedWrite(relative: "archive/full_transcript.json", sessionURL: root)
+        )
+        XCTAssertEqual(
+            try String(contentsOf: export.appendingPathComponent("full_transcript.json"), encoding: .utf8),
+            "inside"
+        )
+    }
+
     func testUnlinkLastComponentUnfollowedUnlinksRegularFile() throws {
         let parent = FileManager.default.temporaryDirectory.appendingPathComponent("st-unlink-reg-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true)
