@@ -255,6 +255,28 @@ final class ContractTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: parent.path))
     }
 
+    func testWipeContainedDirectoryDoesNotFollowSymlinkIntoArchive() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("st-wipe-export-\(UUID().uuidString)")
+        let archive = root.appendingPathComponent("archive")
+        let export = root.appendingPathComponent("export")
+        let media = export.appendingPathComponent("media")
+        try FileManager.default.createDirectory(at: archive, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: media, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let secret = archive.appendingPathComponent("session.mp4")
+        try Data("MASTER".utf8).write(to: secret)
+        let planted = export.appendingPathComponent("leak")
+        try FileManager.default.createSymbolicLink(at: planted, withDestinationURL: archive)
+        try Data("STALE".utf8).write(to: media.appendingPathComponent("stale.mp4"))
+        try ExportRel.wipeContainedDirectory(relative: ScrumTracePath.export, sessionURL: root)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: export.path))
+        XCTAssertEqual(try String(contentsOf: secret, encoding: .utf8), "MASTER")
+        XCTAssertThrowsError(
+            try ExportRel.wipeContainedDirectory(relative: ScrumTracePath.archive, sessionURL: root)
+        )
+        XCTAssertEqual(try String(contentsOf: secret, encoding: .utf8), "MASTER")
+    }
+
     func testUnlinkLastComponentUnfollowedDoesNotRecurseIntoDirectory() throws {
         let parent = FileManager.default.temporaryDirectory.appendingPathComponent("st-unlink-last-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true)
@@ -1291,6 +1313,101 @@ final class ContractTests: XCTestCase {
         XCTAssertTrue(applied[2].evidenceMedia.isEmpty)
         XCTAssertEqual(applied[3].status, .needsReview)
         XCTAssertEqual(applied[3].evidenceMedia, ["shots/001.jpg"])
+    }
+
+    func testApplyExportEvidenceDemotesInvertedAndOutOfSliceQuotes() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("scrumtrace-export-quote-\(UUID().uuidString)")
+        let shots = root.appendingPathComponent("export/shots")
+        try FileManager.default.createDirectory(at: shots, withIntermediateDirectories: true)
+        try Data("jpg".utf8).write(to: shots.appendingPathComponent("001.jpg"))
+        defer { try? FileManager.default.removeItem(at: root) }
+        let inverted = TaskRecord(
+            taskId: "TASK-01",
+            sourceSliceId: "slice-01",
+            kind: .bug,
+            status: .confirmed,
+            title: "Save",
+            observed: "x",
+            stated: "",
+            inferred: "",
+            agentInstructions: "inspect",
+            quotes: [
+                QuoteRecord(speaker: "presenter", text: "this does nothing", tMediaStart: 12, tMediaEnd: 4)
+            ],
+            evidenceMedia: ["shots/001.jpg"],
+            confidence: 0.9
+        )
+        let outside = TaskRecord(
+            taskId: "TASK-02",
+            sourceSliceId: "slice-01",
+            kind: .bug,
+            status: .confirmed,
+            title: "Window",
+            observed: "x",
+            stated: "",
+            inferred: "",
+            agentInstructions: "inspect",
+            quotes: [
+                QuoteRecord(speaker: "presenter", text: "this does nothing", tMediaStart: 10, tMediaEnd: 12)
+            ],
+            evidenceMedia: ["shots/001.jpg"],
+            confidence: 0.9
+        )
+        let slice = SliceRecord(
+            sliceId: "slice-01",
+            startMedia: 178,
+            endMedia: 198,
+            trigger: .shot,
+            associatedShotId: nil,
+            clipPath: nil,
+            stills: ["shots/001.jpg"],
+            analysisStatus: .success,
+            score: 1
+        )
+        let applied = EvidenceValidator.applyExportEvidence(
+            tasks: [inverted, outside],
+            sessionURL: root,
+            slices: [slice]
+        )
+        XCTAssertEqual(applied[0].status, .needsReview)
+        XCTAssertEqual(applied[1].status, .needsReview)
+    }
+
+    func testMergeCanonicalStatusesKeepsArchiveEvidence() {
+        let canonical = TaskRecord(
+            taskId: "TASK-01",
+            sourceSliceId: "slice-01",
+            kind: .bug,
+            status: .confirmed,
+            title: "Save",
+            observed: "x",
+            stated: "",
+            inferred: "",
+            agentInstructions: "inspect",
+            quotes: [],
+            evidenceMedia: ["archive/shots/001.png"],
+            confidence: 0.9
+        )
+        let projected = TaskRecord(
+            taskId: "TASK-01",
+            sourceSliceId: "slice-01",
+            kind: .bug,
+            status: .needsReview,
+            title: "Save",
+            observed: "x",
+            stated: "",
+            inferred: "",
+            agentInstructions: "inspect",
+            quotes: [],
+            evidenceMedia: ["shots/001.jpg"],
+            confidence: 0.9
+        )
+        let merged = EvidenceValidator.mergeCanonicalStatuses(
+            canonical: [canonical],
+            projected: [projected]
+        )
+        XCTAssertEqual(merged[0].status, .needsReview)
+        XCTAssertEqual(merged[0].evidenceMedia, ["archive/shots/001.png"])
     }
 
     func testExistingSessionFileRejectsSymlinkEscape() throws {

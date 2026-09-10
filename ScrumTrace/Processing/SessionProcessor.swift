@@ -189,7 +189,8 @@ final class SessionProcessor: @unchecked Sendable {
         projection.manifest.tasks = EvidenceValidator.applyExportEvidence(
             tasks: projection.manifest.tasks,
             sessionURL: sessionURL,
-            transcript: transcript
+            transcript: transcript,
+            slices: projection.manifest.slices
         )
         manifest.omitted = projection.omitted
         // Docs first: a zip failure must not skip SESSION_BRIEF.html / AGENT_CONTEXT.md.
@@ -227,7 +228,8 @@ final class SessionProcessor: @unchecked Sendable {
             projection.manifest.tasks = EvidenceValidator.applyExportEvidence(
                 tasks: projection.manifest.tasks,
                 sessionURL: sessionURL,
-                transcript: transcript
+                transcript: transcript,
+                slices: projection.manifest.slices
             )
             // C5: demoted tasks must hit AGENT_CONTEXT / BRIEF / the projection
             // even if rebuilding the pack file fails. Do not swallow this write
@@ -263,7 +265,8 @@ final class SessionProcessor: @unchecked Sendable {
                 projection.manifest.tasks = EvidenceValidator.applyExportEvidence(
                     tasks: projection.manifest.tasks,
                     sessionURL: sessionURL,
-                    transcript: transcript
+                    transcript: transcript,
+                    slices: projection.manifest.slices
                 )
                 try writeExportDocuments(
                     sessionURL: sessionURL,
@@ -280,7 +283,11 @@ final class SessionProcessor: @unchecked Sendable {
         try timing.write(sessionURL: sessionURL)
         manifest.omitted = zipResult.omitted
         // C5: canonical SoT must not keep `confirmed` after export evidence was dropped.
-        manifest.tasks = projection.manifest.tasks
+        // D10: keep archive evidence paths; copy status only from the projection.
+        manifest.tasks = EvidenceValidator.mergeCanonicalStatuses(
+            canonical: manifest.tasks,
+            projected: projection.manifest.tasks
+        )
         manifest.markCompleted(.synthesizing)
         manifest.pipelineStatus = manifest.slices.contains(where: { $0.analysisStatus == .offlineFailed })
             ? .offlineFailed

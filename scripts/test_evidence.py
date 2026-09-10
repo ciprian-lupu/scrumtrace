@@ -173,10 +173,17 @@ def test_frame_ref_basename_resolves() -> None:
     apply_fn = validator.split("static func applyExportEvidence")[1].split("static func exportFileExists")[0]
     assert "quoteMatchesTranscript" in apply_fn
     assert "transcript: FullTranscript?" in apply_fn
+    assert "slices: [SliceRecord]" in apply_fn
+    assert "quote times are inverted" in apply_fn or "tMediaStart > quote.tMediaEnd" in apply_fn
+    assert "quote outside slice window" in apply_fn or "slice.startMedia" in apply_fn
     assert "sourceSliceId.isEmpty" in apply_fn
     assert "keepConfidenceFloor" in apply_fn
     assert "normalize(copy.inferred)" in apply_fn
     assert "normalize(copy.observed)" in apply_fn
+    assert "func mergeCanonicalStatuses" in validator
+    merge_fn = validator.split("static func mergeCanonicalStatuses")[1].split("static func exportFileExists")[0]
+    assert "copy.status = projected.status" in merge_fn
+    assert "copy.evidenceMedia" not in merge_fn
     slicer = (ROOT / "ScrumTrace" / "Slicing" / "MeetingSlicer.swift").read_text()
     assert "clipMaxDuration" in slicer
     plist = (ROOT / "ScrumTrace" / "App" / "Info.plist").read_text()
@@ -269,6 +276,11 @@ def test_mock_agent_context_paths_exist() -> None:
     for task in manifest.get("tasks", []):
         for rel in task.get("evidence_media", []):
             assert (export / rel).is_file(), f"manifest missing {rel}"
+        if task.get("status") == "confirmed":
+            assert float(task.get("confidence", 0)) >= 0.55, task.get("task_id")
+    ctx = (export / "AGENT_CONTEXT.md").read_text()
+    assert "confidence: 0.91" in ctx
+    assert "confidence: 0.88" in ctx
 
 
 def test_mock_pack_zip_is_export_only() -> None:

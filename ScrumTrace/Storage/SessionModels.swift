@@ -24,6 +24,27 @@ private func scrumtraceUnlinkat(
     _ flag: Int32
 ) -> Int32
 
+@_silgen_name("fstatat")
+private func scrumtraceFstatat(
+    _ fd: Int32,
+    _ path: UnsafePointer<CChar>?,
+    _ buf: UnsafeMutablePointer<stat>?,
+    _ flag: Int32
+) -> Int32
+
+@_silgen_name("fdopendir")
+private func scrumtraceFdopendir(_ fd: Int32) -> OpaquePointer?
+
+@_silgen_name("readdir")
+private func scrumtraceReaddir(_ dir: OpaquePointer?) -> UnsafeMutablePointer<dirent>?
+
+@_silgen_name("closedir")
+private func scrumtraceClosedir(_ dir: OpaquePointer?) -> Int32
+
+/// Darwin `AT_SYMLINK_NOFOLLOW` / `AT_REMOVEDIR` (sys/fcntl.h).
+private let scrumtraceATSymlinkNofollow: Int32 = 0x0020
+private let scrumtraceATRemoveDir: Int32 = 0x0080
+
 @_silgen_name("posix_spawn_file_actions_init")
 private func scrumtraceSpawnActionsInit(_ file_actions: UnsafeMutableRawPointer) -> Int32
 
@@ -671,6 +692,126 @@ enum ExportRel {
                 scrumtraceUnlinkat(dirFd, ptr, 0)
             }
         } while rc != 0 && Darwin.errno == EINTR
+    }
+
+    /// Wipe `export/` through a directory fd opened with `O_NOFOLLOW`.
+    /// Recursively deleting that folder via FileManager follows a TOCTOU
+    /// swap of the name for a symlink into `archive/` (C2). Only `export` is allowed.
+    static func wipeContainedDirectory(relative: String, sessionURL: URL) throws {
+        guard isUsableSessionRoot(sessionURL) else {
+            throw SessionVaultError.writeFailed(relative)
+        }
+        guard let parts = normalizedComponents(relative), parts == ["export"] else {
+            throw SessionVaultError.writeFailed(relative)
+        }
+        guard let sessionFd = openUnfollowedDirectory(sessionURL) else {
+            throw SessionVaultError.writeFailed(relative)
+        }
+        defer { Darwin.close(sessionFd) }
+        let name = "export"
+        let probe = name.withCString { ptr in
+            Darwin.openat(sessionFd, ptr, O_RDONLY | O_CLOEXEC | O_NOFOLLOW)
+        }
+        if probe < 0 {
+            let err = Darwin.errno
+            if err == ENOENT {
+                return
+            }
+            if err == ELOOP {
+                try unlinkatName(name, dirFd: sessionFd, flag: 0, relative: relative)
+                return
+            }
+            throw SessionVaultError.writeFailed(relative)
+        }
+        var info = stat()
+        let ok = Darwin.fstat(probe, &info) == 0
+        let mode = info.st_mode & S_IFMT
+        if !ok {
+            Darwin.close(probe)
+            throw SessionVaultError.writeFailed(relative)
+        }
+        if mode == S_IFDIR {
+            wipeOpenedDirectory(probe, depth: 0)
+            Darwin.close(probe)
+            try unlinkatName(name, dirFd: sessionFd, flag: scrumtraceATRemoveDir, relative: relative)
+            return
+        }
+        Darwin.close(probe)
+        try unlinkatName(name, dirFd: sessionFd, flag: 0, relative: relative)
+    }
+
+    private static func unlinkatName(
+        _ name: String,
+        dirFd: Int32,
+        flag: Int32,
+        relative: String
+    ) throws {
+        var rc: Int32 = -1
+        repeat {
+            rc = name.withCString { ptr in
+                scrumtraceUnlinkat(dirFd, ptr, flag)
+            }
+        } while rc != 0 && Darwin.errno == EINTR
+        if rc != 0 {
+            let err = Darwin.errno
+            if err == ENOENT { return }
+            if flag == scrumtraceATRemoveDir, err == ENOTDIR || err == ELOOP {
+                try unlinkatName(name, dirFd: dirFd, flag: 0, relative: relative)
+                return
+            }
+            throw SessionVaultError.writeFailed(relative)
+        }
+    }
+
+    private static func wipeOpenedDirectory(_ dirFd: Int32, depth: Int) {
+        guard depth < 24 else { return }
+        let cloned = Darwin.dup(dirFd)
+        guard cloned >= 0 else { return }
+        guard let dir = scrumtraceFdopendir(cloned) else {
+            Darwin.close(cloned)
+            return
+        }
+        defer { _ = scrumtraceClosedir(dir) }
+        while let ent = scrumtraceReaddir(dir) {
+            guard let child = directoryEntryName(ent) else { continue }
+            guard child != ".", child != "..",
+                  !child.contains("/"), !child.contains("\0") else { continue }
+            var info = stat()
+            let st = child.withCString { ptr in
+                scrumtraceFstatat(dirFd, ptr, &info, scrumtraceATSymlinkNofollow)
+            }
+            if st != 0 {
+                _ = child.withCString { ptr in
+                    scrumtraceUnlinkat(dirFd, ptr, 0)
+                }
+                continue
+            }
+            if (info.st_mode & S_IFMT) == S_IFDIR {
+                let nested = child.withCString { ptr in
+                    Darwin.openat(dirFd, ptr, O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW)
+                }
+                if nested >= 0 {
+                    wipeOpenedDirectory(nested, depth: depth + 1)
+                    Darwin.close(nested)
+                }
+                _ = child.withCString { ptr in
+                    scrumtraceUnlinkat(dirFd, ptr, scrumtraceATRemoveDir)
+                }
+            } else {
+                _ = child.withCString { ptr in
+                    scrumtraceUnlinkat(dirFd, ptr, 0)
+                }
+            }
+        }
+    }
+
+    private static func directoryEntryName(_ entry: UnsafeMutablePointer<dirent>) -> String? {
+        withUnsafeBytes(of: entry.pointee.d_name) { raw -> String? in
+            guard let base = raw.baseAddress?.assumingMemoryBound(to: CChar.self) else {
+                return nil
+            }
+            return String(cString: base)
+        }
     }
 
     /// Read bytes without following a dest or intermediate symlink. `Data(contentsOf:)`

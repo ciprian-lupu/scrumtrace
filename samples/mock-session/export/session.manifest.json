@@ -76,7 +76,8 @@
       "evidence_media": [
         "shots/001.annotated.png",
         "shots/001.png"
-      ]
+      ],
+      "confidence": 0.91
     },
     {
       "task_id": "TASK-02",
@@ -91,7 +92,8 @@
       "evidence_media": [
         "media/task-02/clip.mp4",
         "media/task-02/shot-1.jpg"
-      ]
+      ],
+      "confidence": 0.88
     }
   ],
   "omitted": []

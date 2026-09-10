@@ -111,14 +111,16 @@ enum EvidenceValidator {
     }
 
     /// C5: after projection/omit, `confirmed` requires a real file under `export/`.
-    /// Quotes and inferred-copy rules are re-checked when a transcript is present
+    /// Quotes are re-checked (inverted times, slice window, transcript overlap)
     /// so a demotion at zip time cannot leave a `confirmed` row without evidence.
     static func applyExportEvidence(
         tasks: [TaskRecord],
         sessionURL: URL,
-        transcript: FullTranscript? = nil
+        transcript: FullTranscript? = nil,
+        slices: [SliceRecord] = []
     ) -> [TaskRecord] {
-        tasks.map { task in
+        let sliceById = Dictionary(slices.map { ($0.sliceId, $0) }, uniquingKeysWith: { _, latest in latest })
+        return tasks.map { task in
             var copy = task
             copy.evidenceMedia = task.evidenceMedia.filter { path in
                 exportFileExists(path, sessionURL: sessionURL)
@@ -128,9 +130,18 @@ enum EvidenceValidator {
                     copy.status = .needsReview
                 } else if copy.confidence < MediaBudget.keepConfidenceFloor {
                     copy.status = .needsReview
-                } else if let transcript {
+                } else {
                     for quote in copy.quotes {
-                        if !quoteMatchesTranscript(quote, transcript: transcript) {
+                        if quote.tMediaStart > quote.tMediaEnd {
+                            copy.status = .needsReview
+                            break
+                        }
+                        if let slice = sliceById[copy.sourceSliceId],
+                           quote.tMediaEnd < slice.startMedia || quote.tMediaStart > slice.endMedia {
+                            copy.status = .needsReview
+                            break
+                        }
+                        if let transcript, !quoteMatchesTranscript(quote, transcript: transcript) {
                             copy.status = .needsReview
                             break
                         }
@@ -142,6 +153,24 @@ enum EvidenceValidator {
                         copy.status = .needsReview
                     }
                 }
+            }
+            return copy
+        }
+    }
+
+    /// D10: canonical `session.manifest.json` keeps archive evidence paths.
+    /// C5: status still follows the export projection after omit/demotion.
+    static func mergeCanonicalStatuses(
+        canonical: [TaskRecord],
+        projected: [TaskRecord]
+    ) -> [TaskRecord] {
+        let byId = Dictionary(projected.map { ($0.taskId, $0) }, uniquingKeysWith: { _, latest in latest })
+        return canonical.map { task in
+            var copy = task
+            if let projected = byId[task.taskId] {
+                copy.status = projected.status
+            } else if copy.status == .confirmed {
+                copy.status = .needsReview
             }
             return copy
         }

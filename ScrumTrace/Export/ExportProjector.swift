@@ -193,10 +193,12 @@ struct ExportProjector {
                 throw SessionVaultError.writeFailed("export/")
             }
         } else {
-            var isDir: ObjCBool = false
-            if fileManager.fileExists(atPath: export.path, isDirectory: &isDir) {
-                try fileManager.removeItem(at: export)
-            }
+            // Do not recursively delete this path via FileManager — a TOCTOU
+            // swap of export/ for a symlink would follow into archive/ (C2).
+            try ExportRel.wipeContainedDirectory(
+                relative: ScrumTracePath.export,
+                sessionURL: sessionURL
+            )
         }
         try fileManager.createDirectory(at: export, withIntermediateDirectories: true)
         if (try? export.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {

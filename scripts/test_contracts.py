@@ -294,10 +294,12 @@ def test_zipper_never_deletes_archive() -> None:
     project_fn = projector.split("func project")[1].split("func resetExportTree")[0]
     assert "resetExportTree" in project_fn
     assert "removeEscapingExportLinks" in project_fn
-    assert "removeItem(at: export)" in projector.split("func resetExportTree")[1].split("func writeProjectionManifest")[0]
     reset = projector.split("func resetExportTree")[1].split("func writeProjectionManifest")[0]
-    assert "isSymbolicLink" in reset
-    assert "fileExists(atPath: export.path, isDirectory:" in reset
+    assert "wipeContainedDirectory" in reset
+    assert "removeItem(at: export)" not in reset
+    assert "fileManager.removeItem(at: export)" not in reset
+    assert "FileManager.default.removeItem(at: export)" not in reset
+    assert "fileExists(atPath: export.path, isDirectory:" not in reset
     assert "isUsableSessionRoot" in reset
     assert reset.count("isSymbolicLink") >= 4
     assert "removeItemIfRegularFile(export" in reset
@@ -573,6 +575,9 @@ def test_retry_failed_slices_and_pins() -> None:
     assert "testUnlinkLastComponentUnfollowedDoesNotRecurseIntoDirectory" in contracts
     assert "testUnlinkLastComponentUnfollowedUnlinksSymlinkWithoutFollowing" in contracts
     assert "testUnlinkLastComponentUnfollowedUnlinksRegularFile" in contracts
+    assert "testWipeContainedDirectoryDoesNotFollowSymlinkIntoArchive" in contracts
+    assert "testApplyExportEvidenceDemotesInvertedAndOutOfSliceQuotes" in contracts
+    assert "testMergeCanonicalStatusesKeepsArchiveEvidence" in contracts
     models = (ROOT / "ScrumTrace" / "Storage" / "SessionModels.swift").read_text()
     existing_media = models.split("func withExistingMedia")[1].split("enum CodingKeys")[0]
     assert "existingSessionFile" in existing_media
@@ -1183,7 +1188,11 @@ def test_phase45_clip_consent_and_budget() -> None:
     for chunk in processor.split("EvidenceValidator.applyExportEvidence")[1:]:
         head = chunk.split(")")[0]
         assert "transcript: transcript" in head
-    assert "manifest.tasks = projection.manifest.tasks" in processor
+    assert processor.count("slices: projection.manifest.slices") == 3
+    assert "mergeCanonicalStatuses" in processor
+    assert "canonical: manifest.tasks" in processor
+    assert "projected: projection.manifest.tasks" in processor
+    assert "manifest.tasks = projection.manifest.tasks" not in processor
     assert "includesClipAudio != acceptsVideo" in models
     controller = (ROOT / "ScrumTrace" / "Processing" / "SessionController.swift").read_text()
     assert "needsReprompt" in controller
@@ -1649,6 +1658,14 @@ def test_write_contained_data_refuses_directory_symlinks() -> None:
     assert "/private/tmp" in unlink_last
     assert "O_RDONLY | O_DIRECTORY | O_CLOEXEC" in unlink_last
     assert "O_RDONLY | O_CLOEXEC | O_NOFOLLOW" in unlink_last
+    assert "static func wipeContainedDirectory" in models
+    wipe_fn = models.split("static func wipeContainedDirectory")[1].split("static func readContainedData(relative:")[0]
+    assert 'parts == ["export"]' in wipe_fn
+    assert "FileManager.default.removeItem" not in wipe_fn
+    assert "scrumtraceFdopendir" in wipe_fn
+    assert "scrumtraceATRemoveDir" in wipe_fn
+    assert "scrumtraceATSymlinkNofollow" in wipe_fn
+    assert "openUnfollowedDirectory" in wipe_fn
     assert "static func makePrivateTemporaryURL" in models
     assert "static func removePrivateTemporaryURL" in models
     private_temp = models.split("static func makePrivateTemporaryURL")[1].split("static func removePrivateTemporaryURL")[0]
