@@ -1485,11 +1485,16 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "try zipper.writeOmittedMarkdown" in zip_fail
     assert "try? zipper.writeOmittedMarkdown" not in zip_fail
     assert "writeExportDocuments" in processor.split("Docs first")[1].split("var zipResult")[0]
+    assert "try? zipper.writeZip" not in processor
+    docs_first = processor.split("Docs first")[1].split("var zipResult")[0]
+    assert "try zipper.writeZip" in docs_first
+    assert "tightenExportClips" in docs_first
     docs = processor.split("func writeExportDocuments")[1].split("private func transcribe")[0]
     assert "removeEscapingExportLinks" in docs
     assert "writeExportText" in docs
     rewrite = processor.split("for pass in 0..<3")[1].split("timing.zipBytes")[0]
     assert rewrite.index("try writeExportDocuments") < rewrite.index("try zipper.writeZip")
+    assert "discardPackIfOverBudget" in rewrite
     zip_rewrite = rewrite.split("zipBytes = try zipper.writeZip")[1].split("if zipBytes")[0]
     assert "writeExportDocuments" not in zip_rewrite
     loop_zip = rewrite.split("if pass == 2")[1]
@@ -1499,6 +1504,13 @@ def test_phase45_clip_consent_and_budget() -> None:
     zipper_over = zipper.split("if size > MediaBudget.maxZipBytes")[1].split("func writeZip")[0]
     assert "throw" not in zipper_over
     assert "Pack still" in zipper_over
+    assert "discardPackIfOverBudget" in zipper_over
+    zip_fn = zipper.split("func zip(")[1].split("func writeZip")[0]
+    assert "discardPackIfOverBudget" in zip_fn
+    discard_pack = zipper.split("func discardPackIfOverBudget")[1].split("func measuredPackBytes")[0]
+    assert "maxZipBytes" in discard_pack
+    assert "removeItemIfRegularFile(zipURL" in discard_pack
+    assert "try? ExportRel.removeItemIfRegularFile(zipURL" not in discard_pack
     brief = (ROOT / "ScrumTrace" / "Export" / "SessionBriefRenderer.swift").read_text()
     fallback = brief.split("let fallbackShell")[1].split("let fallbackCSS")[0]
     assert "{{TIMELINE_HTML}}" in fallback

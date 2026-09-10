@@ -201,12 +201,17 @@ final class SessionProcessor: @unchecked Sendable {
             projector: projector
         )
         try zipper.writeOmittedMarkdown(sessionURL: sessionURL, omitted: projection.omitted)
-        if let trial = try? zipper.writeZip(
-            sessionURL: sessionURL,
-            includeFullTranscript: projection.manifest.includeFullTranscriptInZip
-        ), trial > MediaBudget.maxZipBytes {
-            await onStatus(.synthesizing, "Re-encoding clips to fit the 35 MB pack")
-            await exporter.tightenExportClips(sessionURL: sessionURL)
+        do {
+            let trial = try zipper.writeZip(
+                sessionURL: sessionURL,
+                includeFullTranscript: projection.manifest.includeFullTranscriptInZip
+            )
+            if trial > MediaBudget.maxZipBytes {
+                await onStatus(.synthesizing, "Re-encoding clips to fit the 35 MB pack")
+                await exporter.tightenExportClips(sessionURL: sessionURL)
+            }
+        } catch {
+            // Trial weigh failed; zip() below still measures and omits.
         }
         var zipResult = SessionPackZipper.Result(
             zipURL: sessionURL.appendingPathComponent(ScrumTracePath.packZip),
@@ -220,6 +225,7 @@ final class SessionProcessor: @unchecked Sendable {
                 OmittedAsset(path: "session-pack.zip", reason: "zip failed: \(error.localizedDescription)")
             )
             try zipper.writeOmittedMarkdown(sessionURL: sessionURL, omitted: zipResult.omitted)
+            zipResult.byteCount = zipper.discardPackIfOverBudget(sessionURL: sessionURL)
         }
         var zipBytes = zipResult.byteCount
         for pass in 0..<3 {
@@ -278,6 +284,7 @@ final class SessionProcessor: @unchecked Sendable {
                 break
             }
         }
+        zipBytes = zipper.discardPackIfOverBudget(sessionURL: sessionURL)
         timing.zipBytes = zipBytes
         timing.omittedCount = zipResult.omitted.count
         try timing.write(sessionURL: sessionURL)

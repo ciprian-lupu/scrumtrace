@@ -39,7 +39,7 @@ struct SessionPackZipper {
             try writeOmittedMarkdown(sessionURL: sessionURL, omitted: listed)
             return Result(
                 zipURL: zipURL,
-                byteCount: ExportRel.regularFileByteCount(relative: ScrumTracePath.packZip, sessionURL: sessionURL) ?? 0,
+                byteCount: discardPackIfOverBudget(sessionURL: sessionURL),
                 omitted: listed
             )
         }
@@ -83,7 +83,11 @@ struct SessionPackZipper {
         do {
             try writeOmittedMarkdown(sessionURL: sessionURL, omitted: omitted)
         } catch {
-            return Result(zipURL: zipURL, byteCount: size, omitted: omitted)
+            return Result(
+                zipURL: zipURL,
+                byteCount: discardPackIfOverBudget(sessionURL: sessionURL),
+                omitted: omitted
+            )
         }
         if omitted.contains(where: { !$0.path.isEmpty }) {
             do {
@@ -99,12 +103,24 @@ struct SessionPackZipper {
                 do {
                     try writeOmittedMarkdown(sessionURL: sessionURL, omitted: omitted)
                 } catch {
-                    return Result(zipURL: zipURL, byteCount: size, omitted: omitted)
+                    return Result(
+                        zipURL: zipURL,
+                        byteCount: discardPackIfOverBudget(sessionURL: sessionURL),
+                        omitted: omitted
+                    )
                 }
-                return Result(zipURL: zipURL, byteCount: size, omitted: omitted)
+                return Result(
+                    zipURL: zipURL,
+                    byteCount: discardPackIfOverBudget(sessionURL: sessionURL),
+                    omitted: omitted
+                )
             }
         }
-        return Result(zipURL: zipURL, byteCount: size, omitted: omitted)
+        return Result(
+            zipURL: zipURL,
+            byteCount: discardPackIfOverBudget(sessionURL: sessionURL),
+            omitted: omitted
+        )
     }
 
     func writeZip(sessionURL: URL, includeFullTranscript: Bool = false) throws -> Int {
@@ -151,6 +167,21 @@ struct SessionPackZipper {
             out.append(item)
         }
         return out
+    }
+
+    /// C3: `export/session-pack.zip` may not stay on disk over 35 MB.
+    /// OMITTED.md already records that protected docs could not fit.
+    func discardPackIfOverBudget(sessionURL: URL) -> Int {
+        guard ExportRel.isUsableSessionRoot(sessionURL) else { return 0 }
+        let zipURL = sessionURL.appendingPathComponent(ScrumTracePath.packZip)
+        let bytes = ExportRel.regularFileByteCount(relative: ScrumTracePath.packZip, sessionURL: sessionURL) ?? 0
+        guard bytes > MediaBudget.maxZipBytes else { return bytes }
+        do {
+            try ExportRel.removeItemIfRegularFile(zipURL, sessionRoot: sessionURL)
+            return 0
+        } catch {
+            return bytes
+        }
     }
 
     /// Weigh the zip with `openat`/`fstat`. Following a dest symlink would
