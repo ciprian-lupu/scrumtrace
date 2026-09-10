@@ -51,11 +51,15 @@ final class SessionProcessor: @unchecked Sendable {
             try timing.write(sessionURL: sessionURL)
             let hadAudio = ExportRel.existingSessionFile(ScrumTracePath.audioWav, sessionURL: sessionURL) != nil
                 || ExportRel.existingSessionFile(ScrumTracePath.sessionMovie, sessionURL: sessionURL) != nil
-            // If Whisper never loaded, leave the stage open so Retry can try again.
-            // Empty speech after a successful load still completes.
+            // If Whisper never loaded, or every audio pass threw, leave the
+            // stage open so Retry can try again. Empty speech after a
+            // successful load still completes (sources is non-empty).
             if transcriber.isReady || !hadAudio {
-                manifest.markCompleted(.transcribing)
-                justFinishedTranscribing = true
+                let ranAPass = !(transcript.sources ?? []).isEmpty || !transcript.segments.isEmpty
+                if !hadAudio || ranAPass {
+                    manifest.markCompleted(.transcribing)
+                    justFinishedTranscribing = true
+                }
             }
             try vault.write(manifest: &manifest)
         }
@@ -74,37 +78,39 @@ final class SessionProcessor: @unchecked Sendable {
 
         try requireUsableSession(sessionURL, id: sessionId)
         if !manifest.hasCompleted(.slicing) {
-            refreshShotsFromDisk(sessionId: sessionId, manifest: &manifest)
-            await onStatus(.slicing, "Cutting evidence windows to the media budget")
-            manifest.pipelineStatus = .slicing
-            let slices = slicer.slice(
-                shots: manifest.shots,
-                pins: pinTimes,
-                transcript: transcript,
-                mediaDuration: manifest.duration.mediaSeconds
-            )
-            var exported: [SliceRecord] = []
-            for slice in slices {
-                if ExportRel.existingSessionFile(ScrumTracePath.sessionMovie, sessionURL: sessionURL) != nil {
-                    do {
-                        let clipped = try await exporter.export(
-                            sessionURL: sessionURL,
-                            slice: slice,
-                            mediaDuration: manifest.duration.mediaSeconds
-                        )
-                        exported.append(clipped.withExistingMedia(sessionURL: sessionURL))
-                    } catch {
-                        // Keep the slice (shot stills, transcript window). One bad
-                        // clip must not abort the session.
+            if manifest.hasCompleted(.transcribing) {
+                refreshShotsFromDisk(sessionId: sessionId, manifest: &manifest)
+                await onStatus(.slicing, "Cutting evidence windows to the media budget")
+                manifest.pipelineStatus = .slicing
+                let slices = slicer.slice(
+                    shots: manifest.shots,
+                    pins: pinTimes,
+                    transcript: transcript,
+                    mediaDuration: manifest.duration.mediaSeconds
+                )
+                var exported: [SliceRecord] = []
+                for slice in slices {
+                    if ExportRel.existingSessionFile(ScrumTracePath.sessionMovie, sessionURL: sessionURL) != nil {
+                        do {
+                            let clipped = try await exporter.export(
+                                sessionURL: sessionURL,
+                                slice: slice,
+                                mediaDuration: manifest.duration.mediaSeconds
+                            )
+                            exported.append(clipped.withExistingMedia(sessionURL: sessionURL))
+                        } catch {
+                            // Keep the slice (shot stills, transcript window). One bad
+                            // clip must not abort the session.
+                            exported.append(slice.withExistingMedia(sessionURL: sessionURL))
+                        }
+                    } else {
                         exported.append(slice.withExistingMedia(sessionURL: sessionURL))
                     }
-                } else {
-                    exported.append(slice.withExistingMedia(sessionURL: sessionURL))
                 }
+                manifest.slices = exported
+                manifest.markCompleted(.slicing)
+                try vault.write(manifest: &manifest)
             }
-            manifest.slices = exported
-            manifest.markCompleted(.slicing)
-            try vault.write(manifest: &manifest)
         }
 
         try requireUsableSession(sessionURL, id: sessionId)
@@ -114,7 +120,10 @@ final class SessionProcessor: @unchecked Sendable {
                 && manifest.slices.contains { $0.analysisStatus == .skipped })
 
         if needsEvaluate {
-            if !manifest.uploadConsent.approved {
+            if !manifest.hasCompleted(.transcribing) {
+                // Retry Analysis transcribes first. Do not mark evaluating
+                // complete from an empty transcript that Whisper never produced.
+            } else if !manifest.uploadConsent.approved {
                 await onStatus(.evaluating, "Upload not approved — local export only")
                 abandonEvaluate(manifest: &manifest, failedStatus: .skipped, markOffline: false)
                 try vault.write(manifest: &manifest)

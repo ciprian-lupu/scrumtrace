@@ -1582,6 +1582,15 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "let hadText = !note.isEmpty" in shot
     processor = (ROOT / "ScrumTrace" / "Processing" / "SessionProcessor.swift").read_text()
     assert "transcriber.isReady || !hadAudio" in processor
+    whisper_gate = processor.split("transcriber.isReady || !hadAudio")[1].split("let transcript = loadTranscript")[0]
+    assert "transcript.sources" in whisper_gate
+    assert "markCompleted(.transcribing)" in whisper_gate
+    slicing_gate = processor.split("if !manifest.hasCompleted(.slicing)")[1].split("let needsEvaluate")[0]
+    assert "hasCompleted(.transcribing)" in slicing_gate
+    assert slicing_gate.index("hasCompleted(.transcribing)") < slicing_gate.index("markCompleted(.slicing)")
+    eval_gate = processor.split("if needsEvaluate")[1].split("await onStatus(.synthesizing")[0]
+    assert "hasCompleted(.transcribing)" in eval_gate
+    assert eval_gate.index("hasCompleted(.transcribing)") < eval_gate.index("uploadConsent.approved")
     assert "async -> FullTranscript" in processor
     assert "justFinishedTranscribing" in processor
     retry_block = processor.split("if justFinishedTranscribing")[1].split("if !manifest.hasCompleted(.slicing)")[0]
