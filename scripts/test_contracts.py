@@ -1006,7 +1006,7 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "removeEscapingExportLinks" in docs
     assert "writeExportText" in docs
     rewrite = processor.split("for pass in 0..<3")[1].split("timing.zipBytes")[0]
-    assert rewrite.index("try writeExportDocuments") < rewrite.index("writeZip")
+    assert rewrite.index("try writeExportDocuments") < rewrite.index("try zipper.writeZip")
     zip_rewrite = rewrite.split("zipBytes = try zipper.writeZip")[1].split("if zipBytes")[0]
     assert "writeExportDocuments" not in zip_rewrite
     zipper_over = zipper.split("if size > MediaBudget.maxZipBytes")[1].split("func writeZip")[0]

@@ -228,7 +228,8 @@ final class SessionProcessor: @unchecked Sendable {
                 sessionURL: sessionURL
             )
             // C5: demoted tasks must hit AGENT_CONTEXT / BRIEF / the projection
-            // even if the zip rewrite fails. Do not swallow this write with writeZip.
+            // even if rebuilding the pack file fails. Do not swallow this write
+            // with the pack rebuild.
             try writeExportDocuments(
                 sessionURL: sessionURL,
                 projected: projection.manifest,
