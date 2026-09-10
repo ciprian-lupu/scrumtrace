@@ -89,7 +89,7 @@ struct AgentContextRenderer {
             }
         }
         lines.append("- Evidence:")
-        let linked = task.evidenceMedia.compactMap { ExportRel.handoffFileIfPresent($0, sessionURL: sessionURL) }
+        let linked = task.evidenceMedia.compactMap { ExportRel.packMediaHandoff($0, sessionURL: sessionURL) }
         if linked.isEmpty {
             lines.append("  - _No evidence files remained in this pack._")
         } else {
@@ -106,7 +106,7 @@ struct AgentContextRenderer {
 
     private func displayPath(_ shot: ShotRecord, sessionURL: URL) -> String? {
         for path in [shot.exportPath].compactMap({ $0 }) + shot.stillCandidates {
-            if let rel = ExportRel.handoffFileIfPresent(path, sessionURL: sessionURL) {
+            if let rel = ExportRel.packMediaHandoff(path, sessionURL: sessionURL) {
                 return rel
             }
         }

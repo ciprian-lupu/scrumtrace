@@ -264,6 +264,23 @@ enum ExportRel {
         return rel
     }
 
+    /// Export-relative still/clip path safe for HTML `src`/`href` and markdown `![]()`.
+    /// `javascript:` / `..` / `()` would break out of `img.src` or `![]()`.
+    static func packMediaHandoff(_ path: String, sessionURL: URL) -> String? {
+        guard let rel = handoffFileIfPresent(path, sessionURL: sessionURL) else { return nil }
+        return packMediaRelative(rel)
+    }
+
+    static func packMediaRelative(_ rel: String) -> String? {
+        guard let parts = normalizedComponents(rel), parts.count >= 2 else { return nil }
+        guard parts[0] == "shots" || parts[0] == "media" else { return nil }
+        if parts.contains(where: { $0 == "." || $0 == ".." }) { return nil }
+        let joined = parts.joined(separator: "/")
+        if joined.contains(":") || joined.contains("\\") { return nil }
+        if joined.contains(where: { "()[]<>`".contains($0) }) { return nil }
+        return joined
+    }
+
     /// Write UTF-8 into `export/`. A planted symlink at the dest is deleted first
     /// so the write cannot follow into `archive/` or overwrite a sibling via a link.
     static func writeExportText(_ text: String, relative: String, sessionURL: URL) throws {

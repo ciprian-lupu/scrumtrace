@@ -727,7 +727,7 @@ def test_pause_privacy_and_metadata_gate() -> None:
     agent = (ROOT / "ScrumTrace" / "Export" / "AgentContextRenderer.swift").read_text()
     assert "this export folder" in agent
     assert "Never open the private capture folder" in agent
-    assert "handoffFileIfPresent" in agent
+    assert "packMediaHandoff" in agent
     assert "omittedHandoffPath" in agent
     assert "wrapUntrustedInline" in agent
     assert "wrapUntrustedInline(task.title)" in agent
@@ -894,6 +894,12 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "func handoffPath" in models
     assert "func omittedHandoffPath" in models
     assert "func handoffFileIfPresent" in models
+    assert "func packMediaHandoff" in models
+    assert "func packMediaRelative" in models
+    pack_rel = models.split("static func packMediaRelative")[1].split("static func writeExportText")[0]
+    assert 'parts[0] == "shots"' in pack_rel
+    assert 'parts[0] == "media"' in pack_rel
+    assert '$0 == ".."' in pack_rel
     assert "func writeExportText" in models
     assert "enum TaskRanking" in models
     assert "stillCandidates" in models
@@ -954,8 +960,8 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "hasPrefix(prefix)" not in copy_if
     agent = (ROOT / "ScrumTrace" / "Export" / "AgentContextRenderer.swift").read_text()
     assert "stillCandidates" in agent.split("func displayPath")[1]
-    assert "handoffFileIfPresent" in agent.split("func displayPath")[1]
-    assert "handoffFileIfPresent" in agent.split("private func taskBlock")[1].split("private func displayPath")[0]
+    assert "packMediaHandoff" in agent.split("func displayPath")[1]
+    assert "packMediaHandoff" in agent.split("private func taskBlock")[1].split("private func displayPath")[0]
     assert "remain in archive/" not in processor
     assert "applyExportEvidence" in processor
     assert "manifest.tasks = projection.manifest.tasks" in processor
@@ -1147,7 +1153,7 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "stoppedWall" in clock
     assert "func markRecordingStopped" in clock
     shots_fn = brief_src.split("private func shots")[1].split("private func omittedHTML")[0]
-    assert "handoffFileIfPresent" in shots_fn
+    assert "packMediaHandoff" in shots_fn
     google = (ROOT / "ScrumTrace" / "AI" / "GoogleClient.swift").read_text()
     assert "var candidates: [Candidate]?" in google
     assert "var content: Content?" in google

@@ -131,7 +131,7 @@ struct SessionBriefRenderer {
 
     private func taskCard(_ task: TaskRecord, excerpts: [String: String], sessionURL: URL) -> String {
         let media = task.evidenceMedia.compactMap { path -> String? in
-            guard let rel = ExportRel.handoffFileIfPresent(path, sessionURL: sessionURL) else { return nil }
+            guard let rel = ExportRel.packMediaHandoff(path, sessionURL: sessionURL) else { return nil }
             if rel.hasSuffix(".mp4") {
                 return """
                 <video class="clip" controls preload="metadata" src="\(HTMLEscaper.escape(rel))"></video>
@@ -199,7 +199,7 @@ struct SessionBriefRenderer {
         let figures = manifest.shots.compactMap { shot -> String? in
             var path: String?
             for candidate in [shot.exportPath].compactMap({ $0 }) + shot.stillCandidates {
-                if let rel = ExportRel.handoffFileIfPresent(candidate, sessionURL: sessionURL) {
+                if let rel = ExportRel.packMediaHandoff(candidate, sessionURL: sessionURL) {
                     path = rel
                     break
                 }
