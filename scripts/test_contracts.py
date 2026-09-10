@@ -663,6 +663,7 @@ def test_retry_failed_slices_and_pins() -> None:
     assert "testPruneAbandonedStartsKeepsShotPNGWhenManifestIsMissing" in contracts
     assert "testPruneAbandonedStartsDeletesEmptyIdleSession" in contracts
     assert "testPruneAbandonedStartsIgnoresPlantedShotsDirectorySymlink" in contracts
+    assert "testLoadShotSidecarsReadsAnnotatedJSONWhenCatalogOmitsIt" in contracts
     assert "testMakePrivateTemporaryURLUsesMkdirNotSharedTempFile" in contracts
     assert "testRemovePrivateTemporaryDirectoryDoesNotFollowSymlink" in contracts
     assert "testCopyContainedToTemporaryFileCopiesRegularFile" in contracts
@@ -1498,6 +1499,20 @@ def test_phase45_clip_consent_and_budget() -> None:
     fallback_offline = processor.split("func fallbackOffline")[1].split("func shotsLinked")[0]
     assert "[Requires Manual Review - API Offline]" in fallback_offline
     assert "refreshShotsFromDisk" in processor
+    refresh = processor.split("func refreshShotsFromDisk")[1].split("func excerptMap")[0]
+    assert "loadShotSidecars" in refresh
+    assert "try? vault.loadManifest" in refresh
+    assert "loadManifest(id: sessionId) else { return }" not in refresh
+    vault = (ROOT / "ScrumTrace" / "Storage" / "SessionVault.swift").read_text()
+    sidecar = vault.split("func loadShotSidecars")[1].split("func windowContext")[0]
+    assert "existingSessionFile" in sidecar
+    assert "readContainedData" in sidecar
+    assert "containsSymlinkComponent" in sidecar
+    assert "contentsOfDirectory(" in sidecar
+    assert "contentsOfDirectory(atPath:" not in sidecar
+    assert "Data(contentsOf:" not in sidecar
+    assert "isSymbolicLink" in sidecar
+    assert "pathExtension.lowercased() == \"json\"" in sidecar
     slicer = (ROOT / "ScrumTrace" / "Slicing" / "MeetingSlicer.swift").read_text()
     assert "shot.stillCandidates" in slicer
     projector = (ROOT / "ScrumTrace" / "Export" / "ExportProjector.swift").read_text()

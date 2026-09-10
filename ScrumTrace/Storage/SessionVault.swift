@@ -298,6 +298,63 @@ final class SessionVault: @unchecked Sendable {
         }
     }
 
+    /// Finish-Shot sidecars can land while Whisper is running, after the
+    /// processor's initial catalog load. Catalog write can also fail after
+    /// the PNG and JSON are on disk (D7).
+    func loadShotSidecars(sessionId: String) -> [ShotRecord] {
+        guard Self.isValidSessionId(sessionId) else { return [] }
+        guard ExportRel.isUsableSessionRoot(rootURL) else { return [] }
+        let session = sessionURL(id: sessionId)
+        guard ExportRel.isUsableSessionRoot(session) else { return [] }
+        if (try? session.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+            return []
+        }
+        let shotsRel = ScrumTracePath.shots
+        if ExportRel.containsSymlinkComponent(shotsRel, sessionURL: session) {
+            return []
+        }
+        let shots = session.appendingPathComponent(shotsRel)
+        if (try? shots.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+            return []
+        }
+        guard let children = try? fileManager.contentsOfDirectory(
+            at: shots,
+            includingPropertiesForKeys: [.isSymbolicLinkKey, .isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        ) else { return [] }
+        if (try? shots.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+            return []
+        }
+        var records: [ShotRecord] = []
+        for url in children {
+            if (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+                continue
+            }
+            guard url.pathExtension.lowercased() == "json" else { continue }
+            let childRel = "\(shotsRel)/\(url.lastPathComponent)"
+            if ExportRel.containsSymlinkComponent(childRel, sessionURL: session) {
+                continue
+            }
+            guard ExportRel.existingSessionFile(childRel, sessionURL: session) != nil,
+                  let data = ExportRel.readContainedData(relative: childRel, sessionURL: session),
+                  let shot = try? decoder.decode(ShotRecord.self, from: data),
+                  !shot.id.isEmpty else {
+                continue
+            }
+            guard Self.isArchiveShotPath(shot.rawPath) else { continue }
+            if let annotated = shot.annotatedPath, !Self.isArchiveShotPath(annotated) {
+                continue
+            }
+            records.append(shot)
+        }
+        return records.sorted { $0.id < $1.id }
+    }
+
+    private static func isArchiveShotPath(_ path: String) -> Bool {
+        guard let parts = ExportRel.normalizedComponents(path), parts.count >= 3 else { return false }
+        return parts[0] == "archive" && parts[1] == "shots"
+    }
+
     func windowContext(sessionId: String, start: TimeInterval, end: TimeInterval) -> String {
         var lines: [String] = []
         for event in events(sessionId: sessionId) {

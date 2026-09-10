@@ -994,13 +994,24 @@ final class SessionProcessor: @unchecked Sendable {
 
     /// Save during Whisper can land annotated PNGs after the initial manifest load.
     private func refreshShotsFromDisk(sessionId: String, manifest: inout SessionManifest) {
-        guard let latest = try? vault.loadManifest(id: sessionId) else { return }
-        for shot in latest.shots {
+        func upsert(_ shot: ShotRecord) {
             if let idx = manifest.shots.firstIndex(where: { $0.id == shot.id }) {
-                manifest.shots[idx] = shot
+                let current = manifest.shots[idx]
+                if shot.annotatedPath != nil || current.annotatedPath == nil {
+                    manifest.shots[idx] = shot
+                }
             } else {
                 manifest.shots.append(shot)
             }
+        }
+        // Corrupt catalog must not skip sidecar JSON already on disk (D7).
+        if let latest = try? vault.loadManifest(id: sessionId) {
+            for shot in latest.shots {
+                upsert(shot)
+            }
+        }
+        for shot in vault.loadShotSidecars(sessionId: sessionId) {
+            upsert(shot)
         }
     }
 

@@ -742,6 +742,50 @@ final class ContractTests: XCTestCase {
         )
     }
 
+    func testLoadShotSidecarsReadsAnnotatedJSONWhenCatalogOmitsIt() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "st-sidecar-\(UUID().uuidString)"
+        )
+        defer { try? FileManager.default.removeItem(at: root) }
+        let vault = SessionVault(rootURL: root)
+        let created = try vault.createSession(product: .empty)
+        let session = vault.sessionURL(id: created.manifest.sessionId)
+        let shot = ShotRecord(
+            id: "shot-001",
+            tMedia: 12,
+            rawPath: "\(ScrumTracePath.shots)/001.png",
+            annotatedPath: "\(ScrumTracePath.shots)/001.annotated.png",
+            note: "Save does nothing",
+            source: .typed
+        )
+        try ExportRel.writeContainedData(
+            Data("PNG"),
+            relative: shot.rawPath,
+            sessionURL: session
+        )
+        try ExportRel.writeContainedData(
+            Data("ANN"),
+            relative: shot.annotatedPath!,
+            sessionURL: session
+        )
+        let data = try JSONEncoder().encode(shot)
+        try ExportRel.writeContainedData(
+            data,
+            relative: "\(ScrumTracePath.shots)/001.json",
+            sessionURL: session
+        )
+        let planted = session.appendingPathComponent("\(ScrumTracePath.shots)/trap.json")
+        try FileManager.default.createSymbolicLink(
+            at: planted,
+            withDestinationURL: session.appendingPathComponent(shot.rawPath)
+        )
+        let loaded = vault.loadShotSidecars(sessionId: created.manifest.sessionId)
+        XCTAssertEqual(loaded.count, 1)
+        XCTAssertEqual(loaded.first?.id, "shot-001")
+        XCTAssertEqual(loaded.first?.annotatedPath, shot.annotatedPath)
+        XCTAssertEqual(loaded.first?.note, "Save does nothing")
+    }
+
     func testPruneAbandonedStartsKeepsShotPNGWhenManifestIsMissing() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(
             "st-prune-missing-\(UUID().uuidString)"
