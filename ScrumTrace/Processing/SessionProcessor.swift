@@ -569,7 +569,12 @@ final class SessionProcessor: @unchecked Sendable {
             }
             let resolvedFrames = EvidenceValidator.existingPaths(candidate.frameReferences, sessionURL: sessionURL)
             let uniqueEvidence = uniquedPaths(
-                resolvedFrames + slice.stills + [slice.clipPath].compactMap { $0 } + shots.flatMap(\.stillCandidates),
+                resolvedFrames
+                    + slice.stills
+                    + [slice.exportClipPath, slice.clipPath].compactMap { $0 }
+                    + shots.flatMap { shot in
+                        [shot.exportPath].compactMap { $0 } + shot.stillCandidates
+                    },
                 sessionURL: sessionURL
             )
             var instructions = AgentInstructionTemplate.render(
@@ -659,7 +664,10 @@ final class SessionProcessor: @unchecked Sendable {
     ) -> TaskRecord {
         var evidence = slice.stills
         evidence.append(contentsOf: shot.stillCandidates)
-        if let clip = slice.clipPath {
+        if let exportPath = shot.exportPath {
+            evidence.append(exportPath)
+        }
+        if let clip = slice.exportClipPath ?? slice.clipPath {
             evidence.append(clip)
         }
         return TaskRecord(
@@ -696,7 +704,7 @@ final class SessionProcessor: @unchecked Sendable {
             agentInstructions: "[Requires Manual Review - API Offline] \(AgentInstructionTemplate.render(kind: .unknown, product: product))",
             quotes: [],
             evidenceMedia: uniquedPaths(
-                slice.stills + [slice.clipPath].compactMap { $0 },
+                slice.stills + [slice.exportClipPath, slice.clipPath].compactMap { $0 },
                 sessionURL: sessionURL
             ),
             confidence: 0
@@ -842,7 +850,10 @@ final class SessionProcessor: @unchecked Sendable {
                     agentInstructions: prefix + AgentInstructionTemplate.render(kind: .bug, product: manifest.productContext),
                     quotes: [],
                     evidenceMedia: uniquedPaths(
-                        shot.stillCandidates + (slice?.stills ?? []) + [slice?.clipPath].compactMap { $0 },
+                        [shot.exportPath].compactMap { $0 }
+                            + shot.stillCandidates
+                            + (slice?.stills ?? [])
+                            + [slice?.exportClipPath, slice?.clipPath].compactMap { $0 },
                         sessionURL: sessionURL
                     ),
                     confidence: 0
@@ -867,7 +878,7 @@ final class SessionProcessor: @unchecked Sendable {
                     agentInstructions: prefix + AgentInstructionTemplate.render(kind: .unknown, product: manifest.productContext),
                     quotes: [],
                     evidenceMedia: uniquedPaths(
-                        slice.stills + [slice.clipPath].compactMap { $0 },
+                        slice.stills + [slice.exportClipPath, slice.clipPath].compactMap { $0 },
                         sessionURL: sessionURL
                     ),
                     confidence: 0
@@ -889,7 +900,7 @@ final class SessionProcessor: @unchecked Sendable {
                     quotes: [],
                     evidenceMedia: uniquedPaths(
                         manifest.slices.flatMap { slice in
-                            slice.stills + [slice.clipPath].compactMap { $0 }
+                            slice.stills + [slice.exportClipPath, slice.clipPath].compactMap { $0 }
                         },
                         sessionURL: sessionURL
                     ),

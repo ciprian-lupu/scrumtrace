@@ -729,10 +729,14 @@ def test_audio_split_and_brief_loader() -> None:
     assert "noteWavSampleNotReady" in write_wav
     assert "wavSampleNotReadyStreak = 0" in write_wav
     assert "WAV writer is missing" in write_wav
+    assert "noteWavEmptyConvert" in write_wav
+    assert "wavEmptyConvertStreak = 0" in write_wav
     engine_buf = recorder.split("func writeEngineBuffer")[1].split("func requestPermission")[0]
     assert "format conversion failed" in engine_buf
     assert "WAV writer is missing" in engine_buf
     assert "guard !paused, started else { return }" in engine_buf
+    assert "noteWavEmptyConvert" in engine_buf
+    assert "wavEmptyConvertStreak = 0" in engine_buf
     assert "_ = videoInput.append" not in recorder
     assert "_ = audioInput.append" not in recorder
     assert "Could not write archive/session.mp4" in recorder
@@ -780,12 +784,14 @@ def test_audio_split_and_brief_loader() -> None:
     assert "wavSampleNotReadyStreak = 0" in freeze
     assert "videoWriterNotWritingStreak = 0" in freeze
     assert "audioWriterNotWritingStreak = 0" in freeze
+    assert "wavEmptyConvertStreak = 0" in freeze
     not_ready = recorder.split("func noteVideoSampleNotReady")[1].split("func writeWav")[0]
     assert "failCaptureWrite" in not_ready
     assert "video sample was not ready" in not_ready
     assert "audio sample was not ready" in not_ready
     assert "audio.wav" in not_ready
     assert "started, CMSampleBufferDataIsReady" not in recorder
+    assert "converted audio was empty" in recorder
     assert "if error == nil, converted.frameLength > 0" not in recorder
     fail_write = recorder.split("func failCaptureWrite")[1].split("func persistWav")[0]
     assert "freezeWriters" in fail_write
@@ -1427,6 +1433,8 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "AgentInstructionTemplate.render(kind: .bug, product: product)" in fallback
     assert "Inspect the linked evidence only" not in fallback
     assert "sessionURL: sessionURL" in fallback
+    assert "exportClipPath" in fallback
+    assert "exportPath" in fallback
     local = processor.split("func localReviewTasks")[1].split("func refreshShotsFromDisk")[0]
     assert "selectForPack" in local
     assert "[Requires Manual Review - API Offline]" in local
@@ -1438,6 +1446,8 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "shot.stillCandidates" in local
     assert "slice?.stills" in local
     assert "slice?.clipPath" in local
+    assert "exportClipPath" in local
+    assert "exportPath" in local
     assert "uncovered" in local
     assert "coveredIds" in local
     assert "sliceMatching" in local
@@ -1828,6 +1838,8 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "shots: [ShotRecord]" in tasks_fn
     assert "shots.flatMap" in tasks_fn
     assert "sessionURL: sessionURL" in tasks_fn.split("let uniqueEvidence")[1].split("var instructions")[0]
+    assert "exportClipPath" in tasks_fn.split("let uniqueEvidence")[1].split("var instructions")[0]
+    assert "exportPath" in tasks_fn.split("let uniqueEvidence")[1].split("var instructions")[0]
     uniqued_fn = processor.split("private func uniquedPaths")[1].split("private func abortedForAuth")[0]
     assert "existingSessionFile" in uniqued_fn
     assert "isVisualEvidence" in uniqued_fn

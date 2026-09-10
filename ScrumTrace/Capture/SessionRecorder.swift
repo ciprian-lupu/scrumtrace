@@ -63,6 +63,10 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
     /// `.unknown` can be a glitch; a stall means the master movie stopped (C1).
     private var videoWriterNotWritingStreak = 0
     private var audioWriterNotWritingStreak = 0
+    /// Consecutive successful WAV conversions that produced zero frames.
+    /// One primed converter output is expected; a stall means room/system
+    /// audio is no longer reaching `archive/audio.wav` (C1).
+    private var wavEmptyConvertStreak = 0
 
     init(sessionURL: URL, clock: ClockSynchronizer) {
         self.sessionURL = sessionURL
@@ -262,6 +266,7 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             self.wavSampleNotReadyStreak = 0
             self.videoWriterNotWritingStreak = 0
             self.audioWriterNotWritingStreak = 0
+            self.wavEmptyConvertStreak = 0
             if next {
                 self.clock.beginPause()
             } else {
@@ -284,6 +289,7 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             self.wavSampleNotReadyStreak = 0
             self.videoWriterNotWritingStreak = 0
             self.audioWriterNotWritingStreak = 0
+            self.wavEmptyConvertStreak = 0
             self.clock.markRecordingStopped()
         }
     }
@@ -607,6 +613,13 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         }
     }
 
+    private func noteWavEmptyConvert() {
+        wavEmptyConvertStreak += 1
+        if wavEmptyConvertStreak >= 90 {
+            failCaptureWrite("Could not write archive/audio.wav: converted audio was empty.")
+        }
+    }
+
     private func writeWav(from sampleBuffer: CMSampleBuffer) {
         guard !paused, started else { return }
         guard CMSampleBufferDataIsReady(sampleBuffer) else {
@@ -648,6 +661,7 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         }
         let target = wavFile.processingFormat
         if buffer.format == target {
+            wavEmptyConvertStreak = 0
             persistWav(buffer, file: wavFile)
             return
         }
@@ -675,8 +689,11 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             return
         }
         if converted.frameLength > 0 {
+            wavEmptyConvertStreak = 0
             persistWav(converted, file: wavFile)
+            return
         }
+        noteWavEmptyConvert()
     }
 
     /// WAV and movie writes share one failure so Start's `audioWriteFailure`
@@ -934,6 +951,7 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         guard frames > 0 else { return }
         let target = wavFile.processingFormat
         if buffer.format == target {
+            wavEmptyConvertStreak = 0
             persistWav(buffer, file: wavFile)
             return
         }
@@ -961,8 +979,11 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             return
         }
         if converted.frameLength > 0 {
+            wavEmptyConvertStreak = 0
             persistWav(converted, file: wavFile)
+            return
         }
+        noteWavEmptyConvert()
     }
 
     private func requestPermission() async throws {
