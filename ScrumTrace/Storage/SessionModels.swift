@@ -698,6 +698,7 @@ enum ExportRel {
         if (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
             throw SessionVaultError.writeFailed(prefix)
         }
+        // Parent may be `/tmp` → `/private/tmp`. O_NOFOLLOW applies to the file.
         var suffix = ""
         let ext = url.pathExtension
         if !ext.isEmpty {
