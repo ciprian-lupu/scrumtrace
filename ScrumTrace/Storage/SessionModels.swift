@@ -1427,6 +1427,30 @@ enum ExportRel {
         }
     }
 
+    /// Directory URL from an `O_NOFOLLOW` fd. Finder must not be handed a
+    /// constructed path whose last component was swapped for a symlink
+    /// after the fd was closed (C2). `F_GETPATH` names the opened vnode.
+    static func unfollowedDirectoryURL(_ url: URL) -> URL? {
+        guard let fd = openUnfollowedDirectory(url) else { return nil }
+        defer { closeDescriptor(fd) }
+        #if os(macOS)
+        var pathBuf = [CChar](repeating: 0, count: Int(PATH_MAX))
+        let rc = pathBuf.withUnsafeMutableBufferPointer { buf -> Int32 in
+            guard let base = buf.baseAddress else { return -1 }
+            return Darwin.fcntl(fd, F_GETPATH, base)
+        }
+        guard rc == 0 else { return nil }
+        let revealed = URL(fileURLWithPath: String(cString: pathBuf), isDirectory: true)
+        if (try? revealed.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+            return nil
+        }
+        guard revealed.lastPathComponent == url.lastPathComponent else { return nil }
+        return revealed
+        #else
+        return url
+        #endif
+    }
+
     /// `renameat` a temp file into a directory already opened with `O_NOFOLLOW`.
     /// Nested parents are `mkdirat`/`openat` so a planted `shots/` link in the
     /// zip staging folder cannot steal pack members.

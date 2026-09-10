@@ -586,16 +586,19 @@ def test_retry_failed_slices_and_pins() -> None:
     assert "containedRelative(ScrumTracePath.events" in append
     reveal = vault.split("func revealInFinder")[1].split("func removeAbandonedSession")[0]
     assert "isSymbolicLink" in reveal
-    assert "openUnfollowedDirectory" in reveal
-    assert "closeDescriptor" in reveal
+    assert "unfollowedDirectoryURL" in reveal
+    assert "openUnfollowedDirectory" not in reveal
+    assert "closeDescriptor" not in reveal
     assert "fileExists(atPath: export.path, isDirectory:" not in reveal
     assert "isDirectoryKey" not in reveal
     assert "containsSymlinkComponent" in reveal
     assert reveal.count("containsSymlinkComponent") >= 2
     assert reveal.index("containsSymlinkComponent") < reveal.index("appendingPathComponent(ScrumTracePath.export)")
-    assert reveal.rfind("containsSymlinkComponent") < reveal.index("activateFileViewerSelecting([export])")
-    assert reveal.index("openUnfollowedDirectory") < reveal.index("activateFileViewerSelecting([export])")
-    assert "activateFileViewerSelecting([export])" in reveal
+    assert reveal.rfind("containsSymlinkComponent") < reveal.index("activateFileViewerSelecting([revealed])")
+    assert reveal.index("unfollowedDirectoryURL") < reveal.index("activateFileViewerSelecting([revealed])")
+    assert "activateFileViewerSelecting([revealed])" in reveal
+    assert "activateFileViewerSelecting([export])" not in reveal
+    assert 'lastPathComponent == ScrumTracePath.export' in reveal
     abandon = vault.split("func removeAbandonedSession")[1].split("func pruneAbandonedStarts")[0]
     assert "isValidSessionId" in abandon
     assert "isUsableSessionRoot(rootURL)" in abandon
@@ -642,6 +645,7 @@ def test_retry_failed_slices_and_pins() -> None:
     assert "testEnsureOwnedSessionDirectoryRefusesSessionIdSymlink" in contracts
     assert "testEnsureRootCreatesSessionsDirectoryWhenMissing" in contracts
     assert "testEnsureSessionsDirectoryRefusesSessionsSymlink" in contracts
+    assert "testUnfollowedDirectoryURLRefusesDirectorySymlink" in contracts
     assert "testUnlinkLastComponentUnfollowedDoesNotRecurseIntoDirectory" in contracts
     assert "testUnlinkLastComponentUnfollowedUnlinksSymlinkWithoutFollowing" in contracts
     assert "testUnlinkLastComponentUnfollowedUnlinksRegularFile" in contracts
@@ -1650,7 +1654,20 @@ def test_write_contained_data_refuses_directory_symlinks() -> None:
     assert "scrumtraceUnlinkat" in models
     assert "func openatDirectory" in models
     assert "func openUnfollowedDirectory" in models
+    assert "func unfollowedDirectoryURL" in models
     assert "func placeIntoOpenedDirectory" in models
+    unf_dir = models.split("static func unfollowedDirectoryURL")[1].split(
+        "static func placeIntoOpenedDirectory"
+    )[0]
+    assert "openUnfollowedDirectory" in unf_dir
+    assert "closeDescriptor" in unf_dir
+    assert "F_GETPATH" in unf_dir
+    assert "fcntl" in unf_dir
+    assert "PATH_MAX" in unf_dir
+    assert "isSymbolicLink" in unf_dir
+    assert "lastPathComponent == url.lastPathComponent" in unf_dir
+    assert "FileManager.default.fileExists" not in unf_dir
+    assert "FileManager.default.createDirectory" not in unf_dir
     assert "func spawnWithDirectoryFd" in models
     assert "posix_spawn_file_actions_addfchdir_np" in models
     assert "scrumtraceAddFchdir" in models
@@ -2007,7 +2024,8 @@ def test_write_contained_data_refuses_directory_symlinks() -> None:
     assert "isUsableSessionRoot(rootURL)" in reveal
     assert "isUsableSessionRoot(session)" in reveal
     assert "containsSymlinkComponent" in reveal
-    assert "openUnfollowedDirectory" in reveal
+    assert "unfollowedDirectoryURL" in reveal
+    assert "openUnfollowedDirectory" not in reveal
     assert "fileExists(atPath: export.path, isDirectory:" not in reveal
     assert "removeAbandonedSession" in vault
     assert vault.count("isUsableSessionRoot(rootURL)") >= 9

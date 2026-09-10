@@ -351,16 +351,16 @@ final class SessionVault: @unchecked Sendable {
             return
         }
         // fileExists follows a planted export/ → archive/ link when
-        // resourceValues fails. O_NOFOLLOW does not (C2, Gate 6).
-        guard let exportFd = ExportRel.openUnfollowedDirectory(export) else { return }
-        ExportRel.closeDescriptor(exportFd)
-        if (try? export.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+        // resourceValues fails. O_NOFOLLOW + F_GETPATH does not (C2, Gate 6).
+        guard let revealed = ExportRel.unfollowedDirectoryURL(export) else { return }
+        guard revealed.lastPathComponent == ScrumTracePath.export else { return }
+        if (try? revealed.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
             return
         }
         if ExportRel.containsSymlinkComponent(ScrumTracePath.export, sessionURL: session) {
             return
         }
-        NSWorkspace.shared.activateFileViewerSelecting([export])
+        NSWorkspace.shared.activateFileViewerSelecting([revealed])
         #endif
     }
 

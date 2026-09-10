@@ -695,6 +695,31 @@ final class ContractTests: XCTestCase {
         XCTAssertEqual((try FileManager.default.contentsOfDirectory(atPath: outside.path)), ["keep.bin"])
     }
 
+    func testUnfollowedDirectoryURLRefusesDirectorySymlink() throws {
+        let parent = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "st-unf-dir-\(UUID().uuidString)"
+        )
+        try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: parent) }
+        let archive = parent.appendingPathComponent("archive")
+        try FileManager.default.createDirectory(at: archive, withIntermediateDirectories: true)
+        let secret = archive.appendingPathComponent("session.mp4")
+        try Data("MASTER".utf8).write(to: secret)
+        let planted = parent.appendingPathComponent("export")
+        try FileManager.default.createSymbolicLink(at: planted, withDestinationURL: archive)
+        XCTAssertNil(ExportRel.unfollowedDirectoryURL(planted))
+        XCTAssertEqual(try String(contentsOf: secret, encoding: .utf8), "MASTER")
+        let real = parent.appendingPathComponent("real-export")
+        try FileManager.default.createDirectory(at: real, withIntermediateDirectories: true)
+        let revealed = ExportRel.unfollowedDirectoryURL(real)
+        XCTAssertNotNil(revealed)
+        XCTAssertEqual(revealed?.lastPathComponent, "real-export")
+        XCTAssertNotEqual(
+            (try revealed?.resourceValues(forKeys: [.isSymbolicLinkKey]))?.isSymbolicLink,
+            true
+        )
+    }
+
     func testPruneAbandonedStartsKeepsShotPNGWhenCatalogIsEmpty() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(
             "st-prune-shot-\(UUID().uuidString)"
