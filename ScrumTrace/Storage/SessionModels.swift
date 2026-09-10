@@ -845,6 +845,52 @@ enum ExportRel {
         return nil
     }
 
+    /// Pack omit reserved set: `archive/shots/001.png` names `export/shots/001.jpg`.
+    static func shotsArchiveToExport(_ path: String) -> String? {
+        guard let parts = normalizedComponents(path) else { return nil }
+        var rest = parts
+        if rest.first == "export" || rest.first == "archive" {
+            rest = Array(rest.dropFirst())
+        }
+        guard rest.count >= 2, rest[0] == "shots" else { return nil }
+        let name = rest[rest.count - 1]
+        let ext = URL(fileURLWithPath: name).pathExtension.lowercased()
+        switch ext {
+        case "png", "jpg", "jpeg":
+            break
+        default:
+            return nil
+        }
+        let stem = URL(fileURLWithPath: name).deletingPathExtension().lastPathComponent
+        guard !stem.isEmpty else { return nil }
+        return "export/shots/\(stem).jpg"
+    }
+
+    /// Working extras under `archive/media-work/` copy to `export/media/`.
+    static func mediaWorkToExport(_ path: String) -> String? {
+        if let clip = mediaWorkToExportClip(path) {
+            return clip
+        }
+        guard let parts = normalizedComponents(path), let last = parts.last else { return nil }
+        let ext = URL(fileURLWithPath: last).pathExtension.lowercased()
+        switch ext {
+        case "png", "jpg", "jpeg", "webp":
+            break
+        default:
+            return nil
+        }
+        if parts.first == "export", parts.count >= 3, parts[1] == "media" {
+            return parts.joined(separator: "/")
+        }
+        if parts.first == "media", parts.count >= 2 {
+            return (["export"] + parts).joined(separator: "/")
+        }
+        if let idx = parts.firstIndex(of: "media-work"), idx + 1 < parts.count {
+            return (["export", "media"] + Array(parts[(idx + 1)...])).joined(separator: "/")
+        }
+        return nil
+    }
+
     static func parentIsSymbolicLink(_ file: URL) -> Bool {
         let parent = file.deletingLastPathComponent()
         return (try? parent.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true

@@ -381,8 +381,11 @@ def test_zipper_never_deletes_archive() -> None:
     assert "fileExists(atPath: sessionURL.appendingPathComponent($0).path)" not in omit_fn
     assert "regularFileByteCount" in omit_fn
     assert "exportRelativeClipPaths" in omit_fn
+    assert "exportRelativeStillPaths" in omit_fn
+    assert "exportRelativeHandoffPaths" in omit_fn
     assert "exportClipPath ?? slice.clipPath" not in omit_fn
     assert "exportClipPath ?? $0.clipPath" not in omit_fn
+    assert "exportPath ?? $0.annotatedPath" not in omit_fn
 
 
 def test_clip_exporter_macos14() -> None:
@@ -1801,6 +1804,7 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "exportRelativeClipPaths" in strip_omit
     assert "mediaWorkToExportClip" in strip_omit
     assert "exportClipPath ?? next.clipPath" not in strip_omit
+    assert "droppedHandoff" in strip_omit
     zip_fn = zipper.split("func zip(")[1].split("func writeZip")[0]
     assert zip_fn.count("if size > MediaBudget.maxZipBytes") == 1
     assert "discardPackIfOverBudget" in zip_fn

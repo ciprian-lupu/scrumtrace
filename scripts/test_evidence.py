@@ -52,6 +52,8 @@ def test_quote_window() -> None:
     assert "stillCandidates" in overlap
     assert "sliceClipPaths" in overlap
     assert "exportRelativeClipPaths" in overlap
+    assert "exportRelativeStillPaths" in overlap
+    assert "exportRelativeHandoffPaths" in overlap
     assert "mediaWorkToExportClip" in overlap
     assert "exportClipPath ?? slice.clipPath" not in overlap
     controller = (ROOT / "ScrumTrace" / "Processing" / "SessionController.swift").read_text()
@@ -90,11 +92,18 @@ def test_export_rel_in_swift() -> None:
     assert "func isVisualEvidence" in models
     assert 'rest[0] == "shots"' in models or '"shots", "media", "media-work"' in models
     assert "func mediaWorkToExportClip" in models
-    clip_map = models.split("static func mediaWorkToExportClip")[1].split("static func parentIsSymbolicLink")[0]
+    clip_map = models.split("static func mediaWorkToExportClip")[1].split("static func shotsArchiveToExport")[0]
     assert '"media-work"' in clip_map
     assert '["export", "media"]' in clip_map
     assert "isAllowedClipDest" in clip_map
     assert "exportClipPath ?? slice.clipPath" not in clip_map
+    assert "func shotsArchiveToExport" in models
+    shot_map = models.split("static func shotsArchiveToExport")[1].split("static func mediaWorkToExport(")[0]
+    assert '"shots"' in shot_map
+    assert "export/shots/" in shot_map
+    assert ".jpg" in shot_map
+    assert "session.mp4" not in shot_map
+    assert "func mediaWorkToExport(" in models
     clip = (ROOT / "ScrumTrace" / "Slicing" / "ClipExporter.swift").read_text()
     assert "tightenExportClips" in clip
     assert "containedExportMember" in clip

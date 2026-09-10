@@ -520,6 +520,15 @@ final class ContractTests: XCTestCase {
         )
         XCTAssertNil(ExportRel.mediaWorkToExportClip("archive/session.mp4"))
         XCTAssertNil(ExportRel.mediaWorkToExportClip("export/shots/001.jpg"))
+        XCTAssertEqual(ExportRel.shotsArchiveToExport("archive/shots/001.png"), "export/shots/001.jpg")
+        XCTAssertEqual(ExportRel.shotsArchiveToExport("export/shots/001.annotated.jpg"), "export/shots/001.annotated.jpg")
+        XCTAssertEqual(ExportRel.shotsArchiveToExport("shots/001.jpg"), "export/shots/001.jpg")
+        XCTAssertNil(ExportRel.shotsArchiveToExport("archive/session.mp4"))
+        XCTAssertNil(ExportRel.shotsArchiveToExport("archive/media-work/task-01/clip.mp4"))
+        XCTAssertEqual(
+            ExportRel.mediaWorkToExport("archive/media-work/task-01/shot-1.jpg"),
+            "export/media/task-01/shot-1.jpg"
+        )
     }
 
     func testWriteExportTextReplacesSymlinkInsteadOfFollowing() throws {
@@ -2295,6 +2304,99 @@ final class ContractTests: XCTestCase {
         )
         XCTAssertNil(stripped.slices[0].exportClipPath)
         XCTAssertNil(stripped.slices[0].clipPath)
+    }
+
+    func testOmissionOrderReservesMappedArchiveShot() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("scrumtrace-omit-shot-\(UUID().uuidString)")
+        let shots = root.appendingPathComponent("export/shots")
+        let extraMedia = root.appendingPathComponent("export/media/extra")
+        try FileManager.default.createDirectory(at: shots, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: extraMedia, withIntermediateDirectories: true)
+        try Data("evidence-still".utf8).write(to: shots.appendingPathComponent("001.jpg"))
+        try Data("extra-clip".utf8).write(to: extraMedia.appendingPathComponent("clip.mp4"))
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        var manifest = SessionManifest.makeNew(sessionId: "s", product: .empty)
+        manifest.shots = [
+            ShotRecord(
+                id: "shot-001",
+                tMedia: 8,
+                rawPath: "archive/shots/001.png",
+                annotatedPath: nil,
+                exportPath: "export/shots/gone.jpg",
+                note: "ingest",
+                source: .typed
+            )
+        ]
+        manifest.slices = [
+            SliceRecord(
+                sliceId: "slice-01",
+                startMedia: 0,
+                endMedia: 20,
+                trigger: .shot,
+                associatedShotId: "shot-001",
+                clipPath: nil,
+                exportClipPath: nil,
+                stills: ["archive/shots/001.png"],
+                analysisStatus: .success,
+                score: 40
+            ),
+            SliceRecord(
+                sliceId: "slice-extra",
+                startMedia: 40,
+                endMedia: 50,
+                trigger: .pin,
+                associatedShotId: nil,
+                clipPath: "export/media/extra/clip.mp4",
+                exportClipPath: "export/media/extra/clip.mp4",
+                stills: [],
+                analysisStatus: .success,
+                score: 10
+            )
+        ]
+        manifest.tasks = [
+            TaskRecord(
+                taskId: "TASK-01",
+                sourceSliceId: "slice-01",
+                kind: .bug,
+                status: .confirmed,
+                title: "Ingest",
+                observed: "x",
+                stated: "",
+                inferred: "",
+                agentInstructions: "inspect",
+                quotes: [],
+                evidenceMedia: ["archive/shots/001.png"],
+                confidence: 0.9
+            )
+        ]
+        let order = PackBudget.omissionOrder(manifest: manifest, sessionURL: root)
+        let extraIdx = order.firstIndex(of: "export/media/extra/clip.mp4")
+        let evidenceIdx = order.firstIndex(of: "export/shots/001.jpg")
+        XCTAssertNotNil(extraIdx)
+        XCTAssertNotNil(evidenceIdx)
+        XCTAssertLessThan(extraIdx!, evidenceIdx!)
+    }
+
+    func testStripOmittedClearsMappedArchiveShotPath() {
+        var manifest = SessionManifest.makeNew(sessionId: "s", product: .empty)
+        manifest.shots = [
+            ShotRecord(
+                id: "shot-001",
+                tMedia: 8,
+                rawPath: "archive/shots/001.png",
+                annotatedPath: nil,
+                exportPath: "export/shots/001.jpg",
+                note: "ingest",
+                source: .typed
+            )
+        ]
+        let stripped = PackBudget.stripOmitted(
+            [OmittedAsset(path: "shots/001.jpg", reason: "Pack over 35 MB; dropped by priority")],
+            from: manifest
+        )
+        XCTAssertNil(stripped.shots[0].exportPath)
+        XCTAssertEqual(stripped.shots[0].rawPath, "")
     }
 
     func testAuthFailureStopsFurtherUploads() {

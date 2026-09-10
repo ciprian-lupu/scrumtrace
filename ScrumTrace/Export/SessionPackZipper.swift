@@ -653,10 +653,11 @@ enum PackBudget {
     static func omissionOrder(manifest: SessionManifest, sessionURL: URL) -> [String] {
         let kept: Set<TaskStatus> = [.confirmed, .needsReview]
         let evidence = Set(
-            manifest.tasks
-                .filter { kept.contains($0.status) }
-                .flatMap(\.evidenceMedia)
-                .map(ExportRel.sessionPath)
+            EvidenceValidator.exportRelativeHandoffPaths(
+                manifest.tasks
+                    .filter { kept.contains($0.status) }
+                    .flatMap(\.evidenceMedia)
+            )
         )
 
         var reservedClips: [String] = []
@@ -677,18 +678,19 @@ enum PackBudget {
 
         let evidenceShotsNewestFirst = manifest.shots
             .sorted { $0.tMedia > $1.tMedia }
-            .compactMap { $0.exportPath ?? $0.annotatedPath ?? ($0.rawPath.isEmpty ? nil : $0.rawPath) }
-            .map(ExportRel.sessionPath)
-            .filter { evidence.contains($0) && ExportRel.isUnderExport($0) }
+            .flatMap { shot -> [String] in
+                let paths = EvidenceValidator.exportRelativeStillPaths(for: shot)
+                guard paths.contains(where: { evidence.contains($0) }) else { return [] }
+                return paths.filter { ExportRel.isUnderExport($0) }
+            }
 
         let extraStills = manifest.slices
             .flatMap(\.stills)
-            .map(ExportRel.sessionPath)
+            .flatMap { EvidenceValidator.exportRelativeHandoffPaths([$0]) }
             .filter { ExportRel.isUnderExport($0) && !evidence.contains($0) && !$0.lowercased().hasSuffix(".mp4") }
 
         let extraShots = manifest.shots
-            .compactMap { $0.exportPath ?? $0.annotatedPath }
-            .map(ExportRel.sessionPath)
+            .flatMap { EvidenceValidator.exportRelativeStillPaths(for: $0) }
             .filter { ExportRel.isUnderExport($0) && !evidence.contains($0) }
 
         let extraClips = manifest.slices
@@ -715,6 +717,14 @@ enum PackBudget {
         .filter { ExportRel.isUnderExport($0) && !isProtected($0) }
     }
 
+    private static func droppedHandoff(_ path: String, dropped: Set<String>) -> Bool {
+        if dropped.contains(ExportRel.toExportRoot(path)) { return true }
+        for mapped in EvidenceValidator.exportRelativeHandoffPaths([path]) {
+            if dropped.contains(ExportRel.toExportRoot(mapped)) { return true }
+        }
+        return false
+    }
+
     static func stripOmitted(_ omitted: [OmittedAsset], from manifest: SessionManifest) -> SessionManifest {
         let dropped = Set(omitted.map { ExportRel.toExportRoot($0.path) })
         var copy = manifest
@@ -731,25 +741,25 @@ enum PackBudget {
                     }
                 }
             }
-            next.stills = next.stills.filter { !dropped.contains(ExportRel.toExportRoot($0)) }
+            next.stills = next.stills.filter { !droppedHandoff($0, dropped: dropped) }
             return next
         }
         copy.shots = copy.shots.map { shot in
             var next = shot
-            if let path = next.exportPath, dropped.contains(ExportRel.toExportRoot(path)) {
+            if let path = next.exportPath, droppedHandoff(path, dropped: dropped) {
                 next.exportPath = nil
             }
-            if let annotated = next.annotatedPath, dropped.contains(ExportRel.toExportRoot(annotated)) {
+            if let annotated = next.annotatedPath, droppedHandoff(annotated, dropped: dropped) {
                 next.annotatedPath = nil
             }
-            if dropped.contains(ExportRel.toExportRoot(next.rawPath)) {
+            if droppedHandoff(next.rawPath, dropped: dropped) {
                 next.rawPath = ""
             }
             return next
         }
         copy.tasks = copy.tasks.map { task in
             var next = task
-            next.evidenceMedia = task.evidenceMedia.filter { !dropped.contains(ExportRel.toExportRoot($0)) }
+            next.evidenceMedia = task.evidenceMedia.filter { !droppedHandoff($0, dropped: dropped) }
             if next.status == .confirmed && next.evidenceMedia.isEmpty {
                 next.status = .needsReview
             }

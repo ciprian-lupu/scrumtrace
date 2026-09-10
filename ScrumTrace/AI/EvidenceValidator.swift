@@ -192,6 +192,48 @@ enum EvidenceValidator {
         return out
     }
 
+    /// C3: a stale `export_path` must not hide annotated/raw JPEG under `export/shots/`.
+    static func exportRelativeStillPaths(for shot: ShotRecord) -> [String] {
+        var seen = Set<String>()
+        var out: [String] = []
+        var candidates: [String] = []
+        if let exported = shot.exportPath, !exported.isEmpty {
+            candidates.append(exported)
+        }
+        if let annotated = shot.annotatedPath, !annotated.isEmpty {
+            candidates.append(annotated)
+        }
+        if !shot.rawPath.isEmpty {
+            candidates.append(shot.rawPath)
+        }
+        for path in candidates {
+            if let mapped = ExportRel.shotsArchiveToExport(path), seen.insert(mapped).inserted {
+                out.append(mapped)
+            }
+        }
+        return out
+    }
+
+    /// Task `evidence_media` may still be archive-relative when omit runs.
+    static func exportRelativeHandoffPaths(_ paths: [String]) -> [String] {
+        var seen = Set<String>()
+        var out: [String] = []
+        func append(_ path: String) {
+            guard seen.insert(path).inserted else { return }
+            out.append(path)
+        }
+        for path in paths {
+            append(ExportRel.sessionPath(path))
+            if let mapped = ExportRel.mediaWorkToExport(path) {
+                append(mapped)
+            }
+            if let mapped = ExportRel.shotsArchiveToExport(path) {
+                append(mapped)
+            }
+        }
+        return out
+    }
+
     private static func shotOwning(_ path: String, in shots: [ShotRecord]) -> ShotRecord? {
         shots.first { shot in
             let paths = shot.stillCandidates
