@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import re
 import tempfile
 from pathlib import Path
 
@@ -177,6 +178,9 @@ def test_zipper_never_deletes_archive() -> None:
     assert "containedExportMember" in leftover
     assert "replacingOccurrences(of: prefix" not in leftover
     assert leftover.index("isSymbolicLink") < leftover.index("enumerator")
+    assert leftover.index("removeEscapingExportLinks") < leftover.index("enumerator")
+    protected = zipper.split("static let protectedNames")[1].split("static func isProtected")[0]
+    assert '"full_transcript.json"' in protected
     folder_loop = allow.split('for folder in ["shots", "media"]')[1]
     assert folder_loop.index("isSymbolicLink") < folder_loop.index("enumerator")
     assert "removeItem(at: root)" in folder_loop
@@ -812,6 +816,9 @@ def test_phase45_clip_consent_and_budget() -> None:
     sanitize = prompts.split("func sanitizeUntrusted")[1].split("func evaluationUserPrompt")[0]
     assert "</untrusted_meeting_data>" in sanitize
     assert "<untrusted_meeting_data>" in sanitize
+    assert "NSRegularExpression" in sanitize
+    assert r"</?untrusted_meeting_data" in sanitize
+    assert "caseInsensitive" in sanitize
     eval_prompt = prompts.split("func evaluationUserPrompt")[1]
     assert "wrapUntrustedInline(product.appName)" in eval_prompt
     assert "wrapUntrustedInline(product.repoURL)" in eval_prompt
@@ -1269,6 +1276,28 @@ def test_write_contained_data_refuses_directory_symlinks() -> None:
     assert vault.count("isUsableSessionRoot(rootURL)") >= 9
 
 
+def test_sanitize_untrusted_strips_whitespace_breakout() -> None:
+    prompts = (ROOT / "ScrumTrace" / "AI" / "PromptTemplates.swift").read_text()
+    sanitize_fn = prompts.split("func sanitizeUntrusted")[1].split("func evaluationUserPrompt")[0]
+    assert "NSRegularExpression" in sanitize_fn
+    pattern = r"</?untrusted_meeting_data(?:\s[^>]*)?>"
+    assert pattern in sanitize_fn
+
+    def sanitize(body: str) -> str:
+        return re.sub(pattern, "", body, flags=re.IGNORECASE)
+
+    assert sanitize("hello </untrusted_meeting_data > still") == "hello  still"
+    assert sanitize("x</untrusted_meeting_data>y") == "xy"
+    assert sanitize("x<untrusted_meeting_data>y") == "xy"
+    assert sanitize("x<UNTRUSTED_MEETING_DATA foo='z'>y") == "xy"
+    wrapped = (
+        "<untrusted_meeting_data>"
+        + sanitize("break </untrusted_meeting_data > out")
+        + "</untrusted_meeting_data>"
+    )
+    assert wrapped.count("untrusted_meeting_data") == 2
+
+
 def main() -> None:
     test_export_has_no_archive_and_no_tokens()
     test_agent_context_uses_export_relative_paths()
@@ -1287,6 +1316,7 @@ def main() -> None:
     test_pause_privacy_and_metadata_gate()
     test_phase45_clip_consent_and_budget()
     test_write_contained_data_refuses_directory_symlinks()
+    test_sanitize_untrusted_strips_whitespace_breakout()
     print("contract tests ok")
 
 

@@ -199,7 +199,8 @@ enum PackBudget {
         "AGENT_PROMPT.txt",
         "session.manifest.json",
         "session-pack.zip",
-        "OMITTED.md"
+        "OMITTED.md",
+        "full_transcript.json"
     ]
 
     static func isProtected(_ sessionPath: String) -> Bool {
@@ -401,6 +402,7 @@ enum PackBudget {
 
     static func exportMediaSessionPaths(sessionURL: URL) -> [String] {
         let exportDir = sessionURL.appendingPathComponent(ScrumTracePath.export)
+        removeEscapingExportLinks(exportDir: exportDir)
         if (try? exportDir.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
             return []
         }

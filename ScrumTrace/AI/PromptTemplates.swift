@@ -60,9 +60,16 @@ enum PromptTemplates {
     }
 
     static func sanitizeUntrusted(_ body: String) -> String {
-        body
-            .replacingOccurrences(of: "</untrusted_meeting_data>", with: "", options: .caseInsensitive)
-            .replacingOccurrences(of: "<untrusted_meeting_data>", with: "", options: .caseInsensitive)
+        // D13: strip opening/closing tags including whitespace before `>`
+        // so `</untrusted_meeting_data >` cannot close the wrapper early.
+        let pattern = #"</?untrusted_meeting_data(?:\s[^>]*)?>"#
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else {
+            return body
+                .replacingOccurrences(of: "</untrusted_meeting_data>", with: "", options: .caseInsensitive)
+                .replacingOccurrences(of: "<untrusted_meeting_data>", with: "", options: .caseInsensitive)
+        }
+        let range = NSRange(body.startIndex..., in: body)
+        return regex.stringByReplacingMatches(in: body, options: [], range: range, withTemplate: "")
     }
 
     static func evaluationUserPrompt(
