@@ -25,6 +25,7 @@ enum EvidenceValidator {
         guard !trimmed.isEmpty else { return nil }
         let name = URL(fileURLWithPath: trimmed).lastPathComponent
         let stem = URL(fileURLWithPath: name).deletingPathExtension().lastPathComponent
+        let collapsed = shotStillStem("shots/\(name)") ?? stem
         var tries: [String] = [
             trimmed,
             ExportRel.sessionPath(trimmed),
@@ -34,7 +35,7 @@ enum EvidenceValidator {
             "export/shots/\(stem).jpg",
             "export/shots/\(stem).annotated.jpg"
         ]
-        if let collapsed = shotStillStem("shots/\(name)"), collapsed != stem {
+        if collapsed != stem {
             tries.append("archive/shots/\(collapsed).png")
             tries.append("archive/shots/\(collapsed).annotated.png")
             tries.append("export/shots/\(collapsed).jpg")
@@ -55,6 +56,11 @@ enum EvidenceValidator {
                 continue
             }
             if let match = firstMatch(name: name, stem: stem, in: sessionURL.appendingPathComponent(folder), sessionURL: sessionURL),
+               ExportRel.isVisualEvidence(match) {
+                return match
+            }
+            if collapsed != stem,
+               let match = firstMatch(name: name, stem: collapsed, in: sessionURL.appendingPathComponent(folder), sessionURL: sessionURL),
                ExportRel.isVisualEvidence(match) {
                 return match
             }

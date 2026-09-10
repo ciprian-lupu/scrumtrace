@@ -181,6 +181,7 @@ def test_frame_ref_basename_resolves() -> None:
     assert "shotStillStem" in resolve
     assert "archive/shots/\\(stem).annotated.png" in resolve
     assert "export/shots/\\(stem).annotated.jpg" in resolve
+    assert "firstMatch(name: name, stem: collapsed" in resolve
     assert "func resolvePath" in validator
     assert "func applyExportEvidence" in validator
     processor = (ROOT / "ScrumTrace" / "Processing" / "SessionProcessor.swift").read_text()
