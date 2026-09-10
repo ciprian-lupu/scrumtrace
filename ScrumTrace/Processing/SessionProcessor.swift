@@ -674,6 +674,7 @@ final class SessionProcessor: @unchecked Sendable {
                 status = .needsReview
             }
             let resolvedFrames = EvidenceValidator.existingPaths(candidate.frameReferences, sessionURL: sessionURL)
+                .filter { EvidenceValidator.framesOverlapSlice([$0], slice: slice, shots: shots, sessionURL: sessionURL) }
             let uniqueEvidence = uniquedPaths(
                 resolvedFrames
                     + slice.stills

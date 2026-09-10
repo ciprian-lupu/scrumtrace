@@ -117,7 +117,7 @@ enum EvidenceValidator {
 
     /// C5: a still from another moment is not evidence for this slice, even
     /// when the PNG exists under archive/shots.
-    private static func framesOverlapSlice(
+    static func framesOverlapSlice(
         _ frames: [String],
         slice: SliceRecord,
         shots: [ShotRecord],

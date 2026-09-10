@@ -1967,6 +1967,7 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "exportPath" in tasks_fn.split("let uniqueEvidence")[1].split("var instructions")[0]
     confirm_call = tasks_fn.split("EvidenceValidator.canConfirm")[1].split("if !issues.isEmpty")[0]
     assert "shots: shots" in confirm_call
+    assert "framesOverlapSlice" in tasks_fn.split("let resolvedFrames")[1].split("let uniqueEvidence")[0]
     uniqued_fn = processor.split("private func uniquedPaths")[1].split("private func abortedForAuth")[0]
     assert "existingSessionFile" in uniqued_fn
     assert "isVisualEvidence" in uniqued_fn
