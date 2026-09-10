@@ -79,8 +79,29 @@ final class SessionProcessor: @unchecked Sendable {
         }
 
         let transcript = loadTranscript(sessionURL: sessionURL, sessionId: sessionId)
+        var recoveredReadableTranscript = false
+        if manifest.hasCompleted(.transcribing), transcriptArchiveUnreadable(sessionURL: sessionURL) {
+            // Corrupt archive/full_transcript.json must not slice as silence (C5).
+            if let written = writtenTranscript, written.sessionId == sessionId {
+                let data = try JSONEncoder().encode(written)
+                try ExportRel.writeContainedData(
+                    data,
+                    relative: ScrumTracePath.fullTranscript,
+                    sessionURL: sessionURL
+                )
+                recoveredReadableTranscript = true
+            } else {
+                manifest.completedStages.removeAll {
+                    $0 == .transcribing || $0 == .slicing || $0 == .evaluating
+                        || $0 == .synthesizing || $0 == .completed
+                }
+                manifest.pipelineStatus = .transcribing
+                manifest.tasks = []
+                try vault.write(manifest: &manifest)
+            }
+        }
 
-        if justFinishedTranscribing {
+        if justFinishedTranscribing || recoveredReadableTranscript {
             manifest.completedStages.removeAll {
                 $0 == .slicing || $0 == .evaluating || $0 == .synthesizing || $0 == .completed
             }
@@ -456,6 +477,21 @@ final class SessionProcessor: @unchecked Sendable {
             return written
         }
         return FullTranscript(sessionId: sessionId, language: "en", segments: [])
+    }
+
+    /// Completed transcribing with a missing or non-JSON archive transcript
+    /// is not a silent room. Retry must run Whisper again (C5 / D14).
+    private func transcriptArchiveUnreadable(sessionURL: URL) -> Bool {
+        guard ExportRel.existingSessionFile(ScrumTracePath.fullTranscript, sessionURL: sessionURL) != nil else {
+            return true
+        }
+        guard let data = ExportRel.readContainedData(
+            relative: ScrumTracePath.fullTranscript,
+            sessionURL: sessionURL
+        ) else {
+            return true
+        }
+        return (try? JSONDecoder().decode(FullTranscript.self, from: data)) == nil
     }
 
     private func evaluateSlice(

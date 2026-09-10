@@ -1627,6 +1627,20 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "Data(contentsOf:" not in load_tr
     assert "writtenTranscript" in load_tr
     assert "written.sessionId == sessionId" in load_tr
+    unread = processor.split("func transcriptArchiveUnreadable")[1].split("func evaluateSlice")[0]
+    assert "existingSessionFile(ScrumTracePath.fullTranscript" in unread
+    assert "readContainedData" in unread
+    assert "Data(contentsOf:" not in unread
+    assert "JSONDecoder().decode(FullTranscript.self" in unread
+    repair = processor.split("let transcript = loadTranscript(sessionURL: sessionURL, sessionId: sessionId)")[1].split("if justFinishedTranscribing")[0]
+    assert "transcriptArchiveUnreadable" in repair
+    assert "writtenTranscript" in repair
+    assert "writeContainedData" in repair
+    assert "recoveredReadableTranscript = true" in repair
+    assert "completedStages.removeAll" in repair
+    assert "pipelineStatus = .transcribing" in repair
+    assert "manifest.tasks = []" in repair
+    assert "justFinishedTranscribing || recoveredReadableTranscript" in processor
     written_before_load = processor.split("writeContainedData")[1].split("let transcript = loadTranscript")[0]
     assert "writtenTranscript = transcript" in written_before_load
     models = (ROOT / "ScrumTrace" / "Storage" / "SessionModels.swift").read_text()
