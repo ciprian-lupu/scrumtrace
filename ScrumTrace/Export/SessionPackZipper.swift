@@ -9,7 +9,9 @@ struct SessionPackZipper {
     }
 
     /// Zip is built from `export/` only. Files are deleted from export (not archive)
-    /// in spec priority until the measured zip is ≤ 35 MB.
+    /// in spec priority until the measured zip **and** the export folder
+    /// (excluding `session-pack.zip`) are ≤ 35 MB. A failed first zip must
+    /// still omit; otherwise folder handoff keeps the oversized media (C3).
     func zip(sessionURL: URL, manifest: SessionManifest) throws -> Result {
         guard ExportRel.isUsableSessionRoot(sessionURL) else {
             throw SessionRecorderError.writerFailed("session folder")
@@ -31,29 +33,25 @@ struct SessionPackZipper {
         var omitted = uniquedOmitted(manifest.omitted)
         var includeTranscript = manifest.includeFullTranscriptInZip
 
+        var size = MediaBudget.maxZipBytes + 1
+        var folder = MediaBudget.maxZipBytes + 1
         do {
             try runZip(
                 exportDir: exportDir,
                 includeFullTranscript: includeTranscript,
                 sessionURL: sessionURL
             )
+            size = try measuredPackBytes(sessionURL: sessionURL)
+            folder = PackBudget.exportFolderBytes(sessionURL: sessionURL)
         } catch {
             if PackBudget.exportStillContainsSymlink(exportDir: exportDir) {
                 throw error
             }
             omitted.append(OmittedAsset(path: "session-pack.zip", reason: error.localizedDescription))
-            let listed = uniquedOmitted(omitted)
-            try writeOmittedMarkdown(sessionURL: sessionURL, omitted: listed)
-            return Result(
-                zipURL: zipURL,
-                byteCount: discardPackIfOverBudget(sessionURL: sessionURL),
-                omitted: listed
-            )
         }
-        var size = try measuredPackBytes(sessionURL: sessionURL)
 
         let dropList = PackBudget.omissionOrder(manifest: manifest, sessionURL: sessionURL)
-        for path in dropList where size > MediaBudget.maxZipBytes {
+        for path in dropList where size > MediaBudget.maxZipBytes || folder > MediaBudget.maxZipBytes {
             guard ExportRel.isUnderExport(path) else { continue }
             if PackBudget.isProtected(path) { continue }
             let url = sessionURL.appendingPathComponent(path)
@@ -84,13 +82,16 @@ struct SessionPackZipper {
                     sessionURL: sessionURL
                 )
                 size = try measuredPackBytes(sessionURL: sessionURL)
+                folder = PackBudget.exportFolderBytes(sessionURL: sessionURL)
             } catch {
                 omitted.append(OmittedAsset(path: "session-pack.zip", reason: error.localizedDescription))
-                break
+                size = MediaBudget.maxZipBytes + 1
+                folder = PackBudget.exportFolderBytes(sessionURL: sessionURL)
             }
         }
 
-        if size > MediaBudget.maxZipBytes {
+        folder = PackBudget.exportFolderBytes(sessionURL: sessionURL)
+        if size > MediaBudget.maxZipBytes || folder > MediaBudget.maxZipBytes {
             // C3: opted-in transcript is allow-listed, not immortal. Archive keeps
             // archive/full_transcript.json. The export copy loses to the 35 MB cap.
             let transcriptRel = "export/full_transcript.json"
@@ -111,11 +112,13 @@ struct SessionPackZipper {
                         sessionURL: sessionURL
                     )
                     size = try measuredPackBytes(sessionURL: sessionURL)
+                    folder = PackBudget.exportFolderBytes(sessionURL: sessionURL)
                 } catch {
                     omitted.append(OmittedAsset(path: "session-pack.zip", reason: error.localizedDescription))
+                    folder = PackBudget.exportFolderBytes(sessionURL: sessionURL)
                 }
             }
-            let stillOver = size > MediaBudget.maxZipBytes
+            let stillOver = size > MediaBudget.maxZipBytes || folder > MediaBudget.maxZipBytes
             if stillOver {
                 omitted.append(
                     OmittedAsset(
@@ -397,6 +400,42 @@ enum PackBudget {
 
     static func isProtected(_ sessionPath: String) -> Bool {
         protectedNames.contains(URL(fileURLWithPath: sessionPath).lastPathComponent)
+    }
+
+    /// C3 folder-handoff: sum of regular files under `export/`, excluding
+    /// `session-pack.zip` so the zip's own bytes cannot double-count.
+    /// Enumerator failure is treated as over-budget so omit still runs.
+    static func exportFolderBytes(sessionURL: URL) -> Int {
+        let exportDir = sessionURL.appendingPathComponent(ScrumTracePath.export)
+        removeEscapingExportLinks(exportDir: exportDir)
+        if (try? exportDir.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+            return MediaBudget.maxZipBytes + 1
+        }
+        guard let enumerator = FileManager.default.enumerator(
+            at: exportDir,
+            includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return MediaBudget.maxZipBytes + 1
+        }
+        var total = 0
+        for case let url as URL in enumerator {
+            if (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+                enumerator.skipDescendants()
+                continue
+            }
+            if let rel = ExportRel.unfollowedRelative(url, sessionRoot: sessionURL),
+               ExportRel.containsSymlinkComponent(rel, sessionURL: sessionURL) {
+                enumerator.skipDescendants()
+                continue
+            }
+            if url.lastPathComponent == "session-pack.zip" { continue }
+            guard ExportRel.containedExportMember(file: url, exportDir: exportDir) != nil else {
+                continue
+            }
+            total += ExportRel.regularFileByteCount(url, sessionRoot: sessionURL) ?? 0
+        }
+        return total
     }
 
     /// Folder-handoff must match zip. A leftover `export/shots` → `archive/`

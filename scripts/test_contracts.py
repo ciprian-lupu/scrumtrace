@@ -1033,6 +1033,10 @@ def test_pipeline_timing_stays_in_archive() -> None:
     assert "try? ExportRel.removeItemIfRegularFile(url" not in drop
     assert "unlinkLastComponentUnfollowed(url)" in drop
     assert drop.count("unlinkLastComponentUnfollowed(url)") >= 2
+    assert "break" not in drop
+    assert "exportFolderBytes" in drop
+    assert "folder > MediaBudget.maxZipBytes" in zip_fn
+    assert zip_fn.index("let dropList") < zip_fn.index("return Result")
     assert "measuredPackBytes" in zip_fn
     assert "regularFileByteCount" in zipper
     assert "attributesOfItem" not in zipper
@@ -1652,6 +1656,13 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "opted-in full transcript" in zipper_over
     assert zipper_over.index("opted-in full transcript") < zipper_over.index("Pack still")
     assert "includeFullTranscript: false" in zipper_over
+    assert "folder > MediaBudget.maxZipBytes" in zipper_over
+    folder_fn = zipper.split("static func exportFolderBytes")[1].split("static func exportStillContainsSymlink")[0]
+    assert "session-pack.zip" in folder_fn
+    assert "skipDescendants" in folder_fn
+    assert "regularFileByteCount" in folder_fn
+    assert "attributesOfItem" not in folder_fn
+    assert "containedExportMember" in folder_fn
     strip_omit = zipper.split("static func stripOmitted")[1].split("static func exportMediaSessionPaths")[0]
     assert "includeFullTranscriptInZip = false" in strip_omit
     zip_fn = zipper.split("func zip(")[1].split("func writeZip")[0]

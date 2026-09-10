@@ -266,8 +266,12 @@ def main() -> int:
     zipper = ROOT / "ScrumTrace" / "Export" / "SessionPackZipper.swift"
     zipper_src = zipper.read_text()
     assert "measuredPackBytes" in zipper_src
+    assert "exportFolderBytes" in zipper_src
     assert "regularFileByteCount" in zipper_src
     assert "attributesOfItem" not in zipper_src
+    zip_fn = zipper_src.split("func zip(")[1].split("func writeZip")[0]
+    assert "folder > MediaBudget.maxZipBytes" in zip_fn
+    assert zip_fn.index("let dropList") < zip_fn.index("return Result")
     return 0
 
 
