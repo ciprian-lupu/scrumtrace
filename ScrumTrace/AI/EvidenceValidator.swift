@@ -129,9 +129,22 @@ enum EvidenceValidator {
             allowed.append(clip)
         }
         for still in slice.stills {
-            if let owner = shotOwning(still, in: shots),
-               owner.tMedia < slice.startMedia || owner.tMedia > slice.endMedia {
+            if let owner = shotOwning(still, in: shots) {
+                if owner.tMedia < slice.startMedia || owner.tMedia > slice.endMedia {
+                    continue
+                }
+                allowed.append(still)
                 continue
+            }
+            // Unowned `shots/` paths belong to a Shot that was not matched
+            // in this list. Do not treat them as this window (C5). Clip-grab
+            // extras live under media-work / media, not shots/.
+            if !shots.isEmpty {
+                let contained = (ExportRel.existingSessionFile(still, sessionURL: sessionURL) ?? still)
+                    .lowercased()
+                if contained.contains("shots/") {
+                    continue
+                }
             }
             allowed.append(still)
         }

@@ -39,6 +39,8 @@ def test_quote_window() -> None:
     assert "endMedia" in overlap
     assert "shotOwning" in overlap
     assert "allowed = slice.stills" not in overlap
+    assert "!shots.isEmpty" in overlap
+    assert 'contains("shots/")' in overlap
     controller = (ROOT / "ScrumTrace" / "Processing" / "SessionController.swift").read_text()
     capture = controller.split("private func captureShot")[1].split("private func finishShot")[0]
     assert "writeContainedData(png, relative: rawPath" in capture
