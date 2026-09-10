@@ -133,7 +133,11 @@ def test_html_escaper_order() -> None:
     zip_fn = gen.split("def write_export_zip")[1].split("def export_zip_members")[0]
     assert "os.close(fd)" in zip_fn
     assert "tmp.unlink(missing_ok=True)" in zip_fn
-    assert zip_fn.index("tmp.unlink") < zip_fn.index('["zip"')
+    assert zip_fn.index("tmp.unlink") > zip_fn.index('["zip"')
+    assert "stdout=zip_out" in zip_fn
+    assert '"-q", "-y", "-", "-@"' in zip_fn
+    assert "os.fsync(zip_out)" in zip_fn
+    assert "str(tmp)" not in zip_fn.split("subprocess.run")[1].split("packed.unlink")[0]
     assert "export.is_symlink" in zip_fn
     assert zip_fn.index("is_symlink") < zip_fn.index('["zip"')
     assert "O_NOFOLLOW" in zip_fn
@@ -669,7 +673,10 @@ def test_pipeline_timing_stays_in_archive() -> None:
     assert "moveIntoSession" in run_zip
     assert "scrumtrace-zip" in run_zip
     assert "temporaryDirectory" in run_zip
-    assert "temp.path" in run_zip
+    assert "temp.path" not in run_zip
+    assert "stdoutFd: destFd" in run_zip
+    assert '"-q", "-y", "-", "-@"' in run_zip
+    assert "O_EXCL" in run_zip
     assert "dest.path" not in run_zip
     assert "containedExportMember" in run_zip
     assert "compactMap" in run_zip
@@ -1436,6 +1443,9 @@ def test_write_contained_data_refuses_directory_symlinks() -> None:
     assert "waitpid" in spawn_fn
     assert "wroteOk" in spawn_fn
     assert "_ = payload.withUnsafeBytes" not in spawn_fn
+    assert "stdoutFd" in spawn_fn
+    assert "STDOUT_FILENO" in spawn_fn
+    assert "STDERR_FILENO" in spawn_fn
     assert "O_EXCL" in models
     read_fn = models.split("static func readContainedData(relative:")[1].split("static func readContainedData(_ file")[0]
     assert "openatFile" in read_fn

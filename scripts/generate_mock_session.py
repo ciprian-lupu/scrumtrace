@@ -256,6 +256,7 @@ def write_export_zip(export: Path, packed: Path, members: list[str]) -> None:
         raise SystemExit("export/ is a symbolic link")
     stage = Path(tempfile.mkdtemp(prefix="scrumtrace-zip-stage-"))
     fd = -1
+    zip_out = -1
     tmp: Path | None = None
     try:
         staged = stage_export_zip_members(export, members, stage)
@@ -263,11 +264,8 @@ def write_export_zip(export: Path, packed: Path, members: list[str]) -> None:
             raise SystemExit("export/ allow-list is empty; nothing to zip.")
         flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
         fd = os.open(stage, flags)
-        zip_fd, tmp_name = tempfile.mkstemp(prefix="scrumtrace-zip-", suffix=".zip")
-        os.close(zip_fd)
+        zip_out, tmp_name = tempfile.mkstemp(prefix="scrumtrace-zip-", suffix=".zip")
         tmp = Path(tmp_name)
-        # zip cannot update an empty placeholder; Swift runZip also removes the temp first.
-        tmp.unlink(missing_ok=True)
         if export.is_symlink() or stage.is_symlink():
             raise SystemExit("export/ is a symbolic link")
 
@@ -275,19 +273,25 @@ def write_export_zip(export: Path, packed: Path, members: list[str]) -> None:
             os.fchdir(fd)
 
         subprocess.run(
-            ["zip", "-q", "-y", str(tmp), "-@"],
+            ["zip", "-q", "-y", "-", "-@"],
             cwd=None,
             preexec_fn=_chdir_stage,
             input="\n".join(staged) + "\n",
             text=True,
             check=True,
+            stdout=zip_out,
         )
+        os.fsync(zip_out)
+        os.close(zip_out)
+        zip_out = -1
         packed.unlink(missing_ok=True)
         shutil.move(str(tmp), packed)
         tmp = None
     finally:
         if fd >= 0:
             os.close(fd)
+        if zip_out >= 0:
+            os.close(zip_out)
         shutil.rmtree(stage, ignore_errors=True)
         if tmp is not None:
             tmp.unlink(missing_ok=True)

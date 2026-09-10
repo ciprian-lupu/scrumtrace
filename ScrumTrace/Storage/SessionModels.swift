@@ -992,10 +992,14 @@ enum ExportRel {
         executable: String,
         arguments: [String],
         directoryFd: Int32,
-        stdin payload: Data
+        stdin payload: Data,
+        stdoutFd: Int32? = nil
     ) throws {
         // Process.currentDirectoryURL re-resolves cwd at launch.
         guard directoryFd >= 0 else {
+            throw SessionVaultError.writeFailed("spawn")
+        }
+        if let stdoutFd, stdoutFd <= STDERR_FILENO {
             throw SessionVaultError.writeFailed("spawn")
         }
         var fds: [Int32] = [0, 0]
@@ -1029,10 +1033,17 @@ enum ExportRel {
         defer { _ = scrumtraceSpawnActionsDestroy(actions) }
 
         // posix_spawn_file_actions_addfchdir_np binds cwd to directoryFd.
-        let wired = scrumtraceAddFchdir(actions, directoryFd) == 0
+        // Zip archive bytes go to stdoutFd (exclusive dest) so zip never
+        // opens a dest path that could be a planted symlink (C2).
+        var wired = scrumtraceAddFchdir(actions, directoryFd) == 0
             && scrumtraceAddDup2(actions, readFd, STDIN_FILENO) == 0
             && scrumtraceAddClose(actions, readFd) == 0
             && scrumtraceAddClose(actions, writeFd) == 0
+        if let stdoutFd {
+            wired = wired
+                && scrumtraceAddDup2(actions, stdoutFd, STDOUT_FILENO) == 0
+                && scrumtraceAddClose(actions, stdoutFd) == 0
+        }
         guard wired else {
             Darwin.close(readFd)
             Darwin.close(writeFd)
