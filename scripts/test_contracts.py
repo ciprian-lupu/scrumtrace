@@ -905,6 +905,7 @@ def test_pipeline_timing_stays_in_archive() -> None:
     assert "wallElapsed" in hud
     assert "canBecomeKey: Bool { false }" in hud
     assert "nonactivatingPanel" in hud
+    assert "becomesKeyOnlyIfNeeded = false" in hud
     assert "refusesFirstResponder" in hud
     assert "NSHostingView" not in hud
     assert "import SwiftUI" not in hud

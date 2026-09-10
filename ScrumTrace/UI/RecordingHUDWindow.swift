@@ -32,7 +32,7 @@ final class RecordingHUDWindow: NSPanel {
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
         hidesOnDeactivate = false
         isFloatingPanel = true
-        becomesKeyOnlyIfNeeded = true
+        becomesKeyOnlyIfNeeded = false
         animationBehavior = .none
         buildChrome()
         controller.objectWillChange

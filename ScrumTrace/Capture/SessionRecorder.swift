@@ -582,7 +582,12 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             throw SessionRecorderError.writerFailed("archive capture paths escaped the session folder.")
         }
         self.liveWavRel = liveWavRel
-        paused = false
+        // Do not clear a privacy freeze from the permission sheet. If writers
+        // are already paused, open the t_media interval now that
+        // markRecordingStarted has run (C1 / D4).
+        if paused {
+            clock.beginPause()
+        }
         started = false
     }
 
