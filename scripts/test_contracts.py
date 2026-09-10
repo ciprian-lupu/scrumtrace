@@ -869,6 +869,12 @@ def test_audio_split_and_brief_loader() -> None:
     discard_live = recorder.split("func discardLiveCaptureLocked")[1].split("func stream(")[0]
     assert "liveBytes > destBytes" in discard_live
     assert "discardLiveIfNotLargerThanCanonical" in discard_live
+    assert "func liveCaptureWasRewritten" in discard_live
+    assert "writer reopened a live capture path" in discard_live
+    assert "isContainedRegularFile(live" in discard_live
+    stream_fn = recorder.split("didOutputSampleBuffer")[1].split("didStopWithError")[0]
+    assert "liveCaptureWasRewritten()" in stream_fn
+    assert stream_fn.index("guard !paused, started") < stream_fn.index("liveCaptureWasRewritten()")
     assert "synchronizationClock" in recorder
     assert "sampleClock" in recorder
     assert "guard !paused, started else { return }" in recorder

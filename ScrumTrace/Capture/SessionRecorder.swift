@@ -445,9 +445,31 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         try? ExportRel.removeItemIfRegularFile(live, sessionRoot: sessionURL)
     }
 
+    /// After `renameat` onto `session.mp4` / `audio.wav`, those UUID names
+    /// must stay gone. If AVAssetWriter recreates them mid-session, Stop's
+    /// reclaim is too late — fail instead of splitting the master movie (C1).
+    private func liveCaptureWasRewritten() -> Bool {
+        if let rel = liveMovieRel {
+            let live = sessionURL.appendingPathComponent(rel)
+            if ExportRel.isContainedRegularFile(live, sessionRoot: sessionURL) {
+                failCaptureWrite("Could not write archive/session.mp4: writer reopened a live capture path.")
+                return true
+            }
+        }
+        if let rel = liveWavRel {
+            let live = sessionURL.appendingPathComponent(rel)
+            if ExportRel.isContainedRegularFile(live, sessionRoot: sessionURL) {
+                failCaptureWrite("Could not write archive/audio.wav: WAV writer reopened a live capture path.")
+                return true
+            }
+        }
+        return false
+    }
+
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
         // Pause drops every ScreenCaptureKit output: screen, system audio, microphone.
         guard !paused, started else { return }
+        if liveCaptureWasRewritten() { return }
         let sampleClock = stream.synchronizationClock
         switch type {
         case .screen:
