@@ -257,6 +257,9 @@ final class SessionController: ObservableObject {
             MetadataSampler.requestTrust(prompt: true)
             let recorder = SessionRecorder(sessionURL: created.url, clock: clock)
             captureFreeze.attach(recorder)
+            // Tick before startCapture: a credential app during the permission
+            // sheet must freeze writers, not wait until start() returns (C1).
+            privacy.start()
             try await recorder.start(shouldPauseCapture: { [privacy] in
                 privacy.currentCredentialApp() != nil
             })
@@ -292,7 +295,6 @@ final class SessionController: ObservableObject {
                 try? vault.write(manifest: &local)
                 manifest = local
             }
-            privacy.start()
             if phase == .recording {
                 sampler.isSuspended = false
             }
@@ -303,6 +305,7 @@ final class SessionController: ObservableObject {
                 try? await transcriber.prepare(model: model)
             }
         } catch {
+            privacy.stop()
             captureFreeze.attach(nil)
             clock.reset()
             if let id = abandonedId {
