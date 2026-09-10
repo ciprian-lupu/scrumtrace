@@ -716,7 +716,7 @@ final class SessionProcessor: @unchecked Sendable {
                     }
                     + [slice.exportClipPath ?? slice.clipPath].compactMap { $0 }
                     + shots.flatMap { shot in
-                        if let associated = slice.associatedShotId, shot.id != associated {
+                        guard let associated = slice.associatedShotId, shot.id == associated else {
                             return []
                         }
                         return ([shot.exportPath].compactMap { $0 } + shot.stillCandidates)
