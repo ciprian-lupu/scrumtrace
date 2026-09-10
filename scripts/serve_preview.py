@@ -15,10 +15,18 @@ class Handler(SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(EXPORT), **kwargs)
 
-    def do_GET(self):  # noqa: N802
-        if self.path in ("/", "/index.html"):
+    def map_index(self) -> None:
+        path = self.path.split("?", 1)[0]
+        if path in ("/", "/index.html"):
             self.path = "/SESSION_BRIEF.html"
+
+    def do_GET(self):  # noqa: N802
+        self.map_index()
         return super().do_GET()
+
+    def do_HEAD(self):  # noqa: N802
+        self.map_index()
+        return super().do_HEAD()
 
     def log_message(self, format: str, *args) -> None:  # noqa: A003
         print("[%s] %s" % (self.log_date_time_string(), format % args))

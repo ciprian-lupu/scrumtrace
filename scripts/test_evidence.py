@@ -195,6 +195,13 @@ def test_brief_shell_tokens_are_filled() -> None:
     assert "1 pauses" not in html
     assert "fonts.googleapis" not in html
     assert "@import" not in html
+    preview = (ROOT / "scripts" / "serve_preview.py").read_text()
+    assert "def do_HEAD" in preview
+    assert "def map_index" in preview
+    head_fn = preview.split("def do_HEAD")[1].split("def log_message")[0]
+    assert "map_index" in head_fn
+    get_fn = preview.split("def do_GET")[1].split("def do_HEAD")[0]
+    assert "map_index" in get_fn
 
 
 def test_mock_clip_ffprobe() -> None:
