@@ -64,14 +64,24 @@ struct ClipExporter {
         guard stillRelative != containedClip else {
             return updated
         }
-        do {
-            let jpeg = try await extractStill(source: movieCopy, at: (slice.startMedia + slice.endMedia) / 2)
-            try ExportRel.writeContainedData(jpeg, relative: stillRelative, sessionURL: sessionURL)
-            if !updated.stills.contains(stillRelative) {
-                updated.stills.insert(stillRelative, at: 0)
+        // Midpoint can sit on a cut or black frame. Retry nearby times so a
+        // clip-only task still has a pack still (C5 / Gate 4).
+        let stillTimes = [
+            (slice.startMedia + slice.endMedia) / 2,
+            slice.startMedia + 0.5,
+            max(slice.startMedia, slice.endMedia - 0.5)
+        ]
+        for time in stillTimes {
+            do {
+                let jpeg = try await extractStill(source: movieCopy, at: time)
+                try ExportRel.writeContainedData(jpeg, relative: stillRelative, sessionURL: sessionURL)
+                if !updated.stills.contains(stillRelative) {
+                    updated.stills.insert(stillRelative, at: 0)
+                }
+                break
+            } catch {
+                continue
             }
-        } catch {
-            // Shot stills on the slice remain; do not fail the whole session for one frame grab.
         }
         return updated
     }

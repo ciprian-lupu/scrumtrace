@@ -327,6 +327,11 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             try await live.stopCapture()
         }
         snapshot.engine?.stop()
+        do {
+            try persistCaptureLayout(microphoneWav: snapshot.mic)
+        } catch {
+            // finishWriting still runs; reclaim persist below is the last try.
+        }
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             writerQueue.async {
                 self.videoInput?.markAsFinished()

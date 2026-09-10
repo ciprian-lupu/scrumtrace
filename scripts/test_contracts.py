@@ -426,6 +426,8 @@ def test_clip_exporter_macos14() -> None:
     assert "FileManager.default.removeItem(at: movieCopy)" not in export_fn
     assert "extractStill(source: movieCopy" in export_fn
     assert "extractStill(source: source" not in export_fn
+    assert "slice.startMedia + 0.5" in export_fn
+    assert export_fn.count("extractStill(source: movieCopy") >= 1
     assert "reencode(\n            source: movieCopy" in export_fn or "source: movieCopy" in export_fn
     assert "clip_path escaped" in clip
     assert "clip_path is not a working or export clip" in clip
@@ -834,7 +836,7 @@ def test_audio_split_and_brief_loader() -> None:
     assert stop_rec.index("finishWriting") < stop_rec.index("reclaimLiveCaptureIfRewritten")
     assert "try ExportRel.moveIntoSession(from: live" in stop_rec
     assert "try? ExportRel.moveIntoSession(from: live" not in recorder
-    assert stop_rec.count("persistCaptureLayout(microphoneWav: snapshot.mic)") >= 2
+    assert stop_rec.count("persistCaptureLayout(microphoneWav: snapshot.mic)") >= 3
     assert stop_rec.rindex("persistCaptureLayout") > stop_rec.index("reclaimLiveCaptureIfRewritten")
     reclaim_locked = recorder.split("func reclaimLiveCaptureIfRewrittenLocked")[1].split("func adoptLargerLiveFile")[0]
     movie_adopt = reclaim_locked.split("if let rel = liveMovieRel")[1].split("if let rel = liveWavRel")[0]
