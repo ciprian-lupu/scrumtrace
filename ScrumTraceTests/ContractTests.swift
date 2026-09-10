@@ -244,6 +244,17 @@ final class ContractTests: XCTestCase {
         XCTAssertEqual(try String(contentsOf: inside, encoding: .utf8), "KEEP")
     }
 
+    func testUnlinkLastComponentUnfollowedUnlinksRegularFile() throws {
+        let parent = FileManager.default.temporaryDirectory.appendingPathComponent("st-unlink-reg-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: parent) }
+        let dest = parent.appendingPathComponent("partial.bin")
+        try Data("DROP".utf8).write(to: dest)
+        ExportRel.unlinkLastComponentUnfollowed(dest)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: dest.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: parent.path))
+    }
+
     func testUnlinkLastComponentUnfollowedDoesNotRecurseIntoDirectory() throws {
         let parent = FileManager.default.temporaryDirectory.appendingPathComponent("st-unlink-last-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true)

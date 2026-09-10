@@ -174,6 +174,7 @@ def test_frame_ref_basename_resolves() -> None:
     assert "quoteMatchesTranscript" in apply_fn
     assert "transcript: FullTranscript?" in apply_fn
     assert "sourceSliceId.isEmpty" in apply_fn
+    assert "keepConfidenceFloor" in apply_fn
     assert "normalize(copy.inferred)" in apply_fn
     assert "normalize(copy.observed)" in apply_fn
     slicer = (ROOT / "ScrumTrace" / "Slicing" / "MeetingSlicer.swift").read_text()

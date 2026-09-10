@@ -181,6 +181,7 @@ final class ShotTalkState: ObservableObject {
         } catch {
             return
         }
+        ExportRel.unlinkLastComponentUnfollowed(url)
         let settings: [String: Any] = [
             AVFormatIDKey: kAudioFormatLinearPCM,
             AVSampleRateKey: 16_000,

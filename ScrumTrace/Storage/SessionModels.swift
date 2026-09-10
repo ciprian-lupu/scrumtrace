@@ -404,7 +404,7 @@ enum ExportRel {
             try fsyncRegularFile(tmp, relative: relative)
             try moveIntoSession(from: tmp, relative: relative, sessionURL: sessionURL)
         } catch {
-            try? FileManager.default.removeItem(at: tmp)
+            unlinkLastComponentUnfollowed(tmp)
             throw error
         }
     }
@@ -444,7 +444,7 @@ enum ExportRel {
         }
         Darwin.close(fd)
         guard ok else {
-            try? FileManager.default.removeItem(at: tmp)
+            unlinkLastComponentUnfollowed(tmp)
             throw SessionVaultError.writeFailed(prefix)
         }
         return tmp
@@ -632,12 +632,28 @@ enum ExportRel {
 
     /// Unlink a trailing symlink or regular file via `unlinkat` on its parent
     /// directory fd. Used when the parent is not a session root (`export/` in
-    /// tests, zip staging). Never recurses into a directory.
+    /// tests, zip staging, shared temp). Never recurses into a directory.
     static func unlinkLastComponentUnfollowed(_ file: URL) {
         let name = file.lastPathComponent
         guard !name.isEmpty, name != ".", name != "..",
               !name.contains("/"), !name.contains("\0") else { return }
-        guard let dirFd = openUnfollowedDirectory(file.deletingLastPathComponent()) else { return }
+        let parent = file.deletingLastPathComponent()
+        let dirFd: Int32
+        if let unfollowed = openUnfollowedDirectory(parent) {
+            dirFd = unfollowed
+        } else {
+            // Parent may be `/tmp` → `/private/tmp`. `O_NOFOLLOW` on that
+            // parent would no-op cleanup of exclusive temps created via
+            // `Darwin.open` (which follows `TMPDIR=/tmp`). Last-component
+            // unlink still uses `O_NOFOLLOW` so a dest file-symlink is not
+            // followed (C2).
+            let followed = parent.withUnsafeFileSystemRepresentation { ptr -> Int32 in
+                guard let ptr else { return -1 }
+                return Darwin.open(ptr, O_RDONLY | O_DIRECTORY | O_CLOEXEC)
+            }
+            guard followed >= 0 else { return }
+            dirFd = followed
+        }
         defer { Darwin.close(dirFd) }
         let probe = name.withCString { ptr in
             Darwin.openat(dirFd, ptr, O_RDONLY | O_CLOEXEC | O_NOFOLLOW)
@@ -727,17 +743,17 @@ enum ExportRel {
         }
         defer { Darwin.close(destFd) }
         guard let srcFd = openatFile(parts: parts, root: sessionURL) else {
-            try? FileManager.default.removeItem(at: dest)
+            unlinkLastComponentUnfollowed(dest)
             throw SessionVaultError.writeFailed(relative)
         }
         defer { Darwin.close(srcFd) }
         // COPYFILE_DATA (1 << 3): copy file bytes only, no xattrs.
         if scrumtraceFcopyfile(srcFd, destFd, nil, 1 << 3) != 0 {
-            try? FileManager.default.removeItem(at: dest)
+            unlinkLastComponentUnfollowed(dest)
             throw SessionVaultError.writeFailed(relative)
         }
         guard Darwin.fsync(destFd) == 0 else {
-            try? FileManager.default.removeItem(at: dest)
+            unlinkLastComponentUnfollowed(dest)
             throw SessionVaultError.writeFailed(relative)
         }
         return dest
@@ -772,21 +788,21 @@ enum ExportRel {
             return Darwin.open(ptr, O_RDONLY | O_CLOEXEC | O_NOFOLLOW)
         }
         guard srcFd >= 0 else {
-            try? FileManager.default.removeItem(at: dest)
+            unlinkLastComponentUnfollowed(dest)
             throw SessionVaultError.writeFailed(prefix)
         }
         defer { Darwin.close(srcFd) }
         var info = stat()
         guard Darwin.fstat(srcFd, &info) == 0, (info.st_mode & S_IFMT) == S_IFREG else {
-            try? FileManager.default.removeItem(at: dest)
+            unlinkLastComponentUnfollowed(dest)
             throw SessionVaultError.writeFailed(prefix)
         }
         if scrumtraceFcopyfile(srcFd, destFd, nil, 1 << 3) != 0 {
-            try? FileManager.default.removeItem(at: dest)
+            unlinkLastComponentUnfollowed(dest)
             throw SessionVaultError.writeFailed(prefix)
         }
         guard Darwin.fsync(destFd) == 0 else {
-            try? FileManager.default.removeItem(at: dest)
+            unlinkLastComponentUnfollowed(dest)
             throw SessionVaultError.writeFailed(prefix)
         }
         return dest
@@ -835,6 +851,7 @@ enum ExportRel {
         let shared = FileManager.default.temporaryDirectory.standardizedFileURL
         guard parent.lastPathComponent.hasPrefix("scrumtrace-"),
               parent.standardizedFileURL != shared else {
+            unlinkLastComponentUnfollowed(url)
             try? FileManager.default.removeItem(at: url)
             return
         }

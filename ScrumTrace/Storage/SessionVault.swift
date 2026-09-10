@@ -348,12 +348,18 @@ final class SessionVault: @unchecked Sendable {
         if (try? session.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
             return
         }
+        if ExportRel.containsSymlinkComponent(ScrumTracePath.export, sessionURL: session) {
+            return
+        }
         let export = session.appendingPathComponent(ScrumTracePath.export)
         let values = try? export.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
         guard values?.isSymbolicLink != true else { return }
         var isDir: ObjCBool = false
         guard fileManager.fileExists(atPath: export.path, isDirectory: &isDir), isDir.boolValue else { return }
         if (try? export.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+            return
+        }
+        if ExportRel.containsSymlinkComponent(ScrumTracePath.export, sessionURL: session) {
             return
         }
         NSWorkspace.shared.activateFileViewerSelecting([export])

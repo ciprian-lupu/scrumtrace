@@ -251,6 +251,7 @@ struct ClipExporter {
         let preferredTransform = try await videoTrack.load(.preferredTransform)
         let assetDuration = try await asset.load(.duration)
 
+        ExportRel.unlinkLastComponentUnfollowed(destination)
         let writer = try AVAssetWriter(outputURL: destination, fileType: .mp4)
         writer.shouldOptimizeForNetworkUse = true
         let videoSettings: [String: Any] = [
@@ -430,6 +431,7 @@ struct ClipExporter {
     }
 
     private func exportPresetClip(asset: AVURLAsset, destination: URL, timeRange: CMTimeRange) async throws {
+        ExportRel.unlinkLastComponentUnfollowed(destination)
         guard let session = AVAssetExportSession(asset: asset, presetName: AVAssetExportPreset1280x720) else {
             throw SessionRecorderError.writerFailed("AVAssetExportSession unavailable.")
         }

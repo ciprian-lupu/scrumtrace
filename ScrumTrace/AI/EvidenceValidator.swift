@@ -126,6 +126,8 @@ enum EvidenceValidator {
             if copy.status == .confirmed {
                 if copy.evidenceMedia.isEmpty || copy.sourceSliceId.isEmpty {
                     copy.status = .needsReview
+                } else if copy.confidence < MediaBudget.keepConfidenceFloor {
+                    copy.status = .needsReview
                 } else if let transcript {
                     for quote in copy.quotes {
                         if !quoteMatchesTranscript(quote, transcript: transcript) {

@@ -233,7 +233,7 @@ struct SessionPackZipper {
             do {
                 try ExportRel.placeIntoOpenedDirectory(from: copy, relative: member, directoryFd: stageFd)
             } catch {
-                try? FileManager.default.removeItem(at: copy)
+                ExportRel.unlinkLastComponentUnfollowed(copy)
                 throw SessionRecorderError.writerFailed("export/ is a symbolic link.")
             }
             staged.append(member)
@@ -244,9 +244,7 @@ struct SessionPackZipper {
         let temp = FileManager.default.temporaryDirectory.appendingPathComponent(
             "scrumtrace-zip-\(UUID().uuidString).zip"
         )
-        if (try? temp.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
-            try? FileManager.default.removeItem(at: temp)
-        }
+        ExportRel.unlinkLastComponentUnfollowed(temp)
         // Exclusive dest fd: zip writes the archive to stdout, never to a
         // dest path that could be replaced with a symlink after create (C2).
         let destFd = temp.withUnsafeFileSystemRepresentation { ptr -> Int32 in
@@ -259,12 +257,12 @@ struct SessionPackZipper {
         if (try? exportDir.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true
             || ExportRel.containsSymlinkComponent(ScrumTracePath.export, sessionURL: sessionURL) {
             Darwin.close(destFd)
-            try? FileManager.default.removeItem(at: temp)
+            ExportRel.unlinkLastComponentUnfollowed(temp)
             throw SessionRecorderError.writerFailed("export/ is a symbolic link.")
         }
         if (try? stage.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
             Darwin.close(destFd)
-            try? FileManager.default.removeItem(at: temp)
+            ExportRel.unlinkLastComponentUnfollowed(temp)
             throw SessionRecorderError.writerFailed("export/ is a symbolic link.")
         }
         do {
@@ -277,20 +275,20 @@ struct SessionPackZipper {
             )
         } catch {
             Darwin.close(destFd)
-            try? FileManager.default.removeItem(at: temp)
+            ExportRel.unlinkLastComponentUnfollowed(temp)
             throw SessionRecorderError.writerFailed("zip failed with status -1.")
         }
         let synced = Darwin.fsync(destFd) == 0
         Darwin.close(destFd)
         guard synced else {
-            try? FileManager.default.removeItem(at: temp)
+            ExportRel.unlinkLastComponentUnfollowed(temp)
             throw SessionRecorderError.writerFailed("zip failed with status -1.")
         }
         do {
             try ExportRel.fsyncRegularFile(temp, relative: destRel)
             try ExportRel.moveIntoSession(from: temp, relative: destRel, sessionURL: sessionURL)
         } catch {
-            try? FileManager.default.removeItem(at: temp)
+            ExportRel.unlinkLastComponentUnfollowed(temp)
             throw error
         }
     }

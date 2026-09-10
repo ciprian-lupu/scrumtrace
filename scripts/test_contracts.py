@@ -397,9 +397,14 @@ def test_clip_exporter_macos14() -> None:
     assert "Do not cancelWriting" in clip
     assert "shouldOptimizeForNetworkUse = true" in clip
     writer = clip.split("func writeMainProfileClip")[1].split("func exportPresetClip")[0]
+    assert "unlinkLastComponentUnfollowed(destination)" in writer
+    assert writer.index("unlinkLastComponentUnfollowed(destination)") < writer.index("AVAssetWriter")
     assert "AVVideoProfileLevelH264MainAutoLevel" in writer
     assert "clipWidth" in writer
     assert "clipHeight" in writer
+    preset = clip.split("func exportPresetClip")[1]
+    assert "unlinkLastComponentUnfollowed(destination)" in preset
+    assert preset.index("unlinkLastComponentUnfollowed(destination)") < preset.index("AVAssetExportSession")
     assert "clipAudioBitrate" in clip
     assert "image(at:" in clip
     assert "generateCGImagesAsynchronously" not in clip
@@ -433,6 +438,8 @@ def test_pause_gate_hold_to_talk() -> None:
     start_talk = shot.split("func startTalk()")[1].split("func abortTalk()")[0]
     assert "makePrivateTemporaryURL" in start_talk
     assert "scrumtrace-note" in start_talk
+    assert "unlinkLastComponentUnfollowed" in start_talk
+    assert start_talk.index("unlinkLastComponentUnfollowed") < start_talk.index("AVAudioRecorder")
     assert "holdingTalk = true" in start_talk
     assert start_talk.index("guard let rec") < start_talk.index("holdingTalk = true")
     assert start_talk.index("guard rec.record()") < start_talk.index("holdingTalk = true")
@@ -525,6 +532,11 @@ def test_retry_failed_slices_and_pins() -> None:
     reveal = vault.split("func revealInFinder")[1].split("func removeAbandonedSession")[0]
     assert "isSymbolicLink" in reveal
     assert "isDirectory" in reveal
+    assert "containsSymlinkComponent" in reveal
+    assert reveal.count("containsSymlinkComponent") >= 2
+    assert reveal.index("containsSymlinkComponent") < reveal.index("appendingPathComponent(ScrumTracePath.export)")
+    assert reveal.rfind("containsSymlinkComponent") < reveal.index("activateFileViewerSelecting([export])")
+    assert "activateFileViewerSelecting([export])" in reveal
     abandon = vault.split("func removeAbandonedSession")[1].split("func pruneAbandonedStarts")[0]
     assert "isValidSessionId" in abandon
     assert "isUsableSessionRoot(rootURL)" in abandon
@@ -559,6 +571,7 @@ def test_retry_failed_slices_and_pins() -> None:
     assert "testPrepareContainedWriteDoesNotRecurseIntoDestDirectory" in contracts
     assert "testUnlinkLastComponentUnfollowedDoesNotRecurseIntoDirectory" in contracts
     assert "testUnlinkLastComponentUnfollowedUnlinksSymlinkWithoutFollowing" in contracts
+    assert "testUnlinkLastComponentUnfollowedUnlinksRegularFile" in contracts
     models = (ROOT / "ScrumTrace" / "Storage" / "SessionModels.swift").read_text()
     existing_media = models.split("func withExistingMedia")[1].split("enum CodingKeys")[0]
     assert "existingSessionFile" in existing_media
@@ -746,6 +759,11 @@ def test_pipeline_timing_stays_in_archive() -> None:
     assert run_zip.rfind("isSymbolicLink") < run_zip.index("spawnWithDirectoryFd")
     assert 'writerFailed("export/ is a symbolic link.")' in run_zip
     assert "zip failed with status" in run_zip
+    assert "unlinkLastComponentUnfollowed(temp)" in run_zip
+    assert "unlinkLastComponentUnfollowed(copy)" in run_zip
+    assert "FileManager.default.removeItem(at: temp)" not in run_zip
+    assert "FileManager.default.removeItem(at: copy)" not in run_zip
+    assert "FileManager.default.removeItem(at: stage)" in run_zip
     zip_fn = zipper.split("func zip(")[1].split("func writeZip")[0]
     assert "isUsableSessionRoot" in zip_fn
     assert "removeEscapingExportLinks" in zip_fn
@@ -1143,6 +1161,8 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "existingSessionFile" in copy_if
     assert "copyContainedToTemporaryFile" in copy_if
     assert "moveIntoSession" in copy_if
+    assert "unlinkLastComponentUnfollowed(temp)" in copy_if
+    assert "FileManager.default.removeItem(at: temp)" not in copy_if
     assert "readContainedData" not in copy_if
     assert "writeContainedData" not in copy_if
     assert "isUnderExport(destSession)" in copy_if
@@ -1543,6 +1563,8 @@ def test_write_contained_data_refuses_directory_symlinks() -> None:
     assert "copyUnfollowedToTemporaryFile" in copy_fn
     copy_only = models.split("static func copyContainedToTemporaryFile")[1].split("static func copyUnfollowedToTemporaryFile")[0]
     assert "FileManager.default.removeItem(at: dest)" not in copy_only.split("guard destFd")[0]
+    assert "FileManager.default.removeItem(at: dest)" not in copy_only
+    assert "unlinkLastComponentUnfollowed(dest)" in copy_only
     unf = models.split("static func copyUnfollowedToTemporaryFile")[1].split("private static func openatDirectory")[0]
     assert "O_NOFOLLOW" in unf
     assert "scrumtraceFcopyfile" in unf
@@ -1550,6 +1572,8 @@ def test_write_contained_data_refuses_directory_symlinks() -> None:
     assert "O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW" in unf
     assert "/tmp" in unf
     assert "FileManager.default.removeItem(at: dest)" not in unf.split("guard destFd")[0]
+    assert "FileManager.default.removeItem(at: dest)" not in unf
+    assert "unlinkLastComponentUnfollowed(dest)" in unf
     assert "O_NOFOLLOW" in models.split("private static func openatFile")[1]
     pack_size = models.split("static func regularFileByteCount(relative:")[1].split(
         "static func regularFileByteCount(_ file"
@@ -1577,6 +1601,8 @@ def test_write_contained_data_refuses_directory_symlinks() -> None:
     assert "removeItemIfRegularFile" in prepare
     assert "FileManager.default.removeItem(at: next)" not in prepare
     write_fn = models.split("static func writeContainedData")[1].split("static func isAllowedClipDest")[0]
+    assert "unlinkLastComponentUnfollowed(tmp)" in write_fn
+    assert "FileManager.default.removeItem(at: tmp)" not in write_fn
     assert "prepareContainedWrite" in write_fn
     assert "options: .atomic" not in write_fn
     assert "writeExclusiveTemporaryFile" in write_fn
@@ -1616,6 +1642,10 @@ def test_write_contained_data_refuses_directory_symlinks() -> None:
     assert "ELOOP" in unlink_last
     assert "S_IFREG" in unlink_last
     assert "FileManager.default.removeItem" not in unlink_last
+    assert "TMPDIR=/tmp" in unlink_last
+    assert "/private/tmp" in unlink_last
+    assert "O_RDONLY | O_DIRECTORY | O_CLOEXEC" in unlink_last
+    assert "O_RDONLY | O_CLOEXEC | O_NOFOLLOW" in unlink_last
     assert "static func makePrivateTemporaryURL" in models
     assert "static func removePrivateTemporaryURL" in models
     private_temp = models.split("static func makePrivateTemporaryURL")[1].split("static func removePrivateTemporaryURL")[0]
@@ -1628,6 +1658,8 @@ def test_write_contained_data_refuses_directory_symlinks() -> None:
     assert "temporaryDirectory" in remove_priv
     assert "removeItem(at: parent)" in remove_priv
     assert "removeItem(at: url)" in remove_priv
+    assert "unlinkLastComponentUnfollowed(url)" in remove_priv
+    assert remove_priv.index("unlinkLastComponentUnfollowed(url)") < remove_priv.index("removeItem(at: url)")
     assert "static func moveIntoSession" in models
     rel = models.split("static func containedRelative(_ path: String, sessionURL: URL)")[1].split("static func existingSessionFile")[0]
     assert "isSymbolicLink" in rel
@@ -1738,6 +1770,7 @@ def test_write_contained_data_refuses_directory_symlinks() -> None:
     reveal = vault.split("func revealInFinder")[1].split("func removeAbandonedSession")[0]
     assert "isUsableSessionRoot(rootURL)" in reveal
     assert "isUsableSessionRoot(session)" in reveal
+    assert "containsSymlinkComponent" in reveal
     assert "removeAbandonedSession" in vault
     assert vault.count("isUsableSessionRoot(rootURL)") >= 9
 

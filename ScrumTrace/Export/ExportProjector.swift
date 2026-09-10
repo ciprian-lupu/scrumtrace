@@ -365,7 +365,7 @@ struct ExportProjector {
         do {
             try ExportRel.moveIntoSession(from: temp, relative: prepared, sessionURL: sessionURL)
         } catch {
-            try? FileManager.default.removeItem(at: temp)
+            ExportRel.unlinkLastComponentUnfollowed(temp)
             omitted.append(OmittedAsset(path: destRelative, reason: "Copy destination escaped export/"))
             return nil
         }
