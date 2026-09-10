@@ -772,7 +772,11 @@ final class SessionController: ObservableObject {
             kind: kind,
             payload: payload
         )
-        try? vault.appendEvent(event, sessionId: id)
+        do {
+            try vault.appendEvent(event, sessionId: id)
+        } catch {
+            lastError = error.localizedDescription
+        }
     }
 
     private func shouldPersistEvent(_ kind: SessionEventKind) -> Bool {

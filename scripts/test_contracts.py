@@ -1026,6 +1026,10 @@ def test_pause_privacy_and_metadata_gate() -> None:
     assert "terminate" in quit_fn
     log_fn = controller.split("private func log(")[1].split("private func flashStatus")[0]
     assert "case .pin, .url, .window" in log_fn
+    assert "try? vault.appendEvent" not in log_fn
+    assert "try vault.appendEvent" in log_fn
+    assert "lastError" in log_fn
+    assert "try? vault.appendEvent" not in controller
     flash = controller.split("private func flashStatus")[1].split("static func clock")[0]
     assert "captureState.allowsNewCapture" in flash
     assert "phase == .recording" in flash
