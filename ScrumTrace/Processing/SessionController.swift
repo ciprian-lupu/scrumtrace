@@ -242,11 +242,20 @@ final class SessionController: ObservableObject {
         statusLine = "Stopped"
         // Close the movie/WAV before the process is killed. Do not start Whisper/AI.
         let lock = DispatchSemaphore(value: 0)
+        let stopBox = HaltStopBox()
         Task.detached {
-            try? await rec?.stop()
+            do {
+                try await rec?.stop()
+            } catch {
+                stopBox.message = error.localizedDescription
+            }
             lock.signal()
         }
         _ = lock.wait(timeout: .now() + 5)
+        if let message = stopBox.message {
+            lastError = message
+            log(.error, ["reason": "quit-stop", "error": message])
+        }
     }
 
     private func persistInterruptedCapture() {
@@ -916,4 +925,9 @@ enum ScreenSnap {
         return nil
         #endif
     }
+}
+
+/// Carries `stop()` failure off `Task.detached` onto MainActor halt (C2).
+private final class HaltStopBox: @unchecked Sendable {
+    var message: String?
 }

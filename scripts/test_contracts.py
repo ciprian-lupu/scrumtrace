@@ -1047,6 +1047,10 @@ def test_pause_privacy_and_metadata_gate() -> None:
     assert "terminateRequested = true" in halt
     assert halt.index("terminateRequested = true") < halt.index("if !isRecording")
     assert "Task.detached" in halt
+    assert "try? await rec?.stop()" not in halt
+    assert "try await rec?.stop()" in halt
+    assert "log(.error" in halt
+    assert halt.index("lock.wait") < halt.index("log(.error")
     assert "persistInterruptedCapture" in halt
     assert halt.index("freezeWriters") < halt.index("persistInterruptedCapture")
     assert "persistCaptureLayout" in halt
