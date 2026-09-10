@@ -6,6 +6,9 @@ struct AnthropicClient: AIProvider {
 
     func evaluate(request: SliceEvaluationRequest) async throws -> CandidateEvaluationResponse {
         _ = ProviderWireMedia.mp4BodyURL(configuration: configuration, request: request)
+        if ProviderWireMedia.willUploadClip(configuration: configuration) {
+            throw AIProviderError.invalidURL("This adapter does not upload clip video.")
+        }
         if configuration.kind == .anthropic && AIProviderConfiguration.isRetiredAnthropic(configuration.model) {
             throw AIProviderError.invalidURL("Retired Anthropic model \(configuration.model)")
         }

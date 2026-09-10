@@ -78,12 +78,19 @@ enum ProviderWireMedia {
     }
 
     /// Clip file bytes that may be placed on the HTTP body.
-    /// Always nil unless `accepts_video` is true **and** the adapter has an MP4
-    /// mapping. Shipped adapters have none — they send stills + transcript only.
+    /// Nil unless `accepts_video` is true **and** `adaptersUploadVideo` is true
+    /// **and** the clip is a contained visual file. Shipped adapters have no
+    /// MP4 body field — they throw rather than evaluate stills-only (C4).
     static func mp4BodyURL(configuration: AIProviderConfiguration, request: SliceEvaluationRequest) -> URL? {
         guard willUploadClip(configuration: configuration) else { return nil }
-        guard request.clipURL != nil else { return nil }
-        return nil
+        guard let clipURL = request.clipURL else { return nil }
+        if (try? clipURL.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+            return nil
+        }
+        guard let rel = ExportRel.unfollowedRelative(clipURL, sessionRoot: request.sessionURL),
+              let contained = ExportRel.existingSessionFile(rel, sessionURL: request.sessionURL),
+              ExportRel.isVisualEvidence(contained) else { return nil }
+        return request.sessionURL.appendingPathComponent(contained)
     }
 }
 

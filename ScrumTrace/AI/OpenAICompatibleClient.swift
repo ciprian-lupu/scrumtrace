@@ -6,6 +6,9 @@ struct OpenAICompatibleClient: AIProvider {
 
     func evaluate(request: SliceEvaluationRequest) async throws -> CandidateEvaluationResponse {
         _ = ProviderWireMedia.mp4BodyURL(configuration: configuration, request: request)
+        if ProviderWireMedia.willUploadClip(configuration: configuration) {
+            throw AIProviderError.invalidURL("This adapter does not upload clip video.")
+        }
         let key = configuration.apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !key.isEmpty else { throw AIProviderError.missingAPIKey }
         let root = configuration.baseURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
