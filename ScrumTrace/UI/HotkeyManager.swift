@@ -58,7 +58,7 @@ final class HotkeyManager {
 
     private func register(key: UInt32, id: UInt32) {
         var hotKeyRef: EventHotKeyRef?
-        var hotKeyID = EventHotKeyID(signature: signature, id: id)
+        let hotKeyID = EventHotKeyID(signature: signature, id: id)
         let status = RegisterEventHotKey(
             key,
             UInt32(optionKey | cmdKey),

@@ -611,20 +611,20 @@ final class SessionController: ObservableObject {
             source: .typed
         )
         // Persist the raw frame immediately so Stop/Quit cannot drop an unsaved Shot window.
-        if var local = manifest {
-            if let idx = local.shots.firstIndex(where: { $0.id == record.id }) {
-                local.shots[idx] = record
-            } else {
-                local.shots.append(record)
-            }
-            do {
-                try vault.write(manifest: &local)
-            } catch {
-                lastError = error.localizedDescription
-                statusLine = "Shot frame captured; catalog write failed. Save still."
-            }
-            self.manifest = local
+        // `manifest` is already unwrapped by the function guard.
+        var local = manifest
+        if let idx = local.shots.firstIndex(where: { $0.id == record.id }) {
+            local.shots[idx] = record
+        } else {
+            local.shots.append(record)
         }
+        do {
+            try vault.write(manifest: &local)
+        } catch {
+            lastError = error.localizedDescription
+            statusLine = "Shot frame captured; catalog write failed. Save still."
+        }
+        self.manifest = local
         let meta = await sampler.sample()
         // Re-check after the 200 ms AX wait: Pause can land while we were sampling (C1).
         if captureState.allowsNewCapture {

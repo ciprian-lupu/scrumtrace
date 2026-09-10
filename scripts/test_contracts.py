@@ -737,6 +737,8 @@ def test_retry_failed_slices_and_pins() -> None:
     assert "pinTimesSessionId == sessionId" in controller
     capture = controller.split("private func captureShot")[1].split("private func finishShot")[0]
     assert "try? vault.write(manifest: &local)" not in capture
+    assert "if var local = manifest" not in capture
+    assert "var local = manifest" in capture
     assert "annotatedPath: nil" in capture
     assert "writeContainedData(png, relative: rawPath" in capture
     assert "png.write(to:" not in capture
