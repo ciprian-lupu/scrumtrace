@@ -92,6 +92,7 @@ final class SessionController: ObservableObject {
             log(.resume, [:])
             persistLivePipelineStatus()
             NotificationCenter.default.post(name: .scrumTraceCaptureGate, object: CaptureSessionState.recording)
+            kickMetadataSample()
         } else {
             pausedByPrivacy = false
             recorder?.setPaused(true)
@@ -603,6 +604,7 @@ final class SessionController: ObservableObject {
             log(.resume, ["reason": "privacy_clear"])
             persistLivePipelineStatus()
             NotificationCenter.default.post(name: .scrumTraceCaptureGate, object: CaptureSessionState.recording)
+            kickMetadataSample()
             return
         }
         unstickWriterIfPrivacyMissed()
@@ -616,9 +618,12 @@ final class SessionController: ObservableObject {
         sampler.isSuspended = false
         statusLine = "Recording"
         NotificationCenter.default.post(name: .scrumTraceCaptureGate, object: CaptureSessionState.recording)
+        kickMetadataSample()
     }
 
     private func startTimer() {
+        wallElapsed = clock.currentWallSeconds()
+        mediaElapsed = clock.currentMediaSeconds()
         hudTimer?.invalidate()
         hudTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
             Task { @MainActor in
@@ -633,6 +638,7 @@ final class SessionController: ObservableObject {
                 await self?.sampleMetadataTick()
             }
         }
+        kickMetadataSample()
     }
 
     private func sampleMetadataTick() async {
@@ -648,6 +654,12 @@ final class SessionController: ObservableObject {
         } else {
             log(.window, ["app": meta.appName, "title": meta.windowTitle])
         }
+    }
+
+    /// The 2 s timer would miss the Keynote/browser window that is already
+    /// front at Start or the instant Pause lifts (D12).
+    private func kickMetadataSample() {
+        Task { await sampleMetadataTick() }
     }
 
     private func log(_ kind: SessionEventKind, _ payload: [String: String]) {

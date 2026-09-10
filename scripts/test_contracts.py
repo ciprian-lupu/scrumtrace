@@ -635,6 +635,7 @@ def test_pause_privacy_and_metadata_gate() -> None:
     assert "currentCredentialApp" in resume_ok
     assert toggle.index("isCurrentlyTripped") < toggle.index("currentCredentialApp")
     assert "persistLivePipelineStatus" in toggle
+    assert "kickMetadataSample" in toggle
     persist_live = controller.split("func persistLivePipelineStatus")[1].split("func flashStatus")[0]
     assert "captureState == .paused" in persist_live
     assert "try? vault.write" in persist_live
@@ -703,10 +704,18 @@ def test_pause_privacy_and_metadata_gate() -> None:
     assert "pausedByPrivacy, phase == .paused" in resume_priv
     assert "unstickWriterIfPrivacyMissed" in resume_priv
     assert "currentCredentialApp" in resume_priv
+    assert "kickMetadataSample" in resume_priv
     unstick = controller.split("func unstickWriterIfPrivacyMissed")[1].split("func startTimer")[0]
     assert "phase == .recording" in unstick
     assert "recorder?.isPaused == true" in unstick
     assert "!pausedByPrivacy" in unstick
+    assert "kickMetadataSample" in unstick
+    start_timer = controller.split("func startTimer")[1].split("func sampleMetadataTick")[0]
+    assert "kickMetadataSample" in start_timer
+    assert "wallElapsed = clock.currentWallSeconds()" in start_timer
+    assert "mediaElapsed = clock.currentMediaSeconds()" in start_timer
+    kick = controller.split("func kickMetadataSample")[1].split("func log(")[0]
+    assert "sampleMetadataTick" in kick
 
 
 def test_phase45_clip_consent_and_budget() -> None:
