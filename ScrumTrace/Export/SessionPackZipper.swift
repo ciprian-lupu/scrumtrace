@@ -717,10 +717,18 @@ enum PackBudget {
         .filter { ExportRel.isUnderExport($0) && !isProtected($0) }
     }
 
+    /// C3: omit of `001.annotated.jpg` must not treat `001.jpg` as dropped.
+    /// Twin expansion belongs in review mapping, not here.
     private static func droppedHandoff(_ path: String, dropped: Set<String>) -> Bool {
         if dropped.contains(ExportRel.toExportRoot(path)) { return true }
-        for mapped in EvidenceValidator.exportRelativeHandoffPaths([path]) {
-            if dropped.contains(ExportRel.toExportRoot(mapped)) { return true }
+        if dropped.contains(ExportRel.toExportRoot(ExportRel.sessionPath(path))) { return true }
+        if let mapped = ExportRel.shotsArchiveToExport(path),
+           dropped.contains(ExportRel.toExportRoot(mapped)) {
+            return true
+        }
+        if let mapped = ExportRel.mediaWorkToExport(path),
+           dropped.contains(ExportRel.toExportRoot(mapped)) {
+            return true
         }
         return false
     }

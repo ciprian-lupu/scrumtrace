@@ -146,6 +146,12 @@ struct ExportProjector {
                     if Set(placed.values).contains(exportRoot) {
                         return exportRoot
                     }
+                    if let stem = EvidenceValidator.shotStillStem(exportCandidate) {
+                        let twins = ["shots/\(stem).annotated.jpg", "shots/\(stem).jpg"]
+                        if let hit = twins.first(where: { Set(placed.values).contains($0) }) {
+                            return hit
+                        }
+                    }
                 }
                 // D7: `001.annotated.png` and `001.png` are one Shot. If JPEG
                 // transcode only placed the twin, keep that file as evidence.

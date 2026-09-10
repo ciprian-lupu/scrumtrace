@@ -2552,6 +2552,28 @@ final class ContractTests: XCTestCase {
         XCTAssertEqual(stripped.shots[0].rawPath, "")
     }
 
+    func testStripOmittedDoesNotClearRawWhenAnnotatedTwinDropped() {
+        var manifest = SessionManifest.makeNew(sessionId: "s", product: .empty)
+        manifest.shots = [
+            ShotRecord(
+                id: "shot-001",
+                tMedia: 8,
+                rawPath: "archive/shots/001.png",
+                annotatedPath: "archive/shots/001.annotated.png",
+                exportPath: "export/shots/001.jpg",
+                note: "ingest",
+                source: .typed
+            )
+        ]
+        let stripped = PackBudget.stripOmitted(
+            [OmittedAsset(path: "shots/001.annotated.jpg", reason: "Pack over 35 MB; dropped by priority")],
+            from: manifest
+        )
+        XCTAssertEqual(stripped.shots[0].rawPath, "archive/shots/001.png")
+        XCTAssertEqual(stripped.shots[0].exportPath, "export/shots/001.jpg")
+        XCTAssertNil(stripped.shots[0].annotatedPath)
+    }
+
     func testSessionBriefShowsMappedArchiveShot() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("scrumtrace-brief-shot-\(UUID().uuidString)")
         let shots = root.appendingPathComponent("export/shots")
