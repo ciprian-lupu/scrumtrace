@@ -2039,6 +2039,7 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "!shots.isEmpty" in tasks_fn
     assert "func reviewTasks" in tasks_fn
     assert "response.candidates.isEmpty" in tasks_fn
+    assert "candidates.isEmpty || !shots.isEmpty" in tasks_fn
     abort_auth = processor.split("func abortedForAuth")[1].split("func resetEvalAuthGate")[0]
     assert "shots: [ShotRecord]" in abort_auth
     assert "sessionURL: URL" in abort_auth

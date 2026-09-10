@@ -690,10 +690,6 @@ final class SessionProcessor: @unchecked Sendable {
             case .drop:
                 status = .dropped
             }
-            if !shots.isEmpty && status == .dropped {
-                // D7: a human Shot on this slice must stay visible.
-                status = .needsReview
-            }
             if forceReview && status == .confirmed {
                 status = .needsReview
             }
@@ -770,8 +766,9 @@ final class SessionProcessor: @unchecked Sendable {
         if out.isEmpty {
             // Empty `candidates[]` is not an explicit drop. Keep a review row so a
             // transcript-only keyword slice cannot vanish (D7). All-drop with no
-            // Shot still omits — those candidates were decided.
-            if response.candidates.isEmpty {
+            // Shot still omits — those candidates were decided. All-drop with a
+            // Shot becomes Shot review rows, not resurrected `drop` candidates (C5).
+            if response.candidates.isEmpty || !shots.isEmpty {
                 out.append(
                     contentsOf: reviewTasks(
                         shots: shots,
