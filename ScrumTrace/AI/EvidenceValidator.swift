@@ -182,14 +182,16 @@ enum EvidenceValidator {
 
     /// C5: an evaluated candidate belongs to `associated_shot_id`. Another
     /// merged in-window Shot's PNG is not this candidate's evidence (D7 rows
-    /// cover that Shot). Match archive and export path forms.
+    /// cover that Shot). A keyword or pin window with no associated Shot must
+    /// not inherit every in-window Shot still either. Match archive and
+    /// export path forms.
     static func ownedByOtherAssociatedShot(
         _ still: String,
         slice: SliceRecord,
         shots: [ShotRecord]
     ) -> Bool {
-        guard let associated = slice.associatedShotId else { return false }
         guard let owner = shotOwning(still, in: shots) else { return false }
+        guard let associated = slice.associatedShotId else { return true }
         return owner.id != associated
     }
 

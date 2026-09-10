@@ -38,6 +38,8 @@ def test_quote_window() -> None:
     owner_fn = validator.split("static func ownedByOtherAssociatedShot")[1].split("static func applyExportEvidence")[0]
     assert "shotOwning" in owner_fn
     assert "associatedShotId" in owner_fn
+    assert owner_fn.index("shotOwning") < owner_fn.index("associatedShotId")
+    assert "else { return true }" in owner_fn
     overlap = validator.split("static func framesOverlapSlice")[1].split("static func applyExportEvidence")[0]
     assert "tMedia" in overlap
     assert "startMedia" in overlap

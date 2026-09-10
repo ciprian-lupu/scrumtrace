@@ -702,6 +702,7 @@ def test_retry_failed_slices_and_pins() -> None:
     assert "testCanConfirmRejectsFrameFromAnotherSlice" in contracts
     assert "testCanConfirmRejectsStillOutsideClampedWindow" in contracts
     assert "testCanConfirmRejectsFrameFromOtherAssociatedShot" in contracts
+    assert "testCanConfirmRejectsShotStillOnKeywordSlice" in contracts
     assert "testMergeCanonicalStatusesKeepsArchiveEvidence" in contracts
     models = (ROOT / "ScrumTrace" / "Storage" / "SessionModels.swift").read_text()
     existing_media = models.split("func withExistingMedia")[1].split("enum CodingKeys")[0]
@@ -2022,7 +2023,8 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "tMedia >= slice.startMedia" in shot_note
     assert "tMedia <= slice.endMedia" in shot_note
     assert "associatedShotId" in shot_note
-    assert "shot.id == associated" in shot_note
+    assert "$0.id == slice.associatedShotId" in shot_note
+    assert "shot.id == associated" not in shot_note
     assert r"linked.map(\.note)" not in eval_slice
     assert "ownedByOtherAssociatedShot" in eval_slice.split("func appendImage")[1].split("if !configuration.acceptsImages")[0]
     assert "ownedByOtherAssociatedShot" in eval_slice.split("promptSlice.stills")[1].split("SliceEvaluationRequest")[0]

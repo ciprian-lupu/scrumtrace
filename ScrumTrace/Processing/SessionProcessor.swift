@@ -512,10 +512,7 @@ final class SessionProcessor: @unchecked Sendable {
         let linked = shotsLinked(to: slice, in: manifest)
         let shotNote = linked
             .filter { $0.tMedia >= slice.startMedia && $0.tMedia <= slice.endMedia }
-            .filter { shot in
-                guard let associated = slice.associatedShotId else { return true }
-                return shot.id == associated
-            }
+            .filter { $0.id == slice.associatedShotId }
             .map(\.note)
             .filter { !$0.isEmpty }
             .joined(separator: "\n")
