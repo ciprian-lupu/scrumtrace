@@ -226,6 +226,9 @@ def test_frame_ref_basename_resolves() -> None:
     assert "citesSliceWindow" in apply_fn
     assert "ownedByOtherAssociatedShot" in apply_fn
     assert "task.status == .confirmed" in apply_fn
+    assert "task.status != .confirmed" in apply_fn
+    assert "reviewPackHandoff" in apply_fn
+    assert "exportRelativeHandoffPaths" in apply_fn
     assert "quote times are inverted" in apply_fn or "tMediaStart > quote.tMediaEnd" in apply_fn
     assert "quote outside slice window" in apply_fn or "slice.startMedia" in apply_fn
     assert "sourceSliceId.isEmpty" in apply_fn

@@ -1927,6 +1927,50 @@ final class ContractTests: XCTestCase {
         XCTAssertTrue(leftover[0].evidenceMedia.isEmpty)
     }
 
+    func testApplyExportEvidenceMapsArchiveStillOnNeedsReview() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("scrumtrace-export-review-\(UUID().uuidString)")
+        let shots = root.appendingPathComponent("export/shots")
+        try FileManager.default.createDirectory(at: shots, withIntermediateDirectories: true)
+        try Data("jpg".utf8).write(to: shots.appendingPathComponent("001.jpg"))
+        defer { try? FileManager.default.removeItem(at: root) }
+        let review = TaskRecord(
+            taskId: "TASK-01",
+            sourceSliceId: "slice-01",
+            kind: .bug,
+            status: .needsReview,
+            title: "Save",
+            observed: "x",
+            stated: "",
+            inferred: "",
+            agentInstructions: "inspect",
+            quotes: [],
+            evidenceMedia: ["archive/shots/001.png"],
+            confidence: 0
+        )
+        let confirmed = TaskRecord(
+            taskId: "TASK-02",
+            sourceSliceId: "slice-03",
+            kind: .bug,
+            status: .confirmed,
+            title: "Archive only",
+            observed: "x",
+            stated: "",
+            inferred: "",
+            agentInstructions: "inspect",
+            quotes: [],
+            evidenceMedia: ["archive/shots/001.png"],
+            confidence: 0.9
+        )
+        let applied = EvidenceValidator.applyExportEvidence(
+            tasks: [review, confirmed],
+            sessionURL: root
+        )
+        XCTAssertEqual(applied[0].status, .needsReview)
+        XCTAssertEqual(applied[0].evidenceMedia, ["shots/001.jpg"])
+        XCTAssertEqual(applied[1].status, .needsReview)
+        XCTAssertTrue(applied[1].evidenceMedia.isEmpty)
+    }
+
     func testApplyExportEvidenceDropsOtherAssociatedShotFromConfirmed() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("st-export-other-\(UUID().uuidString)")
         let shotsDir = root.appendingPathComponent("export/shots")

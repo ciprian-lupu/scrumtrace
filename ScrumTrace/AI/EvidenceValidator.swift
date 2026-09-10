@@ -293,29 +293,37 @@ enum EvidenceValidator {
         let sliceById = Dictionary(slices.map { ($0.sliceId, $0) }, uniquingKeysWith: { _, latest in latest })
         return tasks.map { task in
             var copy = task
-            copy.evidenceMedia = task.evidenceMedia.filter { path in
-                guard ExportRel.packMediaHandoff(path, sessionURL: sessionURL, omitted: omitted) != nil else {
-                    return false
+            var seen = Set<String>()
+            copy.evidenceMedia = task.evidenceMedia.compactMap { path -> String? in
+                let packed: String?
+                if let rel = ExportRel.packMediaHandoff(path, sessionURL: sessionURL, omitted: omitted) {
+                    packed = rel
+                } else if task.status != .confirmed {
+                    packed = reviewPackHandoff(path, sessionURL: sessionURL, omitted: omitted)
+                } else {
+                    packed = nil
                 }
+                guard let packed, seen.insert(packed).inserted else { return nil }
                 guard let slice = sliceById[task.sourceSliceId] else {
-                    return true
+                    return packed
                 }
-                if framesOverlapSlice([path], slice: slice, shots: shots, sessionURL: sessionURL) {
+                if framesOverlapSlice([path, packed], slice: slice, shots: shots, sessionURL: sessionURL) {
                     if task.status == .confirmed,
-                       ownedByOtherAssociatedShot(path, slice: slice, shots: shots) {
-                        return false
+                       ownedByOtherAssociatedShot(path, slice: slice, shots: shots)
+                        || ownedByOtherAssociatedShot(packed, slice: slice, shots: shots) {
+                        return nil
                     }
-                    return true
+                    return packed
                 }
                 // D7: a merge-clamped Shot review row has only that Shot's
                 // stills. Keep them. A row that cited this slice's clip — even
                 // if omit later deleted the MP4 — must not keep another
                 // moment's PNG (C5).
-                guard let owner = shotOwning(path, in: shots),
+                guard let owner = shotOwning(path, in: shots) ?? shotOwning(packed, in: shots),
                       owner.tMedia < slice.startMedia || owner.tMedia > slice.endMedia else {
-                    return false
+                    return nil
                 }
-                return !task.evidenceMedia.contains { other in
+                let citedClip = task.evidenceMedia.contains { other in
                     citesSliceWindow(
                         other,
                         slice: slice,
@@ -323,6 +331,7 @@ enum EvidenceValidator {
                         sessionURL: sessionURL
                     )
                 }
+                return citedClip ? nil : packed
             }
             if copy.status == .confirmed {
                 if copy.evidenceMedia.isEmpty || copy.sourceSliceId.isEmpty {
@@ -364,6 +373,22 @@ enum EvidenceValidator {
             }
             return copy
         }
+    }
+
+    /// D7: `needs_review` may still name archive stills after JPEG transcode.
+    /// `confirmed` must not use that mapping — a same-stem export JPEG can
+    /// belong to another task (C2/C5).
+    private static func reviewPackHandoff(
+        _ path: String,
+        sessionURL: URL,
+        omitted: [OmittedAsset]
+    ) -> String? {
+        for candidate in exportRelativeHandoffPaths([path]) {
+            if let rel = ExportRel.packMediaHandoff(candidate, sessionURL: sessionURL, omitted: omitted) {
+                return rel
+            }
+        }
+        return nil
     }
 
     /// D10: canonical `session.manifest.json` keeps archive evidence paths.
