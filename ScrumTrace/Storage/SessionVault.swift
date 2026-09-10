@@ -108,11 +108,11 @@ final class SessionVault: @unchecked Sendable {
             ] {
                 let dest = url.appendingPathComponent(folder)
                 if (try? dest.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
-                    try fileManager.removeItem(at: dest)
+                    try ExportRel.removeItemIfRegularFile(dest, sessionRoot: url)
                 }
                 try fileManager.createDirectory(at: dest, withIntermediateDirectories: true)
                 if (try? dest.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
-                    try? fileManager.removeItem(at: dest)
+                    try? ExportRel.removeItemIfRegularFile(dest, sessionRoot: url)
                     throw SessionVaultError.writeFailed(folder)
                 }
                 // Nested `export/shots` mkdir follows a planted `export/` link.
@@ -209,7 +209,7 @@ final class SessionVault: @unchecked Sendable {
         }
         let url = session.appendingPathComponent(ScrumTracePath.events)
         if (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
-            try fileManager.removeItem(at: url)
+            try ExportRel.removeItemIfRegularFile(url, sessionRoot: session)
         }
         guard ExportRel.containedRelative(ScrumTracePath.events, sessionURL: session) == ScrumTracePath.events else {
             throw SessionVaultError.writeFailed("events.jsonl")

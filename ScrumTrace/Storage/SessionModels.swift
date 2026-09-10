@@ -348,7 +348,9 @@ enum ExportRel {
             let isLink = (try? next.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true
             if isLast {
                 if isLink {
-                    try FileManager.default.removeItem(at: next)
+                    // unlinkat the link inode. FileManager.removeItem recurses if
+                    // the name is swapped for a directory between the lstat and delete.
+                    try removeItemIfRegularFile(next, sessionRoot: sessionURL)
                 } else {
                     var isDir: ObjCBool = false
                     if FileManager.default.fileExists(atPath: next.path, isDirectory: &isDir), isDir.boolValue {
@@ -367,7 +369,7 @@ enum ExportRel {
                     try FileManager.default.createDirectory(at: next, withIntermediateDirectories: false)
                 }
                 if (try? next.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
-                    try? FileManager.default.removeItem(at: next)
+                    try? removeItemIfRegularFile(next, sessionRoot: sessionURL)
                     throw SessionVaultError.writeFailed(relative)
                 }
                 let walked = parts[0...index].joined(separator: "/")

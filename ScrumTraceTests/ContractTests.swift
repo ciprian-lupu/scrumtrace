@@ -229,6 +229,21 @@ final class ContractTests: XCTestCase {
         XCTAssertEqual(try String(contentsOf: inside, encoding: .utf8), "KEEP")
     }
 
+    func testPrepareContainedWriteDoesNotRecurseIntoDestDirectory() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("st-prep-dir-\(UUID().uuidString)")
+        let archive = root.appendingPathComponent("archive")
+        try FileManager.default.createDirectory(at: archive, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let dest = archive.appendingPathComponent("full_transcript.json")
+        try FileManager.default.createDirectory(at: dest, withIntermediateDirectories: true)
+        let inside = dest.appendingPathComponent("inside.bin")
+        try Data("KEEP".utf8).write(to: inside)
+        XCTAssertThrowsError(
+            try ExportRel.prepareContainedWrite(relative: "archive/full_transcript.json", sessionURL: root)
+        )
+        XCTAssertEqual(try String(contentsOf: inside, encoding: .utf8), "KEEP")
+    }
+
     func testVaultWriteReplacesManifestSymlinkWithoutFollowing() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("st-vault-man-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: root) }

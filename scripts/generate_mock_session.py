@@ -546,7 +546,7 @@ This pack is `samples/mock-session/export/` only. Do not hand `archive/` (this m
 
 ## Result
 - Markdown and JSON in this export must not contain `ATH-SAVE-DISABLED-0x9F` or `STENCIL-4419`.
-- `SESSION_BRIEF.html` is self-contained (CSS/JS inlined) and playable in a browser.
+- `SESSION_BRIEF.html` is self-contained (CSS/JS inlined, system font stacks, no webfont fetch) and playable in a browser.
 """
     )
     packed = EXPORT / "session-pack.zip"

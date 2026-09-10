@@ -541,6 +541,7 @@ def test_retry_failed_slices_and_pins() -> None:
     assert "testPruneAbandonedStartsIgnoresPlantedShotsDirectorySymlink" in contracts
     assert "testMakePrivateTemporaryURLUsesMkdirNotSharedTempFile" in contracts
     assert "testRemoveItemIfRegularFileDoesNotRecurseIntoDirectory" in contracts
+    assert "testPrepareContainedWriteDoesNotRecurseIntoDestDirectory" in contracts
     models = (ROOT / "ScrumTrace" / "Storage" / "SessionModels.swift").read_text()
     existing_media = models.split("func withExistingMedia")[1].split("enum CodingKeys")[0]
     assert "existingSessionFile" in existing_media
@@ -1264,6 +1265,21 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert fallback_js.index("isPackMediaHref(href)") < fallback_js.index("img.src = href")
     assert 'box.addEventListener("click", close)' not in js
     assert 'box.addEventListener("click", close)' not in fallback_js
+    css = (ROOT / "ScrumTrace" / "Export" / "Resources" / "brief.css").read_text()
+    assert "fonts.googleapis" not in css
+    assert "@import" not in css
+    assert "--sans:" in css
+    assert "--mono:" in css
+    assert "--display:" in css
+    assert "IBM Plex" not in css
+    assert "Cormorant" not in css
+    brief_html = (ROOT / "samples" / "mock-session" / "export" / "SESSION_BRIEF.html").read_text()
+    assert "fonts.googleapis" not in brief_html
+    assert "@import" not in brief_html
+    assert "IBM Plex" not in brief_html
+    fallback_css = brief.split("let fallbackCSS")[1].split("let fallbackJS")[0]
+    assert "fonts.googleapis" not in fallback_css
+    assert "@import" not in fallback_css
     prompts = (ROOT / "ScrumTrace" / "AI" / "PromptTemplates.swift").read_text()
     assert 'wrapUntrusted("Human shot note' in prompts
     assert "func sanitizeUntrusted" in prompts
@@ -1528,6 +1544,8 @@ def test_write_contained_data_refuses_directory_symlinks() -> None:
     prepare = models.split("static func prepareContainedWrite")[1].split("static func writeContainedData")[0]
     assert "isSymbolicLink" in prepare
     assert "createDirectory" in prepare
+    assert "removeItemIfRegularFile" in prepare
+    assert "FileManager.default.removeItem(at: next)" not in prepare
     write_fn = models.split("static func writeContainedData")[1].split("static func isAllowedClipDest")[0]
     assert "prepareContainedWrite" in write_fn
     assert "options: .atomic" not in write_fn
@@ -1625,6 +1643,8 @@ def test_write_contained_data_refuses_directory_symlinks() -> None:
     assert create_fn.count("isUsableSessionRoot(rootURL)") >= 2
     assert "isUsableSessionRoot(url)" in create_fn
     assert "containsSymlinkComponent" in create_fn
+    assert "removeItemIfRegularFile" in create_fn
+    assert "fileManager.removeItem(at: dest)" not in create_fn
     assert "removeItem(at: url)" in create_fn
     assert create_fn.index("try write(manifest: &manifest)") < create_fn.index("removeItem(at: url)")
     assert "isUsableSessionRoot(rootURL)" in create_fn.split("createDirectory(at: url")[1]
@@ -1640,6 +1660,8 @@ def test_write_contained_data_refuses_directory_symlinks() -> None:
     assert "isContainedRegularFile" in append_ev
     assert "writeContainedData" in append_ev
     assert "FileHandle" not in append_ev
+    assert "removeItemIfRegularFile" in append_ev
+    assert "fileManager.removeItem(at: url)" not in append_ev
     assert "isUsableSessionRoot(rootURL)" in append_ev
     assert "isUsableSessionRoot(session)" in append_ev
     assert "containsSymlinkComponent" in vault.split("func nextShotIndex")[1].split("func loadPinTimes")[0]
@@ -1658,6 +1680,8 @@ def test_write_contained_data_refuses_directory_symlinks() -> None:
     prepare = models.split("static func prepareContainedWrite")[1].split("static func writeContainedData")[0]
     assert "isUsableSessionRoot" in prepare
     assert "ScrumTracePath.manifest" in prepare
+    assert "removeItemIfRegularFile" in prepare
+    assert "FileManager.default.removeItem(at: next)" not in prepare
     mkdir_check = prepare.split("createDirectory")[1]
     assert "isSymbolicLink" in mkdir_check
     assert "removeItem" in mkdir_check
