@@ -12,6 +12,7 @@ final class MenuBarController: NSObject {
     private var lastMenuSignature = ""
     private var statusMenuItem: NSMenuItem?
     private var hudObserver: NSObjectProtocol?
+    private var lastStartEnabled: Bool?
 
     init(controller: SessionController, hud: RecordingHUDWindow) {
         self.controller = controller
@@ -97,6 +98,10 @@ final class MenuBarController: NSObject {
         } else {
             let start = actionItem("Start recording", #selector(start))
             start.isEnabled = !controller.isBusy && CapturePermissions.readiness().allowsStart
+            if lastStartEnabled != start.isEnabled {
+                lastStartEnabled = start.isEnabled
+                AgentLog.event("start_control_state", ["enabled": start.isEnabled ? "1" : "0"])
+            }
             menu.addItem(start)
         }
         let status = NSMenuItem(title: controller.statusLine, action: nil, keyEquivalent: "")
@@ -157,6 +162,7 @@ final class MenuBarController: NSObject {
         recent.submenu = recentMenu
         menu.addItem(recent)
         menu.addItem(.separator())
+        menu.addItem(actionItem("Log permission probe", #selector(probePermissions)))
         menu.addItem(actionItem("Reveal agent log", #selector(revealLog)))
         menu.addItem(actionItem("Settings…", #selector(settings)))
         menu.addItem(actionItem("Quit ScrumTrace", #selector(quit)))
@@ -181,6 +187,10 @@ final class MenuBarController: NSObject {
     @objc private func reveal() { controller.revealLast() }
     @objc private func revealLog() {
         AgentLog.reveal()
+    }
+    @objc private func probePermissions() {
+        CapturePermissions.probeAndLog()
+        controller.statusLine = "Permission probe written to agent log"
     }
     @objc private func settings() {
         NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)

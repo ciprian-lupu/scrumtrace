@@ -1127,6 +1127,9 @@ def test_pipeline_timing_stays_in_archive() -> None:
     assert "snapshotLaunchState" in perms
     assert "screenGrantedNeedsRelaunch" in perms
     assert "CGRequestScreenCaptureAccess" not in perms
+    assert "func signingFields" in perms
+    assert "cdhash" in perms
+    assert "func probeAndLog" in perms
     gate01 = (ROOT / "scripts" / "mac_gate01.sh").read_text()
     assert "Applications/ScrumTrace.app" in gate01
     assert "com.str8minds.ScrumTrace" in gate01
@@ -1144,6 +1147,9 @@ def test_pipeline_timing_stays_in_archive() -> None:
     assert "recording.lock" in loop
     assert "mac_publish_agent_log.sh" in loop
     assert "mac_gate01.sh" in loop
+    assert "agent.request_rebuild" in loop
+    assert "kill -0" in loop
+    assert 'OLD" != "$NEW" && "$NEED_BUILD" != "1"' in loop
     publish = (ROOT / "scripts" / "mac_publish_agent_log.sh").read_text()
     assert "cursor/scrumtrace-agent-logs-0397" in publish
     fetch = (ROOT / "scripts" / "fetch_agent_log.sh").read_text()
@@ -1311,6 +1317,8 @@ def test_pause_privacy_and_metadata_gate() -> None:
     assert "relaunchForPermissions" in menu
     assert "allowsStart" in menu
     assert "Reveal agent log" in menu
+    assert "Log permission probe" in menu
+    assert "start_control_state" in menu
     log_fn = controller.split("private func log(")[1].split("private func flashStatus")[0]
     assert "case .pin, .url, .window" in log_fn
     assert "try? vault.appendEvent" not in log_fn
@@ -1554,6 +1562,7 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "This process" in settings
     assert "Relaunch ScrumTrace" in settings
     assert "Reveal agent log" in settings
+    assert "Log permission probe" in settings
     assert "not this process" in settings
     controller_src = (ROOT / "ScrumTrace" / "Processing" / "SessionController.swift").read_text()
     assert "Privacy_ScreenCapture" in controller_src

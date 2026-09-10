@@ -126,6 +126,8 @@ enum CapturePermissions {
         Bundle.main.bundlePath
     }
 
+    private static var signingCache: [String: String]?
+
     /// Technical fields only — never titles, URLs, notes, or keys.
     static func logFields() -> [String: String] {
         var fields = [
@@ -139,7 +141,63 @@ enum CapturePermissions {
         #if os(macOS)
         fields["ax"] = AXIsProcessTrusted() ? "1" : "0"
         #endif
+        for (key, value) in signingFields() {
+            fields[key] = value
+        }
         return fields
+    }
+
+    static func probeAndLog() {
+        snapshotLaunchState()
+        AgentLog.eventSync("permission_probe", [:])
+    }
+
+    static func signingFields() -> [String: String] {
+        if let signingCache {
+            return signingCache
+        }
+        let read = readCodesign()
+        signingCache = read
+        return read
+    }
+
+    private static func readCodesign() -> [String: String] {
+        #if os(macOS)
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: "/usr/bin/codesign")
+        proc.arguments = ["-dv", "--verbose=4", Bundle.main.bundlePath]
+        let err = Pipe()
+        proc.standardError = err
+        proc.standardOutput = Pipe()
+        do {
+            try proc.run()
+            proc.waitUntilExit()
+        } catch {
+            return ["sign_error": "codesign_spawn_failed"]
+        }
+        let text = String(data: err.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        var out: [String: String] = [:]
+        for line in text.split(whereSeparator: \.isNewline) {
+            let row = String(line)
+            if row.hasPrefix("CDHash=") {
+                out["cdhash"] = String(row.dropFirst(7))
+            } else if row.hasPrefix("Identifier=") {
+                out["sign_id"] = String(row.dropFirst(11))
+            } else if row.hasPrefix("Format=") {
+                out["sign_format"] = String(row.dropFirst(7))
+            } else if row.hasPrefix("TeamIdentifier=") {
+                out["team_id"] = String(row.dropFirst(15))
+            } else if row.hasPrefix("Signature=") {
+                out["sign_kind"] = String(row.dropFirst(10))
+            }
+        }
+        if text.localizedCaseInsensitiveContains("adhoc") {
+            out["adhoc"] = "1"
+        }
+        return out
+        #else
+        return [:]
+        #endif
     }
 
     static func readinessLabel() -> String {

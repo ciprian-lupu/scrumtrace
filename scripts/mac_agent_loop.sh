@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Pull latest implementation, rebuild if needed, relaunch ScrumTrace, publish logs.
-# Skips restart while a session is recording. Safe to run from LaunchAgent.
+# Pull latest implementation and publish logs. Rebuild only on an explicit
+# request (agent.request_rebuild or SCRUMTRACE_FORCE) or a missing app —
+# never because HEAD moved. Auto-rebuild mints a new TCC client.
 set -euo pipefail
 
 if [[ "$(uname -s)" != "Darwin" ]]; then
@@ -15,6 +16,7 @@ LOG_DIR="${HOME}/Library/Logs/ScrumTrace"
 RECORD_LOCK="${LOG_DIR}/recording.lock"
 LOOP_LOCK="${LOG_DIR}/loop.lock"
 STATUS="${LOG_DIR}/loop-status.txt"
+REQUEST_REBUILD="${LOG_DIR}/agent.request_rebuild"
 FORCE="${SCRUMTRACE_FORCE:-${1:-}}"
 
 mkdir -p "$LOG_DIR"
@@ -31,9 +33,14 @@ log_status() {
 }
 
 if [[ -f "$RECORD_LOCK" ]]; then
-  log_status "skip: recording.lock present ($(tr '\n' ' ' < "$RECORD_LOCK"))"
-  bash "$(dirname "$0")/mac_publish_agent_log.sh" || true
-  exit 0
+  lock_pid="$(sed -n '2p' "$RECORD_LOCK" | tr -d '[:space:]')"
+  if [[ -n "$lock_pid" ]] && kill -0 "$lock_pid" 2>/dev/null; then
+    log_status "skip: recording.lock live pid=$lock_pid"
+    bash "$(dirname "$0")/mac_publish_agent_log.sh" || true
+    exit 0
+  fi
+  rm -f "$RECORD_LOCK"
+  log_status "cleared stale recording.lock (pid ${lock_pid:-unknown} not running)"
 fi
 
 cd "$REPO"
@@ -59,11 +66,14 @@ NEED_BUILD=0
 if [[ "${FORCE}" == "--force" || "${FORCE}" == "1" ]]; then
   NEED_BUILD=1
 fi
+if [[ -f "$REQUEST_REBUILD" ]]; then
+  NEED_BUILD=1
+fi
 if [[ ! -x "$STABLE/Contents/MacOS/ScrumTrace" ]]; then
   NEED_BUILD=1
 fi
-if [[ -n "${NEW:-}" && -n "${OLD:-}" && "$OLD" != "$NEW" ]]; then
-  NEED_BUILD=1
+if [[ -n "${NEW:-}" && -n "${OLD:-}" && "$OLD" != "$NEW" && "$NEED_BUILD" != "1" ]]; then
+  log_status "new commit $NEW available; not rebuilding (touch $REQUEST_REBUILD)"
 fi
 
 if [[ "$NEED_BUILD" == "1" ]]; then
@@ -71,11 +81,12 @@ if [[ "$NEED_BUILD" == "1" ]]; then
   sleep 1
   pkill -x ScrumTrace >/dev/null 2>&1 || true
   sleep 1
-  log_status "building"
+  log_status "building (explicit request or missing app)"
   bash "$(dirname "$0")/mac_gate01.sh"
+  rm -f "$REQUEST_REBUILD"
   log_status "build ok"
 else
-  log_status "build skipped (tree unchanged and app exists)"
+  log_status "build skipped (no request_rebuild / FORCE; app exists)"
 fi
 
 if ! pgrep -x ScrumTrace >/dev/null 2>&1; then

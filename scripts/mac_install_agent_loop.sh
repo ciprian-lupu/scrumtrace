@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Install a LaunchAgent that pulls, rebuilds, and publishes logs every 3 minutes.
+# Install a LaunchAgent that pulls and publishes logs every 3 minutes.
+# It does not xcodebuild unless agent.request_rebuild exists or the app is missing.
 set -euo pipefail
 
 if [[ "$(uname -s)" != "Darwin" ]]; then
