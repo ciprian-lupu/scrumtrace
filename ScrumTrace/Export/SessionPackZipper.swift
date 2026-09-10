@@ -187,40 +187,72 @@ struct SessionPackZipper {
         guard !members.isEmpty else {
             throw SessionRecorderError.writerFailed("export/ allow-list is empty; nothing to zip.")
         }
+        // Do not set Process.currentDirectoryURL to exportDir. Process
+        // resolves cwd at launch; a planted export/ → archive/ link would pack
+        // archive/ members (C2). Copy members via openat into a private
+        // staging directory, then posix_spawn_file_actions_addfchdir_np.
+        let stage = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "scrumtrace-zip-stage-\(UUID().uuidString)"
+        )
+        try FileManager.default.createDirectory(at: stage, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: stage) }
+        if (try? stage.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+            try? FileManager.default.removeItem(at: stage)
+            throw SessionRecorderError.writerFailed("export/ is a symbolic link.")
+        }
+        guard let stageFd = ExportRel.openUnfollowedDirectory(stage) else {
+            throw SessionRecorderError.writerFailed("export/ is a symbolic link.")
+        }
+        defer { ExportRel.closeDescriptor(stageFd) }
+        var staged: [String] = []
+        for member in members {
+            let copy: URL
+            do {
+                copy = try ExportRel.copyContainedToTemporaryFile(
+                    relative: ExportRel.sessionPath(member),
+                    sessionURL: sessionURL,
+                    prefix: "scrumtrace-zip-member"
+                )
+            } catch {
+                if PackBudget.protectedNames.contains(URL(fileURLWithPath: member).lastPathComponent) {
+                    throw SessionRecorderError.writerFailed("export/ allow-list is empty; nothing to zip.")
+                }
+                continue
+            }
+            do {
+                try ExportRel.placeIntoOpenedDirectory(from: copy, relative: member, directoryFd: stageFd)
+            } catch {
+                try? FileManager.default.removeItem(at: copy)
+                throw SessionRecorderError.writerFailed("export/ is a symbolic link.")
+            }
+            staged.append(member)
+        }
+        guard !staged.isEmpty else {
+            throw SessionRecorderError.writerFailed("export/ allow-list is empty; nothing to zip.")
+        }
         let temp = FileManager.default.temporaryDirectory.appendingPathComponent(
             "scrumtrace-zip-\(UUID().uuidString).zip"
         )
         try? FileManager.default.removeItem(at: temp)
         if (try? exportDir.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true
             || ExportRel.containsSymlinkComponent(ScrumTracePath.export, sessionURL: sessionURL) {
-            throw SessionRecorderError.writerFailed("export/ is a symbolic link.")
-        }
-        let process = Process()
-        process.currentDirectoryURL = exportDir
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/zip")
-        // `-y` stores a symlink as a link if one is ever listed; allowList still
-        // omits links so zip cannot follow them into archive/ or another tree.
-        // Zip into temp, then moveIntoSession, so `/usr/bin/zip` cannot follow a
-        // planted pack dest into the master movie.
-        process.arguments = ["-q", "-y", temp.path, "-@"]
-        let pipe = Pipe()
-        process.standardInput = pipe
-        // `Process` resolves cwd at launch. A link planted after
-        // currentDirectoryURL would pack archive/ members (C2).
-        if (try? exportDir.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true
-            || ExportRel.containsSymlinkComponent(ScrumTracePath.export, sessionURL: sessionURL) {
             try? FileManager.default.removeItem(at: temp)
             throw SessionRecorderError.writerFailed("export/ is a symbolic link.")
         }
-        try process.run()
-        if let data = (members.joined(separator: "\n") + "\n").data(using: .utf8) {
-            try pipe.fileHandleForWriting.write(contentsOf: data)
-        }
-        try pipe.fileHandleForWriting.close()
-        process.waitUntilExit()
-        guard process.terminationStatus == 0 else {
+        if (try? stage.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
             try? FileManager.default.removeItem(at: temp)
-            throw SessionRecorderError.writerFailed("zip failed with status \(process.terminationStatus).")
+            throw SessionRecorderError.writerFailed("export/ is a symbolic link.")
+        }
+        do {
+            try ExportRel.spawnWithDirectoryFd(
+                executable: "/usr/bin/zip",
+                arguments: ["-q", "-y", temp.path, "-@"],
+                directoryFd: stageFd,
+                stdin: Data((staged.joined(separator: "\n") + "\n").utf8)
+            )
+        } catch {
+            try? FileManager.default.removeItem(at: temp)
+            throw SessionRecorderError.writerFailed("zip failed with status -1.")
         }
         do {
             try ExportRel.moveIntoSession(from: temp, relative: destRel, sessionURL: sessionURL)

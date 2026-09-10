@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import re
 import tempfile
+import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -109,18 +110,26 @@ def test_html_escaper_order() -> None:
     assert "def contained_export_member" in gen
     assert "def export_zip_members" in gen
     assert "def remove_escaping_export_links" in gen
+    assert "def write_export_zip" in gen
+    assert "def stage_export_zip_members" in gen
     assert '"-y"' in gen
     assert "is_symlink" in gen
     assert "followlinks=False" in gen
     assert "mkstemp" in gen
     assert "scrumtrace-zip-" in gen
+    assert "scrumtrace-zip-stage-" in gen
     assert "shutil.move" in gen
-    zip_build = gen.split("packed = EXPORT / \"session-pack.zip\"")[1]
-    assert "os.close(fd)" in zip_build
-    assert "tmp.unlink(missing_ok=True)" in zip_build
-    assert zip_build.index("tmp.unlink") < zip_build.index('["zip"')
-    assert "EXPORT.is_symlink" in zip_build
-    assert zip_build.index("EXPORT.is_symlink") < zip_build.index("cwd=EXPORT")
+    assert "cwd=EXPORT" not in gen
+    zip_fn = gen.split("def write_export_zip")[1].split("def export_zip_members")[0]
+    assert "os.close(fd)" in zip_fn
+    assert "tmp.unlink(missing_ok=True)" in zip_fn
+    assert zip_fn.index("tmp.unlink") < zip_fn.index('["zip"')
+    assert "export.is_symlink" in zip_fn
+    assert zip_fn.index("is_symlink") < zip_fn.index('["zip"')
+    assert "O_NOFOLLOW" in zip_fn
+    assert "fchdir" in zip_fn
+    assert "preexec_fn" in zip_fn
+    assert "cwd=None" in zip_fn
 
 
 def test_brief_template_does_not_rescan_values() -> None:
@@ -157,6 +166,57 @@ def test_brief_template_does_not_rescan_values() -> None:
         assert "media/leak.mp4" not in members
         assert not (export / "media" / "leak.mp4").exists()
         assert secret.exists()
+
+
+def test_write_export_zip_skips_symlinks_and_packs_relative_members() -> None:
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "generate_mock_session", ROOT / "scripts" / "generate_mock_session.py"
+    )
+    assert spec and spec.loader
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        export = root / "export"
+        export.mkdir()
+        (export / "shots").mkdir()
+        (export / "AGENT_CONTEXT.md").write_text("# ctx\n", encoding="utf-8")
+        (export / "shots" / "ok.png").write_bytes(b"still")
+        secret = root / "archive-session.mp4"
+        secret.write_bytes(b"MASTER-MOVIE")
+        (export / "shots" / "leak.mp4").symlink_to(secret)
+        packed = root / "session-pack.zip"
+        mod.write_export_zip(
+            export,
+            packed,
+            ["AGENT_CONTEXT.md", "shots/ok.png", "shots/leak.mp4"],
+        )
+        with zipfile.ZipFile(packed) as zf:
+            names = zf.namelist()
+            assert "AGENT_CONTEXT.md" in names
+            assert "shots/ok.png" in names
+            assert "shots/leak.mp4" not in names
+            assert "session.mp4" not in names
+            assert "archive-session.mp4" not in names
+            assert zf.read("AGENT_CONTEXT.md") == b"# ctx\n"
+            assert zf.read("shots/ok.png") == b"still"
+
+        archive = root / "archive"
+        archive.mkdir()
+        (archive / "session.mp4").write_bytes(b"MASTER-MOVIE")
+        planted = root / "export-link"
+        planted.symlink_to(archive)
+        planted_pack = root / "planted.zip"
+        try:
+            mod.write_export_zip(planted, planted_pack, ["session.mp4"])
+        except SystemExit as exc:
+            assert "symbolic link" in str(exc)
+        else:
+            raise AssertionError("write_export_zip must refuse a planted export/ symlink")
+        assert not planted_pack.exists()
+        assert secret.read_bytes() == b"MASTER-MOVIE"
 
 
 def test_zipper_never_deletes_archive() -> None:
@@ -572,10 +632,20 @@ def test_pipeline_timing_stays_in_archive() -> None:
     assert run_zip.index("removeEscapingExportLinks") < run_zip.index("compactMap")
     assert "isSymbolicLink" in run_zip
     assert "containsSymlinkComponent" in run_zip
-    assert run_zip.index("isSymbolicLink") < run_zip.index("currentDirectoryURL")
+    assert "currentDirectoryURL" in run_zip
+    assert "Process(" not in run_zip
+    assert "process.run()" not in run_zip
+    assert "spawnWithDirectoryFd" in run_zip
+    assert "scrumtrace-zip-stage" in run_zip
+    assert "copyContainedToTemporaryFile" in run_zip
+    assert "placeIntoOpenedDirectory" in run_zip
+    assert "openUnfollowedDirectory" in run_zip
+    assert "posix_spawn_file_actions_addfchdir_np" in run_zip
+    assert run_zip.index("isSymbolicLink") < run_zip.index("spawnWithDirectoryFd")
     assert run_zip.count("isSymbolicLink") >= 3
-    assert run_zip.rfind("isSymbolicLink") < run_zip.index("process.run()")
+    assert run_zip.rfind("isSymbolicLink") < run_zip.index("spawnWithDirectoryFd")
     assert 'writerFailed("export/ is a symbolic link.")' in run_zip
+    assert "zip failed with status" in run_zip
     zip_fn = zipper.split("func zip(")[1].split("func writeZip")[0]
     assert "isUsableSessionRoot" in zip_fn
     assert "removeEscapingExportLinks" in zip_fn
@@ -1229,6 +1299,23 @@ def test_write_contained_data_refuses_directory_symlinks() -> None:
     assert "scrumtraceRenameat" in models
     assert "scrumtraceUnlinkat" in models
     assert "func openatDirectory" in models
+    assert "func openUnfollowedDirectory" in models
+    assert "func placeIntoOpenedDirectory" in models
+    assert "func spawnWithDirectoryFd" in models
+    assert "posix_spawn_file_actions_addfchdir_np" in models
+    assert "mkdirat" in models
+    place_fn = models.split("static func placeIntoOpenedDirectory")[1].split(
+        "static func spawnWithDirectoryFd"
+    )[0]
+    assert "mkdirat" in place_fn
+    assert "openat" in place_fn
+    assert "O_NOFOLLOW" in place_fn
+    assert "scrumtraceRenameat" in place_fn
+    spawn_fn = models.split("static func spawnWithDirectoryFd")[1].split("enum MediaBudget")[0]
+    assert "posix_spawn_file_actions_addfchdir_np" in spawn_fn
+    assert "currentDirectoryURL" in spawn_fn
+    assert "posix_spawn(" in spawn_fn
+    assert "Process(" not in spawn_fn
     assert "O_EXCL" in models
     read_fn = models.split("static func readContainedData(relative:")[1].split("static func readContainedData(_ file")[0]
     assert "openatFile" in read_fn

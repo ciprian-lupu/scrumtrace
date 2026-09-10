@@ -206,6 +206,89 @@ def iter_export_files(root: Path):
                 yield path
 
 
+def _copy_unfollowed(src: Path, dest: Path) -> None:
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    src_fd = os.open(src, flags)
+    try:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        if dest.parent.is_symlink() or dest.is_symlink():
+            raise SystemExit("export/ is a symbolic link")
+        dest_fd = os.open(dest, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        try:
+            while True:
+                chunk = os.read(src_fd, 1024 * 1024)
+                if not chunk:
+                    break
+                os.write(dest_fd, chunk)
+        finally:
+            os.close(dest_fd)
+    finally:
+        os.close(src_fd)
+
+
+def stage_export_zip_members(export: Path, members: list[str], stage: Path) -> list[str]:
+    if stage.is_symlink():
+        raise SystemExit("export/ is a symbolic link")
+    staged: list[str] = []
+    for member in members:
+        src = export / member
+        if src.is_symlink() or not src.is_file():
+            continue
+        dest = stage / member
+        try:
+            _copy_unfollowed(src, dest)
+        except OSError:
+            continue
+        if dest.is_symlink() or dest.parent.is_symlink():
+            dest.unlink(missing_ok=True)
+            continue
+        staged.append(member)
+    return staged
+
+
+def write_export_zip(export: Path, packed: Path, members: list[str]) -> None:
+    """Zip from an O_NOFOLLOW staging directory fd. Never `cwd=export/`."""
+    if export.is_symlink():
+        raise SystemExit("export/ is a symbolic link")
+    stage = Path(tempfile.mkdtemp(prefix="scrumtrace-zip-stage-"))
+    fd = -1
+    tmp: Path | None = None
+    try:
+        staged = stage_export_zip_members(export, members, stage)
+        if not staged:
+            raise SystemExit("export/ allow-list is empty; nothing to zip.")
+        flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+        fd = os.open(stage, flags)
+        zip_fd, tmp_name = tempfile.mkstemp(prefix="scrumtrace-zip-", suffix=".zip")
+        os.close(zip_fd)
+        tmp = Path(tmp_name)
+        # zip cannot update an empty placeholder; Swift runZip also removes the temp first.
+        tmp.unlink(missing_ok=True)
+        if export.is_symlink() or stage.is_symlink():
+            raise SystemExit("export/ is a symbolic link")
+
+        def _chdir_stage() -> None:
+            os.fchdir(fd)
+
+        subprocess.run(
+            ["zip", "-q", "-y", str(tmp), "-@"],
+            cwd=None,
+            preexec_fn=_chdir_stage,
+            input="\n".join(staged) + "\n",
+            text=True,
+            check=True,
+        )
+        packed.unlink(missing_ok=True)
+        shutil.move(str(tmp), packed)
+        tmp = None
+    finally:
+        if fd >= 0:
+            os.close(fd)
+        shutil.rmtree(stage, ignore_errors=True)
+        if tmp is not None:
+            tmp.unlink(missing_ok=True)
+
+
 def export_zip_members(export: Path) -> list[str]:
     remove_escaping_export_links(export)
     named = [
@@ -461,25 +544,7 @@ This pack is `samples/mock-session/export/` only. Do not hand `archive/` (this m
     packed = EXPORT / "session-pack.zip"
     packed.unlink(missing_ok=True)
     members = export_zip_members(EXPORT)
-    fd, tmp_name = tempfile.mkstemp(prefix="scrumtrace-zip-", suffix=".zip")
-    os.close(fd)
-    tmp = Path(tmp_name)
-    # zip cannot update an empty placeholder; Swift runZip also removes the temp first.
-    tmp.unlink(missing_ok=True)
-    if EXPORT.is_symlink():
-        raise SystemExit("export/ is a symbolic link")
-    try:
-        subprocess.run(
-            ["zip", "-q", "-y", str(tmp), "-@"],
-            cwd=EXPORT,
-            input="\n".join(members) + "\n",
-            text=True,
-            check=True,
-        )
-        packed.unlink(missing_ok=True)
-        shutil.move(str(tmp), packed)
-    finally:
-        tmp.unlink(missing_ok=True)
+    write_export_zip(EXPORT, packed, members)
     size = packed.stat().st_size
     print(f"export ready at {EXPORT} zip={size} bytes")
 

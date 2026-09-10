@@ -752,6 +752,224 @@ enum ExportRel {
         guard filled == size else { return nil }
         return String(data: data, encoding: .utf8)
     }
+
+    /// Open a directory without following a last-component symlink. Caller closes.
+    static func openUnfollowedDirectory(_ url: URL) -> Int32? {
+        if (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+            return nil
+        }
+        let fd = url.withUnsafeFileSystemRepresentation { ptr -> Int32 in
+            guard let ptr else { return -1 }
+            return Darwin.open(ptr, O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW)
+        }
+        guard fd >= 0 else { return nil }
+        var info = stat()
+        guard Darwin.fstat(fd, &info) == 0, (info.st_mode & S_IFMT) == S_IFDIR else {
+            Darwin.close(fd)
+            return nil
+        }
+        return fd
+    }
+
+    static func closeDescriptor(_ fd: Int32) {
+        if fd >= 0 {
+            Darwin.close(fd)
+        }
+    }
+
+    /// `renameat` a temp file into a directory already opened with `O_NOFOLLOW`.
+    /// Nested parents are `mkdirat`/`openat` so a planted `shots/` link in the
+    /// zip staging folder cannot steal pack members.
+    static func placeIntoOpenedDirectory(from temp: URL, relative: String, directoryFd: Int32) throws {
+        guard directoryFd >= 0 else {
+            throw SessionVaultError.writeFailed(relative)
+        }
+        guard let parts = normalizedComponents(relative), let destName = parts.last, !destName.isEmpty else {
+            throw SessionVaultError.writeFailed(relative)
+        }
+        if (try? temp.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+            throw SessionVaultError.writeFailed(relative)
+        }
+        var current = directoryFd
+        var toClose: [Int32] = []
+        defer {
+            for fd in toClose.reversed() {
+                Darwin.close(fd)
+            }
+        }
+        for part in parts.dropLast() {
+            let existing = part.withCString { name in
+                Darwin.openat(current, name, O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW)
+            }
+            if existing >= 0 {
+                if current != directoryFd {
+                    toClose.append(current)
+                }
+                current = existing
+                continue
+            }
+            let made = part.withCString { name in
+                Darwin.mkdirat(current, name, 0o700)
+            }
+            if made != 0 {
+                let err = Darwin.errno
+                guard err == EEXIST else {
+                    throw SessionVaultError.writeFailed(relative)
+                }
+            }
+            let created = part.withCString { name in
+                Darwin.openat(current, name, O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW)
+            }
+            guard created >= 0 else {
+                throw SessionVaultError.writeFailed(relative)
+            }
+            if current != directoryFd {
+                toClose.append(current)
+            }
+            current = created
+        }
+        if current != directoryFd {
+            toClose.append(current)
+        }
+        _ = destName.withCString { name in
+            scrumtraceUnlinkat(current, name, 0)
+        }
+        let tmpName = temp.lastPathComponent
+        let tmpParent = temp.deletingLastPathComponent()
+        let srcDirFd = tmpParent.withUnsafeFileSystemRepresentation { ptr -> Int32 in
+            guard let ptr else { return -1 }
+            return Darwin.open(ptr, O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW)
+        }
+        guard srcDirFd >= 0 else {
+            throw SessionVaultError.writeFailed(relative)
+        }
+        defer { Darwin.close(srcDirFd) }
+        let renamed = tmpName.withCString { fromName in
+            destName.withCString { toName in
+                scrumtraceRenameat(srcDirFd, fromName, current, toName)
+            }
+        }
+        guard renamed == 0 else {
+            throw SessionVaultError.writeFailed(relative)
+        }
+        let placed = destName.withCString { name in
+            Darwin.openat(current, name, O_RDONLY | O_CLOEXEC | O_NOFOLLOW)
+        }
+        guard placed >= 0 else {
+            _ = destName.withCString { name in
+                scrumtraceUnlinkat(current, name, 0)
+            }
+            throw SessionVaultError.writeFailed(relative)
+        }
+        defer { Darwin.close(placed) }
+        var info = stat()
+        guard Darwin.fstat(placed, &info) == 0, (info.st_mode & S_IFMT) == S_IFREG else {
+            _ = destName.withCString { name in
+                scrumtraceUnlinkat(current, name, 0)
+            }
+            throw SessionVaultError.writeFailed(relative)
+        }
+    }
+
+    /// Spawn `executable` with cwd bound to an already-opened directory fd.
+    /// `Process.currentDirectoryURL` re-resolves the path at launch and would
+    /// follow a planted `export/` → `archive/` link (C2).
+    static func spawnWithDirectoryFd(
+        executable: String,
+        arguments: [String],
+        directoryFd: Int32,
+        stdin payload: Data
+    ) throws {
+        guard directoryFd >= 0 else {
+            throw SessionVaultError.writeFailed("spawn")
+        }
+        var fds: [Int32] = [0, 0]
+        let piped = fds.withUnsafeMutableBufferPointer { buf -> Int32 in
+            guard let base = buf.baseAddress else { return -1 }
+            return Darwin.pipe(base)
+        }
+        guard piped == 0 else {
+            throw SessionVaultError.writeFailed("spawn")
+        }
+        let readFd = fds[0]
+        let writeFd = fds[1]
+        _ = Darwin.fcntl(readFd, F_SETFD, FD_CLOEXEC)
+        _ = Darwin.fcntl(writeFd, F_SETFD, FD_CLOEXEC)
+
+        var actions: posix_spawn_file_actions_t? = nil
+        guard posix_spawn_file_actions_init(&actions) == 0 else {
+            Darwin.close(readFd)
+            Darwin.close(writeFd)
+            throw SessionVaultError.writeFailed("spawn")
+        }
+        defer { posix_spawn_file_actions_destroy(&actions) }
+
+        guard posix_spawn_file_actions_addfchdir_np(&actions, directoryFd) == 0,
+              posix_spawn_file_actions_adddup2(&actions, readFd, STDIN_FILENO) == 0,
+              posix_spawn_file_actions_addclose(&actions, readFd) == 0,
+              posix_spawn_file_actions_addclose(&actions, writeFd) == 0 else {
+            Darwin.close(readFd)
+            Darwin.close(writeFd)
+            throw SessionVaultError.writeFailed("spawn")
+        }
+
+        var argv: [UnsafeMutablePointer<CChar>?] = ([executable] + arguments).map { strdup($0) }
+        argv.append(nil)
+        defer {
+            for ptr in argv {
+                if let ptr { free(ptr) }
+            }
+        }
+        var env: [UnsafeMutablePointer<CChar>?] = ProcessInfo.processInfo.environment.map { key, value in
+            strdup("\(key)=\(value)")
+        }
+        env.append(nil)
+        defer {
+            for ptr in env {
+                if let ptr { free(ptr) }
+            }
+        }
+
+        var pid: pid_t = 0
+        let spawned = argv.withUnsafeBufferPointer { argvBuf -> Int32 in
+            env.withUnsafeBufferPointer { envBuf -> Int32 in
+                executable.withCString { path in
+                    posix_spawn(
+                        &pid,
+                        path,
+                        &actions,
+                        nil,
+                        argvBuf.baseAddress,
+                        envBuf.baseAddress
+                    )
+                }
+            }
+        }
+        Darwin.close(readFd)
+        guard spawned == 0 else {
+            Darwin.close(writeFd)
+            throw SessionVaultError.writeFailed("spawn")
+        }
+        if !payload.isEmpty {
+            _ = payload.withUnsafeBytes { buf -> Int in
+                guard let base = buf.baseAddress else { return -1 }
+                var offset = 0
+                let size = buf.count
+                while offset < size {
+                    let n = Darwin.write(writeFd, base.advanced(by: offset), size - offset)
+                    if n <= 0 { return -1 }
+                    offset += Int(n)
+                }
+                return offset
+            }
+        }
+        Darwin.close(writeFd)
+        var status: Int32 = 0
+        let waited = Darwin.waitpid(pid, &status, 0)
+        guard waited == pid, (status & 0o177) == 0, ((status >> 8) & 0xff) == 0 else {
+            throw SessionVaultError.writeFailed("spawn")
+        }
+    }
 }
 
 enum MediaBudget {
