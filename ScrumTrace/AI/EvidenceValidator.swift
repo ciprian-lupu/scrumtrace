@@ -239,6 +239,10 @@ enum EvidenceValidator {
                     return true
                 }
                 if framesOverlapSlice([path], slice: slice, shots: shots, sessionURL: sessionURL) {
+                    if task.status == .confirmed,
+                       ownedByOtherAssociatedShot(path, slice: slice, shots: shots) {
+                        return false
+                    }
                     return true
                 }
                 // D7: a merge-clamped Shot review row has only that Shot's

@@ -698,6 +698,7 @@ def test_retry_failed_slices_and_pins() -> None:
     assert "testWipeContainedDirectoryDoesNotFollowSymlinkIntoArchive" in contracts
     assert "testRemoveOwnedSessionFolderDoesNotFollowSessionSymlink" in contracts
     assert "testApplyExportEvidenceDemotesInvertedAndOutOfSliceQuotes" in contracts
+    assert "testApplyExportEvidenceDropsOtherAssociatedShotFromConfirmed" in contracts
     assert "testPackMediaHandoffDropsOmittedExportFile" in contracts
     assert "testCanConfirmRejectsFrameFromAnotherSlice" in contracts
     assert "testCanConfirmRejectsStillOutsideClampedWindow" in contracts

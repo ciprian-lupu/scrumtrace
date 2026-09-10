@@ -1904,6 +1904,80 @@ final class ContractTests: XCTestCase {
         XCTAssertTrue(leftover[0].evidenceMedia.isEmpty)
     }
 
+    func testApplyExportEvidenceDropsOtherAssociatedShotFromConfirmed() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("st-export-other-\(UUID().uuidString)")
+        let shotsDir = root.appendingPathComponent("export/shots")
+        try FileManager.default.createDirectory(at: shotsDir, withIntermediateDirectories: true)
+        try Data("one".utf8).write(to: shotsDir.appendingPathComponent("001.jpg"))
+        try Data("two".utf8).write(to: shotsDir.appendingPathComponent("002.jpg"))
+        defer { try? FileManager.default.removeItem(at: root) }
+        let slice = SliceRecord(
+            sliceId: "slice-01",
+            startMedia: 0,
+            endMedia: 40,
+            trigger: .shot,
+            associatedShotId: "shot-001",
+            clipPath: nil,
+            stills: ["shots/001.jpg", "shots/002.jpg"],
+            analysisStatus: .success,
+            score: 1
+        )
+        let associated = ShotRecord(
+            id: "shot-001",
+            tMedia: 12,
+            rawPath: "shots/001.jpg",
+            annotatedPath: nil,
+            note: "associated",
+            source: .typed
+        )
+        let merged = ShotRecord(
+            id: "shot-002",
+            tMedia: 28,
+            rawPath: "shots/002.jpg",
+            annotatedPath: nil,
+            note: "merged in window",
+            source: .typed
+        )
+        let confirmed = TaskRecord(
+            taskId: "TASK-01",
+            sourceSliceId: "slice-01",
+            kind: .bug,
+            status: .confirmed,
+            title: "Save",
+            observed: "button",
+            stated: "said",
+            inferred: "maybe",
+            agentInstructions: "inspect",
+            quotes: [],
+            evidenceMedia: ["shots/001.jpg", "shots/002.jpg"],
+            confidence: 0.9
+        )
+        let review = TaskRecord(
+            taskId: "TASK-02",
+            sourceSliceId: "slice-01",
+            kind: .bug,
+            status: .needsReview,
+            title: "Human shot requires review",
+            observed: "Human-captured frame",
+            stated: "merged in window",
+            inferred: "",
+            agentInstructions: "inspect",
+            quotes: [],
+            evidenceMedia: ["shots/002.jpg"],
+            confidence: 0
+        )
+        let applied = EvidenceValidator.applyExportEvidence(
+            tasks: [confirmed, review],
+            sessionURL: root,
+            slices: [slice],
+            shots: [associated, merged]
+        )
+        XCTAssertEqual(applied[0].status, .confirmed)
+        XCTAssertEqual(applied[0].evidenceMedia, ["shots/001.jpg"])
+        XCTAssertEqual(applied[1].status, .needsReview)
+        XCTAssertEqual(applied[1].evidenceMedia, ["shots/002.jpg"])
+    }
+
     func testApplyExportEvidenceDemotesInvertedAndOutOfSliceQuotes() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("scrumtrace-export-quote-\(UUID().uuidString)")
         let shots = root.appendingPathComponent("export/shots")
