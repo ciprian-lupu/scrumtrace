@@ -133,6 +133,17 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             // the first buffer so a missing file cannot default to a room mic.
             try persistCaptureLayout()
             try await stream.startCapture()
+            // startCapture can run for a long time. Freeze or a credential
+            // app that appeared while the stream was starting must still
+            // win — do not return with writers live (C1).
+            if shouldPauseCapture() {
+                syncWriter {
+                    if !self.paused {
+                        self.paused = true
+                        self.clock.beginPause()
+                    }
+                }
+            }
         } catch {
             await abortFailedStart()
             throw error

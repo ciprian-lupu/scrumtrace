@@ -892,8 +892,14 @@ def test_pipeline_timing_stays_in_archive() -> None:
     assert "persistLivePipelineStatus" in controller
     assert "shouldPauseCapture" in start_rec
     assert "currentCredentialApp" in start_rec
+    assert "isCurrentlyTripped" in start_rec
+    assert "unpauseCaptureIfPrivacyClear" in start_rec
+    assert start_rec.index("if recorder.isPaused") < start_rec.index("unpauseCaptureIfPrivacyClear")
     assert start_rec.index("privacy.start()") < start_rec.index("shouldPauseCapture")
-    assert start_rec.index("privacy.start()") < start_rec.index("phase == .recording")
+    assert start_rec.index("privacy.start()") < start_rec.index("phase = .recording")
+    assert "if phase == .recording" not in start_rec
+    assert "sampler.isSuspended = false" not in start_rec
+    assert "isCurrentlyTripped || privacy.currentCredentialApp" in start_rec
     assert "transcriber.prepare" in controller
     hud = (ROOT / "ScrumTrace" / "UI" / "RecordingHUDWindow.swift").read_text()
     assert "wallElapsed" in hud
@@ -988,6 +994,8 @@ def test_pause_privacy_and_metadata_gate() -> None:
     assert "captureState == .paused" not in resume_ok
     assert "currentCredentialApp" in resume_ok
     assert toggle.index("isCurrentlyTripped") < toggle.index("currentCredentialApp")
+    assert "unpauseCaptureIfPrivacyClear" in toggle
+    assert toggle.index("isCurrentlyTripped") < toggle.index("unpauseCaptureIfPrivacyClear")
     assert "persistLivePipelineStatus" in toggle
     assert "kickMetadataSample" in toggle
     persist_live = controller.split("func persistLivePipelineStatus")[1].split("func flashStatus")[0]
@@ -1063,11 +1071,22 @@ def test_pause_privacy_and_metadata_gate() -> None:
     assert "unstickWriterIfPrivacyMissed" in resume_priv
     assert "currentCredentialApp" in resume_priv
     assert "kickMetadataSample" in resume_priv
+    assert "unpauseCaptureIfPrivacyClear" in resume_priv
     unstick = controller.split("func unstickWriterIfPrivacyMissed")[1].split("func startTimer")[0]
     assert "phase == .recording" in unstick
     assert "recorder?.isPaused == true" in unstick
     assert "!pausedByPrivacy" in unstick
     assert "kickMetadataSample" in unstick
+    assert "unpauseCaptureIfPrivacyClear" in unstick
+    assert "isCurrentlyTripped" in unstick
+    helper = controller.split("func unpauseCaptureIfPrivacyClear")[1].split("func unstickWriterIfPrivacyMissed")[0]
+    assert "isCurrentlyTripped" in helper
+    assert "setPaused(false)" in helper
+    assert helper.index("isCurrentlyTripped") < helper.index("setPaused(false)")
+    assert helper.index("setPaused(false)") < helper.rindex("isCurrentlyTripped")
+    assert "sampler.isSuspended = false" in helper
+    assert helper.index("setPaused(false)") < helper.index("sampler.isSuspended = false")
+    assert "recorder?.isPaused == true" in helper
     start_timer = controller.split("func startTimer")[1].split("func sampleMetadataTick")[0]
     assert "kickMetadataSample" in start_timer
     assert "wallElapsed = clock.currentWallSeconds()" in start_timer
@@ -1395,6 +1414,8 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "persistCaptureLayout()" in start_fn
     assert start_fn.index("self.microphoneWav = mic") < start_fn.index("persistCaptureLayout")
     assert start_fn.index("persistCaptureLayout") < start_fn.index("startCapture")
+    assert start_fn.count("shouldPauseCapture()") == 2
+    assert start_fn.index("startCapture") < start_fn.rindex("shouldPauseCapture()")
     prep_head = start_fn[start_fn.index("markRecordingStarted") : start_fn.index("prepareWriters")]
     assert "do {" in prep_head
     assert start_fn.index("prepareWriters") < start_fn.index("await abortFailedStart()")

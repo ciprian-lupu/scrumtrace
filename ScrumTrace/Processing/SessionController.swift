@@ -107,9 +107,11 @@ final class SessionController: ObservableObject {
                 statusLine = "Still auto-paused for a password manager"
                 return
             }
+            if !unpauseCaptureIfPrivacyClear() {
+                statusLine = "Still auto-paused for a password manager"
+                return
+            }
             pausedByPrivacy = false
-            recorder?.setPaused(false)
-            sampler.isSuspended = false
             phase = .recording
             statusLine = "Recording"
             log(.resume, [:])
@@ -261,7 +263,7 @@ final class SessionController: ObservableObject {
             // sheet must freeze writers, not wait until start() returns (C1).
             privacy.start()
             try await recorder.start(shouldPauseCapture: { [privacy] in
-                privacy.currentCredentialApp() != nil
+                privacy.isCurrentlyTripped || privacy.currentCredentialApp() != nil
             })
             abandonedId = nil
             self.recorder = recorder
@@ -287,16 +289,32 @@ final class SessionController: ObservableObject {
                 if recorder.isPaused {
                     recorder.setPaused(false)
                 }
-                phase = .recording
-                statusLine = "Recording"
+                // CaptureFreeze can land between currentCredentialApp() == nil
+                // and this unpause. Do not unsuspend metadata from `phase`
+                // alone — that would clear a freeze that just posted (C1).
+                if unpauseCaptureIfPrivacyClear() {
+                    phase = .recording
+                    statusLine = "Recording"
+                    NotificationCenter.default.post(
+                        name: .scrumTraceCaptureGate,
+                        object: CaptureSessionState.recording
+                    )
+                } else {
+                    pausedByPrivacy = true
+                    phase = .paused
+                    let bundle = privacy.currentCredentialApp() ?? "a password manager"
+                    statusLine = "Auto-paused for \(bundle)"
+                    log(.privacyPause, ["bundle": bundle])
+                    NotificationCenter.default.post(
+                        name: .scrumTraceCaptureGate,
+                        object: CaptureSessionState.paused
+                    )
+                }
             }
             if var local = manifest {
                 local.pipelineStatus = phase
                 try? vault.write(manifest: &local)
                 manifest = local
-            }
-            if phase == .recording {
-                sampler.isSuspended = false
             }
             startTimer()
             log(.start, [:])
@@ -648,9 +666,8 @@ final class SessionController: ObservableObject {
         guard isRecording else { return }
         if privacy.isCurrentlyTripped || privacy.currentCredentialApp() != nil { return }
         if pausedByPrivacy, phase == .paused {
+            if !unpauseCaptureIfPrivacyClear() { return }
             pausedByPrivacy = false
-            recorder?.setPaused(false)
-            sampler.isSuspended = false
             phase = .recording
             statusLine = "Recording"
             log(.resume, ["reason": "privacy_clear"])
@@ -662,12 +679,36 @@ final class SessionController: ObservableObject {
         unstickWriterIfPrivacyMissed()
     }
 
+    /// Unpause writers and metadata only when a credential app is not frontmost.
+    /// Re-check after unpause and after unsuspend: CaptureFreeze can freeze on
+    /// the privacy timer between the MainActor check and `setPaused(false)` (C1).
+    private func unpauseCaptureIfPrivacyClear() -> Bool {
+        if privacy.isCurrentlyTripped || privacy.currentCredentialApp() != nil {
+            recorder?.setPaused(true)
+            sampler.isSuspended = true
+            return false
+        }
+        recorder?.setPaused(false)
+        if privacy.isCurrentlyTripped || privacy.currentCredentialApp() != nil {
+            recorder?.setPaused(true)
+            sampler.isSuspended = true
+            return false
+        }
+        sampler.isSuspended = false
+        if privacy.isCurrentlyTripped || privacy.currentCredentialApp() != nil || recorder?.isPaused == true {
+            recorder?.setPaused(true)
+            sampler.isSuspended = true
+            return false
+        }
+        return true
+    }
+
     /// Writer paused by CaptureFreeze, phase not yet `.paused`, credential app gone.
     /// Do not treat a user Pause (`phase == .paused`, `pausedByPrivacy == false`) as this.
     private func unstickWriterIfPrivacyMissed() {
         guard !pausedByPrivacy, phase == .recording, recorder?.isPaused == true else { return }
-        recorder?.setPaused(false)
-        sampler.isSuspended = false
+        if privacy.isCurrentlyTripped || privacy.currentCredentialApp() != nil { return }
+        if !unpauseCaptureIfPrivacyClear() { return }
         statusLine = "Recording"
         NotificationCenter.default.post(name: .scrumTraceCaptureGate, object: CaptureSessionState.recording)
         kickMetadataSample()
