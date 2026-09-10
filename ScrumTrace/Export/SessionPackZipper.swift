@@ -223,10 +223,14 @@ struct SessionPackZipper {
         guard bytes > MediaBudget.maxZipBytes else { return bytes }
         do {
             try ExportRel.removeItemIfRegularFile(zipURL, sessionRoot: sessionURL)
-            return 0
         } catch {
-            return bytes
+            ExportRel.unlinkLastComponentUnfollowed(zipURL)
         }
+        let leftover = ExportRel.regularFileByteCount(relative: ScrumTracePath.packZip, sessionURL: sessionURL) ?? 0
+        if leftover > MediaBudget.maxZipBytes {
+            ExportRel.unlinkLastComponentUnfollowed(zipURL)
+        }
+        return ExportRel.regularFileByteCount(relative: ScrumTracePath.packZip, sessionURL: sessionURL) ?? 0
     }
 
     /// Weigh the zip with `openat`/`fstat`. Following a dest symlink would

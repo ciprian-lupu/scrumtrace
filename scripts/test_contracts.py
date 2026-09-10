@@ -1614,6 +1614,8 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "maxZipBytes" in discard_pack
     assert "removeItemIfRegularFile(zipURL" in discard_pack
     assert "try? ExportRel.removeItemIfRegularFile(zipURL" not in discard_pack
+    assert "unlinkLastComponentUnfollowed(zipURL" in discard_pack
+    assert discard_pack.count("unlinkLastComponentUnfollowed(zipURL") >= 2
     brief = (ROOT / "ScrumTrace" / "Export" / "SessionBriefRenderer.swift").read_text()
     fallback = brief.split("let fallbackShell")[1].split("let fallbackCSS")[0]
     assert "{{TIMELINE_HTML}}" in fallback
