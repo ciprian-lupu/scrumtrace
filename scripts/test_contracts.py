@@ -332,6 +332,10 @@ def test_zipper_never_deletes_archive() -> None:
     project_fn = projector.split("func project")[1].split("func resetExportTree")[0]
     assert "resetExportTree" in project_fn
     assert "removeEscapingExportLinks" in project_fn
+    evidence_map = project_fn.split("for task in manifest.tasks")[1].split("projected.shots")[0]
+    assert "Set(placed.values).contains" in evidence_map
+    assert "existingSessionFile(session, sessionURL: sessionURL)" not in evidence_map
+    assert "rewriteEvidence(path)" in evidence_map
     reset = projector.split("func resetExportTree")[1].split("func writeProjectionManifest")[0]
     assert "wipeContainedDirectory" in reset
     assert "removeItem(at: export)" not in reset
@@ -687,6 +691,7 @@ def test_retry_failed_slices_and_pins() -> None:
     assert "testWipeContainedDirectoryDoesNotFollowSymlinkIntoArchive" in contracts
     assert "testRemoveOwnedSessionFolderDoesNotFollowSessionSymlink" in contracts
     assert "testApplyExportEvidenceDemotesInvertedAndOutOfSliceQuotes" in contracts
+    assert "testPackMediaHandoffDropsOmittedExportFile" in contracts
     assert "testMergeCanonicalStatusesKeepsArchiveEvidence" in contracts
     models = (ROOT / "ScrumTrace" / "Storage" / "SessionModels.swift").read_text()
     existing_media = models.split("func withExistingMedia")[1].split("enum CodingKeys")[0]
@@ -1456,6 +1461,9 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "func omittedHandoffPath" in models
     assert "func handoffFileIfPresent" in models
     assert "func packMediaHandoff" in models
+    assert "func isOmittedFromPack" in models
+    pack_handoff = models.split("static func packMediaHandoff")[1].split("static func packMediaRelative")[0]
+    assert "isOmittedFromPack" in pack_handoff
     assert "func packMediaRelative" in models
     assert "func isVisualEvidence" in models
     pack_rel = models.split("static func packMediaRelative")[1].split("static func isVisualEvidence")[0]
@@ -1548,14 +1556,18 @@ def test_phase45_clip_consent_and_budget() -> None:
     agent = (ROOT / "ScrumTrace" / "Export" / "AgentContextRenderer.swift").read_text()
     assert "stillCandidates" in agent.split("func displayPath")[1]
     assert "packMediaHandoff" in agent.split("func displayPath")[1]
+    assert "omitted: omitted" in agent.split("func displayPath")[1]
     assert "packMediaHandoff" in agent.split("private func taskBlock")[1].split("private func displayPath")[0]
+    assert "omitted: omitted" in agent.split("private func taskBlock")[1].split("private func displayPath")[0]
     assert "remain in archive/" not in processor
     assert "applyExportEvidence" in processor
     assert processor.count("EvidenceValidator.applyExportEvidence") == 3
     for chunk in processor.split("EvidenceValidator.applyExportEvidence")[1:]:
         head = chunk.split(")")[0]
         assert "transcript: transcript" in head
+        assert "omitted: projection.manifest.omitted" in head
     assert processor.count("slices: projection.manifest.slices") == 3
+    assert processor.count("omitted: projection.manifest.omitted") == 3
     assert "mergeCanonicalStatuses" in processor
     assert "canonical: manifest.tasks" in processor
     assert "projected: projection.manifest.tasks" in processor
@@ -1887,6 +1899,7 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "func markRecordingStopped" in clock
     shots_fn = brief_src.split("private func shots")[1].split("private func omittedHTML")[0]
     assert "packMediaHandoff" in shots_fn
+    assert "omitted: manifest.omitted" in shots_fn
     google = (ROOT / "ScrumTrace" / "AI" / "GoogleClient.swift").read_text()
     assert "var candidates: [Candidate]?" in google
     assert "var content: Content?" in google

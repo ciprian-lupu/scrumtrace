@@ -133,14 +133,13 @@ struct ExportProjector {
                 if let mapped = placed[ExportRel.sessionPath(path)] {
                     return mapped
                 }
-                guard let exportCandidate = rewriteEvidence(path) else {
-                    omitted.append(OmittedAsset(path: path, reason: "Not present under export/ after projection"))
-                    return nil
-                }
-                let session = ExportRel.sessionPath(exportCandidate)
-                if ExportRel.isUnderExport(session),
-                   ExportRel.existingSessionFile(session, sessionURL: sessionURL) != nil {
-                    return ExportRel.toExportRoot(session)
+                // Only files this projection copied. A leftover or same-named
+                // export file is not this candidate's evidence (C5).
+                if let exportCandidate = rewriteEvidence(path) {
+                    let exportRoot = ExportRel.toExportRoot(ExportRel.sessionPath(exportCandidate))
+                    if Set(placed.values).contains(exportRoot) {
+                        return exportRoot
+                    }
                 }
                 omitted.append(OmittedAsset(path: path, reason: "Not present under export/ after projection"))
                 return nil

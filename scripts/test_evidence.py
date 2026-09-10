@@ -176,6 +176,8 @@ def test_frame_ref_basename_resolves() -> None:
     apply_fn = validator.split("static func applyExportEvidence")[1].split("static func exportFileExists")[0]
     assert "quoteMatchesTranscript" in apply_fn
     assert "packMediaHandoff" in apply_fn
+    assert "omitted: [OmittedAsset]" in apply_fn
+    assert "omitted: omitted" in apply_fn
     assert "exportFileExists(path" not in apply_fn
     assert "transcript: FullTranscript?" in apply_fn
     assert "slices: [SliceRecord]" in apply_fn

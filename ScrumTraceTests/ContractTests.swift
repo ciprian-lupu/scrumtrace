@@ -58,6 +58,26 @@ final class ContractTests: XCTestCase {
         XCTAssertNil(ExportRel.handoffFileIfPresent("export/shots/leak.jpg", sessionURL: root))
     }
 
+    func testPackMediaHandoffDropsOmittedExportFile() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("st-omitted-handoff-\(UUID().uuidString)")
+        let shots = root.appendingPathComponent("export/shots")
+        try FileManager.default.createDirectory(at: shots, withIntermediateDirectories: true)
+        try Data("jpg").write(to: shots.appendingPathComponent("001.jpg"))
+        defer { try? FileManager.default.removeItem(at: root) }
+        XCTAssertEqual(
+            ExportRel.packMediaHandoff("shots/001.jpg", sessionURL: root),
+            "shots/001.jpg"
+        )
+        let omitted = [OmittedAsset(path: "shots/001.jpg", reason: "Pack over 35 MB; dropped by priority")]
+        XCTAssertNil(ExportRel.packMediaHandoff("shots/001.jpg", sessionURL: root, omitted: omitted))
+        XCTAssertNil(ExportRel.packMediaHandoff("export/shots/001.jpg", sessionURL: root, omitted: omitted))
+        let zipOnly = [OmittedAsset(path: "session-pack.zip", reason: "Pack exceeded 35 MB after rebuild")]
+        XCTAssertEqual(
+            ExportRel.packMediaHandoff("shots/001.jpg", sessionURL: root, omitted: zipOnly),
+            "shots/001.jpg"
+        )
+    }
+
     func testWriteContainedDataReplacesArchiveJSONSymlink() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("st-contained-json-\(UUID().uuidString)")
         let archive = root.appendingPathComponent("archive")
@@ -1600,6 +1620,13 @@ final class ContractTests: XCTestCase {
         XCTAssertEqual(applied[3].evidenceMedia, ["shots/001.jpg"])
         XCTAssertEqual(applied[4].status, .needsReview)
         XCTAssertTrue(applied[4].evidenceMedia.isEmpty)
+        let leftover = EvidenceValidator.applyExportEvidence(
+            tasks: [kept],
+            sessionURL: root,
+            omitted: [OmittedAsset(path: "shots/001.jpg", reason: "Pack over 35 MB; dropped by priority")]
+        )
+        XCTAssertEqual(leftover[0].status, .needsReview)
+        XCTAssertTrue(leftover[0].evidenceMedia.isEmpty)
     }
 
     func testApplyExportEvidenceDemotesInvertedAndOutOfSliceQuotes() throws {

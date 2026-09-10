@@ -322,7 +322,35 @@ enum ExportRel {
 
     /// Export-relative still/clip path safe for HTML `src`/`href` and markdown `![]()`.
     /// `javascript:` / `..` / `()` would break out of `img.src` or `![]()`.
-    static func packMediaHandoff(_ path: String, sessionURL: URL) -> String? {
+    /// Paths listed in `omitted[]` are not pack evidence even if the file is still on disk (C3/C5).
+    static func isOmittedFromPack(_ path: String, omitted: [OmittedAsset]) -> Bool {
+        guard !omitted.isEmpty else { return false }
+        let skipped: Set<String> = [
+            "session-pack.zip",
+            "OMITTED.md",
+            "AGENT_CONTEXT.md",
+            "SESSION_BRIEF.html",
+            "AGENT_PROMPT.txt",
+            "session.manifest.json"
+        ]
+        var dropped = Set<String>()
+        for item in omitted {
+            let root = toExportRoot(item.path)
+            if root.isEmpty || skipped.contains(root) { continue }
+            dropped.insert(root)
+            dropped.insert(omittedHandoffPath(item.path))
+        }
+        dropped.remove("omitted")
+        let candidates = [
+            toExportRoot(path),
+            omittedHandoffPath(path),
+            handoffPath(path) ?? ""
+        ].filter { !$0.isEmpty }
+        return candidates.contains { dropped.contains($0) }
+    }
+
+    static func packMediaHandoff(_ path: String, sessionURL: URL, omitted: [OmittedAsset] = []) -> String? {
+        if isOmittedFromPack(path, omitted: omitted) { return nil }
         guard let rel = handoffFileIfPresent(path, sessionURL: sessionURL) else { return nil }
         return packMediaRelative(rel)
     }

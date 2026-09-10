@@ -92,8 +92,8 @@ struct SessionBriefRenderer {
             "{{REPO_URL}}": HTMLEscaper.escape(manifest.productContext.repoURL),
             "{{REPO_HREF}}": HTMLEscaper.httpHref(manifest.productContext.repoURL),
             "{{TECH_STACK}}": HTMLEscaper.escape(manifest.productContext.techStack),
-            "{{TASKS_HTML}}": confirmed.map { taskCard($0, excerpts: excerpts, sessionURL: sessionURL) }.joined(),
-            "{{NEEDS_REVIEW_HTML}}": review.isEmpty ? "" : review.map { taskCard($0, excerpts: excerpts, sessionURL: sessionURL) }.joined(),
+            "{{TASKS_HTML}}": confirmed.map { taskCard($0, excerpts: excerpts, sessionURL: sessionURL, omitted: manifest.omitted) }.joined(),
+            "{{NEEDS_REVIEW_HTML}}": review.isEmpty ? "" : review.map { taskCard($0, excerpts: excerpts, sessionURL: sessionURL, omitted: manifest.omitted) }.joined(),
             "{{TIMELINE_HTML}}": timeline(manifest),
             "{{SHOTS_HTML}}": shots(manifest, sessionURL: sessionURL),
             "{{TRANSCRIPT_HTML}}": transcriptHTML(manifest: manifest, excerpts: excerpts),
@@ -129,9 +129,9 @@ struct SessionBriefRenderer {
         return output
     }
 
-    private func taskCard(_ task: TaskRecord, excerpts: [String: String], sessionURL: URL) -> String {
+    private func taskCard(_ task: TaskRecord, excerpts: [String: String], sessionURL: URL, omitted: [OmittedAsset]) -> String {
         let media = task.evidenceMedia.compactMap { path -> String? in
-            guard let rel = ExportRel.packMediaHandoff(path, sessionURL: sessionURL) else { return nil }
+            guard let rel = ExportRel.packMediaHandoff(path, sessionURL: sessionURL, omitted: omitted) else { return nil }
             if rel.hasSuffix(".mp4") {
                 return """
                 <video class="clip" controls preload="metadata" src="\(HTMLEscaper.escape(rel))"></video>
@@ -200,7 +200,7 @@ struct SessionBriefRenderer {
         let figures = manifest.shots.compactMap { shot -> String? in
             var path: String?
             for candidate in [shot.exportPath].compactMap({ $0 }) + shot.stillCandidates {
-                if let rel = ExportRel.packMediaHandoff(candidate, sessionURL: sessionURL) {
+                if let rel = ExportRel.packMediaHandoff(candidate, sessionURL: sessionURL, omitted: manifest.omitted) {
                     path = rel
                     break
                 }

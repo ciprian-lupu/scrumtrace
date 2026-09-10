@@ -119,13 +119,14 @@ enum EvidenceValidator {
         tasks: [TaskRecord],
         sessionURL: URL,
         transcript: FullTranscript? = nil,
-        slices: [SliceRecord] = []
+        slices: [SliceRecord] = [],
+        omitted: [OmittedAsset] = []
     ) -> [TaskRecord] {
         let sliceById = Dictionary(slices.map { ($0.sliceId, $0) }, uniquingKeysWith: { _, latest in latest })
         return tasks.map { task in
             var copy = task
             copy.evidenceMedia = task.evidenceMedia.filter { path in
-                ExportRel.packMediaHandoff(path, sessionURL: sessionURL) != nil
+                ExportRel.packMediaHandoff(path, sessionURL: sessionURL, omitted: omitted) != nil
             }
             if copy.status == .confirmed {
                 if copy.evidenceMedia.isEmpty || copy.sourceSliceId.isEmpty {

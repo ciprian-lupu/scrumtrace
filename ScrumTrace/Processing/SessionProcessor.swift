@@ -249,7 +249,8 @@ final class SessionProcessor: @unchecked Sendable {
             tasks: projection.manifest.tasks,
             sessionURL: sessionURL,
             transcript: transcript,
-            slices: projection.manifest.slices
+            slices: projection.manifest.slices,
+            omitted: projection.manifest.omitted
         )
         manifest.omitted = projection.omitted
         // Docs first: a zip failure must not skip SESSION_BRIEF.html / AGENT_CONTEXT.md.
@@ -296,7 +297,8 @@ final class SessionProcessor: @unchecked Sendable {
                 tasks: projection.manifest.tasks,
                 sessionURL: sessionURL,
                 transcript: transcript,
-                slices: projection.manifest.slices
+                slices: projection.manifest.slices,
+                omitted: projection.manifest.omitted
             )
             // C5: demoted tasks must hit AGENT_CONTEXT / BRIEF / the projection
             // even if rebuilding the pack file fails. Do not swallow this write
@@ -335,7 +337,8 @@ final class SessionProcessor: @unchecked Sendable {
                     tasks: projection.manifest.tasks,
                     sessionURL: sessionURL,
                     transcript: transcript,
-                    slices: projection.manifest.slices
+                    slices: projection.manifest.slices,
+                    omitted: projection.manifest.omitted
                 )
                 try writeExportDocuments(
                     sessionURL: sessionURL,
