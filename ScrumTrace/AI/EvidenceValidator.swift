@@ -172,13 +172,37 @@ enum EvidenceValidator {
         sessionURL: URL,
         transcript: FullTranscript? = nil,
         slices: [SliceRecord] = [],
+        shots: [ShotRecord] = [],
         omitted: [OmittedAsset] = []
     ) -> [TaskRecord] {
         let sliceById = Dictionary(slices.map { ($0.sliceId, $0) }, uniquingKeysWith: { _, latest in latest })
         return tasks.map { task in
             var copy = task
             copy.evidenceMedia = task.evidenceMedia.filter { path in
-                ExportRel.packMediaHandoff(path, sessionURL: sessionURL, omitted: omitted) != nil
+                guard ExportRel.packMediaHandoff(path, sessionURL: sessionURL, omitted: omitted) != nil else {
+                    return false
+                }
+                guard let slice = sliceById[task.sourceSliceId] else {
+                    return true
+                }
+                if framesOverlapSlice([path], slice: slice, shots: shots, sessionURL: sessionURL) {
+                    return true
+                }
+                // D7: a merge-clamped Shot review row has only that Shot's
+                // stills. Keep them. An evaluated row that also has in-window
+                // clip/stills must not keep another moment's PNG (C5).
+                guard let owner = shotOwning(path, in: shots),
+                      owner.tMedia < slice.startMedia || owner.tMedia > slice.endMedia else {
+                    return false
+                }
+                return !task.evidenceMedia.contains { other in
+                    framesOverlapSlice(
+                        [other],
+                        slice: slice,
+                        shots: shots,
+                        sessionURL: sessionURL
+                    )
+                }
             }
             if copy.status == .confirmed {
                 if copy.evidenceMedia.isEmpty || copy.sourceSliceId.isEmpty {

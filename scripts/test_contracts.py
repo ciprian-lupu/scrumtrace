@@ -1601,6 +1601,7 @@ def test_phase45_clip_consent_and_budget() -> None:
         assert "transcript: transcript" in head
         assert "omitted: projection.manifest.omitted" in head
     assert processor.count("slices: projection.manifest.slices") == 3
+    assert processor.count("shots: projection.manifest.shots") == 3
     assert processor.count("omitted: projection.manifest.omitted") == 3
     assert "mergeCanonicalStatuses" in processor
     assert "canonical: manifest.tasks" in processor
@@ -2025,6 +2026,7 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "sessionURL: sessionURL" in tasks_fn.split("let uniqueEvidence")[1].split("var instructions")[0]
     assert "exportClipPath" in tasks_fn.split("let uniqueEvidence")[1].split("var instructions")[0]
     assert "exportPath" in tasks_fn.split("let uniqueEvidence")[1].split("var instructions")[0]
+    assert "[slice.exportClipPath, slice.clipPath]" not in tasks_fn.split("let uniqueEvidence")[1].split("var instructions")[0]
     confirm_call = tasks_fn.split("EvidenceValidator.canConfirm")[1].split("if !issues.isEmpty")[0]
     assert "shots: shots" in confirm_call
     assert "framesOverlapSlice" in tasks_fn.split("let resolvedFrames")[1].split("let uniqueEvidence")[0]

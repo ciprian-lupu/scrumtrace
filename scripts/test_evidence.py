@@ -190,6 +190,9 @@ def test_frame_ref_basename_resolves() -> None:
     assert "exportFileExists(path" not in apply_fn
     assert "transcript: FullTranscript?" in apply_fn
     assert "slices: [SliceRecord]" in apply_fn
+    assert "shots: [ShotRecord]" in apply_fn
+    assert "framesOverlapSlice" in apply_fn
+    assert "shotOwning" in apply_fn
     assert "quote times are inverted" in apply_fn or "tMediaStart > quote.tMediaEnd" in apply_fn
     assert "quote outside slice window" in apply_fn or "slice.startMedia" in apply_fn
     assert "sourceSliceId.isEmpty" in apply_fn

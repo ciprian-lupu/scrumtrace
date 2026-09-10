@@ -250,6 +250,7 @@ final class SessionProcessor: @unchecked Sendable {
             sessionURL: sessionURL,
             transcript: transcript,
             slices: projection.manifest.slices,
+            shots: projection.manifest.shots,
             omitted: projection.manifest.omitted
         )
         manifest.omitted = projection.omitted
@@ -298,6 +299,7 @@ final class SessionProcessor: @unchecked Sendable {
                 sessionURL: sessionURL,
                 transcript: transcript,
                 slices: projection.manifest.slices,
+                shots: projection.manifest.shots,
                 omitted: projection.manifest.omitted
             )
             // C5: demoted tasks must hit AGENT_CONTEXT / BRIEF / the projection
@@ -338,6 +340,7 @@ final class SessionProcessor: @unchecked Sendable {
                     sessionURL: sessionURL,
                     transcript: transcript,
                     slices: projection.manifest.slices,
+                    shots: projection.manifest.shots,
                     omitted: projection.manifest.omitted
                 )
                 try writeExportDocuments(
@@ -704,7 +707,7 @@ final class SessionProcessor: @unchecked Sendable {
                             sessionURL: sessionURL
                         )
                     }
-                    + [slice.exportClipPath, slice.clipPath].compactMap { $0 }
+                    + [slice.exportClipPath ?? slice.clipPath].compactMap { $0 }
                     + shots.flatMap { shot in
                         ([shot.exportPath].compactMap { $0 } + shot.stillCandidates)
                             .filter {
@@ -861,7 +864,7 @@ final class SessionProcessor: @unchecked Sendable {
                         shots: [],
                         sessionURL: sessionURL
                     )
-                } + [slice.exportClipPath, slice.clipPath].compactMap { $0 },
+                } + [slice.exportClipPath ?? slice.clipPath].compactMap { $0 },
                 sessionURL: sessionURL
             ),
             confidence: 0
@@ -1070,7 +1073,7 @@ final class SessionProcessor: @unchecked Sendable {
                                 shots: shotsLinked(to: slice, in: manifest),
                                 sessionURL: sessionURL
                             )
-                        } + [slice.exportClipPath, slice.clipPath].compactMap { $0 },
+                        } + [slice.exportClipPath ?? slice.clipPath].compactMap { $0 },
                         sessionURL: sessionURL
                     ),
                     confidence: 0
@@ -1099,7 +1102,7 @@ final class SessionProcessor: @unchecked Sendable {
                                     shots: shotsLinked(to: slice, in: manifest),
                                     sessionURL: sessionURL
                                 )
-                            } + [slice.exportClipPath, slice.clipPath].compactMap { $0 }
+                            } + [slice.exportClipPath ?? slice.clipPath].compactMap { $0 }
                         },
                         sessionURL: sessionURL
                     ),
