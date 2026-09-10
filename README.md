@@ -15,6 +15,20 @@ The working spec is [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) (contracts 
 - Pluggable AI adapters behind one internal contract (MVP: OpenAI-compatible + JSON Schema)
 - Timeline / contract / transcript-merge / pack-budget / evidence tests (no Mac required): `bash scripts/run_linux_tests.sh`
 
+## Open in Cursor
+
+This repo is the Cursor project. On a Mac:
+
+```bash
+git clone -b cursor/scrumtrace-implementation-0397 https://github.com/ciprian-lupu/scrumtrace.git
+cd scrumtrace
+cursor .
+```
+
+Or **File → Open Folder** on that clone. Run **Linux tests** / **Serve SESSION_BRIEF preview** from the Command Palette tasks. The menu-bar app still needs Xcode on macOS 14+.
+
+Cloud / Linux agents use `.cursor/environment.json` (regenerate the mock pack, serve the brief on port 43147). They cannot compile ScreenCaptureKit or run Gate 0/1.
+
 ## Build (macOS 14+, Apple Silicon recommended)
 
 ```bash

@@ -1,0 +1,40 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Linux tests",
+      "type": "shell",
+      "command": "bash scripts/run_linux_tests.sh",
+      "group": {
+        "kind": "test",
+        "isDefault": true
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      }
+    },
+    {
+      "label": "Generate mock session",
+      "type": "shell",
+      "command": "python3 scripts/generate_mock_session.py",
+      "problemMatcher": []
+    },
+    {
+      "label": "Serve SESSION_BRIEF preview",
+      "type": "shell",
+      "command": "python3 scripts/serve_preview.py --host 127.0.0.1 --port 43147",
+      "isBackground": true,
+      "problemMatcher": []
+    },
+    {
+      "label": "Build ScrumTrace (macOS)",
+      "type": "shell",
+      "command": "bash scripts/mac_gate01.sh",
+      "windows": {
+        "command": "echo This task requires macOS"
+      },
+      "problemMatcher": []
+    }
+  ]
+}

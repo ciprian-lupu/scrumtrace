@@ -1,0 +1,17 @@
+{
+  "name": "ScrumTrace",
+  "install": "chmod +x scripts/*.sh scripts/*.py && python3 scripts/generate_mock_session.py",
+  "terminals": [
+    {
+      "name": "Session brief preview",
+      "command": "python3 scripts/serve_preview.py --host 127.0.0.1 --port 43147",
+      "description": "Serves samples/mock-session/export as SESSION_BRIEF at http://127.0.0.1:43147/"
+    }
+  ],
+  "ports": [
+    {
+      "name": "SESSION_BRIEF preview",
+      "port": 43147
+    }
+  ]
+}
