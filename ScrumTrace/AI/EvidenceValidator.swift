@@ -145,9 +145,15 @@ enum EvidenceValidator {
                 enumerator.skipDescendants()
                 continue
             }
+            if let rel = ExportRel.unfollowedRelative(url, sessionRoot: sessionURL),
+               ExportRel.containsSymlinkComponent(rel, sessionURL: sessionURL) {
+                enumerator.skipDescendants()
+                continue
+            }
             guard (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true else { continue }
             if url.lastPathComponent == name || url.deletingPathExtension().lastPathComponent == stem {
                 guard let rel = ExportRel.unfollowedRelative(url, sessionRoot: sessionURL),
+                      !ExportRel.containsSymlinkComponent(rel, sessionURL: sessionURL),
                       let existing = ExportRel.existingSessionFile(rel, sessionURL: sessionURL) else {
                     continue
                 }

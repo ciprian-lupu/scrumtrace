@@ -199,6 +199,10 @@ enum ImageBase64 {
         if ExportRel.parentIsSymbolicLink(url) {
             return nil
         }
+        guard let rel = ExportRel.unfollowedRelative(url, sessionRoot: sessionRoot),
+              !ExportRel.containsSymlinkComponent(rel, sessionURL: sessionRoot) else {
+            return nil
+        }
         guard ExportRel.isReadableSessionFile(url, sessionRoot: sessionRoot) else { return nil }
         guard let data = ExportRel.readContainedData(url, sessionRoot: sessionRoot) else { return nil }
         #if os(macOS)

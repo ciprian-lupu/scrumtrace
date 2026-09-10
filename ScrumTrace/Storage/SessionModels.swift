@@ -9,6 +9,21 @@ private func scrumtraceFcopyfile(
     _ flags: UInt32
 ) -> Int32
 
+@_silgen_name("renameat")
+private func scrumtraceRenameat(
+    _ fromfd: Int32,
+    _ from: UnsafePointer<CChar>?,
+    _ tofd: Int32,
+    _ to: UnsafePointer<CChar>?
+) -> Int32
+
+@_silgen_name("unlinkat")
+private func scrumtraceUnlinkat(
+    _ fd: Int32,
+    _ path: UnsafePointer<CChar>?,
+    _ flag: Int32
+) -> Int32
+
 extension Notification.Name {
     static let scrumTraceCaptureGate = Notification.Name("ScrumTrace.captureGate")
     static let scrumTraceHUDSuppress = Notification.Name("ScrumTrace.hudSuppress")
@@ -96,14 +111,27 @@ enum ExportRel {
     /// Session folder itself must be a real directory. A planted session → /tmp
     /// link would otherwise make string-prefix containment succeed. A regular
     /// file at the session path is also refused. A missing path is allowed so
-    /// `ensureRoot` can create the sessions folder.
+    /// `ensureRoot` can create the sessions folder. Prefer `O_NOFOLLOW` so
+    /// `fileExists` cannot bless a directory symlink planted after the
+    /// `isSymbolicLink` check.
     static func isUsableSessionRoot(_ sessionURL: URL) -> Bool {
         if (try? sessionURL.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
             return false
         }
+        let fd = sessionURL.withUnsafeFileSystemRepresentation { ptr -> Int32 in
+            guard let ptr else { return -1 }
+            return Darwin.open(ptr, O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW)
+        }
+        if fd >= 0 {
+            Darwin.close(fd)
+            return true
+        }
         var isDir: ObjCBool = false
         if FileManager.default.fileExists(atPath: sessionURL.path, isDirectory: &isDir) {
-            return isDir.boolValue
+            // Exists but O_NOFOLLOW directory open failed (symlink, file, or
+            // unreadable dir). `isDir.boolValue` is true for a followed
+            // symlink — still refuse.
+            return isDir.boolValue && fd >= 0
         }
         return true
     }
@@ -281,6 +309,7 @@ enum ExportRel {
                     try FileManager.default.createDirectory(at: next, withIntermediateDirectories: false)
                 }
                 if (try? next.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+                    try? FileManager.default.removeItem(at: next)
                     throw SessionVaultError.writeFailed(relative)
                 }
             }
@@ -295,26 +324,62 @@ enum ExportRel {
     /// Write bytes under the session folder. A dest symlink is removed first so
     /// the write cannot follow out of `archive/` or `export/`. Intermediate
     /// directory symlinks are refused (a planted `archive/` → `export/` link
-    /// must not receive Whisper JSON). Bytes land in the system temp folder,
-    /// then `moveItem` replaces the dest. Do not exchange the dest with an API
-    /// that follows a dest symlink planted between prepare and write. A
-    /// `.write-tmp` next to the dest would otherwise be enumerable into the zip
-    /// allow-list.
+    /// must not receive Whisper JSON). Bytes land in an `O_EXCL` temp file,
+    /// then `renameat` into a dest directory fd opened with `O_NOFOLLOW`. Do
+    /// not use `Data.write(options: .atomic)` or `moveItem` — both follow a
+    /// dest or temp symlink planted between prepare and write. A `.write-tmp`
+    /// next to the dest would otherwise be enumerable into the zip allow-list.
     static func writeContainedData(_ data: Data, relative: String, sessionURL: URL) throws {
-        let tmp = FileManager.default.temporaryDirectory.appendingPathComponent(
-            "scrumtrace-write-\(UUID().uuidString)"
-        )
-        if (try? tmp.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
-            try FileManager.default.removeItem(at: tmp)
+        let tmp: URL
+        do {
+            tmp = try writeExclusiveTemporaryFile(data, prefix: "scrumtrace-write")
+        } catch {
+            throw SessionVaultError.writeFailed(relative)
         }
         do {
-            try data.write(to: tmp, options: .atomic)
             try fsyncRegularFile(tmp, relative: relative)
             try moveIntoSession(from: tmp, relative: relative, sessionURL: sessionURL)
         } catch {
             try? FileManager.default.removeItem(at: tmp)
             throw error
         }
+    }
+
+    /// `O_EXCL` so a planted temp-path symlink cannot be followed. Caller deletes
+    /// `tmp` if the later `moveIntoSession` fails.
+    private static func writeExclusiveTemporaryFile(_ data: Data, prefix: String) throws -> URL {
+        let tmp = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "\(prefix)-\(UUID().uuidString)"
+        )
+        let fd = tmp.withUnsafeFileSystemRepresentation { ptr -> Int32 in
+            guard let ptr else { return -1 }
+            return Darwin.open(ptr, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0o600)
+        }
+        guard fd >= 0 else {
+            throw SessionVaultError.writeFailed(prefix)
+        }
+        let ok: Bool
+        if data.isEmpty {
+            ok = Darwin.fsync(fd) == 0
+        } else {
+            ok = data.withUnsafeBytes { buf -> Bool in
+                guard let base = buf.baseAddress else { return false }
+                var offset = 0
+                let size = buf.count
+                while offset < size {
+                    let n = Darwin.write(fd, base.advanced(by: offset), size - offset)
+                    if n <= 0 { return false }
+                    offset += Int(n)
+                }
+                return Darwin.fsync(fd) == 0
+            }
+        }
+        Darwin.close(fd)
+        guard ok else {
+            try? FileManager.default.removeItem(at: tmp)
+            throw SessionVaultError.writeFailed(prefix)
+        }
+        return tmp
     }
 
     /// `O_NOFOLLOW` + `fsync` so a planted temp symlink is refused and Whisper JSON
@@ -337,22 +402,76 @@ enum ExportRel {
         }
     }
 
-    /// Move a temp file onto a session-relative path. Unlinks a dest symlink
-    /// (the link inode) then `moveItem` — never an exchange API that follows
-    /// a planted `export/session-pack.zip` into `archive/session.mp4`.
+    /// Move a temp file onto a session-relative path. `renameat` into a dest
+    /// directory fd opened with `O_NOFOLLOW` so a planted parent
+    /// (`export/` → `archive/`) cannot steal the write. `unlinkat` replaces a
+    /// dest file-symlink without following it into `archive/session.mp4`.
     static func moveIntoSession(from temp: URL, relative: String, sessionURL: URL) throws {
         if (try? temp.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
             throw SessionVaultError.writeFailed(relative)
         }
         let destRel = try prepareContainedWrite(relative: relative, sessionURL: sessionURL)
-        let dest = sessionURL.appendingPathComponent(destRel)
-        try removeItemIfRegularFile(dest, sessionRoot: sessionURL)
-        if (try? dest.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+        guard let parts = normalizedComponents(destRel), let destName = parts.last, !destName.isEmpty else {
             throw SessionVaultError.writeFailed(relative)
         }
-        try FileManager.default.moveItem(at: temp, to: dest)
-        guard isContainedRegularFile(dest, sessionRoot: sessionURL) else {
-            try? removeItemIfRegularFile(dest, sessionRoot: sessionURL)
+        let parentParts = Array(parts.dropLast())
+        guard let destDirFd = openatDirectory(parts: parentParts, root: sessionURL) else {
+            throw SessionVaultError.writeFailed(relative)
+        }
+        defer { Darwin.close(destDirFd) }
+        _ = destName.withCString { name in
+            scrumtraceUnlinkat(destDirFd, name, 0)
+        }
+        let tmpName = temp.lastPathComponent
+        let tmpParent = temp.deletingLastPathComponent()
+        let srcDirFd = tmpParent.withUnsafeFileSystemRepresentation { ptr -> Int32 in
+            guard let ptr else { return -1 }
+            return Darwin.open(ptr, O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW)
+        }
+        guard srcDirFd >= 0 else {
+            throw SessionVaultError.writeFailed(relative)
+        }
+        defer { Darwin.close(srcDirFd) }
+        let renamed = tmpName.withCString { fromName in
+            destName.withCString { toName in
+                scrumtraceRenameat(srcDirFd, fromName, destDirFd, toName)
+            }
+        }
+        guard renamed == 0 else {
+            throw SessionVaultError.writeFailed(relative)
+        }
+        let placedFd = destName.withCString { name in
+            Darwin.openat(destDirFd, name, O_RDONLY | O_CLOEXEC | O_NOFOLLOW)
+        }
+        guard placedFd >= 0 else {
+            _ = destName.withCString { name in
+                scrumtraceUnlinkat(destDirFd, name, 0)
+            }
+            throw SessionVaultError.writeFailed(relative)
+        }
+        defer { Darwin.close(placedFd) }
+        var placedInfo = stat()
+        guard Darwin.fstat(placedFd, &placedInfo) == 0,
+              (placedInfo.st_mode & S_IFMT) == S_IFREG else {
+            _ = destName.withCString { name in
+                scrumtraceUnlinkat(destDirFd, name, 0)
+            }
+            throw SessionVaultError.writeFailed(relative)
+        }
+        guard let visibleFd = openatFile(parts: parts, root: sessionURL) else {
+            _ = destName.withCString { name in
+                scrumtraceUnlinkat(destDirFd, name, 0)
+            }
+            throw SessionVaultError.writeFailed(relative)
+        }
+        defer { Darwin.close(visibleFd) }
+        var visibleInfo = stat()
+        guard Darwin.fstat(visibleFd, &visibleInfo) == 0,
+              placedInfo.st_dev == visibleInfo.st_dev,
+              placedInfo.st_ino == visibleInfo.st_ino else {
+            _ = destName.withCString { name in
+                scrumtraceUnlinkat(destDirFd, name, 0)
+            }
             throw SessionVaultError.writeFailed(relative)
         }
     }
@@ -473,6 +592,27 @@ enum ExportRel {
             throw SessionVaultError.writeFailed(relative)
         }
         return dest
+    }
+
+    /// Open a contained directory with `O_NOFOLLOW` on every component. Empty
+    /// `parts` is the session root. Caller closes.
+    private static func openatDirectory(parts: [String], root: URL) -> Int32? {
+        let rootFd = root.withUnsafeFileSystemRepresentation { ptr -> Int32 in
+            guard let ptr else { return -1 }
+            return Darwin.open(ptr, O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW)
+        }
+        guard rootFd >= 0 else { return nil }
+        if parts.isEmpty { return rootFd }
+        var dirFd = rootFd
+        for part in parts {
+            let next = part.withCString { name in
+                Darwin.openat(dirFd, name, O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW)
+            }
+            Darwin.close(dirFd)
+            guard next >= 0 else { return nil }
+            dirFd = next
+        }
+        return dirFd
     }
 
     /// Open a contained regular file with `O_NOFOLLOW` on every component. Caller closes.

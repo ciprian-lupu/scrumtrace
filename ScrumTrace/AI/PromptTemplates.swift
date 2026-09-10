@@ -60,9 +60,10 @@ enum PromptTemplates {
     }
 
     static func sanitizeUntrusted(_ body: String) -> String {
-        // D13: strip opening/closing tags including whitespace before `>`
-        // so `</untrusted_meeting_data >` cannot close the wrapper early.
-        let pattern = #"</?untrusted_meeting_data(?:\s[^>]*)?>"#
+        // D13: strip opening/closing tags, attributes, and self-closing forms
+        // so `</untrusted_meeting_data >` or `<untrusted_meeting_data/>` cannot
+        // close the wrapper early.
+        let pattern = #"</?untrusted_meeting_data[^>]*>"#
         guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else {
             return body
                 .replacingOccurrences(of: "</untrusted_meeting_data>", with: "", options: .caseInsensitive)

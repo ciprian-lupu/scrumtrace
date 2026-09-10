@@ -129,6 +129,7 @@ def test_frame_ref_basename_resolves() -> None:
     assert "isSymbolicLink" in first_match
     assert "skipDescendants" in first_match
     assert "unfollowedRelative" in first_match
+    assert "containsSymlinkComponent" in first_match
     assert "existingSessionFile" in first_match
     assert "sessionRoot: sessionURL" in first_match
     assert "replacingOccurrences(of: prefix" not in first_match

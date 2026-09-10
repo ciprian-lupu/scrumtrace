@@ -62,8 +62,14 @@ final class WhisperTranscriber: @unchecked Sendable {
         try Self.refuseSymlinkMedia(url, sessionRoot: sessionURL)
         var work = url
         var copied: URL?
-        if let sessionURL,
-           let rel = ExportRel.unfollowedRelative(url, sessionRoot: sessionURL) {
+        if let sessionURL {
+            guard let rel = ExportRel.unfollowedRelative(url, sessionRoot: sessionURL) else {
+                throw NSError(
+                    domain: "ScrumTrace",
+                    code: 4,
+                    userInfo: [NSLocalizedDescriptionKey: "Refusing to transcribe a symbolic link."]
+                )
+            }
             let temp = try ExportRel.copyContainedToTemporaryFile(
                 relative: rel,
                 sessionURL: sessionURL,
