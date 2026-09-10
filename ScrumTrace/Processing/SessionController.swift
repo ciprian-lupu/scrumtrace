@@ -33,6 +33,7 @@ final class SessionController: ObservableObject {
     private var shotWindow: ShotNoteWindow?
     private var pausedByPrivacy = false
     private var lastMetaSignature = ""
+    private var startInFlight = false
     private let captureFreeze: CaptureFreeze
 
     init(settings: AppSettings = .shared, vault: SessionVault = SessionVault()) {
@@ -52,6 +53,7 @@ final class SessionController: ObservableObject {
                 self?.privacyResume()
             }
         }
+        vault.pruneAbandonedStarts()
         if let recent = vault.recentSessions(limit: 1).first {
             lastSessionId = recent.sessionId
         }
@@ -66,7 +68,8 @@ final class SessionController: ObservableObject {
     }
 
     func startRecording() {
-        guard !isRecording, !isBusy else { return }
+        guard !isRecording, !isBusy, !startInFlight else { return }
+        startInFlight = true
         Task { await startRecordingAsync() }
     }
 
@@ -162,7 +165,15 @@ final class SessionController: ObservableObject {
 
     /// Process is quitting: freeze capture. Do not start Whisper/AI on a dying process.
     func haltCaptureForTermination() {
-        guard isRecording else { return }
+        if !isRecording {
+            // Start is awaiting Screen Recording permission / startCapture.
+            // Freeze the attached recorder so writers cannot outlive Quit.
+            if startInFlight {
+                captureFreeze.freeze()
+                privacy.stop()
+            }
+            return
+        }
         privacy.stop()
         sampler.isSuspended = true
         hudTimer?.invalidate()
@@ -207,10 +218,13 @@ final class SessionController: ObservableObject {
     }
 
     private func startRecordingAsync() async {
+        defer { startInFlight = false }
         guard !isRecording, !isBusy else { return }
         lastError = nil
+        var abandonedId: String?
         do {
             let created = try vault.createSession(product: settings.productContext)
+            abandonedId = created.manifest.sessionId
             sessionURL = created.url
             var createdManifest = created.manifest
             createdManifest.includeFullTranscriptInZip = settings.includeFullTranscriptInZip
@@ -222,15 +236,10 @@ final class SessionController: ObservableObject {
             MetadataSampler.requestTrust(prompt: true)
             let recorder = SessionRecorder(sessionURL: created.url, clock: clock)
             captureFreeze.attach(recorder)
-            do {
-                try await recorder.start(shouldPauseCapture: { [privacy] in
-                    privacy.currentCredentialApp() != nil
-                })
-            } catch {
-                captureFreeze.attach(nil)
-                clock.reset()
-                throw error
-            }
+            try await recorder.start(shouldPauseCapture: { [privacy] in
+                privacy.currentCredentialApp() != nil
+            })
+            abandonedId = nil
             self.recorder = recorder
             lastSessionId = created.manifest.sessionId
             pinTimes = []
@@ -266,6 +275,17 @@ final class SessionController: ObservableObject {
                 try? await transcriber.prepare(model: model)
             }
         } catch {
+            captureFreeze.attach(nil)
+            clock.reset()
+            if let id = abandonedId {
+                if manifest?.sessionId == id {
+                    manifest = nil
+                }
+                if sessionURL?.lastPathComponent == id {
+                    sessionURL = nil
+                }
+                vault.removeAbandonedSession(id: id)
+            }
             lastError = error.localizedDescription
             statusLine = error.localizedDescription
         }

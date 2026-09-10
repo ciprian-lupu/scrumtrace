@@ -68,12 +68,13 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         }
 
         clock.markRecordingStarted()
-        // DispatchQueue.sync is synchronous — `await` here does not compile.
-        try syncWriter {
-            try self.prepareWriters(width: size.width, height: size.height)
-        }
-
         do {
+            // DispatchQueue.sync is synchronous — `await` here does not compile.
+            // Keep prepareWriters in this catch so a thrown writer still hits
+            // abortFailedStart before SessionController deletes the session folder.
+            try syncWriter {
+                try self.prepareWriters(width: size.width, height: size.height)
+            }
             let filter = SCContentFilter(display: display, excludingApplications: excluded, exceptingWindows: [])
             let config = SCStreamConfiguration()
             config.width = size.width

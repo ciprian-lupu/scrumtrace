@@ -22,9 +22,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         hotkeys?.unregister()
-        if controller.isRecording {
-            controller.haltCaptureForTermination()
-        }
+        controller.haltCaptureForTermination()
     }
 
     @objc func showSettingsWindow(_ sender: Any?) {

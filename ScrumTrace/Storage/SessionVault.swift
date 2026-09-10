@@ -89,26 +89,33 @@ final class SessionVault: @unchecked Sendable {
         if (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
             throw SessionVaultError.writeFailed("session folder")
         }
-        for folder in [
-            ScrumTracePath.archive,
-            ScrumTracePath.export,
-            ScrumTracePath.shots,
-            ScrumTracePath.exportShots,
-            ScrumTracePath.media,
-            ScrumTracePath.mediaWork
-        ] {
-            let dest = url.appendingPathComponent(folder)
-            if (try? dest.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
-                try fileManager.removeItem(at: dest)
+        do {
+            for folder in [
+                ScrumTracePath.archive,
+                ScrumTracePath.export,
+                ScrumTracePath.shots,
+                ScrumTracePath.exportShots,
+                ScrumTracePath.media,
+                ScrumTracePath.mediaWork
+            ] {
+                let dest = url.appendingPathComponent(folder)
+                if (try? dest.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+                    try fileManager.removeItem(at: dest)
+                }
+                try fileManager.createDirectory(at: dest, withIntermediateDirectories: true)
+                if (try? dest.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+                    throw SessionVaultError.writeFailed(folder)
+                }
             }
-            try fileManager.createDirectory(at: dest, withIntermediateDirectories: true)
-            if (try? dest.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
-                throw SessionVaultError.writeFailed(folder)
+            var manifest = SessionManifest.makeNew(sessionId: id, product: product)
+            try write(manifest: &manifest)
+            return (url, manifest)
+        } catch {
+            if (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) != true {
+                try? fileManager.removeItem(at: url)
             }
+            throw error
         }
-        var manifest = SessionManifest.makeNew(sessionId: id, product: product)
-        try write(manifest: &manifest)
-        return (url, manifest)
     }
 
     func loadManifest(id: String) throws -> SessionManifest {
@@ -294,6 +301,48 @@ final class SessionVault: @unchecked Sendable {
         }
         NSWorkspace.shared.activateFileViewerSelecting([export])
         #endif
+    }
+
+    /// Capture never started. Do not leave an empty folder in Recent / Retry.
+    /// Refuses a session-folder symlink so this cannot delete a planted target.
+    func removeAbandonedSession(id: String) {
+        guard Self.isValidSessionId(id) else { return }
+        guard ExportRel.isUsableSessionRoot(rootURL) else { return }
+        let session = sessionURL(id: id)
+        guard ExportRel.isUsableSessionRoot(session) else { return }
+        if (try? session.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+            return
+        }
+        try? fileManager.removeItem(at: session)
+    }
+
+    /// Next launch: drop folders created for a Start that never captured
+    /// (permission sheet, then Quit). Keep anything with a movie, WAV, or Shot.
+    func pruneAbandonedStarts() {
+        guard ExportRel.isUsableSessionRoot(rootURL) else { return }
+        guard let ids = try? fileManager.contentsOfDirectory(atPath: rootURL.path) else { return }
+        for id in ids {
+            guard Self.isValidSessionId(id) else { continue }
+            let session = sessionURL(id: id)
+            guard ExportRel.isUsableSessionRoot(session) else { continue }
+            if (try? session.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+                continue
+            }
+            if ExportRel.existingSessionFile(ScrumTracePath.sessionMovie, sessionURL: session) != nil {
+                continue
+            }
+            if ExportRel.existingSessionFile(ScrumTracePath.audioWav, sessionURL: session) != nil {
+                continue
+            }
+            guard let manifest = try? loadManifest(id: id) else {
+                removeAbandonedSession(id: id)
+                continue
+            }
+            guard manifest.pipelineStatus == .idle,
+                  manifest.duration.mediaSeconds == 0,
+                  manifest.shots.isEmpty else { continue }
+            removeAbandonedSession(id: id)
+        }
     }
 
     private static let folderStamp: DateFormatter = {

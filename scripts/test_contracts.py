@@ -369,9 +369,23 @@ def test_retry_failed_slices_and_pins() -> None:
     assert "writeContainedData" in append
     assert "Data(contentsOf:" not in append
     assert "containedRelative(ScrumTracePath.events" in append
-    reveal = vault.split("func revealInFinder")[1].split("private static let folderStamp")[0]
+    reveal = vault.split("func revealInFinder")[1].split("func removeAbandonedSession")[0]
     assert "isSymbolicLink" in reveal
     assert "isDirectory" in reveal
+    abandon = vault.split("func removeAbandonedSession")[1].split("func pruneAbandonedStarts")[0]
+    assert "isValidSessionId" in abandon
+    assert "isUsableSessionRoot(rootURL)" in abandon
+    assert "isUsableSessionRoot(session)" in abandon
+    assert "isSymbolicLink" in abandon
+    assert "removeItem" in abandon
+    prune = vault.split("func pruneAbandonedStarts")[1].split("private static let folderStamp")[0]
+    assert "pipelineStatus == .idle" in prune
+    assert "sessionMovie" in prune
+    assert "audioWav" in prune
+    assert "shots.isEmpty" in prune
+    assert "removeAbandonedSession" in prune
+    assert "isValidSessionId" in prune
+    assert "isSymbolicLink" in prune
     models = (ROOT / "ScrumTrace" / "Storage" / "SessionModels.swift").read_text()
     existing_media = models.split("func withExistingMedia")[1].split("enum CodingKeys")[0]
     assert "existingSessionFile" in existing_media
@@ -552,7 +566,12 @@ def test_pipeline_timing_stays_in_archive() -> None:
     assert "requestTrust(prompt: false)" in app
     assert "requestTrust(prompt: true)" not in app
     controller = (ROOT / "ScrumTrace" / "Processing" / "SessionController.swift").read_text()
+    start_btn = controller.split("func startRecording()")[1].split("func stopRecording()")[0]
+    assert "!startInFlight" in start_btn
+    assert "startInFlight = true" in start_btn
+    assert start_btn.index("startInFlight = true") < start_btn.index("startRecordingAsync")
     start_rec = controller.split("func startRecordingAsync")[1].split("func stopRecordingAsync")[0]
+    assert "defer { startInFlight = false }" in start_rec
     assert "requestTrust(prompt: true)" in start_rec
     assert "clock.reset()" in start_rec
     assert "captureFreeze.attach(nil)" in start_rec
@@ -560,6 +579,20 @@ def test_pipeline_timing_stays_in_archive() -> None:
     assert start_rec.index("try await recorder.start(") < start_rec.index("pipelineStatus = phase")
     assert start_rec.index("try await recorder.start(") < start_rec.index("lastSessionId = created.manifest.sessionId")
     assert start_rec.index("try await recorder.start(") < start_rec.index("pinTimes = []")
+    assert start_rec.index("try await recorder.start(") < start_rec.index(
+        "pinTimesSessionId = created.manifest.sessionId"
+    )
+    assert "removeAbandonedSession" in start_rec
+    assert start_rec.index("captureFreeze.attach(nil)") < start_rec.index("removeAbandonedSession")
+    assert start_rec.index("abandonedId = created.manifest.sessionId") < start_rec.index(
+        "try await recorder.start("
+    )
+    assert start_rec.index("try await recorder.start(") < start_rec.index("abandonedId = nil")
+    assert start_rec.index("abandonedId = nil") < start_rec.index("lastSessionId = created.manifest.sessionId")
+    assert "sessionURL?.lastPathComponent == id" in start_rec
+    assert "pruneAbandonedStarts" in controller
+    init_fn = controller.split("init(settings:")[1].split("var isRecording")[0]
+    assert init_fn.index("pruneAbandonedStarts") < init_fn.index("lastSessionId")
     assert "persistLivePipelineStatus" in controller
     assert "shouldPauseCapture" in start_rec
     assert "currentCredentialApp" in start_rec
@@ -581,6 +614,8 @@ def test_pause_privacy_and_metadata_gate() -> None:
     assert "haltCaptureForTermination" in controller
     halt = controller.split("func haltCaptureForTermination")[1].split("private func startRecordingAsync")[0]
     assert "stopRecording()" not in halt
+    assert "startInFlight" in halt
+    assert "captureFreeze.freeze()" in halt
     assert "Task.detached" in halt
     assert "persistInterruptedCapture" in halt
     assert halt.index("freezeWriters") < halt.index("persistInterruptedCapture")
@@ -960,6 +995,9 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert start_fn.index("self.started = true") < start_fn.index("startCapture")
     assert start_fn.index("pauseNow") < start_fn.index("startCapture")
     assert start_fn.index("self.paused = true") < start_fn.index("startCapture")
+    prep_head = start_fn[start_fn.index("markRecordingStarted") : start_fn.index("prepareWriters")]
+    assert "do {" in prep_head
+    assert start_fn.index("prepareWriters") < start_fn.index("await abortFailedStart()")
     abort_start = recorder.split("func abortFailedStart")[1].split("func setPaused")[0]
     assert "self.started = false" in abort_start
     assert "snapshot.engine?.stop()" in abort_start
@@ -1143,6 +1181,8 @@ def test_write_contained_data_refuses_directory_symlinks() -> None:
     assert "isSymbolicLink" in create_fn
     assert create_fn.count("isSymbolicLink") >= 2
     assert "isUsableSessionRoot(rootURL)" in create_fn
+    assert "removeItem(at: url)" in create_fn
+    assert create_fn.index("try write(manifest: &manifest)") < create_fn.index("removeItem(at: url)")
     process_head = processor.split("func process(")[1].split("var timing")[0]
     assert "requireUsableSession" in process_head
     assert process_head.index("requireUsableSession") < process_head.index("loadManifest")
@@ -1179,9 +1219,11 @@ def test_write_contained_data_refuses_directory_symlinks() -> None:
     assert "sessions folder" in ensure
     recent = vault.split("func recentSessions")[1].split("func nextShotIndex")[0]
     assert "isUsableSessionRoot(rootURL)" in recent
-    reveal = vault.split("func revealInFinder")[1].split("private static let folderStamp")[0]
+    reveal = vault.split("func revealInFinder")[1].split("func removeAbandonedSession")[0]
     assert "isUsableSessionRoot(rootURL)" in reveal
     assert "isUsableSessionRoot(session)" in reveal
+    assert "removeAbandonedSession" in vault
+    assert vault.count("isUsableSessionRoot(rootURL)") >= 9
 
 
 def main() -> None:
