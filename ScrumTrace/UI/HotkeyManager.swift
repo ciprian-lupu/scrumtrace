@@ -84,7 +84,7 @@ final class HotkeyManager {
         guard hotKeyID.signature == signature, let action = Action(rawValue: hotKeyID.id) else {
             return noErr
         }
-        DispatchQueue.main.async { [weak self] in
+        Task { @MainActor [weak self] in
             guard let self else { return }
             self.perform(action)
         }

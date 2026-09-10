@@ -10,7 +10,7 @@
   const img = box.querySelector("img");
   let lastOpener = null;
   const isPackMediaHref = (href) => {
-    if (!href || href.includes("\\") || href.includes(":")) return false;
+    if (!href || href.includes("\\") || href.includes(":") || href.includes("\n") || href.includes("\r") || href.includes("\0")) return false;
     if (href.startsWith("/") || href.startsWith("#")) return false;
     const parts = href.split("/").filter((part) => part.length > 0);
     if (parts.length < 2) return false;
