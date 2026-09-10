@@ -1924,10 +1924,12 @@ def test_write_contained_data_refuses_directory_symlinks() -> None:
     assert "FileManager.default.removeItem(at: next)" not in prepare
     assert "FileManager.default.createDirectory" not in prepare
     assert "mkdirat" in prepare
-    mkdir_check = prepare.split("ensureContainedDirectory")[1]
-    assert "mkdirat" in mkdir_check
-    assert "O_NOFOLLOW" in mkdir_check
-    assert "openatDirectory" in mkdir_check
+    helper_mkdir = models.split("private static func ensureContainedDirectory")[1].split(
+        "static func writeContainedData"
+    )[0]
+    assert "mkdirat" in helper_mkdir
+    assert "O_NOFOLLOW" in helper_mkdir
+    assert "openatDirectory" in helper_mkdir
     assert "containsSymlinkComponent" in prepare
     contained_reg = models.split("static func isContainedRegularFile")[1].split("static func containedRelative(_ file")[0]
     assert "unfollowedRelative" in contained_reg
