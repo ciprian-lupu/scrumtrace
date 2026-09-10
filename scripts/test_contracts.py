@@ -1993,7 +1993,7 @@ def test_write_contained_data_refuses_directory_symlinks() -> None:
     assert "sessions folder" in ensure
     assert 'lastPathComponent == "sessions"' in ensure
     assert "ensureSessionsDirectory" in ensure
-    assert "createDirectory(at: rootURL)" in ensure
+    assert "createDirectory(at: rootURL," in ensure
     assert ensure.index('lastPathComponent == "sessions"') < ensure.index("ensureSessionsDirectory")
     recent = vault.split("func recentSessions")[1].split("func nextShotIndex")[0]
     assert "isUsableSessionRoot(rootURL)" in recent
