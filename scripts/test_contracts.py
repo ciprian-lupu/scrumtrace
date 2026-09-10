@@ -1007,6 +1007,10 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "NSRegularExpression" in sanitize
     assert r"</?untrusted_meeting_data" in sanitize
     assert "caseInsensitive" in sanitize
+    assert "neutralizeSentinels" in sanitize
+    assert "trustedTail" in sanitize
+    assert "neutralizedTail" in sanitize
+    assert "## Model notes (untrusted)" in sanitize
     eval_prompt = prompts.split("func evaluationUserPrompt")[1]
     assert "wrapUntrustedInline(product.appName)" in eval_prompt
     assert "wrapUntrustedInline(product.repoURL)" in eval_prompt
@@ -1015,8 +1019,14 @@ def test_phase45_clip_consent_and_budget() -> None:
     template = prompts.split("enum AgentInstructionTemplate")[1].split("enum PromptTemplates")[0]
     assert "wrapUntrustedInline(product.appName)" in template
     assert "the product" in template
+    assert "trustedTail" in template
+    assert "neutralizedTail" in template
+    assert "modelNotesMarker" in template
+    assert "Use only the linked evidence paths." in template
     processor = (ROOT / "ScrumTrace" / "Processing" / "SessionProcessor.swift").read_text()
     assert "wrapUntrustedInline(draft)" in processor
+    assert "AgentInstructionTemplate.modelNotesMarker" in processor
+    assert '"\\n\\n## Model notes (untrusted)\\n\\(PromptTemplates.wrapUntrustedInline(draft))"' not in processor
     brief = (ROOT / "ScrumTrace" / "Export" / "SessionBriefRenderer.swift").read_text()
     assert "func transcriptHTML" in brief
     assert "excerpts[task.taskId]" in brief.split("func taskCard")[1].split("func transcriptHTML")[0]
@@ -1336,14 +1346,16 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "wrapUntrustedInline(body)" in handoff_fn
     assert "wrapUntrustedInline(remainder)" in handoff_fn
     assert "wrapUntrustedInline(notes)" in handoff_fn
-    assert "Use only the linked evidence paths." in handoff_fn
+    assert "AgentInstructionTemplate.trustedTail" in handoff_fn
+    assert "AgentInstructionTemplate.modelNotesMarker" in handoff_fn
+    assert "Use only the linked evidence paths." not in handoff_fn
     assert "rangeOutsideUntrusted" in handoff_fn
     assert "isInsideUntrustedWrapper" in handoff_fn
     assert "rangeOutsideUntrusted(marker" in handoff_fn
     assert "rangeOutsideUntrusted(templateAnchor" in handoff_fn
     assert "text.range(of: marker)" not in handoff_fn
     assert "body.range(of: anchor)" not in handoff_fn
-    assert "Model notes (untrusted)" in agent
+    assert "AgentInstructionTemplate.modelNotesMarker" in agent
     assert 'lines.append("- Agent instructions: \\(task.agentInstructions)")' not in agent
     brief_omit = brief_src.split("private func omittedHTML")[1].split("private static func clock")[0]
     assert "omittedHandoffPath" in brief_omit

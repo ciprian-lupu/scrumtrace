@@ -547,7 +547,7 @@ final class SessionProcessor: @unchecked Sendable {
             if status == .needsReview {
                 let draft = candidate.agentInstructionsDraft.trimmingCharacters(in: .whitespacesAndNewlines)
                 if !draft.isEmpty {
-                    instructions += "\n\n## Model notes (untrusted)\n\(PromptTemplates.wrapUntrustedInline(draft))"
+                    instructions += "\(AgentInstructionTemplate.modelNotesMarker)\(PromptTemplates.wrapUntrustedInline(draft))"
                 }
             }
             out.append(
