@@ -360,6 +360,9 @@ final class SessionVault: @unchecked Sendable {
         if ExportRel.containsSymlinkComponent(ScrumTracePath.export, sessionURL: session) {
             return
         }
+        if PackBudget.exportStillContainsSymlink(exportDir: export) {
+            return
+        }
         NSWorkspace.shared.activateFileViewerSelecting([revealed])
         #endif
     }

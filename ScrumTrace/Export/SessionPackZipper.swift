@@ -24,6 +24,9 @@ struct SessionPackZipper {
         if ExportRel.containsSymlinkComponent(ScrumTracePath.export, sessionURL: sessionURL) {
             throw SessionRecorderError.writerFailed("export/ is a symbolic link.")
         }
+        if PackBudget.exportStillContainsSymlink(exportDir: exportDir) {
+            throw SessionRecorderError.writerFailed("export/ is a symbolic link.")
+        }
         let zipURL = sessionURL.appendingPathComponent(ScrumTracePath.packZip)
         var omitted = uniquedOmitted(manifest.omitted)
         var includeTranscript = manifest.includeFullTranscriptInZip
@@ -35,6 +38,9 @@ struct SessionPackZipper {
                 sessionURL: sessionURL
             )
         } catch {
+            if PackBudget.exportStillContainsSymlink(exportDir: exportDir) {
+                throw error
+            }
             omitted.append(OmittedAsset(path: "session-pack.zip", reason: error.localizedDescription))
             let listed = uniquedOmitted(omitted)
             try writeOmittedMarkdown(sessionURL: sessionURL, omitted: listed)
@@ -173,6 +179,9 @@ struct SessionPackZipper {
         if ExportRel.containsSymlinkComponent(ScrumTracePath.export, sessionURL: sessionURL) {
             throw SessionRecorderError.writerFailed("export/ is a symbolic link.")
         }
+        if PackBudget.exportStillContainsSymlink(exportDir: exportDir) {
+            throw SessionRecorderError.writerFailed("export/ is a symbolic link.")
+        }
         try runZip(
             exportDir: exportDir,
             includeFullTranscript: includeFullTranscript,
@@ -243,7 +252,8 @@ struct SessionPackZipper {
         // and must not become zip's cwd (`export/` → `archive/`).
         PackBudget.removeEscapingExportLinks(exportDir: exportDir)
         if (try? exportDir.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true
-            || ExportRel.containsSymlinkComponent(ScrumTracePath.export, sessionURL: sessionURL) {
+            || ExportRel.containsSymlinkComponent(ScrumTracePath.export, sessionURL: sessionURL)
+            || PackBudget.exportStillContainsSymlink(exportDir: exportDir) {
             throw SessionRecorderError.writerFailed("export/ is a symbolic link.")
         }
         let members = scanned.compactMap { member in
@@ -381,6 +391,29 @@ enum PackBudget {
         protectedNames.contains(URL(fileURLWithPath: sessionPath).lastPathComponent)
     }
 
+    /// Folder-handoff must match zip. A leftover `export/shots` → `archive/`
+    /// link is a C2 leak even if the zip allow-list skipped it.
+    static func exportStillContainsSymlink(exportDir: URL) -> Bool {
+        let linkKey = URLResourceKey.isSymbolicLinkKey
+        if (try? exportDir.resourceValues(forKeys: [linkKey]).isSymbolicLink) == true {
+            return true
+        }
+        guard let enumerator = FileManager.default.enumerator(
+            at: exportDir,
+            includingPropertiesForKeys: [linkKey],
+            options: []
+        ) else {
+            return true
+        }
+        for case let file as URL in enumerator {
+            if (try? file.resourceValues(forKeys: [linkKey]).isSymbolicLink) == true {
+                enumerator.skipDescendants()
+                return true
+            }
+        }
+        return false
+    }
+
     /// Deletes every symbolic link under `export/` so a Finder/Cursor folder drop
     /// cannot follow a planted `shots/` or `media/` link into `archive/` (C2).
     /// The zip allow-list already skips links; this matches folder-handoff to zip.
@@ -418,6 +451,9 @@ enum PackBudget {
         for link in links.reversed() {
             try? ExportRel.removeItemIfRegularFile(link, sessionRoot: sessionRoot)
             ExportRel.unlinkLastComponentUnfollowed(link)
+            if (try? link.resourceValues(forKeys: [linkKey]).isSymbolicLink) == true {
+                ExportRel.unlinkLastComponentUnfollowed(link)
+            }
         }
     }
 

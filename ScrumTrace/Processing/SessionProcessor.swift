@@ -211,6 +211,7 @@ final class SessionProcessor: @unchecked Sendable {
                 await exporter.tightenExportClips(sessionURL: sessionURL)
             }
         } catch {
+            try throwIfExportEscapes(sessionURL: sessionURL, error)
             // Trial weigh failed; zip() below still measures and omits.
         }
         var zipResult = SessionPackZipper.Result(
@@ -221,6 +222,7 @@ final class SessionProcessor: @unchecked Sendable {
         do {
             zipResult = try zipper.zip(sessionURL: sessionURL, manifest: projection.manifest)
         } catch {
+            try throwIfExportEscapes(sessionURL: sessionURL, error)
             zipResult.omitted.append(
                 OmittedAsset(path: "session-pack.zip", reason: "zip failed: \(error.localizedDescription)")
             )
@@ -253,6 +255,7 @@ final class SessionProcessor: @unchecked Sendable {
                     includeFullTranscript: projection.manifest.includeFullTranscriptInZip
                 )
             } catch {
+                try throwIfExportEscapes(sessionURL: sessionURL, error)
                 zipBytes = zipResult.byteCount
                 break
             }
@@ -263,6 +266,7 @@ final class SessionProcessor: @unchecked Sendable {
             do {
                 zipResult = try zipper.zip(sessionURL: sessionURL, manifest: projection.manifest)
             } catch {
+                try throwIfExportEscapes(sessionURL: sessionURL, error)
                 zipResult.omitted.append(
                     OmittedAsset(path: "session-pack.zip", reason: "zip failed: \(error.localizedDescription)")
                 )
@@ -305,6 +309,15 @@ final class SessionProcessor: @unchecked Sendable {
         return manifest
     }
 
+    /// C2: a leftover export/ symlink is not a "zip failed, keep going" event.
+    private func throwIfExportEscapes(sessionURL: URL, _ error: Error) throws {
+        let exportDir = sessionURL.appendingPathComponent(ScrumTracePath.export)
+        PackBudget.removeEscapingExportLinks(exportDir: exportDir)
+        if PackBudget.exportStillContainsSymlink(exportDir: exportDir) {
+            throw error
+        }
+    }
+
     private func writeExportDocuments(
         sessionURL: URL,
         projected: SessionManifest,
@@ -314,6 +327,11 @@ final class SessionProcessor: @unchecked Sendable {
         PackBudget.removeEscapingExportLinks(
             exportDir: sessionURL.appendingPathComponent(ScrumTracePath.export)
         )
+        if PackBudget.exportStillContainsSymlink(
+            exportDir: sessionURL.appendingPathComponent(ScrumTracePath.export)
+        ) {
+            throw SessionRecorderError.writerFailed("export/ is a symbolic link.")
+        }
         let markdown = agentRenderer.render(manifest: projected, sessionURL: sessionURL)
         let prompt = agentRenderer.prompt(manifest: projected, sessionURL: sessionURL)
         let html = briefRenderer.render(manifest: projected, excerpts: excerpts, sessionURL: sessionURL)

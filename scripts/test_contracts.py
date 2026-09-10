@@ -313,6 +313,10 @@ def test_zipper_never_deletes_archive() -> None:
     assert leftover.index("removeEscapingExportLinks") < leftover.index("enumerator")
     protected = zipper.split("static let protectedNames")[1].split("static func isProtected")[0]
     assert '"full_transcript.json"' in protected
+    still_link = zipper.split("static func exportStillContainsSymlink")[1].split("static func removeEscapingExportLinks")[0]
+    assert "isSymbolicLink" in still_link
+    assert "skipDescendants" in still_link
+    assert "return true" in still_link
     folder_loop = allow.split('for folder in ["shots", "media"]')[1]
     assert folder_loop.index("isSymbolicLink") < folder_loop.index("enumerator")
     assert "removeItemIfRegularFile(root" in folder_loop
@@ -609,6 +613,8 @@ def test_retry_failed_slices_and_pins() -> None:
     assert reveal.count("containsSymlinkComponent") >= 2
     assert reveal.index("containsSymlinkComponent") < reveal.index("appendingPathComponent(ScrumTracePath.export)")
     assert reveal.rfind("containsSymlinkComponent") < reveal.index("activateFileViewerSelecting([revealed])")
+    assert "exportStillContainsSymlink" in reveal
+    assert reveal.index("exportStillContainsSymlink") < reveal.index("activateFileViewerSelecting([revealed])")
     assert reveal.index("unfollowedDirectoryURL") < reveal.index("activateFileViewerSelecting([revealed])")
     assert "activateFileViewerSelecting([revealed])" in reveal
     assert "activateFileViewerSelecting([export])" not in reveal
@@ -916,6 +922,7 @@ def test_pipeline_timing_stays_in_archive() -> None:
     assert run_zip.count("isSymbolicLink") >= 3
     assert run_zip.rfind("isSymbolicLink") < run_zip.index("spawnWithDirectoryFd")
     assert 'writerFailed("export/ is a symbolic link.")' in run_zip
+    assert "exportStillContainsSymlink" in run_zip
     assert "zip failed with status" in run_zip
     assert "makePrivateTemporaryURL" in run_zip
     assert "UUID().uuidString" not in run_zip
@@ -935,6 +942,8 @@ def test_pipeline_timing_stays_in_archive() -> None:
     assert "createDirectory" not in zip_fn
     assert zip_fn.index("ensureContainedDirectories") < zip_fn.index("is a symbolic link")
     assert "containsSymlinkComponent" in zip_fn
+    assert "exportStillContainsSymlink" in zip_fn
+    assert zip_fn.index("exportStillContainsSymlink") < zip_fn.index("try runZip")
     assert "removeItemIfRegularFile(exportDir" in zip_fn
     assert "FileManager.default.removeItem(at: exportDir)" not in zip_fn
     assert zip_fn.count("try writeOmittedMarkdown") >= 2
@@ -947,6 +956,7 @@ def test_pipeline_timing_stays_in_archive() -> None:
     assert "export/ is a symbolic link" in write_zip
     assert write_zip.index("ensureContainedDirectories") < write_zip.index("is a symbolic link")
     assert "containsSymlinkComponent" in write_zip
+    assert "exportStillContainsSymlink" in write_zip
     assert "removeItemIfRegularFile(exportDir" in write_zip
     assert "FileManager.default.removeItem(at: exportDir)" not in write_zip
     drop = zipper.split("for path in dropList")[1].split("if size > MediaBudget.maxZipBytes")[0]
@@ -1528,6 +1538,7 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "vault.write" in retry_block
     assert "zip failed" in processor
     zip_fail = processor.split("zipResult = try zipper.zip")[1].split("var zipBytes")[0]
+    assert "throwIfExportEscapes" in zip_fail
     assert "try zipper.writeOmittedMarkdown" in zip_fail
     assert "try? zipper.writeOmittedMarkdown" not in zip_fail
     assert "writeExportDocuments" in processor.split("Docs first")[1].split("var zipResult")[0]
@@ -1537,6 +1548,7 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "tightenExportClips" in docs_first
     docs = processor.split("func writeExportDocuments")[1].split("private func transcribe")[0]
     assert "removeEscapingExportLinks" in docs
+    assert "exportStillContainsSymlink" in docs
     assert "writeExportText" in docs
     rewrite = processor.split("for pass in 0..<3")[1].split("timing.zipBytes")[0]
     assert rewrite.index("try writeExportDocuments") < rewrite.index("try zipper.writeZip")
