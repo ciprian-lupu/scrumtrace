@@ -409,9 +409,12 @@ def test_audio_split_and_brief_loader() -> None:
     assert "CaptureAudioLayout" in recorder
     assert "try layout.write" in recorder
     assert "try? layout.write" not in recorder
+    assert "func persistCaptureLayout" in recorder
     stop_rec = recorder.split("func stop() async throws")[1].split("func stream(")[0]
     assert "self.microphoneWav" in stop_rec
     assert "snapshot.mic" in stop_rec
+    assert "persistCaptureLayout(microphoneWav: snapshot.mic)" in stop_rec
+    assert stop_rec.index("persistCaptureLayout") < stop_rec.index("stopCapture")
     assert "snapshot.engine" in stop_rec
     assert "snapshot.engine?.stop()" in stop_rec
     assert "microphoneWav: microphoneWav" not in stop_rec
@@ -555,6 +558,8 @@ def test_pipeline_timing_stays_in_archive() -> None:
     assert "captureFreeze.attach(nil)" in start_rec
     assert "pipelineStatus = phase" in start_rec
     assert start_rec.index("try await recorder.start(") < start_rec.index("pipelineStatus = phase")
+    assert start_rec.index("try await recorder.start(") < start_rec.index("lastSessionId = created.manifest.sessionId")
+    assert start_rec.index("try await recorder.start(") < start_rec.index("pinTimes = []")
     assert "persistLivePipelineStatus" in controller
     assert "shouldPauseCapture" in start_rec
     assert "currentCredentialApp" in start_rec
@@ -579,6 +584,9 @@ def test_pause_privacy_and_metadata_gate() -> None:
     assert "Task.detached" in halt
     assert "persistInterruptedCapture" in halt
     assert halt.index("freezeWriters") < halt.index("persistInterruptedCapture")
+    assert "persistCaptureLayout" in halt
+    assert halt.index("freezeWriters") < halt.index("persistCaptureLayout")
+    assert halt.index("persistCaptureLayout") < halt.index("persistInterruptedCapture")
     assert "scrumTraceSessionEnding" in halt
     assert "scrumTraceCaptureGate" in halt
     persist = controller.split("func persistInterruptedCapture")[1].split("func startRecordingAsync")[0]

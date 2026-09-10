@@ -200,6 +200,17 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         }
     }
 
+    /// Dual-pass Whisper needs this before `stopCapture` / `finishWriting`.
+    /// Quit only waits 5s; the layout must already be on disk (Gate 3).
+    func persistCaptureLayout(microphoneWav: Bool? = nil) throws {
+        let mic = microphoneWav ?? syncWriter { self.microphoneWav }
+        let layout = CaptureAudioLayout(
+            microphoneWav: mic,
+            systemAudioInMovie: true
+        )
+        try layout.write(sessionURL: sessionURL)
+    }
+
     func stop() async throws {
         let snapshot = syncWriter { () -> (stream: SCStream?, mic: Bool, engine: AVAudioEngine?) in
             // Freeze t_wall / t_media at Stop so finishWriting is not counted,
@@ -212,6 +223,11 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             let engine = self.engine
             self.engine = nil
             return (captured, self.microphoneWav, engine)
+        }
+        do {
+            try persistCaptureLayout(microphoneWav: snapshot.mic)
+        } catch {
+            // Tear down the stream even if archive/capture-layout.json cannot be written.
         }
         if let live = snapshot.stream {
             try await live.stopCapture()
@@ -231,11 +247,6 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
                 continuation.resume()
             }
         }
-        let layout = CaptureAudioLayout(
-            microphoneWav: snapshot.mic,
-            systemAudioInMovie: true
-        )
-        try layout.write(sessionURL: sessionURL)
     }
 
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {

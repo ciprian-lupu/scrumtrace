@@ -170,6 +170,7 @@ final class SessionController: ObservableObject {
         metadataTimer?.invalidate()
         metadataTimer = nil
         recorder?.freezeWriters()
+        try? recorder?.persistCaptureLayout()
         NotificationCenter.default.post(name: .scrumTraceCaptureGate, object: CaptureSessionState.paused)
         NotificationCenter.default.post(name: .scrumTraceSessionEnding, object: nil)
         persistInterruptedCapture()
@@ -215,9 +216,6 @@ final class SessionController: ObservableObject {
             createdManifest.includeFullTranscriptInZip = settings.includeFullTranscriptInZip
             try vault.write(manifest: &createdManifest)
             manifest = createdManifest
-            lastSessionId = created.manifest.sessionId
-            pinTimes = []
-            pinTimesSessionId = created.manifest.sessionId
             lastMetaSignature = ""
             pausedByPrivacy = false
             clock.reset()
@@ -234,6 +232,9 @@ final class SessionController: ObservableObject {
                 throw error
             }
             self.recorder = recorder
+            lastSessionId = created.manifest.sessionId
+            pinTimes = []
+            pinTimesSessionId = created.manifest.sessionId
             if let bundle = privacy.currentCredentialApp() {
                 recorder.setPaused(true)
                 sampler.isSuspended = true
