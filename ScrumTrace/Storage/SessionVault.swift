@@ -85,9 +85,9 @@ final class SessionVault: @unchecked Sendable {
         if (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
             throw SessionVaultError.writeFailed("session folder")
         }
-        try fileManager.createDirectory(at: url, withIntermediateDirectories: true)
-        // Re-check the sessions folder. `createDirectory` follows a parent
-        // planted between `ensureRoot` and this mkdir (`sessions` → `/tmp`).
+        try ExportRel.ensureOwnedSessionDirectory(sessionURL: url, sessionsRoot: rootURL)
+        // Re-check the sessions folder. mkdirat still needs the parent to stay
+        // a real directory (`sessions` → `/tmp` between ensureRoot and create).
         guard ExportRel.isUsableSessionRoot(rootURL) else {
             throw SessionVaultError.writeFailed("sessions folder")
         }
@@ -110,16 +110,7 @@ final class SessionVault: @unchecked Sendable {
                 if (try? dest.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
                     try ExportRel.removeItemIfRegularFile(dest, sessionRoot: url)
                 }
-                try fileManager.createDirectory(at: dest, withIntermediateDirectories: true)
-                if (try? dest.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
-                    try? ExportRel.removeItemIfRegularFile(dest, sessionRoot: url)
-                    throw SessionVaultError.writeFailed(folder)
-                }
-                // Nested `export/shots` mkdir follows a planted `export/` link.
-                // Do not delete `dest` when a parent component is the link.
-                if ExportRel.containsSymlinkComponent(folder, sessionURL: url) {
-                    throw SessionVaultError.writeFailed(folder)
-                }
+                try ExportRel.ensureContainedDirectories(relative: folder, sessionURL: url)
             }
             var manifest = SessionManifest.makeNew(sessionId: id, product: product)
             try write(manifest: &manifest)
@@ -175,7 +166,7 @@ final class SessionVault: @unchecked Sendable {
         if (try? dir.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
             throw SessionVaultError.writeFailed("session folder")
         }
-        try fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
+        try ExportRel.ensureOwnedSessionDirectory(sessionURL: dir, sessionsRoot: rootURL)
         guard ExportRel.isUsableSessionRoot(rootURL) else {
             throw SessionVaultError.writeFailed("sessions folder")
         }

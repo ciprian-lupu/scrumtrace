@@ -182,10 +182,9 @@ struct ExportProjector {
         guard ExportRel.isUsableSessionRoot(sessionURL) else {
             throw SessionVaultError.writeFailed("session folder")
         }
-        let fileManager = FileManager.default
         let export = sessionURL.appendingPathComponent(ScrumTracePath.export)
         // fileExists follows links. A dangling or archive-pointing export/
-        // symlink must be unlinked first or createDirectory fails and the
+        // symlink must be unlinked first or mkdirat fails and the
         // destination tree can be removed (C2).
         if (try? export.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
             try ExportRel.removeItemIfRegularFile(export, sessionRoot: sessionURL)
@@ -200,16 +199,15 @@ struct ExportProjector {
                 sessionURL: sessionURL
             )
         }
-        try fileManager.createDirectory(at: export, withIntermediateDirectories: true)
+        try ExportRel.ensureContainedDirectories(relative: ScrumTracePath.export, sessionURL: sessionURL)
         if (try? export.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
             try? ExportRel.removeItemIfRegularFile(export, sessionRoot: sessionURL)
             throw SessionVaultError.writeFailed("export/")
         }
         let shots = sessionURL.appendingPathComponent(ScrumTracePath.exportShots)
-        try fileManager.createDirectory(at: shots, withIntermediateDirectories: true)
-        // `createDirectory` follows a planted `export/` → `archive/` link.
-        // Do not `removeItem(shots)` in that case — that would delete
-        // `archive/shots`.
+        try ExportRel.ensureContainedDirectories(relative: ScrumTracePath.exportShots, sessionURL: sessionURL)
+        // mkdirat refuses a planted `export/` → `archive/` link. Do not
+        // `removeItem(shots)` — that would delete `archive/shots`.
         if (try? export.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true
             || ExportRel.containsSymlinkComponent(ScrumTracePath.exportShots, sessionURL: sessionURL) {
             throw SessionVaultError.writeFailed("export/")
@@ -219,7 +217,7 @@ struct ExportProjector {
             throw SessionVaultError.writeFailed(ScrumTracePath.exportShots)
         }
         let media = sessionURL.appendingPathComponent(ScrumTracePath.media)
-        try fileManager.createDirectory(at: media, withIntermediateDirectories: true)
+        try ExportRel.ensureContainedDirectories(relative: ScrumTracePath.media, sessionURL: sessionURL)
         if (try? export.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true
             || ExportRel.containsSymlinkComponent(ScrumTracePath.media, sessionURL: sessionURL) {
             throw SessionVaultError.writeFailed("export/")

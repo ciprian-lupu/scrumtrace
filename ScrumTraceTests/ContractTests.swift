@@ -278,6 +278,69 @@ final class ContractTests: XCTestCase {
         )
     }
 
+    func testEnsureContainedDirectoriesRefusesExportDirectorySymlink() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "st-mkdir-export-\(UUID().uuidString)"
+        )
+        let archive = root.appendingPathComponent("archive")
+        try FileManager.default.createDirectory(at: archive, withIntermediateDirectories: true)
+        let secret = archive.appendingPathComponent("session.mp4")
+        try Data("MASTER".utf8).write(to: secret)
+        try FileManager.default.createSymbolicLink(
+            at: root.appendingPathComponent("export"),
+            withDestinationURL: archive
+        )
+        defer { try? FileManager.default.removeItem(at: root) }
+        XCTAssertThrowsError(
+            try ExportRel.ensureContainedDirectories(relative: ScrumTracePath.exportShots, sessionURL: root)
+        )
+        XCTAssertEqual(try String(contentsOf: secret, encoding: .utf8), "MASTER")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: archive.appendingPathComponent("shots").path))
+    }
+
+    func testEnsureContainedDirectoriesCreatesTopLevelExport() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "st-mkdir-export-ok-\(UUID().uuidString)"
+        )
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try ExportRel.ensureContainedDirectories(relative: ScrumTracePath.export, sessionURL: root)
+        try ExportRel.ensureContainedDirectories(relative: ScrumTracePath.exportShots, sessionURL: root)
+        var isDir: ObjCBool = false
+        XCTAssertTrue(
+            FileManager.default.fileExists(
+                atPath: root.appendingPathComponent("export/shots").path,
+                isDirectory: &isDir
+            ) && isDir.boolValue
+        )
+        XCTAssertNotEqual(
+            (try root.appendingPathComponent("export").resourceValues(forKeys: [.isSymbolicLinkKey])).isSymbolicLink,
+            true
+        )
+        XCTAssertThrowsError(
+            try ExportRel.ensureContainedDirectories(relative: ScrumTracePath.manifest, sessionURL: root)
+        )
+    }
+
+    func testEnsureOwnedSessionDirectoryRefusesSessionIdSymlink() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "st-owned-mkdir-\(UUID().uuidString)"
+        )
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let outside = root.appendingPathComponent("outside")
+        try FileManager.default.createDirectory(at: outside, withIntermediateDirectories: true)
+        let secret = outside.appendingPathComponent("keep.bin")
+        try Data("KEEP".utf8).write(to: secret)
+        let planted = root.appendingPathComponent("2026-09-10-1200-abcdef")
+        try FileManager.default.createSymbolicLink(at: planted, withDestinationURL: outside)
+        XCTAssertThrowsError(
+            try ExportRel.ensureOwnedSessionDirectory(sessionURL: planted, sessionsRoot: root)
+        )
+        XCTAssertEqual(try String(contentsOf: secret, encoding: .utf8), "KEEP")
+        XCTAssertEqual((try planted.resourceValues(forKeys: [.isSymbolicLinkKey])).isSymbolicLink, true)
+    }
+
     func testUnlinkLastComponentUnfollowedUnlinksRegularFile() throws {
         let parent = FileManager.default.temporaryDirectory.appendingPathComponent("st-unlink-reg-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true)

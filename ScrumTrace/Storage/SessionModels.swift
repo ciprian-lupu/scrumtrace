@@ -460,6 +460,82 @@ enum ExportRel {
         Darwin.close(created)
     }
 
+    /// Create every component of a contained directory path with `mkdirat`.
+    /// Top-level `archive/` and `export/` are layout folders (`isUnderSession`
+    /// only allows files under those trees, plus the canonical manifest).
+    static func ensureContainedDirectories(relative: String, sessionURL: URL) throws {
+        guard isUsableSessionRoot(sessionURL) else {
+            throw SessionVaultError.writeFailed("session folder")
+        }
+        guard let parts = normalizedComponents(relative), let first = parts.first else {
+            throw SessionVaultError.writeFailed(relative)
+        }
+        if parts.count == 1 {
+            guard first == "archive" || first == "export" else {
+                throw SessionVaultError.writeFailed(relative)
+            }
+        } else if !isUnderSession(relative) {
+            throw SessionVaultError.writeFailed(relative)
+        }
+        for (index, part) in parts.enumerated() {
+            try ensureContainedDirectory(
+                parts: Array(parts.prefix(index)),
+                name: part,
+                sessionURL: sessionURL
+            )
+            let walked = parts[0...index].joined(separator: "/")
+            if containsSymlinkComponent(walked, sessionURL: sessionURL) {
+                throw SessionVaultError.writeFailed(relative)
+            }
+        }
+    }
+
+    /// mkdirat the session-id folder under `sessions/` without following a
+    /// planted last-component symlink (`FileManager.createDirectory` would).
+    static func ensureOwnedSessionDirectory(sessionURL: URL, sessionsRoot: URL) throws {
+        guard isUsableSessionRoot(sessionsRoot) else {
+            throw SessionVaultError.writeFailed("sessions folder")
+        }
+        let parent = sessionURL.deletingLastPathComponent().standardizedFileURL
+        guard parent == sessionsRoot.standardizedFileURL else {
+            throw SessionVaultError.writeFailed("session folder")
+        }
+        let name = sessionURL.lastPathComponent
+        guard SessionVault.isValidSessionId(name) else {
+            throw SessionVaultError.writeFailed("session folder")
+        }
+        guard let parentFd = openUnfollowedDirectory(sessionsRoot) else {
+            throw SessionVaultError.writeFailed("sessions folder")
+        }
+        defer { Darwin.close(parentFd) }
+        let existing = name.withCString { ptr in
+            Darwin.openat(parentFd, ptr, O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW)
+        }
+        if existing >= 0 {
+            Darwin.close(existing)
+            return
+        }
+        let made = name.withCString { ptr in
+            Darwin.mkdirat(parentFd, ptr, 0o700)
+        }
+        if made != 0 {
+            let err = Darwin.errno
+            guard err == EEXIST else {
+                throw SessionVaultError.writeFailed("session folder")
+            }
+        }
+        let created = name.withCString { ptr in
+            Darwin.openat(parentFd, ptr, O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW)
+        }
+        guard created >= 0 else {
+            throw SessionVaultError.writeFailed("session folder")
+        }
+        Darwin.close(created)
+        guard isUsableSessionRoot(sessionURL) else {
+            throw SessionVaultError.writeFailed("session folder")
+        }
+    }
+
     /// Write bytes under the session folder. A dest symlink is removed first so
     /// the write cannot follow out of `archive/` or `export/`. Intermediate
     /// directory symlinks are refused (a planted `archive/` → `export/` link

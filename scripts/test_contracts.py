@@ -298,9 +298,12 @@ def test_zipper_never_deletes_archive() -> None:
     assert "unlinkLastComponentUnfollowed" in remove_links
     assert "fm.removeItem(at: exportDir)" not in remove_links
     assert "fm.removeItem(at: link)" not in remove_links
-    recreate = remove_links.split("createDirectory")[1].split("guard let enumerator")[0]
+    assert "ensureContainedDirectories" in remove_links
+    assert "FileManager.default.createDirectory" not in remove_links
+    recreate = remove_links.split("ensureContainedDirectories")[1].split("guard let enumerator")[0]
     assert "isSymbolicLink" in recreate
     assert "removeItem" in recreate
+    assert "try?" in recreate
     assert "replacingOccurrences(of: prefix" not in allow
     leftover = zipper.split("static func exportMediaSessionPaths")[1].split("private static func uniqued")[0]
     assert "containedExportMember" in leftover
@@ -334,11 +337,17 @@ def test_zipper_never_deletes_archive() -> None:
     assert "isUsableSessionRoot" in reset
     assert reset.count("isSymbolicLink") >= 4
     assert "removeItemIfRegularFile(export" in reset
-    assert reset.index("removeItemIfRegularFile(export") < reset.index("createDirectory(at: export")
-    mkdir_export = reset.split("createDirectory(at: export")[1]
+    assert "ensureContainedDirectories" in reset
+    assert "createDirectory(at:" not in reset
+    assert reset.index("removeItemIfRegularFile(export") < reset.index(
+        "ensureContainedDirectories(relative: ScrumTracePath.export,"
+    )
+    mkdir_export = reset.split("ensureContainedDirectories(relative: ScrumTracePath.export,")[1]
     assert 'writeFailed("export/")' in mkdir_export
     assert "containsSymlinkComponent" in reset
-    shots_mkdir = reset.split("createDirectory(at: shots")[1].split("createDirectory(at: media")[0]
+    shots_mkdir = reset.split("ensureContainedDirectories(relative: ScrumTracePath.exportShots")[1].split(
+        "ensureContainedDirectories(relative: ScrumTracePath.media"
+    )[0]
     assert "containsSymlinkComponent" in shots_mkdir
     assert 'writeFailed("export/")' in shots_mkdir
     assert shots_mkdir.index("containsSymlinkComponent") < shots_mkdir.index("removeItemIfRegularFile(shots")
@@ -836,7 +845,9 @@ def test_pipeline_timing_stays_in_archive() -> None:
     assert "isUsableSessionRoot" in zip_fn
     assert "removeEscapingExportLinks" in zip_fn
     assert 'export/ is a symbolic link' in zip_fn
-    assert zip_fn.index("createDirectory") < zip_fn.index("is a symbolic link")
+    assert "ensureContainedDirectories" in zip_fn
+    assert "createDirectory" not in zip_fn
+    assert zip_fn.index("ensureContainedDirectories") < zip_fn.index("is a symbolic link")
     assert "containsSymlinkComponent" in zip_fn
     assert "removeItemIfRegularFile(exportDir" in zip_fn
     assert "FileManager.default.removeItem(at: exportDir)" not in zip_fn
@@ -845,9 +856,10 @@ def test_pipeline_timing_stays_in_archive() -> None:
     write_zip = zipper.split("func writeZip")[1].split("func writeOmittedMarkdown")[0]
     assert "isUsableSessionRoot" in write_zip
     assert "removeEscapingExportLinks" in write_zip
-    assert "createDirectory" in write_zip
+    assert "ensureContainedDirectories" in write_zip
+    assert "createDirectory" not in write_zip
     assert "export/ is a symbolic link" in write_zip
-    assert write_zip.index("createDirectory") < write_zip.index("is a symbolic link")
+    assert write_zip.index("ensureContainedDirectories") < write_zip.index("is a symbolic link")
     assert "containsSymlinkComponent" in write_zip
     assert "removeItemIfRegularFile(exportDir" in write_zip
     assert "FileManager.default.removeItem(at: exportDir)" not in write_zip
@@ -1868,6 +1880,8 @@ def test_write_contained_data_refuses_directory_symlinks() -> None:
     assert "isUsableSessionRoot(rootURL)" in write_man
     assert "isUsableSessionRoot(dir)" in write_man
     assert "writeFailed(\"session folder\")" in write_man
+    assert "ensureOwnedSessionDirectory" in write_man
+    assert "createDirectory" not in write_man
     load_fn = vault.split("func loadManifest")[1].split("func write(manifest")[0]
     assert "isSymbolicLink" in load_fn
     assert "existingSessionFile(ScrumTracePath.manifest" in load_fn
@@ -1882,13 +1896,17 @@ def test_write_contained_data_refuses_directory_symlinks() -> None:
     assert "isUsableSessionRoot(rootURL)" in create_fn
     assert create_fn.count("isUsableSessionRoot(rootURL)") >= 2
     assert "isUsableSessionRoot(url)" in create_fn
-    assert "containsSymlinkComponent" in create_fn
+    assert "ensureContainedDirectories" in create_fn
+    assert "ensureOwnedSessionDirectory" in create_fn
+    assert "fileManager.createDirectory(at: dest" not in create_fn
+    assert "fileManager.createDirectory(at: url)" not in create_fn
+    assert "createDirectory" not in create_fn
     assert "removeItemIfRegularFile" in create_fn
     assert "fileManager.removeItem(at: dest)" not in create_fn
     assert "removeOwnedSessionFolder" in create_fn
     assert create_fn.index("try write(manifest: &manifest)") < create_fn.index("removeOwnedSessionFolder")
     assert "fileManager.removeItem(at: url)" not in create_fn
-    assert "isUsableSessionRoot(rootURL)" in create_fn.split("createDirectory(at: url")[1]
+    assert "isUsableSessionRoot(rootURL)" in create_fn.split("ensureOwnedSessionDirectory")[1]
     process_head = processor.split("func process(")[1].split("var timing")[0]
     assert "requireUsableSession" in process_head
     assert process_head.index("requireUsableSession") < process_head.index("loadManifest")
@@ -1926,11 +1944,29 @@ def test_write_contained_data_refuses_directory_symlinks() -> None:
     assert "FileManager.default.createDirectory" not in prepare
     assert "mkdirat" in prepare
     helper_mkdir = models.split("private static func ensureContainedDirectory")[1].split(
-        "static func writeContainedData"
+        "static func ensureContainedDirectories"
     )[0]
     assert "mkdirat" in helper_mkdir
     assert "O_NOFOLLOW" in helper_mkdir
     assert "openatDirectory" in helper_mkdir
+    dirs_mkdir = models.split("static func ensureContainedDirectories")[1].split(
+        "static func ensureOwnedSessionDirectory"
+    )[0]
+    assert "ensureContainedDirectory(" in dirs_mkdir
+    assert "containsSymlinkComponent" in dirs_mkdir
+    assert "isUnderSession" in dirs_mkdir
+    assert 'first == "archive" || first == "export"' in dirs_mkdir
+    assert "FileManager.default.createDirectory" not in dirs_mkdir
+    assert "fileManager.createDirectory" not in dirs_mkdir
+    owned_mkdir = models.split("static func ensureOwnedSessionDirectory")[1].split(
+        "static func writeContainedData"
+    )[0]
+    assert "mkdirat" in owned_mkdir
+    assert "O_NOFOLLOW" in owned_mkdir
+    assert "openUnfollowedDirectory" in owned_mkdir
+    assert "SessionVault.isValidSessionId" in owned_mkdir
+    assert "FileManager.default.createDirectory" not in owned_mkdir
+    assert "fileManager.createDirectory" not in owned_mkdir
     assert "containsSymlinkComponent" in prepare
     contained_reg = models.split("static func isContainedRegularFile")[1].split("static func containedRelative(_ file")[0]
     assert "unfollowedRelative" in contained_reg

@@ -16,7 +16,7 @@ struct SessionPackZipper {
         }
         let exportDir = sessionURL.appendingPathComponent(ScrumTracePath.export)
         PackBudget.removeEscapingExportLinks(exportDir: exportDir)
-        try FileManager.default.createDirectory(at: exportDir, withIntermediateDirectories: true)
+        try ExportRel.ensureContainedDirectories(relative: ScrumTracePath.export, sessionURL: sessionURL)
         if (try? exportDir.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
             try? ExportRel.removeItemIfRegularFile(exportDir, sessionRoot: sessionURL)
             throw SessionRecorderError.writerFailed("export/ is a symbolic link.")
@@ -113,7 +113,7 @@ struct SessionPackZipper {
         }
         let exportDir = sessionURL.appendingPathComponent(ScrumTracePath.export)
         PackBudget.removeEscapingExportLinks(exportDir: exportDir)
-        try FileManager.default.createDirectory(at: exportDir, withIntermediateDirectories: true)
+        try ExportRel.ensureContainedDirectories(relative: ScrumTracePath.export, sessionURL: sessionURL)
         if (try? exportDir.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
             try? ExportRel.removeItemIfRegularFile(exportDir, sessionRoot: sessionURL)
             throw SessionRecorderError.writerFailed("export/ is a symbolic link.")
@@ -326,7 +326,10 @@ enum PackBudget {
             if (try? exportDir.resourceValues(forKeys: [linkKey]).isSymbolicLink) == true {
                 return
             }
-            try? FileManager.default.createDirectory(at: exportDir, withIntermediateDirectories: true)
+            try? ExportRel.ensureContainedDirectories(
+                relative: ScrumTracePath.export,
+                sessionURL: sessionRoot
+            )
             if (try? exportDir.resourceValues(forKeys: [linkKey]).isSymbolicLink) == true {
                 try? ExportRel.removeItemIfRegularFile(exportDir, sessionRoot: sessionRoot)
                 ExportRel.unlinkLastComponentUnfollowed(exportDir)
