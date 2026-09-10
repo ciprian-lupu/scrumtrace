@@ -1726,6 +1726,7 @@ def test_write_contained_data_refuses_directory_symlinks() -> None:
     assert "isSymbolicLink" in prepare
     assert "mkdirat" in prepare
     assert "ensureContainedDirectory" in prepare
+    assert "openatDirectory" in prepare.split("private static func ensureContainedDirectory")[1]
     assert "FileManager.default.createDirectory" not in prepare
     assert "removeItemIfRegularFile" in prepare
     assert "FileManager.default.removeItem(at: next)" not in prepare
