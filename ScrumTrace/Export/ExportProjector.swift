@@ -179,6 +179,9 @@ struct ExportProjector {
     /// and orphan `media/` from a prior run must not survive into the zip.
     /// Never touches `archive/` or the canonical session-root manifest.
     private func resetExportTree(sessionURL: URL) throws {
+        guard ExportRel.isUsableSessionRoot(sessionURL) else {
+            throw SessionVaultError.writeFailed("session folder")
+        }
         let fileManager = FileManager.default
         let export = sessionURL.appendingPathComponent(ScrumTracePath.export)
         // fileExists follows links. A dangling or archive-pointing export/
@@ -193,14 +196,22 @@ struct ExportProjector {
             }
         }
         try fileManager.createDirectory(at: export, withIntermediateDirectories: true)
-        try fileManager.createDirectory(
-            at: sessionURL.appendingPathComponent(ScrumTracePath.exportShots),
-            withIntermediateDirectories: true
-        )
-        try fileManager.createDirectory(
-            at: sessionURL.appendingPathComponent(ScrumTracePath.media),
-            withIntermediateDirectories: true
-        )
+        if (try? export.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+            try? fileManager.removeItem(at: export)
+            throw SessionVaultError.writeFailed("export/")
+        }
+        let shots = sessionURL.appendingPathComponent(ScrumTracePath.exportShots)
+        try fileManager.createDirectory(at: shots, withIntermediateDirectories: true)
+        if (try? shots.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+            try? fileManager.removeItem(at: shots)
+            throw SessionVaultError.writeFailed(ScrumTracePath.exportShots)
+        }
+        let media = sessionURL.appendingPathComponent(ScrumTracePath.media)
+        try fileManager.createDirectory(at: media, withIntermediateDirectories: true)
+        if (try? media.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+            try? fileManager.removeItem(at: media)
+            throw SessionVaultError.writeFailed(ScrumTracePath.media)
+        }
     }
 
     func writeProjectionManifest(_ manifest: SessionManifest, sessionURL: URL) throws {

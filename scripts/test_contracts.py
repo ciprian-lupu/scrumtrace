@@ -198,6 +198,9 @@ def test_zipper_never_deletes_archive() -> None:
     reset = projector.split("func resetExportTree")[1].split("func writeProjectionManifest")[0]
     assert "isSymbolicLink" in reset
     assert "fileExists(atPath: export.path, isDirectory:" in reset
+    assert "isUsableSessionRoot" in reset
+    assert reset.count("isSymbolicLink") >= 4
+    assert reset.index("createDirectory(at: export") < reset.index('writeFailed("export/")')
     omit_md = zipper.split("func writeOmittedMarkdown")[1].split("private func uniquedOmitted")[0]
     assert "omittedHandoffPath" in omit_md
     assert "writeExportText" in omit_md
@@ -456,6 +459,9 @@ def test_audio_split_and_brief_loader() -> None:
     assert "self.engine = engine" in tap
     brief = (ROOT / "ScrumTrace" / "Export" / "SessionBriefRenderer.swift").read_text()
     assert "Export/Resources" in brief
+    loader = brief.split("enum BriefTemplateLoader")[1].split("enum HTMLEscaper")[0]
+    assert "isSymbolicLink" in loader
+    assert "skipDescendants" in loader
     menu = (ROOT / "ScrumTrace" / "UI" / "MenuBarController.swift").read_text()
     assert "retryRecent" in menu
     assert "lastMenuSignature" in menu

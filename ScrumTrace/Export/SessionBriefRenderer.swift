@@ -13,12 +13,23 @@ enum BriefTemplateLoader {
            let text = try? String(contentsOf: url, encoding: .utf8) {
             return text
         }
-        if let root = Bundle.main.resourceURL,
-           let enumerator = FileManager.default.enumerator(at: root, includingPropertiesForKeys: nil) {
-            for case let url as URL in enumerator {
-                if url.deletingPathExtension().lastPathComponent == name, url.pathExtension == ext,
-                   let text = try? String(contentsOf: url, encoding: .utf8) {
-                    return text
+        if let root = Bundle.main.resourceURL {
+            if (try? root.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+                return ""
+            }
+            if let enumerator = FileManager.default.enumerator(
+                at: root,
+                includingPropertiesForKeys: [.isSymbolicLinkKey]
+            ) {
+                for case let url as URL in enumerator {
+                    if (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+                        enumerator.skipDescendants()
+                        continue
+                    }
+                    if url.deletingPathExtension().lastPathComponent == name, url.pathExtension == ext,
+                       let text = try? String(contentsOf: url, encoding: .utf8) {
+                        return text
+                    }
                 }
             }
         }
