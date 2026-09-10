@@ -253,6 +253,22 @@ final class SessionProcessor: @unchecked Sendable {
             do {
                 zipResult = try zipper.zip(sessionURL: sessionURL, manifest: projection.manifest)
             } catch {
+                zipResult.omitted.append(
+                    OmittedAsset(path: "session-pack.zip", reason: "zip failed: \(error.localizedDescription)")
+                )
+                projection.manifest = PackBudget.stripOmitted(zipResult.omitted, from: projection.manifest)
+                projection.manifest.omitted = zipResult.omitted
+                projection.manifest.tasks = EvidenceValidator.applyExportEvidence(
+                    tasks: projection.manifest.tasks,
+                    sessionURL: sessionURL
+                )
+                try writeExportDocuments(
+                    sessionURL: sessionURL,
+                    projected: projection.manifest,
+                    excerpts: excerpts,
+                    projector: projector
+                )
+                try zipper.writeOmittedMarkdown(sessionURL: sessionURL, omitted: zipResult.omitted)
                 break
             }
         }

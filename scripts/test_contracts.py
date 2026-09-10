@@ -1009,6 +1009,10 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert rewrite.index("try writeExportDocuments") < rewrite.index("try zipper.writeZip")
     zip_rewrite = rewrite.split("zipBytes = try zipper.writeZip")[1].split("if zipBytes")[0]
     assert "writeExportDocuments" not in zip_rewrite
+    loop_zip = rewrite.split("if pass == 2")[1]
+    assert "try writeExportDocuments" in loop_zip
+    assert "stripOmitted" in loop_zip
+    assert "applyExportEvidence" in loop_zip
     zipper_over = zipper.split("if size > MediaBudget.maxZipBytes")[1].split("func writeZip")[0]
     assert "throw" not in zipper_over
     assert "Pack still" in zipper_over
