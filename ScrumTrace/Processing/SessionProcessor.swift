@@ -665,6 +665,21 @@ final class SessionProcessor: @unchecked Sendable {
         forceReview: Bool
     ) -> [TaskRecord] {
         var out: [TaskRecord] = []
+        func ownedByOtherAssociatedShot(_ still: String) -> Bool {
+            guard let associated = slice.associatedShotId else { return false }
+            return shots.contains { shot in
+                guard shot.id != associated else { return false }
+                let paths = shot.stillCandidates
+                    + [shot.rawPath]
+                    + [shot.annotatedPath, shot.exportPath].compactMap { $0 }
+                return paths.contains { candidate in
+                    !candidate.isEmpty && (
+                        candidate == still
+                            || ExportRel.sessionPath(candidate) == ExportRel.sessionPath(still)
+                    )
+                }
+            }
+        }
         for (index, candidate) in response.candidates.enumerated() {
             var status: TaskStatus
             switch candidate.decision {
@@ -699,17 +714,21 @@ final class SessionProcessor: @unchecked Sendable {
                 .filter { EvidenceValidator.framesOverlapSlice([$0], slice: slice, shots: shots, sessionURL: sessionURL) }
             let uniqueEvidence = uniquedPaths(
                 resolvedFrames
-                    + slice.stills.filter {
-                        EvidenceValidator.framesOverlapSlice(
-                            [$0],
+                    + slice.stills.filter { still in
+                        guard EvidenceValidator.framesOverlapSlice(
+                            [still],
                             slice: slice,
                             shots: shots,
                             sessionURL: sessionURL
-                        )
+                        ) else { return false }
+                        return !ownedByOtherAssociatedShot(still)
                     }
                     + [slice.exportClipPath ?? slice.clipPath].compactMap { $0 }
                     + shots.flatMap { shot in
-                        ([shot.exportPath].compactMap { $0 } + shot.stillCandidates)
+                        if let associated = slice.associatedShotId, shot.id != associated {
+                            return []
+                        }
+                        return ([shot.exportPath].compactMap { $0 } + shot.stillCandidates)
                             .filter {
                                 EvidenceValidator.framesOverlapSlice(
                                     [$0],
