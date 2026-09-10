@@ -129,6 +129,9 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
                     self.clock.beginPause()
                 }
             }
+            // Dual-pass Whisper reads this after crash/Quit. Write it before
+            // the first buffer so a missing file cannot default to a room mic.
+            try persistCaptureLayout()
             try await stream.startCapture()
         } catch {
             await abortFailedStart()

@@ -927,31 +927,28 @@ enum ExportRel {
         _ = Darwin.fcntl(readFd, F_SETFD, FD_CLOEXEC)
         _ = Darwin.fcntl(writeFd, F_SETFD, FD_CLOEXEC)
 
-        // Overlay `posix_spawn_file_actions_t` vs `posix_spawn_file_actions_t?`
-        // disagrees across SDKs. Call the C symbols through silgen + raw pointers.
-        var actions = posix_spawn_file_actions_t()
-        let actionsReady = withUnsafeMutablePointer(to: &actions) { ptr in
-            scrumtraceSpawnActionsInit(UnsafeMutableRawPointer(ptr)) == 0
-        }
-        guard actionsReady else {
+        // Darwin overlays disagree on the file-actions type (opaque vs
+        // optional). A 256-byte zeroed blob is larger than the C struct.
+        // Call init/add/spawn/destroy through silgen + raw pointers.
+        let actionsBytes = 256
+        let actions = UnsafeMutableRawPointer.allocate(
+            byteCount: actionsBytes,
+            alignment: MemoryLayout<Int>.alignment
+        )
+        actions.initializeMemory(as: UInt8.self, repeating: 0, count: actionsBytes)
+        defer { actions.deallocate() }
+        guard scrumtraceSpawnActionsInit(actions) == 0 else {
             Darwin.close(readFd)
             Darwin.close(writeFd)
             throw SessionVaultError.writeFailed("spawn")
         }
-        defer {
-            _ = withUnsafeMutablePointer(to: &actions) { ptr in
-                scrumtraceSpawnActionsDestroy(UnsafeMutableRawPointer(ptr))
-            }
-        }
+        defer { _ = scrumtraceSpawnActionsDestroy(actions) }
 
-        let wired = withUnsafeMutablePointer(to: &actions) { ptr -> Bool in
-            let raw = UnsafeMutableRawPointer(ptr)
-            // posix_spawn_file_actions_addfchdir_np binds cwd to directoryFd.
-            return scrumtraceAddFchdir(raw, directoryFd) == 0
-                && scrumtraceAddDup2(raw, readFd, STDIN_FILENO) == 0
-                && scrumtraceAddClose(raw, readFd) == 0
-                && scrumtraceAddClose(raw, writeFd) == 0
-        }
+        // posix_spawn_file_actions_addfchdir_np binds cwd to directoryFd.
+        let wired = scrumtraceAddFchdir(actions, directoryFd) == 0
+            && scrumtraceAddDup2(actions, readFd, STDIN_FILENO) == 0
+            && scrumtraceAddClose(actions, readFd) == 0
+            && scrumtraceAddClose(actions, writeFd) == 0
         guard wired else {
             Darwin.close(readFd)
             Darwin.close(writeFd)
@@ -987,16 +984,14 @@ enum ExportRel {
         let spawned = argv.withUnsafeBufferPointer { argvBuf -> Int32 in
             env.withUnsafeBufferPointer { envBuf -> Int32 in
                 executable.withCString { path in
-                    withUnsafePointer(to: &actions) { actionsPtr in
-                        scrumtracePosixSpawn(
-                            &pid,
-                            path,
-                            UnsafeRawPointer(actionsPtr),
-                            nil,
-                            argvBuf.baseAddress,
-                            envBuf.baseAddress
-                        )
-                    }
+                    scrumtracePosixSpawn(
+                        &pid,
+                        path,
+                        UnsafeRawPointer(actions),
+                        nil,
+                        argvBuf.baseAddress,
+                        envBuf.baseAddress
+                    )
                 }
             }
         }
@@ -1005,23 +1000,32 @@ enum ExportRel {
             Darwin.close(writeFd)
             throw SessionVaultError.writeFailed("spawn")
         }
+        var wroteOk = payload.isEmpty
         if !payload.isEmpty {
-            _ = payload.withUnsafeBytes { buf -> Int in
+            let written = payload.withUnsafeBytes { buf -> Int in
                 guard let base = buf.baseAddress else { return -1 }
                 var offset = 0
                 let size = buf.count
                 while offset < size {
                     let n = Darwin.write(writeFd, base.advanced(by: offset), size - offset)
-                    if n <= 0 { return -1 }
+                    if n < 0 {
+                        if Darwin.errno == EINTR { continue }
+                        return -1
+                    }
+                    if n == 0 { return -1 }
                     offset += Int(n)
                 }
                 return offset
             }
+            wroteOk = written == payload.count
         }
         Darwin.close(writeFd)
         var status: Int32 = 0
-        let waited = Darwin.waitpid(pid, &status, 0)
-        guard waited == pid, (status & 0o177) == 0, ((status >> 8) & 0xff) == 0 else {
+        var waited: pid_t = -1
+        repeat {
+            waited = Darwin.waitpid(pid, &status, 0)
+        } while waited < 0 && Darwin.errno == EINTR
+        guard wroteOk, waited == pid, (status & 0o177) == 0, ((status >> 8) & 0xff) == 0 else {
             throw SessionVaultError.writeFailed("spawn")
         }
     }
@@ -1546,15 +1550,19 @@ struct CaptureAudioLayout: Codable, Sendable, Hashable {
     static let both = CaptureAudioLayout(microphoneWav: true, systemAudioInMovie: true)
 
     static func load(sessionURL: URL) -> CaptureAudioLayout {
+        // Missing/unreadable layout: WAV may be the system-audio fallback
+        // (`if !microphoneWav { writeWav }`). `.both` would label that WAV as
+        // room and also transcribe the movie (duplicate + wrong speaker).
+        let unknownMic = CaptureAudioLayout(microphoneWav: false, systemAudioInMovie: true)
         guard ExportRel.existingSessionFile(ScrumTracePath.captureLayout, sessionURL: sessionURL) != nil else {
-            return .both
+            return unknownMic
         }
         guard let data = ExportRel.readContainedData(
             relative: ScrumTracePath.captureLayout,
             sessionURL: sessionURL
         ),
               let layout = try? JSONDecoder().decode(CaptureAudioLayout.self, from: data) else {
-            return .both
+            return unknownMic
         }
         return layout
     }

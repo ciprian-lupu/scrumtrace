@@ -670,6 +670,9 @@ def test_pipeline_timing_stays_in_archive() -> None:
     assert "process.run()" not in run_zip
     assert "spawnWithDirectoryFd" in run_zip
     assert "scrumtrace-zip-stage" in run_zip
+    assert "mkdtemp" in run_zip
+    assert "scrumtrace-zip-stage-XXXXXX" in run_zip
+    assert "createDirectory(at: stage" not in run_zip
     assert "copyContainedToTemporaryFile" in run_zip
     assert "placeIntoOpenedDirectory" in run_zip
     assert "openUnfollowedDirectory" in run_zip
@@ -1145,6 +1148,8 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "existingSessionFile(ScrumTracePath.captureLayout" in layout_load
     assert "readContainedData" in layout_load
     assert "Data(contentsOf:" not in layout_load
+    assert "microphoneWav: false" in layout_load
+    assert "return .both" not in layout_load
     timing_load = models.split("static func load(sessionURL: URL) -> PipelineTiming?")[1].split("func write(sessionURL")[0]
     assert "readContainedData" in timing_load
     assert "Data(contentsOf:" not in timing_load
@@ -1224,6 +1229,9 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert start_fn.index("self.started = true") < start_fn.index("startCapture")
     assert start_fn.index("pauseNow") < start_fn.index("startCapture")
     assert start_fn.index("self.paused = true") < start_fn.index("startCapture")
+    assert "persistCaptureLayout()" in start_fn
+    assert start_fn.index("self.microphoneWav = mic") < start_fn.index("persistCaptureLayout")
+    assert start_fn.index("persistCaptureLayout") < start_fn.index("startCapture")
     prep_head = start_fn[start_fn.index("markRecordingStarted") : start_fn.index("prepareWriters")]
     assert "do {" in prep_head
     assert start_fn.index("prepareWriters") < start_fn.index("await abortFailedStart()")
@@ -1390,8 +1398,14 @@ def test_write_contained_data_refuses_directory_symlinks() -> None:
     assert "posix_spawn(" not in spawn_fn
     assert "Process(" not in spawn_fn
     assert "UnsafeMutableRawPointer" in spawn_fn
+    assert "UnsafeMutableRawPointer.allocate" in spawn_fn
+    assert "posix_spawn_file_actions_t()" not in spawn_fn
     assert "PATH=/usr/bin:/bin" in spawn_fn
     assert "ProcessInfo.processInfo.environment" not in spawn_fn
+    assert "EINTR" in spawn_fn
+    assert "waitpid" in spawn_fn
+    assert "wroteOk" in spawn_fn
+    assert "_ = payload.withUnsafeBytes" not in spawn_fn
     assert "O_EXCL" in models
     read_fn = models.split("static func readContainedData(relative:")[1].split("static func readContainedData(_ file")[0]
     assert "openatFile" in read_fn

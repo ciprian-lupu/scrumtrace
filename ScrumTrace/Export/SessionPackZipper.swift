@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 
 struct SessionPackZipper {
@@ -191,10 +192,19 @@ struct SessionPackZipper {
         // resolves cwd at launch; a planted export/ → archive/ link would pack
         // archive/ members (C2). Copy members via openat into a private
         // staging directory, then posix_spawn_file_actions_addfchdir_np.
-        let stage = FileManager.default.temporaryDirectory.appendingPathComponent(
-            "scrumtrace-zip-stage-\(UUID().uuidString)"
-        )
-        try FileManager.default.createDirectory(at: stage, withIntermediateDirectories: false)
+        // mkdtemp is exclusive; createDirectory + UUID is a TOCTOU window.
+        let template = FileManager.default.temporaryDirectory
+            .appendingPathComponent("scrumtrace-zip-stage-XXXXXX")
+            .path
+        var stageBytes = Array(template.utf8CString)
+        let made = stageBytes.withUnsafeMutableBufferPointer { buf -> Bool in
+            guard let base = buf.baseAddress else { return false }
+            return Darwin.mkdtemp(base) != nil
+        }
+        guard made else {
+            throw SessionRecorderError.writerFailed("export/ is a symbolic link.")
+        }
+        let stage = URL(fileURLWithPath: String(cString: stageBytes))
         defer { try? FileManager.default.removeItem(at: stage) }
         if (try? stage.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
             try? FileManager.default.removeItem(at: stage)
