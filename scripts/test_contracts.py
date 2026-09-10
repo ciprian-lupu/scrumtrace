@@ -1564,6 +1564,10 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "existingSessionFile(ScrumTracePath.sessionMovie" in transcribe
     assert "transcribeFile(at: wav, sessionURL: sessionURL)" in transcribe
     assert "transcribeMovieAudio(at: movie, sessionURL: sessionURL)" in transcribe
+    assert "Keep shots/clips; Retry Analysis can transcribe again." in transcribe
+    assert "requiredFailed" in transcribe
+    assert "passes.isEmpty || requiredFailed" in transcribe
+    assert "Movie audio is optional" not in transcribe
     load_tr = processor.split("private func loadTranscript")[1].split("private func evaluateSlice")[0]
     assert "existingSessionFile(ScrumTracePath.fullTranscript" in load_tr
     assert "readContainedData" in load_tr

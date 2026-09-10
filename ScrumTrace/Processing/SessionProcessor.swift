@@ -364,6 +364,7 @@ final class SessionProcessor: @unchecked Sendable {
         let wav = sessionURL.appendingPathComponent(ScrumTracePath.audioWav)
         let movie = sessionURL.appendingPathComponent(ScrumTracePath.sessionMovie)
         var passes: [TranscriptQuery.SourcePass] = []
+        var requiredFailed = false
         if wavExists {
             do {
                 let speaker = layout.microphoneWav ? "room" : "system"
@@ -371,6 +372,7 @@ final class SessionProcessor: @unchecked Sendable {
                 passes.append(TranscriptQuery.SourcePass(speaker: speaker, transcript: wavTranscript))
             } catch {
                 // Keep shots/clips; Retry Analysis can transcribe again.
+                requiredFailed = true
             }
         }
         if layout.shouldTranscribeMovie(wavExists: wavExists, movieExists: movieExists) {
@@ -378,10 +380,10 @@ final class SessionProcessor: @unchecked Sendable {
                 let movieTranscript = try await transcriber.transcribeMovieAudio(at: movie, sessionURL: sessionURL)
                 passes.append(TranscriptQuery.SourcePass(speaker: "system", transcript: movieTranscript))
             } catch {
-                // Movie audio is optional when the WAV pass already produced segments.
+                requiredFailed = true
             }
         }
-        if passes.isEmpty {
+        if passes.isEmpty || requiredFailed {
             return FullTranscript(sessionId: "", language: "en", segments: [])
         }
         return TranscriptQuery.merge(passes, sessionId: "")
