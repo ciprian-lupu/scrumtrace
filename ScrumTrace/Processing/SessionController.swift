@@ -267,7 +267,8 @@ final class SessionController: ObservableObject {
     }
 
     private func startRecordingAsync() async {
-        defer { startInFlight = false; captureFreeze.markStartInFlight(false) }
+        defer { startInFlight = false }
+        defer { captureFreeze.markStartInFlight(false) }
         guard !isRecording, !isBusy else { return }
         lastError = nil
         var abandonedId: String?
