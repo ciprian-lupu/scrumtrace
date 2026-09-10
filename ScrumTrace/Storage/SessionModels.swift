@@ -1728,6 +1728,8 @@ enum MediaBudget {
     static let stillJPEGQuality: CGFloat = 0.82
     static let keepConfidenceFloor = 0.55
     static let metadataSampleTimeoutMs: UInt64 = 200
+    /// Consecutive dropped realtime samples before capture fails. ~0.5 s at 30 fps.
+    static let captureStallFrames = 15
     static let manifestVersion = "1.1.0"
 }
 

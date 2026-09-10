@@ -49,12 +49,12 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
     /// a streak means room/system audio is not being persisted (C1).
     private var wavFormatFailStreak = 0
     /// Consecutive `isReadyForMoreMediaData == false` while the writer is
-    /// `.writing`. Brief backpressure is realtime; a multi-second stall
+    /// `.writing`. Brief backpressure is realtime; a half-second stall
     /// means the master movie is no longer receiving samples (C1).
     private var videoBackpressureStreak = 0
     private var audioBackpressureStreak = 0
     /// Consecutive `CMSampleBufferDataIsReady == false`. One late buffer is
-    /// realtime; a multi-second streak means screen/system/mic samples are
+    /// realtime; a half-second streak means screen/system/mic samples are
     /// being dropped while CaptureSessionState is still recording (C1).
     private var videoSampleNotReadyStreak = 0
     private var audioSampleNotReadyStreak = 0
@@ -592,56 +592,56 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
 
     private func noteVideoBackpressure() {
         videoBackpressureStreak += 1
-        if videoBackpressureStreak >= 90 {
+        if videoBackpressureStreak >= MediaBudget.captureStallFrames {
             failCaptureWrite("Could not write archive/session.mp4: video writer was not ready.")
         }
     }
 
     private func noteAudioBackpressure() {
         audioBackpressureStreak += 1
-        if audioBackpressureStreak >= 90 {
+        if audioBackpressureStreak >= MediaBudget.captureStallFrames {
             failCaptureWrite("Could not write archive/session.mp4: audio writer was not ready.")
         }
     }
 
     private func noteVideoSampleNotReady() {
         videoSampleNotReadyStreak += 1
-        if videoSampleNotReadyStreak >= 90 {
+        if videoSampleNotReadyStreak >= MediaBudget.captureStallFrames {
             failCaptureWrite("Could not write archive/session.mp4: video sample was not ready.")
         }
     }
 
     private func noteAudioSampleNotReady() {
         audioSampleNotReadyStreak += 1
-        if audioSampleNotReadyStreak >= 90 {
+        if audioSampleNotReadyStreak >= MediaBudget.captureStallFrames {
             failCaptureWrite("Could not write archive/session.mp4: audio sample was not ready.")
         }
     }
 
     private func noteWavSampleNotReady() {
         wavSampleNotReadyStreak += 1
-        if wavSampleNotReadyStreak >= 90 {
+        if wavSampleNotReadyStreak >= MediaBudget.captureStallFrames {
             failCaptureWrite("Could not write archive/audio.wav: audio sample was not ready.")
         }
     }
 
     private func noteVideoWriterNotWriting() {
         videoWriterNotWritingStreak += 1
-        if videoWriterNotWritingStreak >= 90 {
+        if videoWriterNotWritingStreak >= MediaBudget.captureStallFrames {
             failCaptureWrite("Could not write archive/session.mp4: video writer was not writing.")
         }
     }
 
     private func noteAudioWriterNotWriting() {
         audioWriterNotWritingStreak += 1
-        if audioWriterNotWritingStreak >= 90 {
+        if audioWriterNotWritingStreak >= MediaBudget.captureStallFrames {
             failCaptureWrite("Could not write archive/session.mp4: audio writer was not writing.")
         }
     }
 
     private func noteWavEmptyConvert() {
         wavEmptyConvertStreak += 1
-        if wavEmptyConvertStreak >= 90 {
+        if wavEmptyConvertStreak >= MediaBudget.captureStallFrames {
             failCaptureWrite("Could not write archive/audio.wav: converted audio was empty.")
         }
     }

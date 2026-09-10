@@ -92,6 +92,28 @@ struct SessionPackZipper {
 
         folder = PackBudget.exportFolderBytes(sessionURL: sessionURL)
         if size > MediaBudget.maxZipBytes || folder > MediaBudget.maxZipBytes {
+            // C3: odd extensions and first-pass unlink misses still count in
+            // folder handoff. Drop them before the opted-in transcript.
+            let leftoverDrops = dropOversizedFolderMedia(
+                sessionURL: sessionURL,
+                omitted: omitted
+            )
+            if !leftoverDrops.isEmpty {
+                omitted.append(contentsOf: leftoverDrops)
+                do {
+                    try runZip(
+                        exportDir: exportDir,
+                        includeFullTranscript: includeTranscript,
+                        sessionURL: sessionURL
+                    )
+                    size = try measuredPackBytes(sessionURL: sessionURL)
+                    folder = PackBudget.exportFolderBytes(sessionURL: sessionURL)
+                } catch {
+                    omitted.append(OmittedAsset(path: "session-pack.zip", reason: error.localizedDescription))
+                    size = MediaBudget.maxZipBytes + 1
+                    folder = PackBudget.exportFolderBytes(sessionURL: sessionURL)
+                }
+            }
             // C3: opted-in transcript is allow-listed, not immortal. Archive keeps
             // archive/full_transcript.json. The export copy loses to the 35 MB cap.
             let transcriptRel = "export/full_transcript.json"
@@ -248,6 +270,57 @@ struct SessionPackZipper {
             throw SessionRecorderError.writerFailed("session-pack.zip is missing or not a regular file.")
         }
         return size
+    }
+
+    /// C3: leftover non-protected export files (odd extensions, first-pass
+    /// unlink misses) still count toward folder handoff. Drop largest first.
+    private func dropOversizedFolderMedia(
+        sessionURL: URL,
+        omitted: [OmittedAsset]
+    ) -> [OmittedAsset] {
+        var extra: [OmittedAsset] = []
+        var folder = PackBudget.exportFolderBytes(sessionURL: sessionURL)
+        var seen = Set(omitted.map { ExportRel.toExportRoot($0.path) })
+        let candidates = PackBudget.exportMediaSessionPaths(sessionURL: sessionURL)
+            .sorted {
+                (ExportRel.regularFileByteCount(relative: $0, sessionURL: sessionURL) ?? 0)
+                    > (ExportRel.regularFileByteCount(relative: $1, sessionURL: sessionURL) ?? 0)
+            }
+        for path in candidates where folder > MediaBudget.maxZipBytes {
+            guard ExportRel.isUnderExport(path) else { continue }
+            if PackBudget.isProtected(path) { continue }
+            let label = ExportRel.toExportRoot(path)
+            if seen.contains(label) { continue }
+            let url = sessionURL.appendingPathComponent(path)
+            guard removeDroppableExportURL(url, sessionRoot: sessionURL) else { continue }
+            extra.append(OmittedAsset(path: label, reason: "Pack over 35 MB; dropped by priority"))
+            seen.insert(label)
+            folder = PackBudget.exportFolderBytes(sessionURL: sessionURL)
+        }
+        return extra
+    }
+
+    private func removeDroppableExportURL(_ url: URL, sessionRoot: URL) -> Bool {
+        let plantedLink = (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true
+        if plantedLink {
+            do {
+                try ExportRel.removeItemIfRegularFile(url, sessionRoot: sessionRoot)
+            } catch {
+                ExportRel.unlinkLastComponentUnfollowed(url)
+                if (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+                    return false
+                }
+            }
+            return (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) != true
+        }
+        guard ExportRel.isContainedRegularFile(url, sessionRoot: sessionRoot) else { return false }
+        do {
+            try ExportRel.removeItemIfRegularFile(url, sessionRoot: sessionRoot)
+        } catch {
+            ExportRel.unlinkLastComponentUnfollowed(url)
+            guard !ExportRel.isContainedRegularFile(url, sessionRoot: sessionRoot) else { return false }
+        }
+        return true
     }
 
     private func runZip(exportDir: URL, includeFullTranscript: Bool, sessionURL: URL) throws {
@@ -705,10 +778,7 @@ enum PackBudget {
             guard let exportRel = ExportRel.containedExportMember(file: url, exportDir: exportDir) else {
                 continue
             }
-            let ext = url.pathExtension.lowercased()
-            if ["png", "jpg", "jpeg", "mp4", "wav", "webp", "json"].contains(ext) {
-                out.append(ExportRel.sessionPath(exportRel))
-            }
+            out.append(ExportRel.sessionPath(exportRel))
         }
         return out.sorted()
     }

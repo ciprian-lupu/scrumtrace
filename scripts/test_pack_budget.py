@@ -272,6 +272,8 @@ def main() -> int:
     zip_fn = zipper_src.split("func zip(")[1].split("func writeZip")[0]
     assert "folder > MediaBudget.maxZipBytes" in zip_fn
     assert zip_fn.index("let dropList") < zip_fn.index("return Result")
+    assert "dropOversizedFolderMedia" in zip_fn
+    assert zip_fn.index("dropOversizedFolderMedia") < zip_fn.index("opted-in full transcript")
     return 0
 
 

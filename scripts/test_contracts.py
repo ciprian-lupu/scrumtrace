@@ -311,6 +311,8 @@ def test_zipper_never_deletes_archive() -> None:
     assert "replacingOccurrences(of: prefix" not in leftover
     assert leftover.index("isSymbolicLink") < leftover.index("enumerator")
     assert leftover.index("removeEscapingExportLinks") < leftover.index("enumerator")
+    assert '["png", "jpg", "jpeg", "mp4", "wav", "webp", "json"]' not in leftover
+    assert "pathExtension.lowercased()" not in leftover
     protected = zipper.split("static let protectedNames")[1].split("static func isProtected")[0]
     assert '"full_transcript.json"' in protected
     still_link = zipper.split("static func exportStillContainsSymlink")[1].split("static func removeEscapingExportLinks")[0]
@@ -773,6 +775,8 @@ def test_audio_split_and_brief_loader() -> None:
     assert "remapFailStreak = 0" in append_video
     assert "noteVideoBackpressure" in append_video
     assert "videoBackpressureStreak = 0" in append_video
+    assert "MediaBudget.captureStallFrames" in recorder
+    assert ">= 90" not in recorder
     assert "guard !paused, started else { return }" in append_video
     assert "CMSampleBufferDataIsReady" in append_video
     assert "noteVideoSampleNotReady" in append_video
@@ -1256,6 +1260,10 @@ def test_pause_privacy_and_metadata_gate() -> None:
     assert "recorder?.isPaused == true" in controller
     assert "captureFreeze.attach" in controller
     assert "freezeCapture" in privacy
+    assert "didActivateApplicationNotification" in privacy
+    assert "didDeactivateApplicationNotification" in privacy
+    assert "repeating: 0.1" in privacy
+    assert "repeating: 0.4" not in privacy
     tick = privacy.split("func tick()")[1].split("func currentCredentialApp")[0]
     assert "freezeCapture?()" in tick
     assert tick.index("freezeCapture") < tick.index("onTrip")
@@ -1746,6 +1754,8 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert zipper_over.index("opted-in full transcript") < zipper_over.index("Pack still")
     assert "includeFullTranscript: false" in zipper_over
     assert "folder > MediaBudget.maxZipBytes" in zipper_over
+    assert "dropOversizedFolderMedia" in zipper_over
+    assert zipper_over.index("dropOversizedFolderMedia") < zipper_over.index("opted-in full transcript")
     folder_fn = zipper.split("static func exportFolderBytes")[1].split("static func exportStillContainsSymlink")[0]
     assert "session-pack.zip" in folder_fn
     assert "skipDescendants" in folder_fn

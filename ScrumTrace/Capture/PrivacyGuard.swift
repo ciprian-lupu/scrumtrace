@@ -26,11 +26,16 @@ final class PrivacyGuard: @unchecked Sendable {
     ]
 
     private var timer: DispatchSourceTimer?
+    private var workspaceObservers: [NSObjectProtocol] = []
+    private let tickQueue = DispatchQueue(
+        label: "com.str8minds.ScrumTrace.privacy",
+        qos: .userInitiated
+    )
     private let lock = NSLock()
     private(set) var isTripped = false
     var onTrip: ((String) -> Void)?
     var onClear: (() -> Void)?
-    /// Called on the privacy timer queue. Must pause capture without waiting for MainActor.
+    /// Called on the privacy queue. Must pause capture without waiting for MainActor.
     var freezeCapture: (() -> Void)?
 
     var isCurrentlyTripped: Bool {
@@ -41,18 +46,26 @@ final class PrivacyGuard: @unchecked Sendable {
 
     func start() {
         stop()
-        let timer = DispatchSource.makeTimerSource(queue: .global(qos: .utility))
-        timer.schedule(deadline: .now(), repeating: 0.4)
+        let timer = DispatchSource.makeTimerSource(queue: tickQueue)
+        timer.schedule(deadline: .now(), repeating: 0.1)
         timer.setEventHandler { [weak self] in
             self?.tick()
         }
         timer.resume()
         self.timer = timer
+        observeFrontmostApp()
     }
 
     func stop() {
         timer?.cancel()
         timer = nil
+        #if os(macOS)
+        let center = NSWorkspace.shared.notificationCenter
+        for token in workspaceObservers {
+            center.removeObserver(token)
+        }
+        #endif
+        workspaceObservers = []
         lock.lock()
         isTripped = false
         lock.unlock()
@@ -100,6 +113,25 @@ final class PrivacyGuard: @unchecked Sendable {
         return nil
         #endif
     }
+
+    /// Frontmost-app changes fire immediately; the 0.1s timer is only a backstop
+    /// for overlays that never become the frontmost application.
+    private func observeFrontmostApp() {
+        #if os(macOS)
+        let center = NSWorkspace.shared.notificationCenter
+        let names = [
+            NSWorkspace.didActivateApplicationNotification,
+            NSWorkspace.didDeactivateApplicationNotification
+        ]
+        for name in names {
+            let token = center.addObserver(forName: name, object: nil, queue: nil) { [weak self] _ in
+                guard let self else { return }
+                self.tickQueue.async { self.tick() }
+            }
+            workspaceObservers.append(token)
+        }
+        #endif
+    }
 }
 
 /// Pauses the live recorder from a background privacy tick (C1). SessionController
@@ -130,7 +162,7 @@ final class CaptureFreeze: @unchecked Sendable {
         sampler.isSuspended = true
         // Hold-to-Talk observers run on this queue (`queue: nil`) and abort
         // before the MainActor HUD hop (C1). Skip re-posting while already
-        // frozen so an open Shot annotation is not aborted every 0.4 s.
+        // frozen so an open Shot annotation is not aborted on every privacy tick.
         if alreadyPaused { return }
         NotificationCenter.default.post(
             name: .scrumTraceCaptureGate,
