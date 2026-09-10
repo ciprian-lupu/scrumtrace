@@ -1,9 +1,6 @@
 import AVFoundation
 import Combine
-import SwiftUI
-#if os(macOS)
 import AppKit
-#endif
 
 enum DrawTool: String, CaseIterable {
     case rectangle
@@ -11,7 +8,7 @@ enum DrawTool: String, CaseIterable {
     case pen
 }
 
-struct AnnotationStroke: Identifiable {
+struct AnnotationStroke {
     var id = UUID()
     var tool: DrawTool
     var points: [CGPoint]
@@ -24,6 +21,8 @@ final class AnnotationCanvas: NSView {
     var sourceImage: NSImage?
 
     override var isFlipped: Bool { true }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     override func draw(_ dirtyRect: NSRect) {
         sourceImage?.draw(in: bounds)
@@ -106,7 +105,7 @@ final class AnnotationCanvas: NSView {
 }
 
 /// Note / Hold-to-Talk state lives on a class so Pause and Stop observers can
-/// abort and persist on the posting thread (C1). SwiftUI `onReceive` can hop.
+/// abort and persist on the posting thread (C1).
 final class ShotTalkState: ObservableObject {
     @Published var tool: DrawTool = .rectangle
     @Published var note = ""
@@ -241,102 +240,19 @@ final class ShotTalkState: ObservableObject {
     }
 }
 
-struct ShotNoteView: View {
-    @ObservedObject var session: ShotTalkState
-
-    var body: some View {
-        VStack(spacing: 10) {
-            HStack {
-                Text("Shot note")
-                    .font(.headline)
-                Spacer()
-                Picker("Tool", selection: $session.tool) {
-                    Text("Box").tag(DrawTool.rectangle)
-                    Text("Arrow").tag(DrawTool.arrow)
-                    Text("Pen").tag(DrawTool.pen)
-                }
-                .pickerStyle(.segmented)
-                .frame(maxWidth: 240)
-            }
-            CanvasHost(canvas: session.canvas, screenshot: session.screenshot, tool: session.tool)
-                .frame(minHeight: 280)
-                .clipShape(RoundedRectangle(cornerRadius: 8))
-            TextField("What should an agent notice here?", text: $session.note, axis: .vertical)
-                .textFieldStyle(.roundedBorder)
-                .lineLimit(2...4)
-            HStack {
-                Button(session.holdingTalk ? "Release to transcribe" : (session.canTalk ? "Hold to talk" : "Hold to talk (paused)")) {}
-                    .disabled(!session.canTalk)
-                    .simultaneousGesture(
-                        DragGesture(minimumDistance: 0)
-                            .onChanged { _ in startTalk() }
-                            .onEnded { _ in Task { await stopTalk() } }
-                    )
-                Spacer()
-                Button("Save") { save() }
-                    .keyboardShortcut(.defaultAction)
-            }
-        }
-        .padding(14)
-        .frame(width: 720, height: 520)
-        .onAppear {
-            session.canvas.sourceImage = session.screenshot
-            session.canvas.tool = session.tool
-            session.canTalk = session.allowsNewCapture()
-        }
-        .onChange(of: session.tool) { _, newValue in
-            session.canvas.tool = newValue
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .scrumTraceCaptureGate)) { notification in
-            session.applyCaptureGate(notification.object as? CaptureSessionState)
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .scrumTraceSessionEnding)) { _ in
-            session.persist()
-        }
-        .onDisappear {
-            abortTalk()
-        }
-    }
-
-    private func startTalk() {
-        session.startTalk()
-    }
-
-    private func abortTalk() {
-        session.abortTalk()
-    }
-
-    private func stopTalk() async {
-        await session.stopTalk()
-    }
-
-    private func save() {
-        session.persist()
-    }
-}
-
-struct CanvasHost: NSViewRepresentable {
-    let canvas: AnnotationCanvas
-    let screenshot: NSImage
-    let tool: DrawTool
-
-    func makeNSView(context: Context) -> AnnotationCanvas {
-        canvas.sourceImage = screenshot
-        canvas.tool = tool
-        return canvas
-    }
-
-    func updateNSView(_ nsView: AnnotationCanvas, context: Context) {
-        nsView.tool = tool
-        nsView.sourceImage = screenshot
-        nsView.needsDisplay = true
-    }
-}
-
-final class ShotNoteWindow: NSPanel {
-    private var hosting: NSHostingView<ShotNoteView>?
+final class ShotNoteWindow: NSPanel, NSTextFieldDelegate {
     private let talk: ShotTalkState
     private var observers: [NSObjectProtocol] = []
+    private var cancellables = Set<AnyCancellable>()
+    private let tools = NSSegmentedControl(
+        labels: ["Box", "Arrow", "Pen"],
+        trackingMode: .selectOne,
+        target: nil,
+        action: nil
+    )
+    private let noteField = NSTextField()
+    private let talkButton = HoldTalkButton()
+    private let saveButton = NSButton(title: "Save", target: nil, action: nil)
 
     init(
         screenshot: NSImage,
@@ -363,6 +279,7 @@ final class ShotNoteWindow: NSPanel {
             onSave(note, image, source)
             self?.orderOut(nil)
         }
+        talk.canTalk = talk.allowsNewCapture()
         title = "ScrumTrace shot"
         isFloatingPanel = true
         level = .modalPanel
@@ -370,10 +287,14 @@ final class ShotNoteWindow: NSPanel {
         becomesKeyOnlyIfNeeded = true
         animationBehavior = .none
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-        let root = ShotNoteView(session: talk)
-        let view = NSHostingView(rootView: root)
-        contentView = view
-        hosting = view
+        buildChrome()
+        talk.objectWillChange
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                DispatchQueue.main.async { self?.refreshChrome() }
+            }
+            .store(in: &cancellables)
+        refreshChrome()
         // queue: nil — run on the posting thread so Stop/Quit persist the
         // annotation before persistInterruptedCapture (C1).
         observers.append(
@@ -397,6 +318,7 @@ final class ShotNoteWindow: NSPanel {
     }
 
     deinit {
+        talk.abortTalk()
         observers.forEach { NotificationCenter.default.removeObserver($0) }
     }
 
@@ -408,9 +330,180 @@ final class ShotNoteWindow: NSPanel {
 
     /// Close finishes the pre-pause annotation (C1). Persist is idempotent.
     override func close() {
+        talk.note = noteField.stringValue
         talk.persist()
         super.close()
     }
 
+    override func makeKeyAndOrderFront(_ sender: Any?) {
+        orderFrontRegardless()
+    }
+
+    override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
+
+    func controlTextDidChange(_ obj: Notification) {
+        talk.note = noteField.stringValue
+        if talk.source == .voice {
+            talk.source = .mixed
+        }
+    }
+
+    private func buildChrome() {
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: 740, height: 540))
+        contentView = root
+
+        let titleLabel = NSTextField(labelWithString: "Shot note")
+        titleLabel.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
+        titleLabel.refusesFirstResponder = true
+
+        tools.selectedSegment = 0
+        tools.target = self
+        tools.action = #selector(toolChanged)
+        tools.refusesFirstResponder = true
+        tools.setContentHuggingPriority(.required, for: .horizontal)
+
+        talk.canvas.translatesAutoresizingMaskIntoConstraints = false
+        talk.canvas.wantsLayer = true
+        talk.canvas.layer?.cornerRadius = 8
+        talk.canvas.layer?.masksToBounds = true
+
+        noteField.placeholderString = "What should an agent notice here?"
+        noteField.translatesAutoresizingMaskIntoConstraints = false
+        noteField.delegate = self
+        noteField.maximumNumberOfLines = 4
+        noteField.lineBreakMode = .byWordWrapping
+        noteField.cell?.wraps = true
+        noteField.cell?.isScrollable = false
+        noteField.preferredMaxLayoutWidth = 700
+
+        talkButton.refusesFirstResponder = true
+        talkButton.onPress = { [weak self] in
+            self?.talk.startTalk()
+        }
+        talkButton.onRelease = { [weak self] in
+            guard let self else { return }
+            Task { await self.talk.stopTalk() }
+        }
+
+        saveButton.target = self
+        saveButton.action = #selector(saveClicked)
+        saveButton.keyEquivalent = "\r"
+        saveButton.refusesFirstResponder = true
+
+        let headerSpace = NSView()
+        headerSpace.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        headerSpace.setContentCompressionResistancePriority(.fittingSizeCompression, for: .horizontal)
+        let header = NSStackView(views: [titleLabel, headerSpace, tools])
+        header.orientation = .horizontal
+        header.alignment = .centerY
+        header.spacing = 8
+        header.distribution = .fill
+
+        let footerSpace = NSView()
+        footerSpace.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        footerSpace.setContentCompressionResistancePriority(.fittingSizeCompression, for: .horizontal)
+        let footer = NSStackView(views: [talkButton, footerSpace, saveButton])
+        footer.orientation = .horizontal
+        footer.alignment = .centerY
+        header.translatesAutoresizingMaskIntoConstraints = false
+        footer.translatesAutoresizingMaskIntoConstraints = false
+
+        root.addSubview(header)
+        root.addSubview(talk.canvas)
+        root.addSubview(noteField)
+        root.addSubview(footer)
+
+        NSLayoutConstraint.activate([
+            header.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 14),
+            header.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -14),
+            header.topAnchor.constraint(equalTo: root.topAnchor, constant: 12),
+            talk.canvas.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 14),
+            talk.canvas.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -14),
+            talk.canvas.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 10),
+            talk.canvas.heightAnchor.constraint(greaterThanOrEqualToConstant: 280),
+            noteField.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 14),
+            noteField.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -14),
+            noteField.topAnchor.constraint(equalTo: talk.canvas.bottomAnchor, constant: 10),
+            noteField.heightAnchor.constraint(equalToConstant: 64),
+            footer.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 14),
+            footer.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -14),
+            footer.topAnchor.constraint(equalTo: noteField.bottomAnchor, constant: 10),
+            footer.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -14)
+        ])
+    }
+
+    private func refreshChrome() {
+        talk.canvas.tool = talk.tool
+        talk.canvas.sourceImage = talk.screenshot
+        talk.canvas.needsDisplay = true
+        switch talk.tool {
+        case .rectangle: tools.selectedSegment = 0
+        case .arrow: tools.selectedSegment = 1
+        case .pen: tools.selectedSegment = 2
+        }
+        talkButton.isEnabled = talk.canTalk
+        talkButton.setLabel(
+            talk.holdingTalk
+                ? "Release to transcribe"
+                : (talk.canTalk ? "Hold to talk" : "Hold to talk (paused)")
+        )
+        if noteField.currentEditor() == nil, noteField.stringValue != talk.note {
+            noteField.stringValue = talk.note
+        }
+    }
+
+    @objc private func toolChanged() {
+        switch tools.selectedSegment {
+        case 1: talk.tool = .arrow
+        case 2: talk.tool = .pen
+        default: talk.tool = .rectangle
+        }
+        talk.canvas.tool = talk.tool
+        talk.canvas.needsDisplay = true
+    }
+
+    @objc private func saveClicked() {
+        talk.note = noteField.stringValue
+        talk.persist()
+    }
+}
+
+private final class HoldTalkButton: NSButton {
+    var onPress: () -> Void = {}
+    var onRelease: () -> Void = {}
+
+    init() {
+        super.init(frame: .zero)
+        bezelStyle = .rounded
+        setLabel("Hold to talk")
+        refusesFirstResponder = true
+        focusRingType = .none
+        setButtonType(.momentaryChange)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { nil }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    func setLabel(_ text: String) {
+        title = text
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        isHighlighted = true
+        onPress()
+        while true {
+            guard let next = window?.nextEvent(
+                matching: [.leftMouseUp, .leftMouseDragged],
+                until: .distantFuture,
+                inMode: .eventTracking,
+                dequeue: true
+            ) else { break }
+            if next.type == .leftMouseUp { break }
+        }
+        isHighlighted = false
+        onRelease()
+    }
 }

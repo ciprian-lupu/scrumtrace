@@ -426,16 +426,22 @@ def test_pause_gate_hold_to_talk() -> None:
     assert "abortTalk" in shot
     assert "scrumTraceCaptureGate" in shot
     assert "scrumTraceSessionEnding" in shot
-    assert ".onDisappear" in shot
+    assert ".onDisappear" not in shot
     assert "canJoinAllSpaces" in shot
     assert "fullScreenAuxiliary" in shot
     assert "becomesKeyOnlyIfNeeded" in shot
     assert "canBecomeMain" in shot
+    assert "canBecomeKey: Bool { true }" in shot
+    assert "makeKeyAndOrderFront" in shot
+    assert "refusesFirstResponder" in shot
+    assert "NSHostingView" not in shot
+    assert "import SwiftUI" not in shot
+    assert "struct ShotNoteView" not in shot
     assert "addObserver" in shot
     assert "queue: nil" in shot
     assert "class ShotTalkState" in shot
     assert "override func close()" in shot
-    close_fn = shot.split("override func close()")[1].split("override var canBecomeMain")[0]
+    close_fn = shot.split("override func close()")[1].split("override func makeKeyAndOrderFront")[0]
     assert "talk.persist()" in close_fn
     assert close_fn.index("talk.persist()") < close_fn.index("super.close()")
     start_talk = shot.split("func startTalk()")[1].split("func abortTalk()")[0]
@@ -461,7 +467,7 @@ def test_pause_gate_hold_to_talk() -> None:
     assert "Thread.isMainThread" in gate
     assert "Task { @MainActor" in gate
     assert "DispatchQueue.main" not in gate
-    stop_talk = shot.split("func stopTalk()")[1].split("struct ShotNoteView")[0]
+    stop_talk = shot.split("func stopTalk()")[1].split("final class ShotNoteWindow")[0]
     assert "guard live, !saved" not in stop_talk
     assert "guard allowsNewCapture(), !saved" not in stop_talk
     assert "guard live else { return }" in stop_talk
@@ -663,9 +669,9 @@ def test_audio_split_and_brief_loader() -> None:
     assert "controller.isBusy" in hud
     shot = (ROOT / "ScrumTrace" / "UI" / "ShotNoteWindow.swift").read_text()
     assert "abortTalk" in shot
-    # ShotNoteView.body must close before startTalk (compile error if the brace is missing).
-    body = shot.split("struct ShotNoteView")[1].split("struct CanvasHost")[0]
-    assert body.count("{") == body.count("}")
+    assert "talk.abortTalk()" in shot.split("deinit")[1].split("func show()")[0]
+    assert "struct ShotNoteView" not in shot
+    assert "NSHostingView" not in shot
 
 
 def test_dual_transcript_merge_wired() -> None:

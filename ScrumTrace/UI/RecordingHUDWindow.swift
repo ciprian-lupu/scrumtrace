@@ -222,6 +222,8 @@ private final class HUDTextButton: NSButton {
         setLabel(title)
     }
 
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
     func setLabel(_ text: String) {
         attributedTitle = NSAttributedString(
             string: text,
