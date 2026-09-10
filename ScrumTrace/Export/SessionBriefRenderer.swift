@@ -158,6 +158,7 @@ struct SessionBriefRenderer {
           <header>
             <span class="slate">\(HTMLEscaper.escape(task.taskId))</span>
             <span class="kind">\(HTMLEscaper.escape(task.kind.rawValue.replacingOccurrences(of: "_", with: " ")))</span>
+            <span class="conf">\(HTMLEscaper.escape(String(format: "%.2f", task.confidence)))</span>
             <h2>\(HTMLEscaper.escape(task.title))</h2>
           </header>
           <dl class="epistemic">
@@ -317,6 +318,8 @@ struct SessionBriefRenderer {
     .take { background: var(--panel); border: 1px solid var(--line); border-radius: 18px; padding: 22px; margin: 0 0 22px; }
     .excerpt { font-size: 13px; color: var(--muted); margin: 0 0 12px; }
     .epistemic { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+    .kind { font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; }
+    .conf { font-family: ui-monospace, monospace; font-size: 11px; opacity: 0.7; }
     .clip { width: 100%; border-radius: 12px; background: #000; }
     .still img, figure img { width: 100%; border-radius: 12px; display: block; }
     .contact { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 14px; }

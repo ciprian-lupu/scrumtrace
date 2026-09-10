@@ -342,6 +342,7 @@ def main() -> None:
       <header>
         <span class="slate">TASK-01</span>
         <span class="kind">bug</span>
+        <span class="conf">0.91</span>
         <h2>Save athlete does not persist a valid form</h2>
       </header>
       <dl class="epistemic">
@@ -359,6 +360,7 @@ def main() -> None:
       <header>
         <span class="slate">TASK-02</span>
         <span class="kind">action item</span>
+        <span class="conf">0.88</span>
         <h2>Ingest stall recovery sequence</h2>
       </header>
       <dl class="epistemic">

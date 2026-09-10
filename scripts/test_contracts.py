@@ -1328,6 +1328,7 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "--sans:" in css
     assert "--mono:" in css
     assert "--display:" in css
+    assert ".take .conf" in css
     assert "@media (max-width: 860px)" in css
     assert ".meta { display: grid" in css.split("@media (max-width: 860px)")[1]
     assert "IBM Plex" not in css
@@ -1339,6 +1340,7 @@ def test_phase45_clip_consent_and_budget() -> None:
     fallback_css = brief.split("let fallbackCSS")[1].split("let fallbackJS")[0]
     assert "fonts.googleapis" not in fallback_css
     assert "@import" not in fallback_css
+    assert ".conf" in fallback_css
     prompts = (ROOT / "ScrumTrace" / "AI" / "PromptTemplates.swift").read_text()
     assert 'wrapUntrusted("Human shot note' in prompts
     assert "func sanitizeUntrusted" in prompts
@@ -1355,6 +1357,8 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "scrumtrace-note" in shot
     brief_src = (ROOT / "ScrumTrace" / "Export" / "SessionBriefRenderer.swift").read_text()
     assert "t_media" in brief_src.split("task.quotes.map")[1].split("return \"\"\"")[0]
+    assert 'class="conf"' in brief_src
+    assert 'String(format: "%.2f", task.confidence)' in brief_src
     models = (ROOT / "ScrumTrace" / "Storage" / "SessionModels.swift").read_text()
     task_decode = models.split("struct TaskRecord")[1].split("struct CandidateRecord")[0]
     assert "decodeIfPresent([QuoteRecord]" in task_decode

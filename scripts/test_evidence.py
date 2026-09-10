@@ -180,6 +180,7 @@ def test_frame_ref_basename_resolves() -> None:
     assert "keepConfidenceFloor" in apply_fn
     assert "normalize(copy.inferred)" in apply_fn
     assert "normalize(copy.observed)" in apply_fn
+    assert "guard let transcript else" in apply_fn
     assert "func mergeCanonicalStatuses" in validator
     merge_fn = validator.split("static func mergeCanonicalStatuses")[1].split("static func exportFileExists")[0]
     assert "copy.status = projected.status" in merge_fn
@@ -268,6 +269,8 @@ def test_mock_agent_context_paths_exist() -> None:
     for rel in re.findall(r"`(media/[^`]+)`", ctx):
         assert (export / rel).is_file(), f"missing {rel}"
     html = (export / "SESSION_BRIEF.html").read_text()
+    assert 'class="conf">0.91</span>' in html
+    assert 'class="conf">0.88</span>' in html
     for rel in re.findall(r'(?:src|href)="([^"]+)"', html):
         if rel.startswith("http://") or rel.startswith("https://") or rel.startswith("#"):
             continue

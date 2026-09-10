@@ -141,7 +141,13 @@ enum EvidenceValidator {
                             copy.status = .needsReview
                             break
                         }
-                        if let transcript, !quoteMatchesTranscript(quote, transcript: transcript) {
+                        // C5: quotes must hit a transcript segment. Missing
+                        // transcript cannot keep `confirmed`.
+                        guard let transcript else {
+                            copy.status = .needsReview
+                            break
+                        }
+                        if !quoteMatchesTranscript(quote, transcript: transcript) {
                             copy.status = .needsReview
                             break
                         }

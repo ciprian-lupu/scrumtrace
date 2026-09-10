@@ -1376,6 +1376,28 @@ final class ContractTests: XCTestCase {
         )
         XCTAssertEqual(applied[0].status, .needsReview)
         XCTAssertEqual(applied[1].status, .needsReview)
+        let validQuoteNoTranscript = TaskRecord(
+            taskId: "TASK-03",
+            sourceSliceId: "slice-01",
+            kind: .bug,
+            status: .confirmed,
+            title: "Quoted",
+            observed: "x",
+            stated: "",
+            inferred: "",
+            agentInstructions: "inspect",
+            quotes: [
+                QuoteRecord(speaker: "presenter", text: "this does nothing", tMediaStart: 184.1, tMediaEnd: 187.4)
+            ],
+            evidenceMedia: ["shots/001.jpg"],
+            confidence: 0.9
+        )
+        let withoutTranscript = EvidenceValidator.applyExportEvidence(
+            tasks: [validQuoteNoTranscript],
+            sessionURL: root,
+            slices: [slice]
+        )
+        XCTAssertEqual(withoutTranscript[0].status, .needsReview)
     }
 
     func testMergeCanonicalStatusesKeepsArchiveEvidence() {
