@@ -464,7 +464,6 @@ enum PackBudget {
     static let protectedNames: Set<String> = [
         "AGENT_CONTEXT.md",
         "SESSION_BRIEF.html",
-        "AGENT_PROMPT.txt",
         "session.manifest.json",
         "session-pack.zip",
         "OMITTED.md",

@@ -315,6 +315,7 @@ def test_zipper_never_deletes_archive() -> None:
     assert "pathExtension.lowercased()" not in leftover
     protected = zipper.split("static let protectedNames")[1].split("static func isProtected")[0]
     assert '"full_transcript.json"' in protected
+    assert '"AGENT_PROMPT.txt"' not in protected
     still_link = zipper.split("static func exportStillContainsSymlink")[1].split("static func removeEscapingExportLinks")[0]
     assert "isSymbolicLink" in still_link
     assert "skipDescendants" in still_link

@@ -177,6 +177,28 @@ enum EvidenceValidator {
         }
     }
 
+    /// Clip path still counts as this window after omit deletes the MP4.
+    private static func citesSliceWindow(
+        _ path: String,
+        slice: SliceRecord,
+        shots: [ShotRecord],
+        sessionURL: URL
+    ) -> Bool {
+        if framesOverlapSlice([path], slice: slice, shots: shots, sessionURL: sessionURL) {
+            return true
+        }
+        if let clip = slice.exportClipPath ?? slice.clipPath, isSameSessionPath(path, clip) {
+            return true
+        }
+        return false
+    }
+
+    private static func isSameSessionPath(_ lhs: String, _ rhs: String) -> Bool {
+        ExportRel.sessionPath(lhs) == ExportRel.sessionPath(rhs)
+            || ExportRel.toExportRoot(ExportRel.sessionPath(lhs))
+                == ExportRel.toExportRoot(ExportRel.sessionPath(rhs))
+    }
+
     /// C5: after projection/omit, `confirmed` requires a real file under `export/`.
     /// Quotes are re-checked (inverted times, slice window, transcript overlap)
     /// so a demotion at zip time cannot leave a `confirmed` row without evidence.
@@ -202,15 +224,16 @@ enum EvidenceValidator {
                     return true
                 }
                 // D7: a merge-clamped Shot review row has only that Shot's
-                // stills. Keep them. An evaluated row that also has in-window
-                // clip/stills must not keep another moment's PNG (C5).
+                // stills. Keep them. A row that cited this slice's clip — even
+                // if omit later deleted the MP4 — must not keep another
+                // moment's PNG (C5).
                 guard let owner = shotOwning(path, in: shots),
                       owner.tMedia < slice.startMedia || owner.tMedia > slice.endMedia else {
                     return false
                 }
                 return !task.evidenceMedia.contains { other in
-                    framesOverlapSlice(
-                        [other],
+                    citesSliceWindow(
+                        other,
                         slice: slice,
                         shots: shots,
                         sessionURL: sessionURL
