@@ -20,6 +20,9 @@ struct SessionPackZipper {
             try? FileManager.default.removeItem(at: exportDir)
             throw SessionRecorderError.writerFailed("export/ is a symbolic link.")
         }
+        if ExportRel.containsSymlinkComponent(ScrumTracePath.export, sessionURL: sessionURL) {
+            throw SessionRecorderError.writerFailed("export/ is a symbolic link.")
+        }
         let zipURL = sessionURL.appendingPathComponent(ScrumTracePath.packZip)
         var omitted = uniquedOmitted(manifest.omitted)
 
@@ -114,6 +117,9 @@ struct SessionPackZipper {
             try? FileManager.default.removeItem(at: exportDir)
             throw SessionRecorderError.writerFailed("export/ is a symbolic link.")
         }
+        if ExportRel.containsSymlinkComponent(ScrumTracePath.export, sessionURL: sessionURL) {
+            throw SessionRecorderError.writerFailed("export/ is a symbolic link.")
+        }
         try runZip(
             exportDir: exportDir,
             includeFullTranscript: includeFullTranscript,
@@ -199,6 +205,13 @@ struct SessionPackZipper {
         process.arguments = ["-q", "-y", temp.path, "-@"]
         let pipe = Pipe()
         process.standardInput = pipe
+        // `Process` resolves cwd at launch. A link planted after
+        // currentDirectoryURL would pack archive/ members (C2).
+        if (try? exportDir.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true
+            || ExportRel.containsSymlinkComponent(ScrumTracePath.export, sessionURL: sessionURL) {
+            try? FileManager.default.removeItem(at: temp)
+            throw SessionRecorderError.writerFailed("export/ is a symbolic link.")
+        }
         try process.run()
         if let data = (members.joined(separator: "\n") + "\n").data(using: .utf8) {
             try pipe.fileHandleForWriting.write(contentsOf: data)

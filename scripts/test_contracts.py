@@ -573,13 +573,15 @@ def test_pipeline_timing_stays_in_archive() -> None:
     assert "isSymbolicLink" in run_zip
     assert "containsSymlinkComponent" in run_zip
     assert run_zip.index("isSymbolicLink") < run_zip.index("currentDirectoryURL")
-    assert run_zip.count("isSymbolicLink") >= 2
+    assert run_zip.count("isSymbolicLink") >= 3
+    assert run_zip.rfind("isSymbolicLink") < run_zip.index("process.run()")
     assert 'writerFailed("export/ is a symbolic link.")' in run_zip
     zip_fn = zipper.split("func zip(")[1].split("func writeZip")[0]
     assert "isUsableSessionRoot" in zip_fn
     assert "removeEscapingExportLinks" in zip_fn
     assert 'export/ is a symbolic link' in zip_fn
     assert zip_fn.index("createDirectory") < zip_fn.index("is a symbolic link")
+    assert "containsSymlinkComponent" in zip_fn
     assert "removeItem(at: exportDir)" in zip_fn
     assert zip_fn.count("try writeOmittedMarkdown") >= 2
     assert "try runZip" in zip_fn
@@ -589,6 +591,7 @@ def test_pipeline_timing_stays_in_archive() -> None:
     assert "createDirectory" in write_zip
     assert "export/ is a symbolic link" in write_zip
     assert write_zip.index("createDirectory") < write_zip.index("is a symbolic link")
+    assert "containsSymlinkComponent" in write_zip
     assert "removeItem(at: exportDir)" in write_zip
     drop = zipper.split("for path in dropList")[1].split("if size > MediaBudget.maxZipBytes")[0]
     assert "isContainedRegularFile" in drop
