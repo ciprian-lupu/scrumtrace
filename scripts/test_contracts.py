@@ -520,6 +520,8 @@ def test_pause_gate_hold_to_talk() -> None:
     assert "recorder = nil" in stop_talk
     assert stop_talk.index("recorder = nil") < stop_talk.index("transcribeVoiceNote")
     assert stop_talk.index("recorder = nil") < stop_talk.index("transcriber.prepare")
+    assert "try? await transcriber.transcribeVoiceNote" not in stop_talk
+    assert "talkError" in stop_talk
     assert "if saved" in stop_talk
     assert "onSave(note, canvas.snapshot(), source)" in stop_talk
     assert "notification.object as? CaptureSessionState" in shot
@@ -694,6 +696,11 @@ def test_audio_split_and_brief_loader() -> None:
     assert "appendAudioToMovie" in recorder
     assert "case .microphone:" in recorder
     assert "writeWav(from: sampleBuffer)" in recorder
+    assert "func persistWav" in recorder
+    assert "try file.write(from: buffer)" in recorder
+    assert "try? wavFile.write" not in recorder
+    assert "Could not write archive/audio.wav" in recorder
+    assert "audioWriteFailure" in recorder
     assert "microphoneWav" in recorder
     assert "CaptureAudioLayout" in recorder
     assert "try layout.write" in recorder
@@ -973,6 +980,10 @@ def test_pipeline_timing_stays_in_archive() -> None:
     assert "consumeHoldThroughStart" in start_rec
     assert start_rec.index("if terminateRequested") < start_rec.index("consumeHoldThroughStart")
     assert start_rec.index("consumeHoldThroughStart") < start_rec.index("if recorder.isPaused")
+    assert "audioWriteFailure" in start_rec
+    assert start_rec.index("if terminateRequested") < start_rec.index("audioWriteFailure")
+    assert start_rec.index("audioWriteFailure") < start_rec.index("consumeHoldThroughStart")
+    assert "try? await transcriber.prepare" not in start_rec
     assert "isHeldThroughStart" in start_rec
     assert "isCurrentlyTripped || privacy.currentCredentialApp" in start_rec
     assert start_rec.index("captureFreeze.attach(recorder)") < start_rec.index("privacy.start()")

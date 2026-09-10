@@ -304,6 +304,13 @@ final class SessionController: ObservableObject {
                 haltCaptureForTermination()
                 return
             }
+            if let writeFail = recorder.audioWriteFailure {
+                lastError = writeFail
+                phase = .recording
+                statusLine = writeFail
+                stopRecording()
+                return
+            }
             if captureFreeze.consumeHoldThroughStart() {
                 recorder.setPaused(true)
                 sampler.isSuspended = true
@@ -363,7 +370,11 @@ final class SessionController: ObservableObject {
             log(.start, [:])
             let model = settings.whisperModel
             Task {
-                try? await transcriber.prepare(model: model)
+                do {
+                    try await transcriber.prepare(model: model)
+                } catch {
+                    lastError = error.localizedDescription
+                }
             }
         } catch {
             privacy.stop()

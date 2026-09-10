@@ -40,6 +40,8 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
     /// still recreate the original UUID path — reclaim the larger file.
     private var liveMovieRel: String?
     private var liveWavRel: String?
+    private var wavWriteFailed = false
+    private var wavWriteMessage: String?
 
     init(sessionURL: URL, clock: ClockSynchronizer) {
         self.sessionURL = sessionURL
@@ -59,6 +61,12 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
 
     var isPaused: Bool {
         syncWriter { paused }
+    }
+
+    /// Disk-full / AVAudioFile write failure. Start checks this if the
+    /// capture-failed notification landed before `phase` was `.recording`.
+    var audioWriteFailure: String? {
+        syncWriter { wavWriteMessage }
     }
 
     func start(shouldPauseCapture: @escaping () -> Bool = { false }) async throws {
@@ -435,7 +443,7 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         guard copied == noErr else { return }
         let target = wavFile.processingFormat
         if buffer.format == target {
-            try? wavFile.write(from: buffer)
+            persistWav(buffer, file: wavFile)
             return
         }
         if converter?.inputFormat != buffer.format {
@@ -455,7 +463,22 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             return buffer
         }
         if error == nil, converted.frameLength > 0 {
-            try? wavFile.write(from: converted)
+            persistWav(converted, file: wavFile)
+        }
+    }
+
+    private func persistWav(_ buffer: AVAudioPCMBuffer, file: AVAudioFile) {
+        do {
+            try file.write(from: buffer)
+        } catch {
+            guard !wavWriteFailed else { return }
+            wavWriteFailed = true
+            wavWriteMessage = "Could not write archive/audio.wav: \(error.localizedDescription)"
+            freezeWriters()
+            NotificationCenter.default.post(
+                name: .scrumTraceCaptureFailed,
+                object: wavWriteMessage
+            )
         }
     }
 
@@ -680,7 +703,7 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         guard frames > 0 else { return }
         let target = wavFile.processingFormat
         if buffer.format == target {
-            try? wavFile.write(from: buffer)
+            persistWav(buffer, file: wavFile)
             return
         }
         if converter?.inputFormat != buffer.format {
@@ -700,7 +723,7 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             return buffer
         }
         if error == nil, converted.frameLength > 0 {
-            try? wavFile.write(from: converted)
+            persistWav(converted, file: wavFile)
         }
     }
 

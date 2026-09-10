@@ -112,6 +112,7 @@ final class ShotTalkState: ObservableObject {
     @Published var holdingTalk = false
     @Published var canTalk = true
     @Published var source: ShotSource = .typed
+    @Published var talkError: String?
     let canvas = AnnotationCanvas()
     let screenshot: NSImage
     let transcriber: WhisperTranscriber
@@ -190,6 +191,7 @@ final class ShotTalkState: ObservableObject {
         ]
         guard let rec = try? AVAudioRecorder(url: url, settings: settings) else {
             ExportRel.removePrivateTemporaryURL(url)
+            talkError = "Could not start Hold-to-Talk."
             return
         }
         // Bind the recorder before record() so Pause can abort in-flight (C1).
@@ -200,6 +202,7 @@ final class ShotTalkState: ObservableObject {
             return
         }
         holdingTalk = true
+        talkError = nil
         if !allowsNewCapture() {
             abortTalk()
         }
@@ -228,14 +231,18 @@ final class ShotTalkState: ObservableObject {
         // Pause after release is not a new capture. Still transcribe audio
         // recorded while the gate was open.
         guard live else { return }
-        try? await transcriber.prepare(model: whisperModel)
-        if let text = try? await transcriber.transcribeVoiceNote(at: url), !text.isEmpty {
+        do {
+            try await transcriber.prepare(model: whisperModel)
+            let text = try await transcriber.transcribeVoiceNote(at: url)
+            guard !text.isEmpty else { return }
             let hadText = !note.isEmpty
             note = hadText ? "\(note) \(text)" : text
             source = hadText ? .mixed : .voice
             if saved {
                 onSave(note, canvas.snapshot(), source)
             }
+        } catch {
+            talkError = error.localizedDescription
         }
     }
 }
@@ -448,11 +455,15 @@ final class ShotNoteWindow: NSPanel, NSTextFieldDelegate {
         case .pen: tools.selectedSegment = 2
         }
         talkButton.isEnabled = talk.canTalk
-        talkButton.setLabel(
-            talk.holdingTalk
-                ? "Release to transcribe"
-                : (talk.canTalk ? "Hold to talk" : "Hold to talk (paused)")
-        )
+        if talk.holdingTalk {
+            talkButton.setLabel("Release to transcribe")
+        } else if let talkError = talk.talkError, !talkError.isEmpty {
+            talkButton.setLabel("Hold to talk — transcribe failed")
+        } else if talk.canTalk {
+            talkButton.setLabel("Hold to talk")
+        } else {
+            talkButton.setLabel("Hold to talk (paused)")
+        }
         if noteField.currentEditor() == nil, noteField.stringValue != talk.note {
             noteField.stringValue = talk.note
         }
