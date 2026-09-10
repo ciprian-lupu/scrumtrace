@@ -518,14 +518,23 @@ def test_retry_failed_slices_and_pins() -> None:
     assert "audioWav" in prune
     assert "scrumtrace-live-" in prune
     assert "archiveHasLiveCaptureResidue" in prune
+    assert "func archiveHasShotResidue" in prune
+    assert prune.count("if archiveHasShotResidue(session) { continue }") == 2
+    assert "ScrumTracePath.shots" in prune
     assert "contentsOfDirectory(" in prune
     assert "at: archive" in prune
+    assert "at: shots" in prune
     assert "shots.isEmpty" in prune
     assert "removeAbandonedSession" in prune
     assert "isValidSessionId" in prune
     assert "isSymbolicLink" in prune
     assert "listedSessionIds" in prune
     assert "contentsOfDirectory(atPath:" not in prune
+    contracts = (ROOT / "ScrumTraceTests" / "ContractTests.swift").read_text()
+    assert "testPruneAbandonedStartsKeepsShotPNGWhenCatalogIsEmpty" in contracts
+    assert "testPruneAbandonedStartsKeepsShotPNGWhenManifestIsMissing" in contracts
+    assert "testPruneAbandonedStartsDeletesEmptyIdleSession" in contracts
+    assert "testPruneAbandonedStartsIgnoresPlantedShotsDirectorySymlink" in contracts
     models = (ROOT / "ScrumTrace" / "Storage" / "SessionModels.swift").read_text()
     existing_media = models.split("func withExistingMedia")[1].split("enum CodingKeys")[0]
     assert "existingSessionFile" in existing_media

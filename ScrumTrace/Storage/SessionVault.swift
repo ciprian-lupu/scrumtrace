@@ -394,14 +394,51 @@ final class SessionVault: @unchecked Sendable {
                 continue
             }
             guard let manifest = try? loadManifest(id: id) else {
+                if archiveHasShotResidue(session) { continue }
                 removeAbandonedSession(id: id)
                 continue
             }
             guard manifest.pipelineStatus == .idle,
                   manifest.duration.mediaSeconds == 0,
                   manifest.shots.isEmpty else { continue }
+            if archiveHasShotResidue(session) { continue }
             removeAbandonedSession(id: id)
         }
+    }
+
+    /// Catalog write can fail after PNG persist (`captureShot`). Missing or
+    /// corrupt manifests must also keep a session that already holds Shot files.
+    /// A planted `archive/shots` directory symlink is not residue.
+    private func archiveHasShotResidue(_ session: URL) -> Bool {
+        let shotsRel = ScrumTracePath.shots
+        if ExportRel.containsSymlinkComponent(shotsRel, sessionURL: session) {
+            return false
+        }
+        let shots = session.appendingPathComponent(shotsRel)
+        if (try? shots.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+            return false
+        }
+        guard let children = try? fileManager.contentsOfDirectory(
+            at: shots,
+            includingPropertiesForKeys: [.isSymbolicLinkKey, .isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        ) else { return false }
+        if (try? shots.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+            return false
+        }
+        for url in children {
+            if (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+                continue
+            }
+            let childRel = "\(shotsRel)/\(url.lastPathComponent)"
+            if ExportRel.containsSymlinkComponent(childRel, sessionURL: session) {
+                continue
+            }
+            if ExportRel.isContainedRegularFile(url, sessionRoot: session) {
+                return true
+            }
+        }
+        return false
     }
 
     /// A Start that created unique live capture files but crashed before

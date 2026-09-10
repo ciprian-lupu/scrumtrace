@@ -433,6 +433,84 @@ final class ContractTests: XCTestCase {
         XCTAssertEqual((try FileManager.default.contentsOfDirectory(atPath: outside.path)), [])
     }
 
+    func testPruneAbandonedStartsKeepsShotPNGWhenCatalogIsEmpty() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "st-prune-shot-\(UUID().uuidString)"
+        )
+        defer { try? FileManager.default.removeItem(at: root) }
+        let vault = SessionVault(rootURL: root)
+        let created = try vault.createSession(product: .empty)
+        let session = vault.sessionURL(id: created.manifest.sessionId)
+        try ExportRel.writeContainedData(
+            Data("PNG"),
+            relative: "\(ScrumTracePath.shots)/001.png",
+            sessionURL: session
+        )
+        XCTAssertTrue(created.manifest.shots.isEmpty)
+        vault.pruneAbandonedStarts()
+        XCTAssertTrue(FileManager.default.fileExists(atPath: session.path))
+        XCTAssertEqual(
+            ExportRel.existingSessionFile("\(ScrumTracePath.shots)/001.png", sessionURL: session),
+            "\(ScrumTracePath.shots)/001.png"
+        )
+    }
+
+    func testPruneAbandonedStartsKeepsShotPNGWhenManifestIsMissing() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "st-prune-missing-\(UUID().uuidString)"
+        )
+        defer { try? FileManager.default.removeItem(at: root) }
+        let vault = SessionVault(rootURL: root)
+        let created = try vault.createSession(product: .empty)
+        let session = vault.sessionURL(id: created.manifest.sessionId)
+        try ExportRel.writeContainedData(
+            Data("PNG"),
+            relative: "\(ScrumTracePath.shots)/001.png",
+            sessionURL: session
+        )
+        try FileManager.default.removeItem(at: session.appendingPathComponent(ScrumTracePath.manifest))
+        vault.pruneAbandonedStarts()
+        XCTAssertTrue(FileManager.default.fileExists(atPath: session.path))
+        XCTAssertEqual(
+            ExportRel.existingSessionFile("\(ScrumTracePath.shots)/001.png", sessionURL: session),
+            "\(ScrumTracePath.shots)/001.png"
+        )
+    }
+
+    func testPruneAbandonedStartsDeletesEmptyIdleSession() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "st-prune-empty-\(UUID().uuidString)"
+        )
+        defer { try? FileManager.default.removeItem(at: root) }
+        let vault = SessionVault(rootURL: root)
+        let created = try vault.createSession(product: .empty)
+        let session = vault.sessionURL(id: created.manifest.sessionId)
+        vault.pruneAbandonedStarts()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: session.path))
+    }
+
+    func testPruneAbandonedStartsIgnoresPlantedShotsDirectorySymlink() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "st-prune-shots-link-\(UUID().uuidString)"
+        )
+        defer { try? FileManager.default.removeItem(at: root) }
+        let vault = SessionVault(rootURL: root)
+        let created = try vault.createSession(product: .empty)
+        let session = vault.sessionURL(id: created.manifest.sessionId)
+        let shots = session.appendingPathComponent(ScrumTracePath.shots)
+        let outside = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "st-prune-shots-outside-\(UUID().uuidString)"
+        )
+        defer { try? FileManager.default.removeItem(at: outside) }
+        try FileManager.default.createDirectory(at: outside, withIntermediateDirectories: true)
+        try Data("SECRET-PNG").write(to: outside.appendingPathComponent("001.png"))
+        try FileManager.default.removeItem(at: shots)
+        try FileManager.default.createSymbolicLink(at: shots, withDestinationURL: outside)
+        vault.pruneAbandonedStarts()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: session.path))
+        XCTAssertEqual(try String(contentsOf: outside.appendingPathComponent("001.png"), encoding: .utf8), "SECRET-PNG")
+    }
+
     func testContainedRegularFileRejectsSymlinkEvenIfTargetIsInsideSession() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("scrumtrace-regular-\(UUID().uuidString)")
         let shots = root.appendingPathComponent("archive/shots")
