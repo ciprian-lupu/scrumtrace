@@ -385,10 +385,35 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             || (try? wavURL.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
             throw SessionRecorderError.writerFailed("archive capture paths escaped the session folder.")
         }
+        // AVAssetWriter / AVAudioFile follow a dest symlink planted between
+        // unlink and create. Create unique live names, then renameat onto
+        // session.mp4 / audio.wav immediately after startWriting — not at Stop.
+        let liveMovieRel: String
+        let liveWavRel: String
+        do {
+            liveMovieRel = try ExportRel.prepareContainedWrite(
+                relative: "archive/scrumtrace-live-\(UUID().uuidString).mp4",
+                sessionURL: sessionURL
+            )
+            liveWavRel = try ExportRel.prepareContainedWrite(
+                relative: "archive/scrumtrace-live-\(UUID().uuidString).wav",
+                sessionURL: sessionURL
+            )
+        } catch {
+            throw SessionRecorderError.writerFailed("archive capture paths escaped the session folder.")
+        }
+        let liveMovieURL = sessionURL.appendingPathComponent(liveMovieRel)
+        let liveWavURL = sessionURL.appendingPathComponent(liveWavRel)
+        try ExportRel.removeItemIfRegularFile(liveMovieURL, sessionRoot: sessionURL)
+        try ExportRel.removeItemIfRegularFile(liveWavURL, sessionRoot: sessionURL)
+        if (try? liveMovieURL.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true
+            || (try? liveWavURL.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+            throw SessionRecorderError.writerFailed("archive capture paths escaped the session folder.")
+        }
 
         let w = max(width - width % 2, 2)
         let h = max(height - height % 2, 2)
-        let writer = try AVAssetWriter(outputURL: movieURL, fileType: .mp4)
+        let writer = try AVAssetWriter(outputURL: liveMovieURL, fileType: .mp4)
         let videoSettings: [String: Any] = [
             AVVideoCodecKey: AVVideoCodecType.h264,
             AVVideoWidthKey: w,
@@ -414,7 +439,20 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         writer.add(videoInput)
         writer.add(audioInput)
         guard writer.startWriting() else {
+            try? ExportRel.removeItemIfRegularFile(liveMovieURL, sessionRoot: sessionURL)
             throw SessionRecorderError.writerFailed(writer.error?.localizedDescription ?? "Writer failed.")
+        }
+        guard ExportRel.isContainedRegularFile(liveMovieURL, sessionRoot: sessionURL) else {
+            writer.cancelWriting()
+            try? ExportRel.removeItemIfRegularFile(liveMovieURL, sessionRoot: sessionURL)
+            throw SessionRecorderError.writerFailed("archive capture paths escaped the session folder.")
+        }
+        do {
+            try ExportRel.moveIntoSession(from: liveMovieURL, relative: movieRel, sessionURL: sessionURL)
+        } catch {
+            writer.cancelWriting()
+            try? ExportRel.removeItemIfRegularFile(liveMovieURL, sessionRoot: sessionURL)
+            throw SessionRecorderError.writerFailed("archive capture paths escaped the session folder.")
         }
         guard ExportRel.isContainedRegularFile(movieURL, sessionRoot: sessionURL) else {
             writer.cancelWriting()
@@ -434,7 +472,29 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             AVLinearPCMIsFloatKey: false,
             AVLinearPCMIsBigEndianKey: false
         ]
-        wavFile = try AVAudioFile(forWriting: wavURL, settings: wavSettings)
+        wavFile = try AVAudioFile(forWriting: liveWavURL, settings: wavSettings)
+        guard ExportRel.isContainedRegularFile(liveWavURL, sessionRoot: sessionURL) else {
+            writer.cancelWriting()
+            self.writer = nil
+            self.videoInput = nil
+            self.audioInput = nil
+            wavFile = nil
+            try? ExportRel.removeItemIfRegularFile(movieURL, sessionRoot: sessionURL)
+            try? ExportRel.removeItemIfRegularFile(liveWavURL, sessionRoot: sessionURL)
+            throw SessionRecorderError.writerFailed("archive capture paths escaped the session folder.")
+        }
+        do {
+            try ExportRel.moveIntoSession(from: liveWavURL, relative: wavRel, sessionURL: sessionURL)
+        } catch {
+            writer.cancelWriting()
+            self.writer = nil
+            self.videoInput = nil
+            self.audioInput = nil
+            wavFile = nil
+            try? ExportRel.removeItemIfRegularFile(movieURL, sessionRoot: sessionURL)
+            try? ExportRel.removeItemIfRegularFile(liveWavURL, sessionRoot: sessionURL)
+            throw SessionRecorderError.writerFailed("archive capture paths escaped the session folder.")
+        }
         guard ExportRel.isContainedRegularFile(wavURL, sessionRoot: sessionURL) else {
             writer.cancelWriting()
             self.writer = nil

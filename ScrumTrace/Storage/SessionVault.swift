@@ -390,6 +390,9 @@ final class SessionVault: @unchecked Sendable {
             if ExportRel.existingSessionFile(ScrumTracePath.audioWav, sessionURL: session) != nil {
                 continue
             }
+            if archiveHasLiveCaptureResidue(session) {
+                continue
+            }
             guard let manifest = try? loadManifest(id: id) else {
                 removeAbandonedSession(id: id)
                 continue
@@ -399,6 +402,34 @@ final class SessionVault: @unchecked Sendable {
                   manifest.shots.isEmpty else { continue }
             removeAbandonedSession(id: id)
         }
+    }
+
+    /// A Start that created unique live capture files but crashed before
+    /// `renameat` onto `session.mp4` / `audio.wav` is not an empty folder.
+    private func archiveHasLiveCaptureResidue(_ session: URL) -> Bool {
+        let archive = session.appendingPathComponent("archive")
+        if (try? archive.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+            return false
+        }
+        if ExportRel.containsSymlinkComponent("archive", sessionURL: session) {
+            return false
+        }
+        guard let children = try? fileManager.contentsOfDirectory(
+            at: archive,
+            includingPropertiesForKeys: [.isSymbolicLinkKey, .isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        ) else { return false }
+        for url in children {
+            if (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+                continue
+            }
+            let name = url.lastPathComponent
+            guard name.hasPrefix("scrumtrace-live-") else { continue }
+            if ExportRel.isContainedRegularFile(url, sessionRoot: session) {
+                return true
+            }
+        }
+        return false
     }
 
     private static let folderStamp: DateFormatter = {

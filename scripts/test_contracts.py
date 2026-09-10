@@ -483,6 +483,10 @@ def test_retry_failed_slices_and_pins() -> None:
     assert "pipelineStatus == .idle" in prune
     assert "sessionMovie" in prune
     assert "audioWav" in prune
+    assert "scrumtrace-live-" in prune
+    assert "archiveHasLiveCaptureResidue" in prune
+    assert "contentsOfDirectory(" in prune
+    assert "at: archive" in prune
     assert "shots.isEmpty" in prune
     assert "removeAbandonedSession" in prune
     assert "isValidSessionId" in prune
@@ -1210,6 +1214,16 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert prepare.index("AVAssetWriter") < prepare.index("isContainedRegularFile(movieURL")
     assert prepare.index("AVAudioFile") < prepare.index("isContainedRegularFile(wavURL")
     assert "cancelWriting" in prepare
+    assert "scrumtrace-live-" in prepare
+    assert "liveMovieURL" in prepare
+    assert "liveWavURL" in prepare
+    assert "AVAssetWriter(outputURL: liveMovieURL" in prepare
+    assert "AVAudioFile(forWriting: liveWavURL" in prepare
+    assert "moveIntoSession(from: liveMovieURL" in prepare
+    assert "moveIntoSession(from: liveWavURL" in prepare
+    assert prepare.index("AVAssetWriter(outputURL: liveMovieURL") < prepare.index("moveIntoSession(from: liveMovieURL")
+    assert prepare.index("AVAudioFile(forWriting: liveWavURL") < prepare.index("moveIntoSession(from: liveWavURL")
+    assert "not at Stop" in prepare
     assert "config.width = size.width" in start_fn
     assert "config.height = size.height" in start_fn
     assert "AVVideoWidthKey: w" in recorder
