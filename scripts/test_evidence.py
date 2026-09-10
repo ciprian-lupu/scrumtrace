@@ -30,6 +30,9 @@ def test_quote_window() -> None:
     assert "quote outside slice window" in confirm
     assert "quote times are inverted" in confirm
     assert "quote not found in transcript window" in confirm
+    assert "frame_references outside this slice window" in confirm
+    assert "shots: [ShotRecord]" in confirm
+    assert "framesOverlapSlice" in confirm
     controller = (ROOT / "ScrumTrace" / "Processing" / "SessionController.swift").read_text()
     capture = controller.split("private func captureShot")[1].split("private func finishShot")[0]
     assert "writeContainedData(png, relative: rawPath" in capture

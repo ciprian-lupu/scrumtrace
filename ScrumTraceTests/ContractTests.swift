@@ -1078,6 +1078,66 @@ final class ContractTests: XCTestCase {
         XCTAssertFalse(invertedIssues.contains { $0.reason == "quote outside slice window" })
     }
 
+    func testCanConfirmRejectsFrameFromAnotherSlice() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("st-frame-window-\(UUID().uuidString)")
+        let shotsDir = root.appendingPathComponent("export/shots")
+        try FileManager.default.createDirectory(at: shotsDir, withIntermediateDirectories: true)
+        try Data("one").write(to: shotsDir.appendingPathComponent("001.jpg"))
+        try Data("two").write(to: shotsDir.appendingPathComponent("002.jpg"))
+        defer { try? FileManager.default.removeItem(at: root) }
+        let slice = SliceRecord(
+            sliceId: "slice-01",
+            startMedia: 0,
+            endMedia: 20,
+            trigger: .shot,
+            associatedShotId: "shot-001",
+            clipPath: nil,
+            stills: ["export/shots/001.jpg"],
+            analysisStatus: .success,
+            score: 1
+        )
+        let onSlice = ShotRecord(
+            id: "shot-001",
+            tMedia: 12,
+            rawPath: "export/shots/001.jpg",
+            annotatedPath: nil,
+            note: "in window",
+            source: .typed
+        )
+        let transcript = FullTranscript(sessionId: "s", language: "en", segments: [])
+        func candidate(frames: [String]) -> CandidateRecord {
+            CandidateRecord(
+                decision: .keep,
+                confidence: 0.9,
+                kind: .bug,
+                title: "Save",
+                observed: "button",
+                stated: "said",
+                inferred: "maybe",
+                agentInstructionsDraft: "",
+                quotes: [],
+                frameReferences: frames
+            )
+        }
+        let foreign = EvidenceValidator.canConfirm(
+            candidate: candidate(frames: ["export/shots/002.jpg"]),
+            slice: slice,
+            transcript: transcript,
+            sessionURL: root,
+            shots: [onSlice]
+        )
+        XCTAssertTrue(foreign.contains { $0.reason == "frame_references outside this slice window" })
+        let local = EvidenceValidator.canConfirm(
+            candidate: candidate(frames: ["export/shots/001.jpg"]),
+            slice: slice,
+            transcript: transcript,
+            sessionURL: root,
+            shots: [onSlice]
+        )
+        XCTAssertFalse(local.contains { $0.reason == "frame_references outside this slice window" })
+        XCTAssertFalse(local.contains { $0.reason == "no valid frame_references on disk" })
+    }
+
     func testInferredCopiedIntoObservedBlocksConfirm() {
         let candidate = CandidateRecord(
             decision: .keep,

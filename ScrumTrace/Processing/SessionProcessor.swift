@@ -667,7 +667,8 @@ final class SessionProcessor: @unchecked Sendable {
                 candidate: candidate,
                 slice: slice,
                 transcript: transcript,
-                sessionURL: sessionURL
+                sessionURL: sessionURL,
+                shots: shots
             )
             if !issues.isEmpty && status == .confirmed {
                 status = .needsReview

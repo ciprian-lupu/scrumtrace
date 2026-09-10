@@ -72,7 +72,8 @@ enum EvidenceValidator {
         candidate: CandidateRecord,
         slice: SliceRecord,
         transcript: FullTranscript,
-        sessionURL: URL
+        sessionURL: URL,
+        shots: [ShotRecord] = []
     ) -> [EvidenceIssue] {
         var issues: [EvidenceIssue] = []
         if candidate.decision != .keep {
@@ -90,6 +91,8 @@ enum EvidenceValidator {
         let frames = existingPaths(candidate.frameReferences, sessionURL: sessionURL)
         if frames.isEmpty {
             issues.append(EvidenceIssue(reason: "no valid frame_references on disk"))
+        } else if !framesOverlapSlice(frames, slice: slice, shots: shots, sessionURL: sessionURL) {
+            issues.append(EvidenceIssue(reason: "frame_references outside this slice window"))
         }
         for quote in candidate.quotes {
             if quote.tMediaStart > quote.tMediaEnd {
@@ -110,6 +113,31 @@ enum EvidenceValidator {
             issues.append(EvidenceIssue(reason: "unknown task kind"))
         }
         return issues
+    }
+
+    /// C5: a still from another moment is not evidence for this slice, even
+    /// when the PNG exists under archive/shots.
+    private static func framesOverlapSlice(
+        _ frames: [String],
+        slice: SliceRecord,
+        shots: [ShotRecord],
+        sessionURL: URL
+    ) -> Bool {
+        var allowed = slice.stills
+        if let clip = slice.exportClipPath ?? slice.clipPath {
+            allowed.append(clip)
+        }
+        for shot in shots {
+            allowed.append(contentsOf: shot.stillCandidates)
+            if let exportPath = shot.exportPath {
+                allowed.append(exportPath)
+            }
+        }
+        let allowedResolved = Set(existingPaths(allowed, sessionURL: sessionURL))
+        let allowedContained = Set(allowed.compactMap { ExportRel.existingSessionFile($0, sessionURL: sessionURL) })
+        return frames.contains { frame in
+            allowedResolved.contains(frame) || allowedContained.contains(frame)
+        }
     }
 
     /// C5: after projection/omit, `confirmed` requires a real file under `export/`.
