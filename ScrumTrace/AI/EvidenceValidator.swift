@@ -131,6 +131,9 @@ enum EvidenceValidator {
                 } else if copy.confidence < MediaBudget.keepConfidenceFloor {
                     copy.status = .needsReview
                 } else {
+                    if !copy.quotes.isEmpty, sliceById[copy.sourceSliceId] == nil {
+                        copy.status = .needsReview
+                    }
                     for quote in copy.quotes {
                         if quote.tMediaStart > quote.tMediaEnd {
                             copy.status = .needsReview

@@ -282,6 +282,40 @@ final class ContractTests: XCTestCase {
         XCTAssertEqual(try String(contentsOf: secret, encoding: .utf8), "MASTER")
     }
 
+    func testRemoveOwnedSessionFolderDoesNotFollowSessionSymlink() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("st-owned-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let vault = SessionVault(rootURL: root)
+        let created = try vault.createSession(product: .empty)
+        let session = vault.sessionURL(id: created.manifest.sessionId)
+        let movie = session.appendingPathComponent("archive/session.mp4")
+        try Data("MASTER".utf8).write(to: movie)
+        let sibling = root.appendingPathComponent("keep-sibling")
+        try FileManager.default.createDirectory(at: sibling, withIntermediateDirectories: true)
+        let keep = sibling.appendingPathComponent("keep.bin")
+        try Data("KEEP".utf8).write(to: keep)
+        ExportRel.removeOwnedSessionFolder(sessionURL: session, sessionsRoot: root)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: session.path))
+        XCTAssertEqual(try String(contentsOf: keep, encoding: .utf8), "KEEP")
+
+        let outside = root.appendingPathComponent("outside-target")
+        try FileManager.default.createDirectory(at: outside, withIntermediateDirectories: true)
+        let secret = outside.appendingPathComponent("secret.bin")
+        try Data("SECRET".utf8).write(to: secret)
+        let planted = root.appendingPathComponent("2026-09-10-1200-abcdef")
+        try FileManager.default.createSymbolicLink(at: planted, withDestinationURL: outside)
+        ExportRel.removeOwnedSessionFolder(sessionURL: planted, sessionsRoot: root)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: planted.path))
+        XCTAssertEqual(try String(contentsOf: secret, encoding: .utf8), "SECRET")
+
+        let other = try vault.createSession(product: .empty)
+        let archive = vault.sessionURL(id: other.manifest.sessionId).appendingPathComponent("archive")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: archive.path))
+        ExportRel.removeOwnedSessionFolder(sessionURL: archive, sessionsRoot: root)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: archive.path))
+    }
+
     func testUnlinkLastComponentUnfollowedDoesNotRecurseIntoDirectory() throws {
         let parent = FileManager.default.temporaryDirectory.appendingPathComponent("st-unlink-last-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true)
@@ -1398,6 +1432,12 @@ final class ContractTests: XCTestCase {
             slices: [slice]
         )
         XCTAssertEqual(withoutTranscript[0].status, .needsReview)
+        let missingSliceMap = EvidenceValidator.applyExportEvidence(
+            tasks: [validQuoteNoTranscript],
+            sessionURL: root,
+            slices: []
+        )
+        XCTAssertEqual(missingSliceMap[0].status, .needsReview)
     }
 
     func testMergeCanonicalStatusesKeepsArchiveEvidence() {

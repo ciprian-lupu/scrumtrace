@@ -545,7 +545,8 @@ def test_retry_failed_slices_and_pins() -> None:
     assert "isUsableSessionRoot(rootURL)" in abandon
     assert "isUsableSessionRoot(session)" in abandon
     assert "isSymbolicLink" in abandon
-    assert "removeItem" in abandon
+    assert "removeOwnedSessionFolder" in abandon
+    assert "fileManager.removeItem" not in abandon
     prune = vault.split("func pruneAbandonedStarts")[1].split("private static let folderStamp")[0]
     assert "pipelineStatus == .idle" in prune
     assert "sessionMovie" in prune
@@ -576,6 +577,7 @@ def test_retry_failed_slices_and_pins() -> None:
     assert "testUnlinkLastComponentUnfollowedUnlinksSymlinkWithoutFollowing" in contracts
     assert "testUnlinkLastComponentUnfollowedUnlinksRegularFile" in contracts
     assert "testWipeContainedDirectoryDoesNotFollowSymlinkIntoArchive" in contracts
+    assert "testRemoveOwnedSessionFolderDoesNotFollowSessionSymlink" in contracts
     assert "testApplyExportEvidenceDemotesInvertedAndOutOfSliceQuotes" in contracts
     assert "testMergeCanonicalStatusesKeepsArchiveEvidence" in contracts
     models = (ROOT / "ScrumTrace" / "Storage" / "SessionModels.swift").read_text()
@@ -656,6 +658,7 @@ def test_audio_split_and_brief_loader() -> None:
     assert "isEnabled = !controller.isBusy" in menu
     assert "hudShouldShow" in menu
     assert "scrumTraceHUDSuppress" in menu
+    assert "hud?.refresh()" in menu
     hud = (ROOT / "ScrumTrace" / "UI" / "RecordingHUDWindow.swift").read_text()
     assert "controller.isBusy" in hud
     shot = (ROOT / "ScrumTrace" / "UI" / "ShotNoteWindow.swift").read_text()
@@ -881,6 +884,10 @@ def test_pipeline_timing_stays_in_archive() -> None:
     assert "wallElapsed" in hud
     assert "canBecomeKey: Bool { false }" in hud
     assert "nonactivatingPanel" in hud
+    assert "refusesFirstResponder" in hud
+    assert "NSHostingView" not in hud
+    assert "import SwiftUI" not in hud
+    assert "buttonStyle" not in hud
 
 
 def test_pause_privacy_and_metadata_gate() -> None:
@@ -1663,7 +1670,7 @@ def test_write_contained_data_refuses_directory_symlinks() -> None:
     assert "O_RDONLY | O_DIRECTORY | O_CLOEXEC" in unlink_last
     assert "O_RDONLY | O_CLOEXEC | O_NOFOLLOW" in unlink_last
     assert "static func wipeContainedDirectory" in models
-    wipe_fn = models.split("static func wipeContainedDirectory")[1].split("static func readContainedData(relative:")[0]
+    wipe_fn = models.split("static func wipeContainedDirectory")[1].split("static func removeOwnedSessionFolder")[0]
     assert 'parts == ["export"]' in wipe_fn
     assert "FileManager.default.removeItem" not in wipe_fn
     assert "scrumtraceFdopendir" in wipe_fn
@@ -1671,6 +1678,16 @@ def test_write_contained_data_refuses_directory_symlinks() -> None:
     assert "scrumtraceATSymlinkNofollow" in wipe_fn
     assert "openUnfollowedDirectory" in wipe_fn
     assert "directoryNames" in wipe_fn
+    assert "static func removeOwnedSessionFolder" in models
+    owned_fn = models.split("static func removeOwnedSessionFolder")[1].split("static func readContainedData(relative:")[0]
+    assert "scrumtraceRenameat" in owned_fn
+    assert "scrumtraceATRemoveDir" in owned_fn
+    assert "wipeOpenedDirectory" in owned_fn
+    assert "FileManager.default.removeItem" not in owned_fn
+    assert "isValidSessionId" in owned_fn
+    assert "sessionsRoot" in owned_fn
+    assert ".scrumtrace-abandoned-" in owned_fn
+    assert "O_NOFOLLOW" in owned_fn
     wipe_open = models.split("static func wipeOpenedDirectory")[1].split("static func directoryNames")[0]
     assert wipe_open.index("directoryNames") < wipe_open.index("scrumtraceUnlinkat")
     assert "scrumtraceReaddir" not in wipe_open
@@ -1745,8 +1762,9 @@ def test_write_contained_data_refuses_directory_symlinks() -> None:
     assert "containsSymlinkComponent" in create_fn
     assert "removeItemIfRegularFile" in create_fn
     assert "fileManager.removeItem(at: dest)" not in create_fn
-    assert "removeItem(at: url)" in create_fn
-    assert create_fn.index("try write(manifest: &manifest)") < create_fn.index("removeItem(at: url)")
+    assert "removeOwnedSessionFolder" in create_fn
+    assert create_fn.index("try write(manifest: &manifest)") < create_fn.index("removeOwnedSessionFolder")
+    assert "fileManager.removeItem(at: url)" not in create_fn
     assert "isUsableSessionRoot(rootURL)" in create_fn.split("createDirectory(at: url")[1]
     process_head = processor.split("func process(")[1].split("var timing")[0]
     assert "requireUsableSession" in process_head

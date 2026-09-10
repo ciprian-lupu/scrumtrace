@@ -181,6 +181,8 @@ def test_frame_ref_basename_resolves() -> None:
     assert "normalize(copy.inferred)" in apply_fn
     assert "normalize(copy.observed)" in apply_fn
     assert "guard let transcript else" in apply_fn
+    assert "!copy.quotes.isEmpty" in apply_fn
+    assert "sliceById[copy.sourceSliceId] == nil" in apply_fn
     assert "func mergeCanonicalStatuses" in validator
     merge_fn = validator.split("static func mergeCanonicalStatuses")[1].split("static func exportFileExists")[0]
     assert "copy.status = projected.status" in merge_fn

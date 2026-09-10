@@ -125,11 +125,11 @@ final class SessionVault: @unchecked Sendable {
             try write(manifest: &manifest)
             return (url, manifest)
         } catch {
-            // Do not `removeItem` through a planted sessions-folder symlink —
-            // that would delete the target's `<id>` directory.
+            // Do not `FileManager.removeItem` — a TOCTOU swap of `<id>` for a
+            // symlink would delete the target. renameat + O_NOFOLLOW wipe.
             if ExportRel.isUsableSessionRoot(rootURL),
                (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) != true {
-                try? fileManager.removeItem(at: url)
+                ExportRel.removeOwnedSessionFolder(sessionURL: url, sessionsRoot: rootURL)
             }
             throw error
         }
@@ -376,7 +376,7 @@ final class SessionVault: @unchecked Sendable {
         if (try? session.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
             return
         }
-        try? fileManager.removeItem(at: session)
+        ExportRel.removeOwnedSessionFolder(sessionURL: session, sessionsRoot: rootURL)
     }
 
     /// Next launch: drop folders created for a Start that never captured

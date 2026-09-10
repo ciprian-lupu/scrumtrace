@@ -32,6 +32,7 @@ final class MenuBarController {
     }
 
     private func sync() {
+        hud?.refresh()
         hud?.setVisible(controller.hudShouldShow)
         if let button = item.button {
             let symbol: String

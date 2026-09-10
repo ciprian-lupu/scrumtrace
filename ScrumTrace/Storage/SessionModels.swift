@@ -827,6 +827,50 @@ enum ExportRel {
         }
     }
 
+    /// Delete an owned `sessions/<id>` folder without `FileManager.removeItem`.
+    /// Rename the last component first so a TOCTOU swap for a symlink is
+    /// renamed (the link inode), then wipe via `O_NOFOLLOW` directory fds (C2).
+    static func removeOwnedSessionFolder(sessionURL: URL, sessionsRoot: URL) {
+        guard isUsableSessionRoot(sessionsRoot) else { return }
+        guard isUsableSessionRoot(sessionURL) else { return }
+        let parent = sessionURL.deletingLastPathComponent()
+        guard parent.standardizedFileURL.path == sessionsRoot.standardizedFileURL.path else { return }
+        let id = sessionURL.lastPathComponent
+        guard SessionVault.isValidSessionId(id) else { return }
+        guard let parentFd = openUnfollowedDirectory(parent) else { return }
+        defer { Darwin.close(parentFd) }
+        var info = stat()
+        let st = id.withCString { ptr in
+            scrumtraceFstatat(parentFd, ptr, &info, scrumtraceATSymlinkNofollow)
+        }
+        guard st == 0, (info.st_mode & S_IFMT) == S_IFDIR else { return }
+        let trash = ".scrumtrace-abandoned-\(UUID().uuidString)"
+        var renamed: Int32 = -1
+        repeat {
+            renamed = id.withCString { from in
+                trash.withCString { to in
+                    scrumtraceRenameat(parentFd, from, parentFd, to)
+                }
+            }
+        } while renamed != 0 && Darwin.errno == EINTR
+        guard renamed == 0 else { return }
+        let probe = trash.withCString { ptr in
+            Darwin.openat(parentFd, ptr, O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW)
+        }
+        if probe >= 0 {
+            wipeOpenedDirectory(probe, depth: 0)
+            wipeOpenedDirectory(probe, depth: 0)
+            Darwin.close(probe)
+            _ = trash.withCString { ptr in
+                scrumtraceUnlinkat(parentFd, ptr, scrumtraceATRemoveDir)
+            }
+            return
+        }
+        _ = trash.withCString { ptr in
+            scrumtraceUnlinkat(parentFd, ptr, 0)
+        }
+    }
+
     /// Read bytes without following a dest or intermediate symlink. `Data(contentsOf:)`
     /// and `NSImage(contentsOf:)` follow a link planted after `isReadableSessionFile`.
     static func readContainedData(relative: String, sessionURL: URL) -> Data? {
