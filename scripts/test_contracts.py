@@ -208,6 +208,7 @@ def test_zipper_never_deletes_archive() -> None:
     assert "omittedHandoffPath" in omit_md
     assert "writeExportText" in omit_md
     assert "wrapUntrustedInline" in omit_md
+    assert "wrapUntrustedInline(ExportRel.omittedHandoffPath" in omit_md
     assert ".write(to: url, atomically" not in omit_md
     omit_fn = zipper.split("static func omissionOrder")[1].split("static func stripOmitted")[0]
     dropped = omit_fn.split("return uniqued")[1].split(".filter")[0]
@@ -705,6 +706,7 @@ def test_pause_privacy_and_metadata_gate() -> None:
     assert "wrapUntrustedInline(quote.speaker)" in agent
     assert "wrapUntrustedInline(quote.text)" in agent
     assert "wrapUntrustedInline(item.reason)" in agent
+    assert "wrapUntrustedInline(ExportRel.omittedHandoffPath" in agent
     assert "pauseLabel" in agent
     assert "pauses.count) pauses" not in agent
     privacy = (ROOT / "ScrumTrace" / "Capture" / "PrivacyGuard.swift").read_text()
@@ -1143,6 +1145,7 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "fallbackOffline" in tasks_fn
     assert "shots: [ShotRecord]" in tasks_fn
     assert "shots.flatMap" in tasks_fn
+    assert "existingSessionFile($0, sessionURL: sessionURL)" in tasks_fn
     assert "!shots.isEmpty" in tasks_fn
     assert "func reviewTasks" in tasks_fn
     assert "response.candidates.isEmpty" in tasks_fn
@@ -1273,6 +1276,7 @@ def test_write_contained_data_refuses_directory_symlinks() -> None:
     assert "isSymbolicLink" in create_fn
     assert create_fn.count("isSymbolicLink") >= 2
     assert "isUsableSessionRoot(rootURL)" in create_fn
+    assert "isUsableSessionRoot(url)" in create_fn
     assert "removeItem(at: url)" in create_fn
     assert create_fn.index("try write(manifest: &manifest)") < create_fn.index("removeItem(at: url)")
     process_head = processor.split("func process(")[1].split("var timing")[0]

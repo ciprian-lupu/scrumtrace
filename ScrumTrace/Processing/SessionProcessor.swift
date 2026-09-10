@@ -508,7 +508,7 @@ final class SessionProcessor: @unchecked Sendable {
             let resolvedFrames = EvidenceValidator.existingPaths(candidate.frameReferences, sessionURL: sessionURL)
             let uniqueEvidence = uniquedPaths(
                 resolvedFrames + slice.stills + [slice.clipPath].compactMap { $0 } + shots.flatMap(\.stillCandidates)
-            )
+            ).compactMap { ExportRel.existingSessionFile($0, sessionURL: sessionURL) }
             var instructions = AgentInstructionTemplate.render(
                 kind: candidate.kind,
                 product: product

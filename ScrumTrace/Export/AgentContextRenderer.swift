@@ -53,7 +53,7 @@ struct AgentContextRenderer {
             lines.append("## Omitted from this pack")
             lines.append("These files stayed on this Mac. Do not assume they are here.")
             for item in manifest.omitted {
-                lines.append("- `\(ExportRel.omittedHandoffPath(item.path))` — \(PromptTemplates.wrapUntrustedInline(item.reason))")
+                lines.append("- `\(PromptTemplates.wrapUntrustedInline(ExportRel.omittedHandoffPath(item.path)))` — \(PromptTemplates.wrapUntrustedInline(item.reason))")
             }
         }
         lines.append("")

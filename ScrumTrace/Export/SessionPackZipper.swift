@@ -132,7 +132,7 @@ struct SessionPackZipper {
             return
         }
         let lines = ["# Omitted from export", ""] + omitted.map {
-            "- `\(ExportRel.omittedHandoffPath($0.path))` — \(PromptTemplates.wrapUntrustedInline($0.reason))"
+            "- `\(PromptTemplates.wrapUntrustedInline(ExportRel.omittedHandoffPath($0.path)))` — \(PromptTemplates.wrapUntrustedInline($0.reason))"
         }
         try ExportRel.writeExportText(lines.joined(separator: "\n"), relative: ScrumTracePath.omitted, sessionURL: sessionURL)
     }

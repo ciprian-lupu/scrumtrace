@@ -89,6 +89,9 @@ final class SessionVault: @unchecked Sendable {
         if (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
             throw SessionVaultError.writeFailed("session folder")
         }
+        guard ExportRel.isUsableSessionRoot(url) else {
+            throw SessionVaultError.writeFailed("session folder")
+        }
         do {
             for folder in [
                 ScrumTracePath.archive,
@@ -104,6 +107,7 @@ final class SessionVault: @unchecked Sendable {
                 }
                 try fileManager.createDirectory(at: dest, withIntermediateDirectories: true)
                 if (try? dest.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+                    try? fileManager.removeItem(at: dest)
                     throw SessionVaultError.writeFailed(folder)
                 }
             }
