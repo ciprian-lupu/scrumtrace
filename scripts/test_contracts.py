@@ -590,6 +590,10 @@ def test_pipeline_timing_stays_in_archive() -> None:
     assert start_rec.index("try await recorder.start(") < start_rec.index("abandonedId = nil")
     assert start_rec.index("abandonedId = nil") < start_rec.index("lastSessionId = created.manifest.sessionId")
     assert "sessionURL?.lastPathComponent == id" in start_rec
+    assert "terminateRequested" in start_rec
+    assert start_rec.index("try await recorder.start(") < start_rec.index("if terminateRequested")
+    assert start_rec.index("if terminateRequested") < start_rec.index("if recorder.isPaused")
+    assert start_rec.index("haltCaptureForTermination()") < start_rec.index("privacy.start()")
     assert "pruneAbandonedStarts" in controller
     init_fn = controller.split("init(settings:")[1].split("var isRecording")[0]
     assert init_fn.index("pruneAbandonedStarts") < init_fn.index("lastSessionId")
@@ -616,6 +620,8 @@ def test_pause_privacy_and_metadata_gate() -> None:
     assert "stopRecording()" not in halt
     assert "startInFlight" in halt
     assert "captureFreeze.freeze()" in halt
+    assert "terminateRequested = true" in halt
+    assert halt.index("terminateRequested = true") < halt.index("if !isRecording")
     assert "Task.detached" in halt
     assert "persistInterruptedCapture" in halt
     assert halt.index("freezeWriters") < halt.index("persistInterruptedCapture")

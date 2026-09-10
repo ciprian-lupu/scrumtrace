@@ -34,6 +34,7 @@ final class SessionController: ObservableObject {
     private var pausedByPrivacy = false
     private var lastMetaSignature = ""
     private var startInFlight = false
+    private var terminateRequested = false
     private let captureFreeze: CaptureFreeze
 
     init(settings: AppSettings = .shared, vault: SessionVault = SessionVault()) {
@@ -165,6 +166,7 @@ final class SessionController: ObservableObject {
 
     /// Process is quitting: freeze capture. Do not start Whisper/AI on a dying process.
     func haltCaptureForTermination() {
+        terminateRequested = true
         if !isRecording {
             // Start is awaiting Screen Recording permission / startCapture.
             // Freeze the attached recorder so writers cannot outlive Quit.
@@ -244,6 +246,13 @@ final class SessionController: ObservableObject {
             lastSessionId = created.manifest.sessionId
             pinTimes = []
             pinTimesSessionId = created.manifest.sessionId
+            // Quit may have frozen writers while start() was still awaiting.
+            // Do not unpause, and finish through halt instead of the privacy timer.
+            if terminateRequested {
+                phase = .paused
+                haltCaptureForTermination()
+                return
+            }
             if let bundle = privacy.currentCredentialApp() {
                 recorder.setPaused(true)
                 sampler.isSuspended = true
