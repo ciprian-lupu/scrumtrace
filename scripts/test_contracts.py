@@ -959,7 +959,7 @@ def test_pipeline_timing_stays_in_archive() -> None:
     assert start_rec.index("privacy.start()") < start_rec.index("try await recorder.start(")
     assert start_rec.count("privacy.start()") == 1
     assert "privacy.start()" not in start_rec.split("try await recorder.start(")[1]
-    catch_start = start_rec.split("} catch {")[1]
+    catch_start = start_rec.rsplit("} catch {", 1)[1]
     assert catch_start.index("privacy.stop()") < catch_start.index("captureFreeze.attach(nil)")
     assert "pruneAbandonedStarts" in controller
     init_fn = controller.split("init(settings:")[1].split("var isRecording")[0]
