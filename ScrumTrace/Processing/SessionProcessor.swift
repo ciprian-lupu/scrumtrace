@@ -140,6 +140,7 @@ final class SessionProcessor: @unchecked Sendable {
             if !manifest.hasCompleted(.transcribing) {
                 // Retry Analysis transcribes first. Do not mark evaluating
                 // complete from an empty transcript that Whisper never produced.
+                // Synthesize is also withheld until transcribing completes (below).
             } else if !manifest.uploadConsent.approved {
                 await onStatus(.evaluating, "Upload not approved — local export only")
                 abandonEvaluate(manifest: &manifest, failedStatus: .skipped, markOffline: false)
@@ -203,6 +204,17 @@ final class SessionProcessor: @unchecked Sendable {
         }
 
         try requireUsableSession(sessionURL, id: sessionId)
+        guard manifest.hasCompleted(.transcribing) else {
+            // Do not stamp synthesizing/completed while Whisper never produced
+            // a usable pass. Retry Analysis transcribes first (D14).
+            await onStatus(
+                .transcribing,
+                "Transcription incomplete — Retry Analysis to transcribe again"
+            )
+            manifest.pipelineStatus = .transcribing
+            try vault.write(manifest: &manifest)
+            return manifest
+        }
         await onStatus(.synthesizing, "Writing AGENT_CONTEXT.md and SESSION_BRIEF.html")
         manifest.pipelineStatus = .synthesizing
         let excerpts = excerptMap(manifest: manifest, transcript: transcript)

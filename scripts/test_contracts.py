@@ -1635,6 +1635,12 @@ def test_phase45_clip_consent_and_budget() -> None:
     eval_gate = processor.split("if needsEvaluate")[1].split("await onStatus(.synthesizing")[0]
     assert "hasCompleted(.transcribing)" in eval_gate
     assert eval_gate.index("hasCompleted(.transcribing)") < eval_gate.index("uploadConsent.approved")
+    incomplete = processor.split("Transcription incomplete")[1].split("Writing AGENT_CONTEXT.md")[0]
+    assert "return manifest" in incomplete
+    assert "pipelineStatus = .transcribing" in incomplete
+    assert "markCompleted(.synthesizing)" not in incomplete
+    assert "markCompleted(.completed)" not in incomplete
+    assert "hasCompleted(.transcribing)" in processor.split("try requireUsableSession(sessionURL, id: sessionId)")[-1].split("Writing AGENT_CONTEXT.md")[0]
     assert "async -> FullTranscript" in processor
     assert "justFinishedTranscribing" in processor
     retry_block = processor.split("if justFinishedTranscribing")[1].split("if !manifest.hasCompleted(.slicing)")[0]
