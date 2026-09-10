@@ -1987,6 +1987,11 @@ def test_phase45_clip_consent_and_budget() -> None:
     after_eval = processor.split("manifest.slices = updatedSlices.sorted")[1].split("try requireUsableSession")[0]
     assert "mergeUncoveredReview(manifest: &manifest, kept: tasks)" in after_eval
     assert "rankedTasks(tasks)" not in after_eval
+    merge_fn = processor.split("func mergeUncoveredReview")[1].split("func localReviewTasks")[0]
+    assert "isShotBacked" in merge_fn
+    assert "shotStems" in merge_fn
+    assert "covered.contains" in merge_fn
+    assert "shots/" in merge_fn
     eval_slice = processor.split("private func evaluateSlice")[1].split("private func tasks(")[0]
     assert eval_slice.count("abortedForAuth") >= 3
     assert eval_slice.rfind("abortedForAuth") < eval_slice.find("provider.evaluate")
@@ -1997,6 +2002,9 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "reviewTasks(" in eval_slice
     assert "shots: linked" in eval_slice
     assert "let shot = linked.first" not in eval_slice
+    assert "promptSlice" in eval_slice
+    assert eval_slice.index("promptSlice.stills") < eval_slice.index("SliceEvaluationRequest")
+    assert "slice: promptSlice" in eval_slice
     shot_note = eval_slice.split("let shotNote")[1].split("if let aborted")[0]
     assert "tMedia >= slice.startMedia" in shot_note
     assert "tMedia <= slice.endMedia" in shot_note

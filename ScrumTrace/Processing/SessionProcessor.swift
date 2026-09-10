@@ -593,9 +593,18 @@ final class SessionProcessor: @unchecked Sendable {
         ) {
             return aborted
         }
+        var promptSlice = slice
+        promptSlice.stills = slice.stills.filter {
+            EvidenceValidator.framesOverlapSlice(
+                [$0],
+                slice: slice,
+                shots: linked,
+                sessionURL: sessionURL
+            )
+        }
         let request = SliceEvaluationRequest(
             product: manifest.productContext,
-            slice: slice,
+            slice: promptSlice,
             transcriptExcerpt: excerpt,
             shotNote: shotNote,
             windowContext: vault.windowContext(
@@ -959,11 +968,26 @@ final class SessionProcessor: @unchecked Sendable {
 
     /// Shots whose slice was dropped by the 12-window cap, and pin/keyword
     /// windows with no keepable candidate, still get a review row (D7).
+    /// A Shot whose stills were clamped out of an evaluated slice is not
+    /// "covered" by that slice's task list.
     private func mergeUncoveredReview(manifest: inout SessionManifest, kept: [TaskRecord]) {
         let local = localReviewTasks(manifest: manifest)
         let covered = Set(kept.map(\.sourceSliceId))
-        let extra = local.filter { !covered.contains($0.sourceSliceId) }
+        let keptShotStems = shotStems(kept.flatMap(\.evidenceMedia))
+        let extra = local.filter { task in
+            if TaskRanking.isShotBacked(task) {
+                return shotStems(task.evidenceMedia).isDisjoint(with: keptShotStems)
+            }
+            return !covered.contains(task.sourceSliceId)
+        }
         manifest.tasks = rankedTasks(kept + extra)
+    }
+
+    private func shotStems(_ paths: [String]) -> Set<String> {
+        Set(paths.compactMap { path in
+            guard path.lowercased().contains("shots/") else { return nil }
+            return URL(fileURLWithPath: path).deletingPathExtension().lastPathComponent
+        })
     }
 
     private func localReviewTasks(manifest: SessionManifest) -> [TaskRecord] {
