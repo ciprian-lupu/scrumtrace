@@ -506,6 +506,47 @@ enum ExportRel {
         Darwin.close(dirFd)
         return nil
     }
+
+    /// Byte size of a contained regular file via `openat` + `fstat`.
+    /// Following a dest symlink would let a planted
+    /// `export/session-pack.zip` → `archive/session.mp4` make the
+    /// 35 MB check weigh the master movie (C3).
+    static func regularFileByteCount(relative: String, sessionURL: URL) -> Int? {
+        guard isUsableSessionRoot(sessionURL) else { return nil }
+        guard isUnderSession(relative), let parts = normalizedComponents(relative) else { return nil }
+        guard let fd = openatFile(parts: parts, root: sessionURL) else { return nil }
+        defer { Darwin.close(fd) }
+        var info = stat()
+        guard Darwin.fstat(fd, &info) == 0 else { return nil }
+        guard (info.st_mode & S_IFMT) == S_IFREG else { return nil }
+        let size = Int(info.st_size)
+        guard size >= 0 else { return nil }
+        return size
+    }
+
+    static func regularFileByteCount(_ file: URL, sessionRoot: URL) -> Int? {
+        guard let rel = unfollowedRelative(file, sessionRoot: sessionRoot) else { return nil }
+        return regularFileByteCount(relative: rel, sessionURL: sessionRoot)
+    }
+
+    /// Temp-file size that refuses to follow a symlink (`O_NOFOLLOW`).
+    static func unfollowedRegularFileByteCount(_ url: URL) -> Int? {
+        if (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+            return nil
+        }
+        let fd = url.withUnsafeFileSystemRepresentation { ptr -> Int32 in
+            guard let ptr else { return -1 }
+            return Darwin.open(ptr, O_RDONLY | O_CLOEXEC | O_NOFOLLOW)
+        }
+        guard fd >= 0 else { return nil }
+        defer { Darwin.close(fd) }
+        var info = stat()
+        guard Darwin.fstat(fd, &info) == 0 else { return nil }
+        guard (info.st_mode & S_IFMT) == S_IFREG else { return nil }
+        let size = Int(info.st_size)
+        guard size >= 0 else { return nil }
+        return size
+    }
 }
 
 enum MediaBudget {

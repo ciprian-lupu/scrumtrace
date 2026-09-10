@@ -246,7 +246,28 @@ def main() -> int:
         remove_escaping_export_links(export)
         assert not trap.exists()
         assert secret.exists()
-        print("pack budget folder-drop links: ok")
+    with tempfile.TemporaryDirectory() as tmp:
+        session = Path(tmp) / "session"
+        export = session / "export"
+        archive = session / "archive"
+        export.mkdir(parents=True)
+        archive.mkdir()
+        movie = archive / "session.mp4"
+        movie.write_bytes(os.urandom(64 * 1024))
+        planted = export / "session-pack.zip"
+        planted.symlink_to(movie)
+        # Following the dest would weigh the master movie. C3 must not.
+        measured = 0 if planted.is_symlink() or not planted.is_file() else planted.stat().st_size
+        assert planted.is_symlink()
+        assert measured == 0
+        assert planted.stat().st_size == movie.stat().st_size
+        print("pack budget zip dest symlink: ok")
+
+    zipper = ROOT / "ScrumTrace" / "Export" / "SessionPackZipper.swift"
+    zipper_src = zipper.read_text()
+    assert "measuredPackBytes" in zipper_src
+    assert "regularFileByteCount" in zipper_src
+    assert "attributesOfItem" not in zipper_src
     return 0
 
 

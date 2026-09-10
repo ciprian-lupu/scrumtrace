@@ -32,21 +32,26 @@ struct SessionPackZipper {
             omitted.append(OmittedAsset(path: "session-pack.zip", reason: error.localizedDescription))
             let listed = uniquedOmitted(omitted)
             try writeOmittedMarkdown(sessionURL: sessionURL, omitted: listed)
-            return Result(zipURL: zipURL, byteCount: fileSize(zipURL), omitted: listed)
+            return Result(
+                zipURL: zipURL,
+                byteCount: ExportRel.regularFileByteCount(relative: ScrumTracePath.packZip, sessionURL: sessionURL) ?? 0,
+                omitted: listed
+            )
         }
-        var size = fileSize(zipURL)
+        var size = try measuredPackBytes(sessionURL: sessionURL)
 
         let dropList = PackBudget.omissionOrder(manifest: manifest, sessionURL: sessionURL)
         for path in dropList where size > MediaBudget.maxZipBytes {
             guard ExportRel.isUnderExport(path) else { continue }
             if PackBudget.isProtected(path) { continue }
             let url = sessionURL.appendingPathComponent(path)
-            if (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+            let plantedLink = (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true
+            if plantedLink {
                 try? FileManager.default.removeItem(at: url)
-                continue
+            } else {
+                guard ExportRel.isContainedRegularFile(url, sessionRoot: sessionURL) else { continue }
+                try? FileManager.default.removeItem(at: url)
             }
-            guard ExportRel.isContainedRegularFile(url, sessionRoot: sessionURL) else { continue }
-            try? FileManager.default.removeItem(at: url)
             omitted.append(OmittedAsset(path: ExportRel.toExportRoot(path), reason: "Pack over 35 MB; dropped by priority"))
             do {
                 try runZip(
@@ -54,7 +59,7 @@ struct SessionPackZipper {
                     includeFullTranscript: manifest.includeFullTranscriptInZip,
                     sessionURL: sessionURL
                 )
-                size = fileSize(zipURL)
+                size = try measuredPackBytes(sessionURL: sessionURL)
             } catch {
                 omitted.append(OmittedAsset(path: "session-pack.zip", reason: error.localizedDescription))
                 break
@@ -77,7 +82,7 @@ struct SessionPackZipper {
                 includeFullTranscript: manifest.includeFullTranscriptInZip,
                 sessionURL: sessionURL
             )
-            size = fileSize(zipURL)
+            size = try measuredPackBytes(sessionURL: sessionURL)
         }
         return Result(zipURL: zipURL, byteCount: size, omitted: omitted)
     }
@@ -92,13 +97,12 @@ struct SessionPackZipper {
         if (try? exportDir.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
             throw SessionRecorderError.writerFailed("export/ is a symbolic link.")
         }
-        let zipURL = sessionURL.appendingPathComponent(ScrumTracePath.packZip)
         try runZip(
             exportDir: exportDir,
             includeFullTranscript: includeFullTranscript,
             sessionURL: sessionURL
         )
-        return fileSize(zipURL)
+        return try measuredPackBytes(sessionURL: sessionURL)
     }
 
     func writeOmittedMarkdown(sessionURL: URL, omitted: [OmittedAsset]) throws {
@@ -125,8 +129,14 @@ struct SessionPackZipper {
         return out
     }
 
-    private func fileSize(_ url: URL) -> Int {
-        (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? NSNumber)?.intValue ?? 0
+    /// Weigh the zip with `openat`/`fstat`. Following a dest symlink would
+    /// count a planted `export/session-pack.zip` as `archive/session.mp4` (C3).
+    private func measuredPackBytes(sessionURL: URL) throws -> Int {
+        guard let size = ExportRel.regularFileByteCount(relative: ScrumTracePath.packZip, sessionURL: sessionURL),
+              size > 0 else {
+            throw SessionRecorderError.writerFailed("session-pack.zip is missing or not a regular file.")
+        }
+        return size
     }
 
     private func runZip(exportDir: URL, includeFullTranscript: Bool, sessionURL: URL) throws {
@@ -335,7 +345,8 @@ enum PackBudget {
             .filter { !listed.contains($0) && !isProtected($0) }
 
         let evidenceClipsDrop = reservedClips.sorted {
-            fileSize(sessionURL.appendingPathComponent($0)) > fileSize(sessionURL.appendingPathComponent($1))
+            (ExportRel.regularFileByteCount(relative: $0, sessionURL: sessionURL) ?? 0)
+                > (ExportRel.regularFileByteCount(relative: $1, sessionURL: sessionURL) ?? 0)
         }
         let evidenceStillsDrop = Array(evidenceShotsNewestFirst.reversed())
 
@@ -425,7 +436,4 @@ enum PackBudget {
         return out
     }
 
-    private static func fileSize(_ url: URL) -> Int {
-        (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? NSNumber)?.intValue ?? 0
-    }
 }

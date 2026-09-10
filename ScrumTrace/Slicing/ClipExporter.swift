@@ -80,6 +80,7 @@ struct ClipExporter {
     func tightenExportClips(sessionURL: URL) async {
         let exportDir = sessionURL.appendingPathComponent(ScrumTracePath.export)
         let media = sessionURL.appendingPathComponent(ScrumTracePath.media)
+        PackBudget.removeEscapingExportLinks(exportDir: exportDir)
         if (try? exportDir.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
             return
         }
@@ -102,8 +103,8 @@ struct ClipExporter {
             files.append(url)
         }
         files.sort { lhs, rhs in
-            let left = (try? FileManager.default.attributesOfItem(atPath: lhs.path)[.size] as? NSNumber)?.intValue ?? 0
-            let right = (try? FileManager.default.attributesOfItem(atPath: rhs.path)[.size] as? NSNumber)?.intValue ?? 0
+            let left = ExportRel.regularFileByteCount(lhs, sessionRoot: sessionURL) ?? 0
+            let right = ExportRel.regularFileByteCount(rhs, sessionRoot: sessionURL) ?? 0
             return left > right
         }
         // Leave the smallest clip at H.264 Main 720p so Gate 4 still has a
@@ -135,9 +136,11 @@ struct ClipExporter {
             return
         }
         defer { try? FileManager.default.removeItem(at: work) }
+        guard let before = ExportRel.regularFileByteCount(url, sessionRoot: sessionURL), before > 0 else {
+            return
+        }
         let presets = [AVAssetExportPreset640x480, AVAssetExportPresetLowQuality]
         for preset in presets {
-            let before = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? NSNumber)?.intValue ?? 0
             let temp = FileManager.default.temporaryDirectory.appendingPathComponent(
                 "scrumtrace-tighten-\(UUID().uuidString).mp4"
             )
@@ -158,7 +161,7 @@ struct ClipExporter {
                 try? FileManager.default.removeItem(at: temp)
                 continue
             }
-            let after = (try? FileManager.default.attributesOfItem(atPath: temp.path)[.size] as? NSNumber)?.intValue ?? before
+            let after = ExportRel.unfollowedRegularFileByteCount(temp) ?? before
             if after < before {
                 do {
                     try ExportRel.moveIntoSession(from: temp, relative: rel, sessionURL: sessionURL)

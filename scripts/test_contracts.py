@@ -204,6 +204,7 @@ def test_zipper_never_deletes_archive() -> None:
     assert "extraClips + extraShots" not in dropped
     assert "isContainedRegularFile" in omit_fn
     assert "fileExists(atPath: sessionURL.appendingPathComponent($0).path)" not in omit_fn
+    assert "regularFileByteCount" in omit_fn
 
 
 def test_clip_exporter_macos14() -> None:
@@ -219,6 +220,9 @@ def test_clip_exporter_macos14() -> None:
     assert "skipDescendants" in tighten
     assert tighten.index("isSymbolicLink") < tighten.index("enumerator")
     assert "sessionURL: sessionURL" in tighten
+    assert "regularFileByteCount" in tighten
+    assert "attributesOfItem" not in tighten
+    assert "removeEscapingExportLinks" in tighten
     tighten_file = clip.split("func tighten(file")[1].split("func reencode")[0]
     assert "temporaryDirectory" in tighten_file
     assert "copyContainedToTemporaryFile" in tighten_file
@@ -231,6 +235,9 @@ def test_clip_exporter_macos14() -> None:
     assert "isReadableSessionFile" in tighten_file
     assert "scrumtrace-tighten" in tighten_file
     assert "replaceItemAt" not in tighten_file
+    assert "regularFileByteCount" in tighten_file
+    assert "unfollowedRegularFileByteCount" in tighten_file
+    assert "attributesOfItem" not in tighten_file
     assert "existingSessionFile" in clip
     export_fn = clip.split("func export(")[1].split("func tightenExportClips")[0]
     assert "isUsableSessionRoot" in export_fn
@@ -536,6 +543,16 @@ def test_pipeline_timing_stays_in_archive() -> None:
     assert "isContainedRegularFile" in drop
     assert "isSymbolicLink" in drop
     assert "fileExists(atPath: url.path)" not in drop
+    assert drop.index("isSymbolicLink") < drop.index("omitted.append")
+    assert "plantedLink" in drop
+    assert "measuredPackBytes" in zip_fn
+    assert "regularFileByteCount" in zipper
+    assert "attributesOfItem" not in zipper
+    assert "func fileSize" not in zipper
+    size_fn = zipper.split("private func measuredPackBytes")[1].split("private func runZip")[0]
+    assert "regularFileByteCount" in size_fn
+    assert "attributesOfItem" not in size_fn
+    assert "ScrumTracePath.packZip" in size_fn
     recorder = (ROOT / "ScrumTrace" / "Capture" / "SessionRecorder.swift").read_text()
     assert "writerQueue.sync" in recorder
     assert recorder.count("sampleHandlerQueue: writerQueue") >= 3
@@ -1129,6 +1146,18 @@ def test_write_contained_data_refuses_directory_symlinks() -> None:
     assert "pathExtension" in copy_fn
     assert "Darwin.fsync" in copy_fn
     assert "O_NOFOLLOW" in models.split("private static func openatFile")[1]
+    pack_size = models.split("static func regularFileByteCount(relative:")[1].split(
+        "static func regularFileByteCount(_ file"
+    )[0]
+    assert "openatFile" in pack_size
+    assert "fstat" in pack_size
+    assert "S_IFREG" in pack_size
+    assert "attributesOfItem" not in pack_size
+    unfollowed_size = models.split("static func unfollowedRegularFileByteCount")[1].split("enum MediaBudget")[0]
+    assert "O_NOFOLLOW" in unfollowed_size
+    assert "fstat" in unfollowed_size
+    assert "isSymbolicLink" in unfollowed_size
+    assert "attributesOfItem" not in unfollowed_size
     prepare = models.split("static func prepareContainedWrite")[1].split("static func writeContainedData")[0]
     assert "isSymbolicLink" in prepare
     assert "createDirectory" in prepare
