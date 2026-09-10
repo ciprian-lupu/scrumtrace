@@ -284,7 +284,9 @@ def test_mock_pack_zip_is_export_only() -> None:
     for name in names:
         assert "archive/" not in name, name
         assert not name.startswith("..")
+        assert not name.startswith("media/task-01"), name
         assert (export / name).is_file(), name
+    assert not (export / "media" / "task-01").exists()
 
 
 def main() -> None:

@@ -326,10 +326,8 @@ def main() -> None:
     if EXPORT.exists():
         shutil.rmtree(EXPORT)
     shots = EXPORT / "shots"
-    media1 = EXPORT / "media" / "task-01"
     media2 = EXPORT / "media" / "task-02"
     shots.mkdir(parents=True)
-    media1.mkdir(parents=True)
     media2.mkdir(parents=True)
 
     raw = shots / "001.png"
@@ -338,7 +336,6 @@ def main() -> None:
     annotate(raw, annotated)
     still_from_video_script(media2 / "shot-1.jpg")
     write_clip(media2 / "clip.mp4")
-    shutil.copy(annotated, media1 / "shot-1.png")
 
     tasks_html = """
     <article class="take" id="TASK-01" data-status="confirmed">

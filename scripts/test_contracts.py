@@ -18,6 +18,7 @@ def test_export_has_no_archive_and_no_tokens() -> None:
     assert not (export / "session.mp4").exists()
     assert not (export / "audio.wav").exists()
     assert not (export / "full_transcript.json").exists()
+    assert not (export / "media" / "task-01").exists()
     forbidden = ["ATH-SAVE-DISABLED-0x9F", "STENCIL-4419"]
     for path in export.rglob("*"):
         if not path.is_file() or path.suffix.lower() in {".png", ".jpg", ".jpeg", ".mp4", ".zip"}:
