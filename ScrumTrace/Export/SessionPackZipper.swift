@@ -26,11 +26,12 @@ struct SessionPackZipper {
         }
         let zipURL = sessionURL.appendingPathComponent(ScrumTracePath.packZip)
         var omitted = uniquedOmitted(manifest.omitted)
+        var includeTranscript = manifest.includeFullTranscriptInZip
 
         do {
             try runZip(
                 exportDir: exportDir,
-                includeFullTranscript: manifest.includeFullTranscriptInZip,
+                includeFullTranscript: includeTranscript,
                 sessionURL: sessionURL
             )
         } catch {
@@ -52,16 +53,24 @@ struct SessionPackZipper {
             let url = sessionURL.appendingPathComponent(path)
             let plantedLink = (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true
             if plantedLink {
-                try? ExportRel.removeItemIfRegularFile(url, sessionRoot: sessionURL)
+                do {
+                    try ExportRel.removeItemIfRegularFile(url, sessionRoot: sessionURL)
+                } catch {
+                    continue
+                }
             } else {
                 guard ExportRel.isContainedRegularFile(url, sessionRoot: sessionURL) else { continue }
-                try? ExportRel.removeItemIfRegularFile(url, sessionRoot: sessionURL)
+                do {
+                    try ExportRel.removeItemIfRegularFile(url, sessionRoot: sessionURL)
+                } catch {
+                    continue
+                }
             }
             omitted.append(OmittedAsset(path: ExportRel.toExportRoot(path), reason: "Pack over 35 MB; dropped by priority"))
             do {
                 try runZip(
                     exportDir: exportDir,
-                    includeFullTranscript: manifest.includeFullTranscriptInZip,
+                    includeFullTranscript: includeTranscript,
                     sessionURL: sessionURL
                 )
                 size = try measuredPackBytes(sessionURL: sessionURL)
@@ -72,12 +81,39 @@ struct SessionPackZipper {
         }
 
         if size > MediaBudget.maxZipBytes {
-            omitted.append(
-                OmittedAsset(
-                    path: "session-pack.zip",
-                    reason: "Pack still \(size) bytes after dropping all droppable export media; protected docs remain."
+            // C3: opted-in transcript is allow-listed, not immortal. Archive keeps
+            // archive/full_transcript.json. The export copy loses to the 35 MB cap.
+            let transcriptRel = "export/full_transcript.json"
+            let transcriptURL = sessionURL.appendingPathComponent(transcriptRel)
+            if ExportRel.isContainedRegularFile(transcriptURL, sessionRoot: sessionURL) {
+                do {
+                    try ExportRel.removeItemIfRegularFile(transcriptURL, sessionRoot: sessionURL)
+                    omitted.append(
+                        OmittedAsset(
+                            path: "full_transcript.json",
+                            reason: "Pack over 35 MB; opted-in full transcript dropped. Archive copy kept."
+                        )
+                    )
+                    includeTranscript = false
+                    try runZip(
+                        exportDir: exportDir,
+                        includeFullTranscript: false,
+                        sessionURL: sessionURL
+                    )
+                    size = try measuredPackBytes(sessionURL: sessionURL)
+                } catch {
+                    omitted.append(OmittedAsset(path: "session-pack.zip", reason: error.localizedDescription))
+                }
+            }
+            let stillOver = size > MediaBudget.maxZipBytes
+            if stillOver {
+                omitted.append(
+                    OmittedAsset(
+                        path: "session-pack.zip",
+                        reason: "Pack still \(size) bytes after dropping all droppable export media; protected docs remain."
+                    )
                 )
-            )
+            }
         }
         omitted = uniquedOmitted(omitted)
         do {
@@ -93,7 +129,7 @@ struct SessionPackZipper {
             do {
                 try runZip(
                     exportDir: exportDir,
-                    includeFullTranscript: manifest.includeFullTranscriptInZip,
+                    includeFullTranscript: includeTranscript,
                     sessionURL: sessionURL
                 )
                 size = try measuredPackBytes(sessionURL: sessionURL)
@@ -554,6 +590,9 @@ enum PackBudget {
             return next
         }
         copy.omitted = omitted
+        if dropped.contains("full_transcript.json") {
+            copy.includeFullTranscriptInZip = false
+        }
         return copy
     }
 

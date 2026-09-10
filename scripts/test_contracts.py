@@ -928,6 +928,7 @@ def test_pipeline_timing_stays_in_archive() -> None:
     assert "plantedLink" in drop
     assert "removeItemIfRegularFile" in drop
     assert "FileManager.default.removeItem(at: url)" not in drop
+    assert "try? ExportRel.removeItemIfRegularFile(url" not in drop
     assert "measuredPackBytes" in zip_fn
     assert "regularFileByteCount" in zipper
     assert "attributesOfItem" not in zipper
@@ -1521,7 +1522,13 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "throw" not in zipper_over
     assert "Pack still" in zipper_over
     assert "discardPackIfOverBudget" in zipper_over
+    assert "opted-in full transcript" in zipper_over
+    assert zipper_over.index("opted-in full transcript") < zipper_over.index("Pack still")
+    assert "includeFullTranscript: false" in zipper_over
+    strip_omit = zipper.split("static func stripOmitted")[1].split("static func exportMediaSessionPaths")[0]
+    assert "includeFullTranscriptInZip = false" in strip_omit
     zip_fn = zipper.split("func zip(")[1].split("func writeZip")[0]
+    assert zip_fn.count("if size > MediaBudget.maxZipBytes") == 1
     assert "discardPackIfOverBudget" in zip_fn
     discard_pack = zipper.split("func discardPackIfOverBudget")[1].split("func measuredPackBytes")[0]
     assert "maxZipBytes" in discard_pack
