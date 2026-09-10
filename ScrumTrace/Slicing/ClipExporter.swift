@@ -129,11 +129,13 @@ struct ClipExporter {
     /// Encode into the system temp folder so a leftover UUID.mp4 cannot
     /// land in `export/media/` and enter the zip allow-list (C3).
     private func tighten(file url: URL, sessionURL: URL) async throws {
-        guard ExportRel.isUsableSessionRoot(sessionURL) else { return }
+        guard ExportRel.isUsableSessionRoot(sessionURL) else {
+            throw SessionRecorderError.writerFailed("session folder")
+        }
         guard let rel = ExportRel.unfollowedRelative(url, sessionRoot: sessionURL),
               ExportRel.isAllowedClipDest(rel),
               ExportRel.isReadableSessionFile(url, sessionRoot: sessionURL) else {
-            return
+            throw SessionRecorderError.writerFailed("Tighten skipped an unreadable export clip.")
         }
         let work: URL
         do {
@@ -143,11 +145,11 @@ struct ClipExporter {
                 prefix: "scrumtrace-tighten-src"
             )
         } catch {
-            return
+            throw error
         }
         defer { ExportRel.removePrivateTemporaryURL(work) }
         guard let before = ExportRel.regularFileByteCount(url, sessionRoot: sessionURL), before > 0 else {
-            return
+            throw SessionRecorderError.writerFailed("Export clip is empty.")
         }
         let presets = [AVAssetExportPreset640x480, AVAssetExportPresetLowQuality]
         for preset in presets {
@@ -199,6 +201,7 @@ struct ClipExporter {
             }
             ExportRel.removePrivateTemporaryURL(temp)
         }
+        throw SessionRecorderError.writerFailed("Could not re-encode export clip under the pack budget.")
     }
 
     private func reencode(

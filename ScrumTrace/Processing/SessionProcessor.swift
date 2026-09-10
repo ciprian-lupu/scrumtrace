@@ -12,6 +12,9 @@ final class SessionProcessor: @unchecked Sendable {
     private let zipper = SessionPackZipper()
     private let evalLock = NSLock()
     private var evalAuthFailed = false
+    /// Last transcript this processor wrote. `loadTranscript` prefers disk,
+    /// then this, so a decode miss cannot slice as if the room was silent.
+    private var writtenTranscript: FullTranscript?
 
     init(vault: SessionVault, transcriber: WhisperTranscriber) {
         self.vault = vault
@@ -28,6 +31,9 @@ final class SessionProcessor: @unchecked Sendable {
         let sessionURL = vault.sessionURL(id: sessionId)
         try requireUsableSession(sessionURL, id: sessionId)
         var manifest = try vault.loadManifest(id: sessionId)
+        if writtenTranscript?.sessionId != sessionId {
+            writtenTranscript = nil
+        }
 
         var timing = PipelineTiming.load(sessionURL: sessionURL) ?? PipelineTiming()
 
@@ -46,6 +52,7 @@ final class SessionProcessor: @unchecked Sendable {
                 relative: ScrumTracePath.fullTranscript,
                 sessionURL: sessionURL
             )
+            writtenTranscript = transcript
             timing.whisperWallSeconds = Date().timeIntervalSince(whisperStarted)
             timing.whisperSources = transcript.sources ?? []
             try timing.write(sessionURL: sessionURL)
@@ -390,17 +397,18 @@ final class SessionProcessor: @unchecked Sendable {
     }
 
     private func loadTranscript(sessionURL: URL, sessionId: String) -> FullTranscript {
-        guard ExportRel.existingSessionFile(ScrumTracePath.fullTranscript, sessionURL: sessionURL) != nil else {
-            return FullTranscript(sessionId: sessionId, language: "en", segments: [])
-        }
-        guard let data = ExportRel.readContainedData(
+        if ExportRel.existingSessionFile(ScrumTracePath.fullTranscript, sessionURL: sessionURL) != nil,
+           let data = ExportRel.readContainedData(
             relative: ScrumTracePath.fullTranscript,
             sessionURL: sessionURL
-        ),
-              let transcript = try? JSONDecoder().decode(FullTranscript.self, from: data) else {
-            return FullTranscript(sessionId: sessionId, language: "en", segments: [])
+           ),
+           let transcript = try? JSONDecoder().decode(FullTranscript.self, from: data) {
+            return transcript
         }
-        return transcript
+        if let written = writtenTranscript, written.sessionId == sessionId {
+            return written
+        }
+        return FullTranscript(sessionId: sessionId, language: "en", segments: [])
     }
 
     private func evaluateSlice(

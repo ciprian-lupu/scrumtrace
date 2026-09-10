@@ -427,6 +427,11 @@ final class SessionController: ObservableObject {
         } catch {
             lastError = error.localizedDescription
         }
+        do {
+            try recorder?.reclaimLiveCaptureIfRewritten()
+        } catch {
+            lastError = error.localizedDescription
+        }
         hudTimer?.invalidate()
         hudTimer = nil
         metadataTimer?.invalidate()

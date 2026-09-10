@@ -412,6 +412,10 @@ def test_clip_exporter_macos14() -> None:
     assert "attributesOfItem" not in tighten_file
     assert "try? await asset.load(.duration)" not in tighten_file
     assert "try await asset.load(.duration)" in tighten_file
+    assert "throw" in tighten_file
+    assert "Could not re-encode export clip under the pack budget." in tighten_file
+    assert "Tighten skipped an unreadable export clip." in tighten_file
+    assert "Export clip is empty." in tighten_file
     assert "existingSessionFile" in clip
     export_fn = clip.split("func export(")[1].split("func tightenExportClips")[0]
     assert "isUsableSessionRoot" in export_fn
@@ -828,6 +832,19 @@ def test_audio_split_and_brief_loader() -> None:
     assert "try? ExportRel.moveIntoSession(from: live" not in recorder
     assert stop_rec.count("persistCaptureLayout(microphoneWav: snapshot.mic)") >= 2
     assert stop_rec.rindex("persistCaptureLayout") > stop_rec.index("reclaimLiveCaptureIfRewritten")
+    reclaim_locked = recorder.split("func reclaimLiveCaptureIfRewrittenLocked")[1].split("func adoptLargerLiveFile")[0]
+    movie_adopt = reclaim_locked.split("if let rel = liveMovieRel")[1].split("if let rel = liveWavRel")[0]
+    assert movie_adopt.index("adoptLargerLiveFile") < movie_adopt.index("liveMovieRel = nil")
+    assert "liveMovieRel = nil" not in movie_adopt.split("adoptLargerLiveFile")[0]
+    wav_adopt = reclaim_locked.split("if let rel = liveWavRel")[1]
+    assert wav_adopt.index("adoptLargerLiveFile") < wav_adopt.index("liveWavRel = nil")
+    assert "liveWavRel = nil" not in wav_adopt.split("adoptLargerLiveFile")[0]
+    adopt = recorder.split("func adoptLargerLiveFile")[1].split("func discardLiveCaptureLocked")[0]
+    assert "unlinkLastComponentUnfollowed(live)" in adopt
+    assert "try? ExportRel.removeItemIfRegularFile(live" not in adopt
+    discard_live = recorder.split("func discardLiveCaptureLocked")[1].split("func stream(")[0]
+    assert "liveBytes > destBytes" in discard_live
+    assert "discardLiveIfNotLargerThanCanonical" in discard_live
     assert "synchronizationClock" in recorder
     assert "sampleClock" in recorder
     assert "guard !paused, started else { return }" in recorder
@@ -1572,6 +1589,10 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "existingSessionFile(ScrumTracePath.fullTranscript" in load_tr
     assert "readContainedData" in load_tr
     assert "Data(contentsOf:" not in load_tr
+    assert "writtenTranscript" in load_tr
+    assert "written.sessionId == sessionId" in load_tr
+    written_before_load = processor.split("writeContainedData")[1].split("let transcript = loadTranscript")[0]
+    assert "writtenTranscript = transcript" in written_before_load
     models = (ROOT / "ScrumTrace" / "Storage" / "SessionModels.swift").read_text()
     layout_load = models.split("static func load(sessionURL: URL) -> CaptureAudioLayout")[1].split("func write(sessionURL")[0]
     assert "existingSessionFile(ScrumTracePath.captureLayout" in layout_load
@@ -1785,6 +1806,9 @@ def test_phase45_clip_consent_and_budget() -> None:
     stop_fn = controller.split("private func stopRecordingAsync")[1].split("private func runProcessor")[0]
     assert "setPaused(false)" not in stop_fn
     assert "freezeWriters" in stop_fn
+    assert "reclaimLiveCaptureIfRewritten" in stop_fn
+    assert "try? recorder?.reclaim" not in stop_fn
+    assert stop_fn.index("try await recorder?.stop()") < stop_fn.index("reclaimLiveCaptureIfRewritten")
     assert "markRecordingStopped" in recorder
     assert "func freezeWriters" in recorder
     clock = (ROOT / "ScrumTrace" / "Capture" / "ClockSynchronizer.swift").read_text()

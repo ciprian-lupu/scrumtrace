@@ -346,6 +346,11 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             try reclaimLiveCaptureIfRewritten()
         } catch {
             stopError = error
+            do {
+                try reclaimLiveCaptureIfRewritten()
+            } catch {
+                stopError = error
+            }
         }
         do {
             try persistCaptureLayout(microphoneWav: snapshot.mic)
@@ -359,7 +364,9 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
 
     /// If AVAssetWriter / AVAudioFile reopened the UUID path at finishWriting,
     /// keep the larger regular file on the canonical archive names (C2).
-    private func reclaimLiveCaptureIfRewritten() throws {
+    /// Forget the live name only after adopt succeeds so Stop can retry
+    /// instead of leaving Whisper on a truncated `session.mp4`.
+    func reclaimLiveCaptureIfRewritten() throws {
         try syncWriter {
             try self.reclaimLiveCaptureIfRewrittenLocked()
         }
@@ -370,6 +377,7 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         if let rel = liveMovieRel {
             do {
                 try adoptLargerLiveFile(rel, destRelative: ScrumTracePath.sessionMovie)
+                liveMovieRel = nil
             } catch {
                 firstError = error
             }
@@ -377,12 +385,11 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         if let rel = liveWavRel {
             do {
                 try adoptLargerLiveFile(rel, destRelative: ScrumTracePath.audioWav)
+                liveWavRel = nil
             } catch {
                 firstError = firstError ?? error
             }
         }
-        liveMovieRel = nil
-        liveWavRel = nil
         if let firstError {
             throw firstError
         }
@@ -397,26 +404,40 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         if liveBytes > destBytes {
             try ExportRel.moveIntoSession(from: live, relative: destRelative, sessionURL: sessionURL)
         } else {
-            try? ExportRel.removeItemIfRegularFile(live, sessionRoot: sessionURL)
+            do {
+                try ExportRel.removeItemIfRegularFile(live, sessionRoot: sessionURL)
+            } catch {
+                ExportRel.unlinkLastComponentUnfollowed(live)
+            }
+            if ExportRel.isContainedRegularFile(live, sessionRoot: sessionURL) {
+                throw SessionRecorderError.writerFailed("Could not drop leftover live capture file.")
+            }
         }
     }
 
-    /// Cancel / deinit: drop leftover UUID files. Do not overwrite session.mp4.
+    /// Cancel / deinit: drop leftover UUID files that are not the only
+    /// complete movie/WAV. Do not overwrite session.mp4, and do not delete
+    /// a larger live file after a failed Stop reclaim (Gate 3).
     private func discardLiveCaptureLocked() {
         if let rel = liveMovieRel {
-            try? ExportRel.removeItemIfRegularFile(
-                sessionURL.appendingPathComponent(rel),
-                sessionRoot: sessionURL
-            )
+            discardLiveIfNotLargerThanCanonical(rel, destRelative: ScrumTracePath.sessionMovie)
         }
         if let rel = liveWavRel {
-            try? ExportRel.removeItemIfRegularFile(
-                sessionURL.appendingPathComponent(rel),
-                sessionRoot: sessionURL
-            )
+            discardLiveIfNotLargerThanCanonical(rel, destRelative: ScrumTracePath.audioWav)
         }
         liveMovieRel = nil
         liveWavRel = nil
+    }
+
+    private func discardLiveIfNotLargerThanCanonical(_ rel: String, destRelative: String) {
+        let live = sessionURL.appendingPathComponent(rel)
+        let dest = sessionURL.appendingPathComponent(destRelative)
+        let liveBytes = ExportRel.regularFileByteCount(live, sessionRoot: sessionURL) ?? 0
+        let destBytes = ExportRel.regularFileByteCount(dest, sessionRoot: sessionURL) ?? 0
+        if liveBytes > destBytes {
+            return
+        }
+        try? ExportRel.removeItemIfRegularFile(live, sessionRoot: sessionURL)
     }
 
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
