@@ -1390,6 +1390,7 @@ def test_write_contained_data_refuses_directory_symlinks() -> None:
     assert "openat" in place_fn
     assert "O_NOFOLLOW" in place_fn
     assert "scrumtraceRenameat" in place_fn
+    assert "openTempRenameSourceDirectory" in place_fn
     spawn_fn = models.split("static func spawnWithDirectoryFd")[1].split("enum MediaBudget")[0]
     assert "posix_spawn_file_actions_addfchdir_np" in spawn_fn
     assert "scrumtraceAddFchdir" in spawn_fn
@@ -1451,6 +1452,10 @@ def test_write_contained_data_refuses_directory_symlinks() -> None:
     assert "fsyncRegularFile" in write_fn
     assert "Darwin.fsync" in write_fn
     assert "O_NOFOLLOW" in write_fn
+    assert "EINTR" in write_fn
+    assert "openTempRenameSourceDirectory" in write_fn
+    assert "TMPDIR=/tmp" in write_fn
+    assert "/private/tmp" in write_fn
     assert "replaceItemAt" not in write_fn
     assert "moveIntoSession" in write_fn
     assert "moveItem(at: temp, to: dest)" not in write_fn

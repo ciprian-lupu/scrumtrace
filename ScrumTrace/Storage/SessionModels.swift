@@ -430,7 +430,11 @@ enum ExportRel {
                 let size = buf.count
                 while offset < size {
                     let n = Darwin.write(fd, base.advanced(by: offset), size - offset)
-                    if n <= 0 { return false }
+                    if n < 0 {
+                        if Darwin.errno == EINTR { continue }
+                        return false
+                    }
+                    if n == 0 { return false }
                     offset += Int(n)
                 }
                 return Darwin.fsync(fd) == 0
@@ -464,6 +468,40 @@ enum ExportRel {
         }
     }
 
+    /// Directory fd for `renameat` of a temp file we created. Do not use
+    /// `O_NOFOLLOW` on the parent: on macOS `/tmp` → `/private/tmp`, and a
+    /// user `TMPDIR=/tmp` would otherwise fail every contained write and zip.
+    /// The temp *file* is still verified with `openat` + `O_NOFOLLOW`.
+    private static func openTempRenameSourceDirectory(temp: URL) throws -> Int32 {
+        if (try? temp.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+            throw SessionVaultError.writeFailed(temp.lastPathComponent)
+        }
+        let tmpName = temp.lastPathComponent
+        let tmpParent = temp.deletingLastPathComponent()
+        let srcDirFd = tmpParent.withUnsafeFileSystemRepresentation { ptr -> Int32 in
+            guard let ptr else { return -1 }
+            return Darwin.open(ptr, O_RDONLY | O_DIRECTORY | O_CLOEXEC)
+        }
+        guard srcDirFd >= 0 else {
+            throw SessionVaultError.writeFailed(temp.lastPathComponent)
+        }
+        let srcFileFd = tmpName.withCString { name in
+            Darwin.openat(srcDirFd, name, O_RDONLY | O_CLOEXEC | O_NOFOLLOW)
+        }
+        guard srcFileFd >= 0 else {
+            Darwin.close(srcDirFd)
+            throw SessionVaultError.writeFailed(temp.lastPathComponent)
+        }
+        var srcInfo = stat()
+        let srcOk = Darwin.fstat(srcFileFd, &srcInfo) == 0 && (srcInfo.st_mode & S_IFMT) == S_IFREG
+        Darwin.close(srcFileFd)
+        guard srcOk else {
+            Darwin.close(srcDirFd)
+            throw SessionVaultError.writeFailed(temp.lastPathComponent)
+        }
+        return srcDirFd
+    }
+
     /// Move a temp file onto a session-relative path. `renameat` into a dest
     /// directory fd opened with `O_NOFOLLOW` so a planted parent
     /// (`export/` → `archive/`) cannot steal the write. `unlinkat` replaces a
@@ -485,14 +523,7 @@ enum ExportRel {
             scrumtraceUnlinkat(destDirFd, name, 0)
         }
         let tmpName = temp.lastPathComponent
-        let tmpParent = temp.deletingLastPathComponent()
-        let srcDirFd = tmpParent.withUnsafeFileSystemRepresentation { ptr -> Int32 in
-            guard let ptr else { return -1 }
-            return Darwin.open(ptr, O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW)
-        }
-        guard srcDirFd >= 0 else {
-            throw SessionVaultError.writeFailed(relative)
-        }
+        let srcDirFd = try openTempRenameSourceDirectory(temp: temp)
         defer { Darwin.close(srcDirFd) }
         let renamed = tmpName.withCString { fromName in
             destName.withCString { toName in
@@ -865,14 +896,7 @@ enum ExportRel {
             scrumtraceUnlinkat(current, name, 0)
         }
         let tmpName = temp.lastPathComponent
-        let tmpParent = temp.deletingLastPathComponent()
-        let srcDirFd = tmpParent.withUnsafeFileSystemRepresentation { ptr -> Int32 in
-            guard let ptr else { return -1 }
-            return Darwin.open(ptr, O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW)
-        }
-        guard srcDirFd >= 0 else {
-            throw SessionVaultError.writeFailed(relative)
-        }
+        let srcDirFd = try openTempRenameSourceDirectory(temp: temp)
         defer { Darwin.close(srcDirFd) }
         let renamed = tmpName.withCString { fromName in
             destName.withCString { toName in
