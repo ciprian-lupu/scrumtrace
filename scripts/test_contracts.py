@@ -1222,6 +1222,10 @@ def test_pipeline_timing_stays_in_archive() -> None:
     assert "start_requested" in inspect_g0
     assert "def record_overlay_step" in inspect_g0
     assert 'mode in ("", "record")' in inspect_g0
+    audit = (ROOT / "SCRUMTRACE_AUDIT.md").read_text()
+    assert "**Historical.**" in audit
+    assert "014cca7" in audit
+    assert "Do not invent PASS cells here." in audit
     hotkey = (ROOT / "ScrumTrace" / "UI" / "HotkeyManager.swift").read_text()
     assert "hotkey_front" in hotkey
     shot = (ROOT / "ScrumTrace" / "UI" / "ShotNoteWindow.swift").read_text()

@@ -1,5 +1,7 @@
 # ScrumTrace audit and production plan
 
+> **Historical.** Written against tip `014cca7`. Current `develop` has closed the Linux-doable Part E TASK-01–17 *code* shapes (see `AGENTS.md`). Hardware gates in `samples/GATE_LOG.md` are still empty. Do not treat line numbers or `[VERIFIED IN CODE]` rows below as current. Do not invent PASS cells here.
+
 Tree: `github.com/ciprian-lupu/scrumtrace`, branch `develop`, tip `014cca7` (279 commits). Deployment target `MACOSX_DEPLOYMENT_TARGET = 14.0` (`ScrumTrace.xcodeproj/project.pbxproj:273`). Language mode `SWIFT_VERSION = 5.0` under the Swift 6.2.3 compiler (`project.pbxproj:235,250,278,305,319,334`), no `SWIFT_STRICT_CONCURRENCY` anywhere.
 
 Auditing machine: macOS 26.5, Command Line Tools only (no Xcode, `xcodebuild` refuses to run), no `~/Applications/ScrumTrace.app`, no `~/Library/Logs/ScrumTrace/agent.jsonl`, no session folder under `~/Movies/ScrumTrace/sessions`. Nothing in `ScrumTrace/` was built or run. Every runtime claim below is tagged `[ASSUMPTION]` and names the log line or file that settles it. Line numbers are current at `014cca7`; where a reference in the prompt drifted, the current line is given.
