@@ -69,12 +69,16 @@ final class RecordingHUDWindow: NSPanel {
         mediaLabel.stringValue = SessionController.clock(controller.mediaElapsed)
         wallLabel.stringValue = "w \(SessionController.clock(controller.wallElapsed))"
         let busy = controller.isBusy
+        let starting = controller.startInFlight
+        if starting {
+            dot.setBusy()
+        }
         statusLabel.stringValue = controller.statusLine
-        statusLabel.isHidden = !busy
-        shotButton.isHidden = busy
-        pinButton.isHidden = busy
-        pauseButton.isHidden = busy
-        stopButton.isHidden = busy
+        statusLabel.isHidden = !busy && !starting
+        shotButton.isHidden = busy || starting
+        pinButton.isHidden = busy || starting
+        pauseButton.isHidden = busy || starting
+        stopButton.isHidden = busy || starting
         shotButton.isEnabled = controller.captureState.allowsNewCapture
         pinButton.isEnabled = controller.captureState.allowsNewCapture
         pauseButton.setLabel(gatePaused ? "Resume" : "Pause")

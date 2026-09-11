@@ -1334,6 +1334,9 @@ def test_pause_privacy_and_metadata_gate() -> None:
     assert "Relaunch ScrumTrace" in menu
     assert "relaunchForPermissions" in menu
     assert "allowsStart" in menu
+    assert "presentStartBlocked" in menu
+    assert "Cannot start recording" in menu
+    assert "CGRequestScreenCaptureAccess" not in menu
     assert "Reveal agent log" in menu
     assert "Log permission probe" in menu
     assert "start_control_state" in menu

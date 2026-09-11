@@ -97,7 +97,7 @@ final class MenuBarController: NSObject {
             menu.addItem(actionItem("Stop & process", #selector(stop)))
         } else {
             let start = actionItem("Start recording", #selector(start))
-            start.isEnabled = !controller.isBusy && CapturePermissions.readiness().allowsStart
+            start.isEnabled = !controller.isBusy
             if lastStartEnabled != start.isEnabled {
                 lastStartEnabled = start.isEnabled
                 AgentLog.event("start_control_state", ["enabled": start.isEnabled ? "1" : "0"])
@@ -178,7 +178,56 @@ final class MenuBarController: NSObject {
         return item
     }
 
-    @objc private func start() { controller.startRecording() }
+    @objc private func start() {
+        let readiness = CapturePermissions.readiness()
+        if !readiness.allowsStart {
+            presentStartBlocked(readiness)
+        }
+        controller.startRecording()
+    }
+
+    private func presentStartBlocked(_ readiness: CaptureReadiness) {
+        let alert = NSAlert()
+        alert.messageText = "Cannot start recording"
+        alert.informativeText = readiness.userMessage
+        switch readiness {
+        case .ready:
+            return
+        case .screenDenied:
+            alert.addButton(withTitle: "Open Screen Recording")
+            alert.addButton(withTitle: "Relaunch ScrumTrace")
+            alert.addButton(withTitle: "Cancel")
+        case .screenGrantedNeedsRelaunch:
+            alert.addButton(withTitle: "Relaunch ScrumTrace")
+            alert.addButton(withTitle: "Cancel")
+        case .microphoneDenied:
+            alert.addButton(withTitle: "Open Microphone")
+            alert.addButton(withTitle: "Relaunch ScrumTrace")
+            alert.addButton(withTitle: "Cancel")
+        }
+        NSApp.activate(ignoringOtherApps: true)
+        let response = alert.runModal()
+        switch readiness {
+        case .ready:
+            return
+        case .screenDenied:
+            if response == .alertFirstButtonReturn {
+                SystemPrivacySettings.openScreenRecording()
+            } else if response == .alertSecondButtonReturn {
+                controller.relaunchForPermissions()
+            }
+        case .screenGrantedNeedsRelaunch:
+            if response == .alertFirstButtonReturn {
+                controller.relaunchForPermissions()
+            }
+        case .microphoneDenied:
+            if response == .alertFirstButtonReturn {
+                SystemPrivacySettings.openMicrophone()
+            } else if response == .alertSecondButtonReturn {
+                controller.relaunchForPermissions()
+            }
+        }
+    }
     @objc private func stop() { controller.stopRecording() }
     @objc private func pause() { controller.togglePause() }
     @objc private func shot() { controller.openShot() }

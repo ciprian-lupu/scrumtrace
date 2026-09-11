@@ -15,6 +15,7 @@ final class SessionController: ObservableObject {
     @Published var lastSessionId: String?
     @Published var isBusy = false
     @Published var suppressHUD = false
+    @Published private(set) var startInFlight = false
 
     let settings: AppSettings
     let vault: SessionVault
@@ -35,7 +36,6 @@ final class SessionController: ObservableObject {
     private var shotWindow: ShotNoteWindow?
     private var pausedByPrivacy = false
     private var lastMetaSignature = ""
-    private var startInFlight = false
     private var terminateRequested = false
     let captureFreeze: CaptureFreeze
 
@@ -77,7 +77,7 @@ final class SessionController: ObservableObject {
     }
 
     var hudShouldShow: Bool {
-        (isRecording || isBusy) && !suppressHUD
+        (isRecording || isBusy || startInFlight) && !suppressHUD
     }
 
     func startRecording() {
@@ -449,6 +449,9 @@ final class SessionController: ObservableObject {
             lastError = error.localizedDescription
             statusLine = error.localizedDescription
             AgentLog.event("start_fail", ["error": error.localizedDescription])
+            #if os(macOS)
+            Self.presentStartFailureAlert(error.localizedDescription)
+            #endif
         }
     }
 
@@ -939,6 +942,15 @@ final class SessionController: ObservableObject {
     }
 
     #if os(macOS)
+    fileprivate static func presentStartFailureAlert(_ message: String) {
+        let alert = NSAlert()
+        alert.messageText = "Recording did not start"
+        alert.informativeText = message
+        alert.addButton(withTitle: "OK")
+        NSApp.activate(ignoringOtherApps: true)
+        alert.runModal()
+    }
+
     static func openScreenCaptureSettings() {
         SystemPrivacySettings.openScreenRecording()
     }
