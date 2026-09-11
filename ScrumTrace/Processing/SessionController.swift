@@ -272,7 +272,6 @@ final class SessionController: ObservableObject {
     func haltCaptureForTermination() {
         terminateRequested = true
         AgentLog.event("halt", ["recording": isRecording ? "1" : "0", "inflight": startInFlight ? "1" : "0"])
-        AgentLog.setRecording(false, sessionId: nil)
         if !isRecording {
             // Start is awaiting Screen Recording permission / startCapture.
             // Freeze the attached recorder so writers cannot outlive Quit.
@@ -326,6 +325,7 @@ final class SessionController: ObservableObject {
         } else {
             AgentLog.event("halt_stop_ok", [:])
         }
+        AgentLog.setRecording(false, sessionId: nil)
     }
 
     private func persistInterruptedCapture() {
@@ -380,13 +380,16 @@ final class SessionController: ObservableObject {
             let pauseGate: @Sendable () -> Bool = { [privacy, captureFreeze] in
                 privacy.isCurrentlyTripped || privacy.currentCredentialApp() != nil || captureFreeze.isHeldThroughStart
             }
+            // Lock before startCapture so a crash mid-start is visible to the
+            // LaunchAgent (CL-05). Keep it through Whisper so a rebuild cannot
+            // pkill during finishWriting or processing.
+            AgentLog.setRecording(true, sessionId: created.manifest.sessionId)
             // Await (do not Task.detached.value from MainActor). A detached
             // wrapper that MainActor waits on deadlocks if SCKit hops to main.
             try await recorder.start(shouldPauseCapture: pauseGate)
             abandonedId = nil
             self.recorder = recorder
             lastSessionId = created.manifest.sessionId
-            AgentLog.setRecording(true, sessionId: created.manifest.sessionId)
             AgentLog.event("start_ok", ["session": created.manifest.sessionId])
             pinTimes = []
             pinTimesSessionId = created.manifest.sessionId
@@ -489,6 +492,7 @@ final class SessionController: ObservableObject {
             }
             lastError = error.localizedDescription
             statusLine = error.localizedDescription
+            AgentLog.setRecording(false, sessionId: nil)
             AgentLog.event("start_fail", ["error": AgentLog.sanitize(error.localizedDescription)])
             #if os(macOS)
             Self.presentStartFailureAlert(error.localizedDescription)
@@ -504,7 +508,6 @@ final class SessionController: ObservableObject {
         isBusy = true
         statusLine = "Stopping capture"
         AgentLog.event("stop_requested", ["session": manifest?.sessionId ?? ""])
-        AgentLog.setRecording(false, sessionId: nil)
         privacy.stop()
         sampler.isSuspended = true
         // Freeze writers immediately without resuming a paused session (C1).
@@ -553,6 +556,7 @@ final class SessionController: ObservableObject {
         }
         recorder = nil
         captureFreeze.attach(nil)
+        AgentLog.setRecording(false, sessionId: nil)
     }
 
     private func runProcessor(sessionId: String) async {
@@ -1130,10 +1134,38 @@ enum ScreenSnap {
         #if os(macOS)
         let display = CGMainDisplayID()
         guard let cg = CGDisplayCreateImage(display) else { return nil }
-        return NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))
+        let scaled = downscale(cg, maxEdge: MediaBudget.stillMaxWidth)
+        return NSImage(cgImage: scaled, size: NSSize(width: scaled.width, height: scaled.height))
         #else
         return nil
         #endif
+    }
+
+    /// CG-09: Shot PNGs are capped at `stillMaxWidth` so 20 Retina captures
+    /// do not add tens of megabytes to `archive/`.
+    static func downscale(_ image: CGImage, maxEdge: Int) -> CGImage {
+        let w = image.width
+        let h = image.height
+        let longest = max(w, h)
+        guard longest > maxEdge else { return image }
+        let scale = CGFloat(maxEdge) / CGFloat(longest)
+        let nw = max(Int((CGFloat(w) * scale).rounded(.toNearestOrEven)), 2)
+        let nh = max(Int((CGFloat(h) * scale).rounded(.toNearestOrEven)), 2)
+        let evenW = nw - nw % 2
+        let evenH = nh - nh % 2
+        let colorSpace = image.colorSpace ?? CGColorSpaceCreateDeviceRGB()
+        guard let ctx = CGContext(
+            data: nil,
+            width: evenW,
+            height: evenH,
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return image }
+        ctx.interpolationQuality = .high
+        ctx.draw(image, in: CGRect(x: 0, y: 0, width: evenW, height: evenH))
+        return ctx.makeImage() ?? image
     }
 }
 

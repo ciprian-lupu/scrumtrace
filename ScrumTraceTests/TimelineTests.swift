@@ -62,4 +62,26 @@ final class TimelineTests: XCTestCase {
         let open = [PauseInterval(pauseWall: 10, resumeWall: nil)]
         XCTAssertTrue(TimelineMath.isInsidePause(wall: 25, pauses: open))
     }
+
+    func testPausedCaptureStateRefusesNewCapture() {
+        XCTAssertTrue(CaptureSessionState.recording.allowsNewCapture)
+        XCTAssertFalse(CaptureSessionState.paused.allowsNewCapture)
+    }
+
+    func testArchiveBudgetIsFourFpsAndSharp() {
+        XCTAssertEqual(MediaBudget.archiveFrameStep, 1)
+        XCTAssertEqual(MediaBudget.archiveFrameTimescale, 4)
+        XCTAssertEqual(MediaBudget.archiveExpectedFrameRate, 4)
+        XCTAssertEqual(MediaBudget.archiveMaxWidth, 3840)
+        XCTAssertEqual(MediaBudget.archiveMaxHeight, 2160)
+        XCTAssertEqual(MediaBudget.archiveVideoBitrate, 16_000_000)
+        XCTAssertGreaterThan(MediaBudget.archiveVideoBitrate, 6_000_000)
+        XCTAssertEqual(MediaBudget.archiveKeyFrameInterval, 4)
+    }
+
+    func testInPauseWallMapsToPauseStartNotNewMedia() {
+        let pauses = [PauseInterval(pauseWall: 10, resumeWall: 20)]
+        XCTAssertEqual(TimelineMath.mediaTime(wall: 15, pauses: pauses), 10, accuracy: 0.0001)
+        XCTAssertTrue(TimelineMath.isInsidePause(wall: 15, pauses: pauses))
+    }
 }

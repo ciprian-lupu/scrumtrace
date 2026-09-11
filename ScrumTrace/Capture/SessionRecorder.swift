@@ -93,6 +93,7 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
     private var wavStartMediaSeconds: TimeInterval?
     private var wavFramesWritten: AVAudioFramePosition = 0
     private var loggedWavAhead = false
+    private var micWatchTimer: DispatchSourceTimer?
 
     init(sessionURL: URL, clock: ClockSynchronizer) {
         self.sessionURL = sessionURL
@@ -225,6 +226,7 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             // Dual-pass Whisper reads this after crash/Quit. Write it before
             // the first buffer so a missing file cannot default to a room mic.
             try persistCaptureLayout()
+            startMicRevocationWatch()
             try await Self.startCaptureOffMain(stream)
             // startCapture can run for a long time. Freeze or a credential
             // app that appeared while the stream was starting must still
@@ -274,6 +276,7 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             let engine = self.engine
             self.engine = nil
             self.clearEngineObserver()
+            self.stopMicRevocationWatch()
             return (stream, engine)
         }
         if let live = snapshot.stream {
@@ -303,7 +306,7 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         syncWriter {
             self.videoInput?.markAsFinished()
             self.audioInput?.markAsFinished()
-            self.wavFile = nil
+            self.closeWavWriter()
             if let writer = self.writer, writer.status == .writing || writer.status == .unknown {
                 writer.cancelWriting()
             }
@@ -382,9 +385,10 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         }
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             writerQueue.async {
+                self.stopMicRevocationWatch()
                 self.videoInput?.markAsFinished()
                 self.audioInput?.markAsFinished()
-                self.wavFile = nil
+                self.closeWavWriter()
                 if let writer = self.writer, writer.status == .writing {
                     writer.finishWriting {
                         continuation.resume()
@@ -906,6 +910,41 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         noteWavEmptyConvert()
     }
 
+    /// CL-02: `AVAudioFile` finalizes RIFF sizes on close. `kill -9` cannot.
+    private func closeWavWriter() {
+        wavFile = nil
+    }
+
+    /// TCC-6: mid-session Microphone revocation is not delivered as an SCStream
+    /// error. Poll `authorizationStatus` while writers are live.
+    private func startMicRevocationWatch() {
+        stopMicRevocationWatch()
+        let timer = DispatchSource.makeTimerSource(queue: writerQueue)
+        timer.schedule(deadline: .now() + 2, repeating: 2)
+        timer.setEventHandler { [weak self] in
+            self?.checkMicAuthorizationLocked()
+        }
+        timer.resume()
+        micWatchTimer = timer
+    }
+
+    private func stopMicRevocationWatch() {
+        micWatchTimer?.cancel()
+        micWatchTimer = nil
+    }
+
+    private func checkMicAuthorizationLocked() {
+        guard started, !captureWriteFailed else { return }
+        switch AVCaptureDevice.authorizationStatus(for: .audio) {
+        case .denied, .restricted:
+            failCaptureWrite("Microphone access was revoked.")
+        case .authorized, .notDetermined:
+            break
+        @unknown default:
+            break
+        }
+    }
+
     /// WAV and movie writes share one failure so Start's `audioWriteFailure`
     /// catch covers a disk-full AVAssetWriter during startCapture (C1).
     private func failCaptureWrite(_ message: String) {
@@ -1023,8 +1062,11 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             AVVideoWidthKey: w,
             AVVideoHeightKey: h,
             AVVideoCompressionPropertiesKey: [
-                AVVideoAverageBitRateKey: 6_000_000,
-                AVVideoProfileLevelKey: AVVideoProfileLevelH264HighAutoLevel
+                AVVideoAverageBitRateKey: MediaBudget.archiveVideoBitrate,
+                AVVideoMaxKeyFrameIntervalKey: MediaBudget.archiveKeyFrameInterval,
+                AVVideoExpectedSourceFrameRateKey: MediaBudget.archiveExpectedFrameRate,
+                AVVideoProfileLevelKey: AVVideoProfileLevelH264HighAutoLevel,
+                AVVideoAllowFrameReorderingKey: false
             ]
         ]
         let videoInput = AVAssetWriterInput(mediaType: .video, outputSettings: videoSettings)
@@ -1348,7 +1390,8 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             let engine = self.engine
             self.engine = nil
             self.clearEngineObserver()
-            self.wavFile = nil
+            self.stopMicRevocationWatch()
+            self.closeWavWriter()
             if let writer = self.writer, writer.status == .writing || writer.status == .unknown {
                 writer.cancelWriting()
             }

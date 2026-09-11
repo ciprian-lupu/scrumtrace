@@ -27,6 +27,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         CapturePermissions.snapshotLaunchState()
+        ExportRel.sweepPrivateTemporaryOrphans()
         AgentLog.eventSync("launch", [
             "ax_silent": MetadataSampler.requestTrust(prompt: false) ? "1" : "0",
             "crash_ips": String(CapturePermissions.pendingCrashReportCount())
@@ -39,13 +40,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         hotkeys?.register()
         MetadataSampler.requestTrust(prompt: false)
         controller.vault.pruneCompletedOlderThan(days: controller.settings.retentionDays)
+        OnboardingWindow.presentIfNeeded()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         AgentLog.eventSync("terminate", [:])
-        AgentLog.setRecording(false, sessionId: nil)
         hotkeys?.unregister()
         controller.haltCaptureForTermination()
+        // Keep the lock while Start is still inside startCapture; that path
+        // clears it on start_fail. Halt already cleared it after stop() when
+        // a session was live.
+        if !controller.isRecording && !controller.startInFlight {
+            AgentLog.setRecording(false, sessionId: nil)
+        }
     }
 
     @objc func showSettingsWindow(_ sender: Any?) {

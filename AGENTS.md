@@ -2,7 +2,7 @@
 
 Read this before changing product code, gates, remotes, or TCC/signing. The working spec is [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md). Mac debug loop: [AGENT_DEBUG.md](AGENT_DEBUG.md). Hardware results: [samples/GATE_LOG.md](samples/GATE_LOG.md) (empty until a Mac run).
 
-Snapshot date: **2026-09-11** (audit TASK-01–17 plus Whisper 632 MB default, Settings/logs, consent/leak hardening; hardware still open). Update the snapshot when status in this file changes.
+Snapshot date: **2026-09-11** (audit TASK-01–17 plus leftover code items: 4 fps / 16 Mbps archive, events append, clonefile, lock timing, onboarding, license display, GitHub update check, Release Developer ID settings; hardware still open). Update the snapshot when status in this file changes.
 
 ## What this is
 
@@ -47,7 +47,7 @@ Hard rules:
 
 ## Honest status
 
-**Software for phases -1 through 6 and contracts C1–C5 is in the tree.** The `SCRUMTRACE_AUDIT.md` Part E queue (TASK-01–17) is implemented on `develop`. Linux contract tests pass: `bash scripts/run_linux_tests.sh`.
+**Software for phases -1 through 6 and contracts C1–C5 is in the tree.** The `SCRUMTRACE_AUDIT.md` Part E queue (TASK-01–17) and the remaining Part C/G *code* leftovers that can be done without a Mac or Apple secrets are implemented on `develop`. Linux contract tests pass: `bash scripts/run_linux_tests.sh`.
 
 **Hardware gates are not closed.** `samples/GATE_LOG.md` has no PASS rows. No Mac has run Gate −0 after these fixes. Treat Record, pause, Whisper, and drift as **unproven** until that log is filled.
 
@@ -101,7 +101,7 @@ open ~/Applications/ScrumTrace.app
 
 That copies a Debug build to `~/Applications/ScrumTrace.app` and signs it with a local **ScrumTrace Debug** identity. Open **that** copy. Enable Screen Recording and Microphone for it, then **Relaunch**. A grant never applies to the already-running process. Accessibility is optional.
 
-Xcode resolves WhisperKit **0.11.0** on first open (`Package.resolved` is not checked in). First WhisperKit launch downloads `openai_whisper-large-v3-v20240930_turbo_632MB`. HUD: Loading Whisper model… then Transcribing.
+Xcode resolves WhisperKit **0.11.0** from the committed `Package.resolved`. First WhisperKit launch downloads `openai_whisper-large-v3-v20240930_turbo_632MB`. HUD: Loading Whisper model… then Transcribing. Archive capture is 3840×2160 at 4 fps / 16 Mbps.
 
 Gate 1 inspect (after a real session folder exists):
 
@@ -175,17 +175,11 @@ Do **not** add product surfaces. Prefer the first item you can actually finish i
 
 ### In Swift (Linux-testable; do not call them “gated”)
 
-Fix-first list from the last implementation audit:
-
-1. `SessionProcessor.transcribe` — if one Whisper pass throws, the other surviving pass is discarded (`requiredFailed` → empty transcript). Keep the surviving pass.
-2. Gate 0 — Shot note window `canBecomeKey` can steal Keynote focus.
-3. Confirmed tasks — remap leftover `*.png` evidence onto export `*.jpg` twins the same way review tasks do.
-4. `forceReview` when no still actually left the Mac (including a Google clip over the inline size cap).
-5. Smaller: privacy overlay not `frontmost` during `startCapture`; AVAudioEngine WAV has no host-clock PTS; `AgentLog` `localizedDescription` may leak paths; clip-only + no-video labeled `skipped` instead of `needs_review`.
+Code leftovers from the audit that needed a Mac or a secret are still open: Gate −0 through 6, Developer ID team + notary Apple ID, first Whisper download, Sparkle EdDSA keys, a paid license private key. Do not invent `GATE_LOG.md` cells.
 
 ### Plan-deferred (leave alone)
 
-Diarization. 60-minute drift. New modules / new product UI. Redesigning C1–C5.
+Diarization. 60-minute drift. Redesigning C1–C5. Sparkle SPM (v1 uses GitHub Releases). Gating Record on a license.
 
 ## What “done” is not
 

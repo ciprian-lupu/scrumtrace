@@ -334,8 +334,30 @@ final class MenuBarController: NSObject {
     }
     @objc private func checkUpdates() {
         AgentLog.event("menu_updates", [:])
-        if let url = URL(string: "https://github.com/ciprian-lupu/scrumtrace/releases") {
-            NSWorkspace.shared.open(url)
+        Task {
+            let result = await UpdateChecker.check()
+            AgentLog.event("update_check", [
+                "result": {
+                    switch result {
+                    case .upToDate:
+                        return "up_to_date"
+                    case .newerAvailable:
+                        return "newer"
+                    case .failed:
+                        return "failed"
+                    }
+                }()
+            ])
+            await MainActor.run {
+                let alert = NSAlert()
+                alert.messageText = "ScrumTrace updates"
+                alert.informativeText = result.settingsLine
+                alert.addButton(withTitle: "Open releases")
+                alert.addButton(withTitle: "Close")
+                if alert.runModal() == .alertFirstButtonReturn {
+                    NSWorkspace.shared.open(UpdateChecker.releasesURL)
+                }
+            }
         }
     }
     @objc private func relaunch() {

@@ -6,6 +6,9 @@ struct SettingsView: View {
     @ObservedObject var controller: SessionController
     @State private var keyStatus = ""
     @State private var selectedTab = SettingsTab.speech
+    @State private var licenseDraft = ""
+    @State private var licenseLine = LicenseStore.status().settingsLine
+    @State private var updateLine = ""
 
     var body: some View {
         TabView(selection: $selectedTab) {
@@ -47,7 +50,7 @@ struct SettingsView: View {
             Section("Capture") {
                 Text("Shot  ⌥⌘S    Pin  ⌥⌘Space    Pause  ⌥⌘P")
                     .font(.system(.body, design: .monospaced))
-                Text("HUD shows t_media. Pause discards screen frames, system audio, microphone PCM, metadata, Shot, and Hold-to-Talk. After Stop, WhisperKit transcribes the room mic and the movie’s system-audio track, then merges on t_media. Archive is 3840×2160 at 7.5 fps.")
+                Text("HUD shows t_media. Pause discards screen frames, system audio, microphone PCM, metadata, Shot, and Hold-to-Talk. After Stop, WhisperKit transcribes the room mic and the movie’s system-audio track, then merges on t_media. Archive is 3840×2160 at 4 fps, 16 Mbps H.264 High (keyframe every second).")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -214,6 +217,38 @@ struct SettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+            Section("License") {
+                Text(licenseLine)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                TextField("Signed license (label|expires.signature)", text: $licenseDraft)
+                Button("Save license") {
+                    licenseLine = LicenseStore.applyLicenseKey(licenseDraft).settingsLine
+                    AgentLog.event("settings_action", ["action": "license_save"])
+                }
+                Text("A 14-day local trial is display-only. Record is never gated by this row.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Section("Updates") {
+                Text(updateLine.isEmpty ? "This build is \(UpdateChecker.currentVersion)." : updateLine)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Button("Check GitHub releases") {
+                    AgentLog.event("settings_action", ["action": "updates"])
+                    Task {
+                        let result = await UpdateChecker.check()
+                        updateLine = result.settingsLine
+                    }
+                }
+                Button("Open releases page") {
+                    NSWorkspace.shared.open(UpdateChecker.releasesURL)
+                }
+            }
+            Button("Show first-run permissions") {
+                AgentLog.event("settings_action", ["action": "onboarding"])
+                OnboardingWindow.present()
+            }
         }
         .formStyle(.grouped)
     }
@@ -245,6 +280,7 @@ struct AgentLogPane: View {
     @ObservedObject var controller: SessionController
     @State private var logText = ""
     @State private var status = ""
+    @State private var crashNames: [String] = []
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -275,6 +311,20 @@ struct AgentLogPane: View {
                         status = error.localizedDescription
                     }
                 }
+                Button("Reveal crash reports") {
+                    AgentLog.event("settings_action", ["action": "crash_reports"])
+                    CapturePermissions.revealCrashReports()
+                    reloadCrashes()
+                }
+            }
+            if crashNames.isEmpty {
+                Text("No ScrumTrace-*.ips reports in ~/Library/Logs/DiagnosticReports.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                Text("Crash reports: \(crashNames.joined(separator: ", "))")
+                    .font(.caption)
+                    .textSelection(.enabled)
             }
             if let error = controller.lastError, !error.isEmpty {
                 Text("Last error: \(error)")
@@ -307,13 +357,17 @@ struct AgentLogPane: View {
                 }
                 Button("Check for updates") {
                     AgentLog.event("settings_action", ["action": "updates"])
-                    if let url = URL(string: "https://github.com/ciprian-lupu/scrumtrace/releases") {
-                        NSWorkspace.shared.open(url)
+                    Task {
+                        _ = await UpdateChecker.check()
+                        NSWorkspace.shared.open(UpdateChecker.releasesURL)
                     }
                 }
             }
         }
-        .onAppear { reload() }
+        .onAppear {
+            reload()
+            reloadCrashes()
+        }
         .onReceive(Timer.publish(every: 2, on: .main, in: .common).autoconnect()) { _ in
             reload()
         }
@@ -321,5 +375,9 @@ struct AgentLogPane: View {
 
     private func reload() {
         logText = AgentLog.readTail(maxLines: 250)
+    }
+
+    private func reloadCrashes() {
+        crashNames = CapturePermissions.crashReportURLs().map(\.lastPathComponent)
     }
 }

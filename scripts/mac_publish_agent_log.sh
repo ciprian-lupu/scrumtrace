@@ -46,11 +46,14 @@ else
 fi
 
 mkdir -p "$WORKDIR"
-tail -n 4000 "$SRC" > "$WORKDIR/agent.jsonl"
+scrub_home() {
+  sed "s|$HOME|~|g"
+}
+tail -n 4000 "$SRC" | scrub_home > "$WORKDIR/agent.jsonl"
 if [[ -f "$STATUS" ]]; then
-  tail -n 80 "$STATUS" > "$WORKDIR/loop-status.txt"
+  tail -n 80 "$STATUS" | scrub_home > "$WORKDIR/loop-status.txt"
 fi
-uname -a > "$WORKDIR/machine.txt"
+uname -srm > "$WORKDIR/machine.txt"
 sw_vers > "$WORKDIR/sw_vers.txt" 2>/dev/null || true
 date -u +"published=%Y-%m-%dT%H:%M:%SZ" > "$WORKDIR/published.txt"
 

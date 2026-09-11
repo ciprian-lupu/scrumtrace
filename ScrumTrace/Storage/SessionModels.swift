@@ -9,6 +9,15 @@ private func scrumtraceFcopyfile(
     _ flags: UInt32
 ) -> Int32
 
+/// Darwin `fclonefileat` (sys/clonefile.h). `CLONE_NOFOLLOW` is `0x0001`.
+@_silgen_name("fclonefileat")
+private func scrumtraceFclonefileat(
+    _ srcFd: Int32,
+    _ dstDirFd: Int32,
+    _ dst: UnsafePointer<CChar>?,
+    _ flags: UInt32
+) -> Int32
+
 @_silgen_name("renameat")
 private func scrumtraceRenameat(
     _ fromfd: Int32,
@@ -829,6 +838,54 @@ enum ExportRel {
         return false
     }
 
+    /// CG-04: O(1) append with `O_APPEND | O_NOFOLLOW`. Do not rewrite the
+    /// whole `events.jsonl` on every Shot / metadata tick. Never `FileHandle`.
+    static func appendContainedData(_ data: Data, relative: String, sessionURL: URL) throws {
+        let destRel = try prepareContainedWrite(relative: relative, sessionURL: sessionURL)
+        guard let parts = normalizedComponents(destRel), let last = parts.last else {
+            throw SessionVaultError.writeFailed(relative)
+        }
+        let parentParts = Array(parts.dropLast())
+        guard let dirFd = openatDirectory(parts: parentParts, root: sessionURL) else {
+            throw SessionVaultError.writeFailed(relative)
+        }
+        defer { Darwin.close(dirFd) }
+        let fd = last.withCString { name in
+            Darwin.openat(dirFd, name, O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC | O_NOFOLLOW, 0o600)
+        }
+        guard fd >= 0 else {
+            throw SessionVaultError.writeFailed(relative)
+        }
+        defer { Darwin.close(fd) }
+        var info = stat()
+        guard Darwin.fstat(fd, &info) == 0, (info.st_mode & S_IFMT) == S_IFREG else {
+            throw SessionVaultError.writeFailed(relative)
+        }
+        if !data.isEmpty {
+            let ok = data.withUnsafeBytes { buf -> Bool in
+                guard let base = buf.baseAddress else { return false }
+                var offset = 0
+                let size = buf.count
+                while offset < size {
+                    let n = Darwin.write(fd, base.advanced(by: offset), size - offset)
+                    if n < 0 {
+                        if Darwin.errno == EINTR { continue }
+                        return false
+                    }
+                    if n == 0 { return false }
+                    offset += n
+                }
+                return true
+            }
+            guard ok else {
+                throw SessionVaultError.writeFailed(relative)
+            }
+        }
+        guard Darwin.fsync(fd) == 0 else {
+            throw SessionVaultError.writeFailed(relative)
+        }
+    }
+
     /// Pack omit reserved set: `archive/media-work/…/clip.mp4` and
     /// `media/…/clip.mp4` name the same export MP4 as `export/media/…/clip.mp4`.
     static func mediaWorkToExportClip(_ path: String) -> String? {
@@ -1216,6 +1273,30 @@ enum ExportRel {
             ext = URL(fileURLWithPath: last).pathExtension
         }
         let dest = try makePrivateTemporaryURL(prefix: prefix, ext: ext)
+        guard let srcFd = openatFile(parts: parts, root: sessionURL) else {
+            removePrivateTemporaryURL(dest)
+            throw SessionVaultError.writeFailed(relative)
+        }
+        defer { Darwin.close(srcFd) }
+        // CG-03: APFS clone first. Dest does not exist yet. CLONE_NOFOLLOW = 0x0001.
+        let destDir = dest.deletingLastPathComponent()
+        if let destDirFd = openUnfollowedDirectory(destDir) {
+            let name = dest.lastPathComponent
+            let cloned = name.withCString { ptr in
+                scrumtraceFclonefileat(srcFd, destDirFd, ptr, 0x0001)
+            }
+            Darwin.close(destDirFd)
+            if cloned == 0 {
+                do {
+                    try fsyncRegularFile(dest, relative: relative)
+                    return dest
+                } catch {
+                    unlinkLastComponentUnfollowed(dest)
+                    removePrivateTemporaryURL(dest)
+                    throw SessionVaultError.writeFailed(relative)
+                }
+            }
+        }
         let destFd = dest.withUnsafeFileSystemRepresentation { ptr -> Int32 in
             guard let ptr else { return -1 }
             return Darwin.open(ptr, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, 0o600)
@@ -1225,12 +1306,6 @@ enum ExportRel {
             throw SessionVaultError.writeFailed(relative)
         }
         defer { Darwin.close(destFd) }
-        guard let srcFd = openatFile(parts: parts, root: sessionURL) else {
-            unlinkLastComponentUnfollowed(dest)
-            removePrivateTemporaryURL(dest)
-            throw SessionVaultError.writeFailed(relative)
-        }
-        defer { Darwin.close(srcFd) }
         // COPYFILE_DATA (1 << 3): copy file bytes only, no xattrs.
         if scrumtraceFcopyfile(srcFd, destFd, nil, 1 << 3) != 0 {
             unlinkLastComponentUnfollowed(dest)
@@ -1374,6 +1449,26 @@ enum ExportRel {
         }
         _ = name.withCString { ptr in
             scrumtraceUnlinkat(parentFd, ptr, 0)
+        }
+    }
+
+    /// PAUSE-11: wipe leftover `scrumtrace-*` mkdtemp folders from a crash
+    /// mid Hold-to-Talk or a failed clip copy. Only names under the process
+    /// temp directory; never follows a planted symlink.
+    static func sweepPrivateTemporaryOrphans() {
+        let shared = FileManager.default.temporaryDirectory
+        let children = (try? FileManager.default.contentsOfDirectory(
+            at: shared,
+            includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey],
+            options: [.skipsHiddenFiles]
+        )) ?? []
+        for url in children {
+            let name = url.lastPathComponent
+            guard name.hasPrefix("scrumtrace-") else { continue }
+            if (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+                continue
+            }
+            removePrivateTemporaryDirectory(url)
         }
     }
 
@@ -1800,13 +1895,18 @@ enum MediaBudget {
     static let stillJPEGQuality: CGFloat = 0.82
     static let keepConfidenceFloor = 0.55
     static let metadataSampleTimeoutMs: UInt64 = 200
-    /// Archive movie cap. 4× fewer frames than 30 fps at 2× linear resolution
-    /// keeps about the same bitrate budget with sharper stills.
+    /// Archive movie cap. 3840×2160 at 4 fps. High bitrate so stills stay sharp
+    /// (about 4 Mbit/frame vs ~0.2 Mbit/frame at 1080p30 / 6 Mbps).
     static let archiveMaxWidth = 3840
     static let archiveMaxHeight = 2160
-    static let archiveFrameStep = 4
-    static let archiveFrameTimescale = 30
-    /// Consecutive dropped realtime samples before capture fails. ~2 s at 7.5 fps.
+    static let archiveFrameStep = 1
+    static let archiveFrameTimescale = 4
+    static let archiveExpectedFrameRate = 4
+    static let archiveVideoBitrate = 16_000_000
+    static let archiveVideoMaxBitrate = 24_000_000
+    static let archiveKeyFrameInterval = 4
+    /// Consecutive dropped realtime samples before capture fails. Time gate is
+    /// `captureStallSeconds`; frame count is a backstop at 4 fps.
     static let captureStallFrames = 15
     static let captureStallSeconds: TimeInterval = 2.0
     static let manifestVersion = "1.1.0"

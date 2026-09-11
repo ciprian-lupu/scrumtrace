@@ -149,11 +149,31 @@ enum CapturePermissions {
     }
 
     static func pendingCrashReportCount() -> Int {
+        crashReportURLs().count
+    }
+
+    static func crashReportURLs() -> [URL] {
         let dir = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Logs/DiagnosticReports", isDirectory: true)
         let names = (try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []
-        return names.filter { $0.hasPrefix("ScrumTrace-") && $0.hasSuffix(".ips") }.count
+        return names
+            .filter { $0.hasPrefix("ScrumTrace-") && $0.hasSuffix(".ips") }
+            .map { dir.appendingPathComponent($0) }
+            .sorted { $0.lastPathComponent > $1.lastPathComponent }
     }
+
+    #if os(macOS)
+    static func revealCrashReports() {
+        let urls = crashReportURLs()
+        let dir = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Logs/DiagnosticReports", isDirectory: true)
+        if urls.isEmpty {
+            NSWorkspace.shared.activateFileViewerSelecting([dir])
+        } else {
+            NSWorkspace.shared.activateFileViewerSelecting(urls)
+        }
+    }
+    #endif
 
     private static var signingCache: [String: String]?
 

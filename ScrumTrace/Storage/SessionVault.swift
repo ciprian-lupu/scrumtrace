@@ -209,15 +209,10 @@ final class SessionVault: @unchecked Sendable {
         guard ExportRel.containedRelative(ScrumTracePath.events, sessionURL: session) == ScrumTracePath.events else {
             throw SessionVaultError.writeFailed("events.jsonl")
         }
-        var payload = Data()
-        if ExportRel.isContainedRegularFile(url, sessionRoot: session),
-           let existing = ExportRel.readContainedData(relative: ScrumTracePath.events, sessionURL: session) {
-            payload = existing
-        }
+        _ = ExportRel.isContainedRegularFile(url, sessionRoot: session)
         var data = try eventEncoder.encode(event)
         data.append(contentsOf: [0x0A])
-        payload.append(data)
-        try ExportRel.writeContainedData(payload, relative: ScrumTracePath.events, sessionURL: session)
+        try ExportRel.appendContainedData(data, relative: ScrumTracePath.events, sessionURL: session)
     }
 
     /// Real session-directory names only. `contentsOfDirectory(atPath:)` plus a

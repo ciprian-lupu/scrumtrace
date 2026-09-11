@@ -631,8 +631,9 @@ def test_retry_failed_slices_and_pins() -> None:
     append = vault.split("func appendEvent")[1].split("func recentSessions")[0]
     assert "isSymbolicLink" in append
     assert "isContainedRegularFile" in append
-    assert "readContainedData" in append
-    assert "writeContainedData" in append
+    assert "appendContainedData" in append
+    assert "readContainedData" not in append
+    assert "writeContainedData" not in append
     assert "Data(contentsOf:" not in append
     assert "containedRelative(ScrumTracePath.events" in append
     reveal = vault.split("func revealInFinder")[1].split("func removeAbandonedSession")[0]
@@ -1273,6 +1274,9 @@ def test_pipeline_timing_stays_in_archive() -> None:
     assert start_rec.index("captureFreeze.attach(recorder)") < start_rec.index("privacy.start()")
     assert start_rec.index("privacy.start()") < start_rec.index("try await recorder.start(")
     assert start_rec.count("privacy.start()") == 1
+    assert start_rec.index("AgentLog.setRecording(true") < start_rec.index("try await recorder.start(")
+    assert "LicenseStore" not in start_rec
+    assert "CGRequestScreenCaptureAccess" not in start_rec
     assert "privacy.start()" not in start_rec.split("try await recorder.start(")[1]
     catch_start = start_rec.rsplit("} catch {", 1)[1]
     assert catch_start.index("privacy.stop()") < catch_start.index("captureFreeze.attach(nil)")
@@ -1416,6 +1420,7 @@ def test_pause_privacy_and_metadata_gate() -> None:
     assert "Re-check after the 200 ms" in controller
     assert "haltCaptureForTermination" in controller
     halt = controller.split("func haltCaptureForTermination")[1].split("private func startRecordingAsync")[0]
+    assert halt.index("lock.wait") < halt.index("setRecording(false")
     assert "stopRecording()" not in halt
     assert "startInFlight" in halt
     assert "captureFreeze.freeze()" in halt
@@ -2184,6 +2189,13 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "evenCaptureSize" in start_fn
     assert "MediaBudget.archiveFrameStep" in start_fn
     assert "MediaBudget.archiveMaxWidth" in recorder
+    assert "MediaBudget.archiveVideoBitrate" in recorder
+    assert "6_000_000" not in recorder
+    assert "AVVideoMaxKeyFrameIntervalKey" in recorder
+    assert "AVVideoExpectedSourceFrameRateKey" in recorder
+    assert "func closeWavWriter" in recorder
+    assert "func startMicRevocationWatch" in recorder
+    assert "Microphone access was revoked" in recorder
     assert "prepareWriters(width:" in start_fn
     prepare = recorder.split("func prepareWriters")[1].split("func startMicrophoneFallback")[0]
     assert "prepareContainedWrite" in prepare
@@ -2432,6 +2444,8 @@ def test_write_contained_data_refuses_directory_symlinks() -> None:
     copy_only = models.split("static func copyContainedToTemporaryFile")[1].split("static func copyUnfollowedToTemporaryFile")[0]
     assert "makePrivateTemporaryURL" in copy_only
     assert "removePrivateTemporaryURL" in copy_only
+    assert "scrumtraceFclonefileat" in copy_only
+    assert "0x0001" in copy_only
     assert "FileManager.default.temporaryDirectory" not in copy_only
     assert "FileManager.default.removeItem(at: dest)" not in copy_only.split("guard destFd")[0]
     assert "FileManager.default.removeItem(at: dest)" not in copy_only
@@ -2656,7 +2670,8 @@ def test_write_contained_data_refuses_directory_symlinks() -> None:
     append_ev = vault.split("func appendEvent")[1].split("func recentSessions")[0]
     assert "fileExists(atPath: url.path)" not in append_ev
     assert "isContainedRegularFile" in append_ev
-    assert "writeContainedData" in append_ev
+    assert "appendContainedData" in append_ev
+    assert "writeContainedData" not in append_ev
     assert "FileHandle" not in append_ev
     assert "removeItemIfRegularFile" in append_ev
     assert "fileManager.removeItem(at: url)" not in append_ev
@@ -2745,6 +2760,83 @@ def test_write_contained_data_refuses_directory_symlinks() -> None:
     assert vault.count("isUsableSessionRoot(rootURL)") >= 9
 
 
+def test_audit_leftovers_are_implemented() -> None:
+    models = (ROOT / "ScrumTrace" / "Storage" / "SessionModels.swift").read_text()
+    assert "static func appendContainedData" in models
+    assert "O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC | O_NOFOLLOW" in models
+    assert "func sweepPrivateTemporaryOrphans" in models
+    assert "archiveFrameTimescale = 4" in models
+    assert "archiveVideoBitrate = 16_000_000" in models
+    sampler = (ROOT / "ScrumTrace" / "Capture" / "MetadataSampler.swift").read_text()
+    assert "timeoutQueue" in sampler
+    sample_fn = sampler.split("func sample(")[1].split("func readFrontmost")[0]
+    assert "timeoutQueue.asyncAfter" in sample_fn
+    assert "queue.asyncAfter" not in sample_fn
+    entitlements = (ROOT / "ScrumTrace" / "App" / "ScrumTrace.entitlements").read_text()
+    assert "automation.apple-events" not in entitlements
+    assert "app-sandbox" in entitlements
+    publish = (ROOT / "scripts" / "mac_publish_agent_log.sh").read_text()
+    assert "uname -srm" in publish
+    assert "uname -a" not in publish
+    assert "s|$HOME|~|g" in publish
+    pbx = (ROOT / "ScrumTrace.xcodeproj" / "project.pbxproj").read_text()
+    assert 'CODE_SIGN_IDENTITY = "Developer ID Application"' in pbx
+    assert "ENABLE_HARDENED_RUNTIME = YES" in pbx
+    resolved = (
+        ROOT
+        / "ScrumTrace.xcodeproj"
+        / "project.xcworkspace"
+        / "xcshareddata"
+        / "swiftpm"
+        / "Package.resolved"
+    ).read_text()
+    assert "0.11.0" in resolved
+    assert "whisperkit" in resolved.lower()
+    shot = (ROOT / "ScrumTrace" / "UI" / "ShotNoteWindow.swift").read_text()
+    hold = shot.split("class HoldTalkButton")[1]
+    assert "eventTracking" not in hold
+    assert "nextEvent" not in hold
+    assert "addLocalMonitorForEvents" in hold
+    assert "func mouseUp" in hold
+    assert "func finishHold" in hold
+    snap = (ROOT / "ScrumTrace" / "Processing" / "SessionController.swift").read_text()
+    snap_fn = snap.split("enum ScreenSnap")[1]
+    assert "stillMaxWidth" in snap_fn
+    assert "CGDisplayCreateImage" in snap_fn
+    assert "func downscale" in snap_fn
+    start = snap.split("func startRecording()")[1].split("func stopRecording()")[0]
+    assert "LicenseStore" not in start
+    assert "CGRequestScreenCaptureAccess" not in start
+    app = (ROOT / "ScrumTrace" / "App" / "AppDelegate.swift").read_text()
+    assert "sweepPrivateTemporaryOrphans" in app
+    assert "OnboardingWindow.presentIfNeeded" in app
+    terminate = app.split("func applicationWillTerminate")[1]
+    assert "haltCaptureForTermination" in terminate
+    assert terminate.index("haltCaptureForTermination") < terminate.index("setRecording(false")
+    assert "startInFlight" in terminate
+    assert (ROOT / "ScrumTrace" / "App" / "LicenseStore.swift").exists()
+    license = (ROOT / "ScrumTrace" / "App" / "LicenseStore.swift").read_text()
+    assert "Record path" in license
+    assert "trialDays = 14" in license
+    assert (ROOT / "ScrumTrace" / "App" / "UpdateChecker.swift").exists()
+    assert (ROOT / "ScrumTrace" / "UI" / "OnboardingWindow.swift").exists()
+    onboard = (ROOT / "ScrumTrace" / "UI" / "OnboardingWindow.swift").read_text()
+    assert "requestScreenAccess" in onboard
+    assert "CGRequestScreenCaptureAccess" not in onboard
+    assert (ROOT / "scripts" / "mac_release.sh").exists()
+    release = (ROOT / "scripts" / "mac_release.sh").read_text()
+    assert "notarytool" in release
+    assert "stapler" in release
+    assert "hdiutil" in release
+    assert (ROOT / "scripts" / "mac_xcode_test.sh").exists()
+    xctest = (ROOT / "scripts" / "mac_xcode_test.sh").read_text()
+    assert "xcodebuild" in xctest
+    assert " test " in xctest or "\ttest " in xctest or "test 2>&1" in xctest
+    perms = (ROOT / "ScrumTrace" / "Capture" / "CapturePermissions.swift").read_text()
+    assert "func crashReportURLs" in perms
+    assert "func revealCrashReports" in perms
+
+
 def test_sanitize_untrusted_strips_whitespace_breakout() -> None:
     prompts = (ROOT / "ScrumTrace" / "AI" / "PromptTemplates.swift").read_text()
     sanitize_fn = prompts.split("func sanitizeUntrusted")[1].split("func evaluationUserPrompt")[0]
@@ -2787,6 +2879,7 @@ def main() -> None:
     test_pause_privacy_and_metadata_gate()
     test_phase45_clip_consent_and_budget()
     test_write_contained_data_refuses_directory_symlinks()
+    test_audit_leftovers_are_implemented()
     test_sanitize_untrusted_strips_whitespace_breakout()
     print("contract tests ok")
 

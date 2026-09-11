@@ -541,6 +541,8 @@ final class ShotNoteWindow: NSPanel, NSTextFieldDelegate {
 private final class HoldTalkButton: NSButton {
     var onPress: () -> Void = {}
     var onRelease: () -> Void = {}
+    private var holding = false
+    private var mouseUpMonitor: Any?
 
     init() {
         super.init(frame: .zero)
@@ -561,17 +563,35 @@ private final class HoldTalkButton: NSButton {
     }
 
     override func mouseDown(with event: NSEvent) {
+        // PAUSE-06: do not spin a nested mouse-tracking loop. Carbon ⌥⌘P
+        // must be delivered while the button is held.
+        guard !holding else { return }
+        holding = true
         isHighlighted = true
         onPress()
-        while true {
-            guard let next = window?.nextEvent(
-                matching: [.leftMouseUp, .leftMouseDragged],
-                until: .distantFuture,
-                inMode: .eventTracking,
-                dequeue: true
-            ) else { break }
-            if next.type == .leftMouseUp { break }
+        mouseUpMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseUp) { [weak self] ev in
+            self?.finishHold()
+            return ev
         }
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        finishHold()
+    }
+
+    deinit {
+        if let mouseUpMonitor {
+            NSEvent.removeMonitor(mouseUpMonitor)
+        }
+    }
+
+    private func finishHold() {
+        guard holding else { return }
+        holding = false
+        if let mouseUpMonitor {
+            NSEvent.removeMonitor(mouseUpMonitor)
+        }
+        mouseUpMonitor = nil
         isHighlighted = false
         onRelease()
     }

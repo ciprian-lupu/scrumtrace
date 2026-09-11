@@ -8,6 +8,9 @@ import Foundation
 /// runs off the main thread and is abandoned after 200ms.
 final class MetadataSampler: @unchecked Sendable {
     private let queue = DispatchQueue(label: "com.str8minds.ScrumTrace.metadata", qos: .userInitiated)
+    /// WA-8: the 200 ms deadline must not sit on the same serial queue as a
+    /// blocking `AXUIElementCopyAttributeValue`.
+    private let timeoutQueue = DispatchQueue(label: "com.str8minds.ScrumTrace.metadata.timeout", qos: .userInitiated)
     private let lock = NSLock()
     private var suspended = false
 
@@ -46,7 +49,7 @@ final class MetadataSampler: @unchecked Sendable {
                 }
                 once.resume(continuation, meta)
             }
-            queue.asyncAfter(deadline: .now() + .milliseconds(Int(timeoutMs))) {
+            timeoutQueue.asyncAfter(deadline: .now() + .milliseconds(Int(timeoutMs))) {
                 once.resume(continuation, nil)
             }
         }
