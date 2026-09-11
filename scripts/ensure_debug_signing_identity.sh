@@ -51,13 +51,16 @@ fi
 
 if [[ -f "$P12" ]]; then
   echo "re-importing $P12 into login keychain" >&2
-  import_p12 "$P12" || true
-  if [[ -f "$PEM" ]]; then
-    trust_cert "$PEM"
-  fi
-  if identity_present; then
-    echo "$NAME"
-    exit 0
+  if import_p12 "$P12"; then
+    if [[ -f "$PEM" ]]; then
+      trust_cert "$PEM"
+    fi
+    if identity_present; then
+      echo "$NAME"
+      exit 0
+    fi
+  else
+    echo "existing p12 rejected by security import; recreating with /usr/bin/openssl" >&2
   fi
 fi
 

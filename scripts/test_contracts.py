@@ -1144,6 +1144,10 @@ def test_pipeline_timing_stays_in_archive() -> None:
     assert "Applications/ScrumTrace.app" in gate01
     assert "com.str8minds.ScrumTrace" in gate01
     assert "ensure_debug_signing_identity.sh" in gate01
+    assert 'deep_flag[@]' not in gate01
+    assert "--deep" in gate01
+    assert "Contents/Frameworks" in gate01
+    assert "SCRUMTRACE_ALLOW_ADHOC" in gate01
     identity = (ROOT / "scripts" / "ensure_debug_signing_identity.sh").read_text()
     assert "ScrumTrace Debug" in identity
     assert "codeSigning" in identity

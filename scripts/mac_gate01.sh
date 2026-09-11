@@ -68,15 +68,14 @@ ENTITLEMENTS="$(dirname "$0")/../ScrumTrace/App/ScrumTrace.entitlements"
 
 sign_app() {
   local target="$1"
-  local deep_flag=()
+  local identity="${IDENTITY:--}"
+  # macOS /bin/bash is 3.2: `set -u` treats an empty array as unbound, so
+  # pass --deep only on the Frameworks branch instead of an optional array.
   if [[ -d "$target/Contents/Frameworks" ]]; then
-    deep_flag=(--deep)
-  fi
-  if [[ -n "$IDENTITY" ]]; then
-    codesign --force "${deep_flag[@]}" --sign "$IDENTITY" --identifier com.str8minds.ScrumTrace \
+    codesign --force --deep --sign "$identity" --identifier com.str8minds.ScrumTrace \
       --entitlements "$ENTITLEMENTS" "$target"
   else
-    codesign --force "${deep_flag[@]}" --sign - --identifier com.str8minds.ScrumTrace \
+    codesign --force --sign "$identity" --identifier com.str8minds.ScrumTrace \
       --entitlements "$ENTITLEMENTS" "$target"
   fi
 }
