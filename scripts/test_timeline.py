@@ -43,12 +43,13 @@ def is_inside_pause(wall: float, pauses: list[tuple[float, float | None]]) -> bo
 def even_capture_size(width: int, height: int) -> tuple[int, int]:
     w = max(width, 2)
     h = max(height, 2)
-    if w > 1920:
-        h = max(int(round(h * 1920.0 / w)), 2)
-        w = 1920
-    if h > 1080:
-        w = max(int(round(w * 1080.0 / h)), 2)
-        h = 1080
+    max_w, max_h = 3840, 2160
+    if w > max_w:
+        h = max(int(round(h * max_w / w)), 2)
+        w = max_w
+    if h > max_h:
+        w = max(int(round(w * max_h / h)), 2)
+        h = max_h
     w -= w % 2
     h -= h % 2
     return max(w, 2), max(h, 2)
@@ -96,7 +97,8 @@ def main() -> None:
     assert even_capture_size(1920, 1080) == (1920, 1080)
     rw, rh = even_capture_size(3024, 1964)
     assert rw % 2 == 0 and rh % 2 == 0
-    assert rw <= 1920 and rh <= 1080
+    assert (rw, rh) == (3024, 1964)
+    assert even_capture_size(5120, 2880) == (3840, 2160)
     ow, rh2 = even_capture_size(1367, 769)
     assert ow % 2 == 0 and rh2 % 2 == 0
     print("timeline contract ok")

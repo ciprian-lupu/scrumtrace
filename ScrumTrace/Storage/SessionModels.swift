@@ -1800,7 +1800,13 @@ enum MediaBudget {
     static let stillJPEGQuality: CGFloat = 0.82
     static let keepConfidenceFloor = 0.55
     static let metadataSampleTimeoutMs: UInt64 = 200
-    /// Consecutive dropped realtime samples before capture fails. ~0.5 s at 30 fps.
+    /// Archive movie cap. 4× fewer frames than 30 fps at 2× linear resolution
+    /// keeps about the same bitrate budget with sharper stills.
+    static let archiveMaxWidth = 3840
+    static let archiveMaxHeight = 2160
+    static let archiveFrameStep = 4
+    static let archiveFrameTimescale = 30
+    /// Consecutive dropped realtime samples before capture fails. ~2 s at 7.5 fps.
     static let captureStallFrames = 15
     static let captureStallSeconds: TimeInterval = 2.0
     static let manifestVersion = "1.1.0"

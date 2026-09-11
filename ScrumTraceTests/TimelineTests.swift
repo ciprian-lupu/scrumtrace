@@ -37,8 +37,14 @@ final class TimelineTests: XCTestCase {
         let retina = SessionRecorder.evenCaptureSize(width: 3024, height: 1964)
         XCTAssertEqual(retina.width % 2, 0)
         XCTAssertEqual(retina.height % 2, 0)
-        XCTAssertLessThanOrEqual(retina.width, 1920)
-        XCTAssertLessThanOrEqual(retina.height, 1080)
+        XCTAssertEqual(retina.width, 3024)
+        XCTAssertEqual(retina.height, 1964)
+        XCTAssertLessThanOrEqual(retina.width, MediaBudget.archiveMaxWidth)
+        XCTAssertLessThanOrEqual(retina.height, MediaBudget.archiveMaxHeight)
+
+        let fiveK = SessionRecorder.evenCaptureSize(width: 5120, height: 2880)
+        XCTAssertEqual(fiveK.width, 3840)
+        XCTAssertEqual(fiveK.height, 2160)
 
         let odd = SessionRecorder.evenCaptureSize(width: 1367, height: 769)
         XCTAssertEqual(odd.width % 2, 0)

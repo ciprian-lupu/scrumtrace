@@ -173,7 +173,10 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             let config = SCStreamConfiguration()
             config.width = size.width
             config.height = size.height
-            config.minimumFrameInterval = CMTime(value: 1, timescale: 30)
+            config.minimumFrameInterval = CMTime(
+                value: Int64(MediaBudget.archiveFrameStep),
+                timescale: Int32(MediaBudget.archiveFrameTimescale)
+            )
             config.queueDepth = 8
             config.showsCursor = true
             config.capturesAudio = true
@@ -239,17 +242,19 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         }
     }
 
-    /// Even pixel size shared by SCStream and AVAssetWriter, capped at 1920×1080.
+    /// Even pixel size shared by SCStream and AVAssetWriter, capped at 3840×2160.
     static func evenCaptureSize(width: Int, height: Int) -> (width: Int, height: Int) {
         var w = max(width, 2)
         var h = max(height, 2)
-        if w > 1920 {
-            h = max(Int((Double(h) * 1920.0 / Double(w)).rounded()), 2)
-            w = 1920
+        let maxW = MediaBudget.archiveMaxWidth
+        let maxH = MediaBudget.archiveMaxHeight
+        if w > maxW {
+            h = max(Int((Double(h) * Double(maxW) / Double(w)).rounded()), 2)
+            w = maxW
         }
-        if h > 1080 {
-            w = max(Int((Double(w) * 1080.0 / Double(h)).rounded()), 2)
-            h = 1080
+        if h > maxH {
+            w = max(Int((Double(w) * Double(maxH) / Double(h)).rounded()), 2)
+            h = maxH
         }
         w -= w % 2
         h -= h % 2

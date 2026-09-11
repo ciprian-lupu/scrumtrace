@@ -2058,6 +2058,8 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "getSpecific(key:" in recorder
     assert "try await writerQueue.sync" not in recorder
     assert "evenCaptureSize" in start_fn
+    assert "MediaBudget.archiveFrameStep" in start_fn
+    assert "MediaBudget.archiveMaxWidth" in recorder
     assert "prepareWriters(width:" in start_fn
     prepare = recorder.split("func prepareWriters")[1].split("func startMicrophoneFallback")[0]
     assert "prepareContainedWrite" in prepare
