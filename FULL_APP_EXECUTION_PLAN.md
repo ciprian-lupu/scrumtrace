@@ -119,17 +119,30 @@ Rules:
 
    ```bash
    git fetch origin "$BRANCH"
-   git ls-remote --heads origin "$BRANCH"
+   REMOTE_SHA="$(git ls-remote --heads origin "$BRANCH" | awk '{print $1}')"
+   test -n "$REMOTE_SHA"
+   test "$REMOTE_SHA" = "$(git rev-parse FETCH_HEAD)"
    ```
 
-   A commit is not accepted until the remote branch resolves. The required
+   Cherry-pick `FETCH_HEAD`, not an unverified SHA from a worker message. A
+   commit is not accepted until the remote branch resolves. The required
    lowercase `cursor/…-0397` name is an explicit user override for these tasks.
 10. Integrate with `git cherry-pick <worker-commit>` in the table's order.
 11. Run the wave test command only after all commits in that wave are
     integrated.
-12. Delete integrated worktrees and branches:
+12. On any wave failure, keep every task branch/worktree and fix or revert the
+    wave without deleting remote recovery refs.
+13. After a green wave, push `develop` to both remotes and require local HEAD,
+    `origin/develop`, and `github/develop` to equal the integrated SHA. If the
+    `github` remote is absent, add the public URL documented in `AGENTS.md`;
+    this is automatable. A definitive auth denial follows the consolidated
+    `authz_denied` path.
+14. Delete integrated worktrees and branches only after both remote ancestry
+    checks succeed:
 
     ```bash
+    git merge-base --is-ancestor "$INTEGRATED_SHA" origin/develop
+    git merge-base --is-ancestor "$INTEGRATED_SHA" github/develop
     git worktree remove "$DIR"
     git branch -D "$BRANCH"
     git push origin --delete "$BRANCH"
@@ -137,7 +150,6 @@ Rules:
 
     `-D` is intentional because a cherry-picked commit has a different commit
     identity and Git does not consider the task branch merged.
-13. Push `develop` only after the complete wave is green.
 
 Branch names must remain lowercase and end in `-0397`.
 
@@ -173,8 +185,8 @@ from the same base because their write sets are disjoint.
 
 | Wave | Work | Builder / reviewer | Integration order |
 |---|---|---|---|
-| 0 | **O01** split gate tests into owned modules | Composer / Grok | O01 |
-| 1 | **A01 → A02** shared containment and log-window foundations | Composer / Grok | A01, then A02 |
+| 0 | **O00 → O01** automation ledger, then split gate tests | Composer / Grok | O00, then O01 |
+| 1 | **A01 → A02** Python containment/log window ‖ **A02b** Swift log context | Composer / Grok | A01, A02; A02b may land later but is required before B |
 | 2 | **A03 ‖ A04 ‖ A05 ‖ A06 ‖ A07 ‖ A08 ‖ A09** | Composer: A04/A05/A07/A09; Grok: A03/A06/A08; opposite model reviews each | Numeric order |
 | 3 | **A10 → A11** ZIP helper, then aggregate wiring/docs | Grok then Composer; cross-review | A10, then A11 |
 | 4 | **B01 → B02 → B03 → B04** one Mac/TCC identity | Composer operator / Grok log review | Strictly sequential |
@@ -189,9 +201,11 @@ display, one persistent agent log, shared session manifests, final packaging,
 and release signing are serial resources.
 
 Wave 2 exception: if A06 reports `INTERFACE_BLOCKED`, pause Wave 2 integration
-before A06. Composer performs serial TASK A06b on a new base, owning only the
-required Swift logging files and tests, runs Mac tests, and integrates A06b.
-Restart A06 from that base. Do not cherry-pick A07–A09 until A06 is complete.
+for A06 itself. `A06b` depends on integrated A02b and is forbidden while A02b
+is in progress/recorded/reviewed, preventing concurrent edits to logging files.
+Composer then performs serial A06b, runs Mac tests, and restarts A06 from that
+base. A07–A09 may integrate meanwhile when their declared dependencies and
+ownership are disjoint; they do not make A06 complete.
 
 For a parallel wave, launch all eligible builders in one Cursor batch after
 recording the common base SHA. Do not start downstream review agents until
@@ -202,12 +216,16 @@ Wave integration checks:
 
 ```bash
 # Wave 0
+python3 scripts/test_autopilot.py
 python3 scripts/test_inspect_gates.py
+bash scripts/run_linux_tests.sh
 
 # Wave 1 (new modules are not aggregate-registered until A11)
 python3 scripts/gate_tests/test_gate_inspect_lib.py
 python3 scripts/gate_tests/test_gate_log_window.py
 bash scripts/run_linux_tests.sh
+
+# A02b Mac lane, when an eligible worker is connected
 bash scripts/mac_xcode_test.sh
 
 # Wave 2, after all seven commits are cherry-picked
@@ -222,6 +240,8 @@ for test_file in \
   python3 "scripts/gate_tests/${test_file}"
 done
 bash scripts/run_linux_tests.sh
+
+# Required after A02b/A04 integration, but does not stop independent Linux lanes
 bash scripts/mac_xcode_test.sh
 
 # Wave 3 / final inspector integration
@@ -271,10 +291,154 @@ A task is ready to integrate only when:
 Unlimited tokens permit deeper review and more fixtures, not duplicate
 implementations of the same stateful code.
 
+### Autonomous no-interruption contract
+
+The coordinator runs autonomously until it reaches a definitive human-only
+boundary. It must not ask the user to choose implementation details, approve
+routine commands, select between equivalent fixes, run ordinary tests, review
+intermediate diffs, or decide what task comes next.
+
+The coordinator must:
+
+1. Select the next dependency-ready task from the task graph.
+2. Launch every conflict-free task in the current wave together.
+3. Retry transient tool/network failures up to four times with backoff.
+4. Diagnose test failures, assign one focused fix, cross-review it, integrate
+   it, and rerun the wave without asking the user.
+5. Choose the safest option that satisfies the existing spec when an
+   implementation detail is unspecified.
+6. Record assumptions in the local automation state and continue.
+7. Continue other dependency-independent work when one lane is blocked.
+8. Never relax security, privacy, evidence, tests, or gate criteria to make
+   progress.
+9. Never call a hardware/manual gate passed from static analysis, mocks, Linux,
+   or model agreement.
+10. Never expose secrets or captured content in prompts, state, reviews, logs,
+    commits, or summaries.
+
+Only these are valid reasons to stop for the user:
+
+- no eligible self-hosted Mac worker is connected after four retries; the user
+  may be asked only to enable/attach the worker, never to run ordinary tests;
+- macOS requires a human TCC/System Settings action;
+- a subjective visual/audio/manual check is required;
+- Apple Developer/notary/Sparkle/license signing material is absent;
+- a paid provider credential is required for the synthetic live-provider test;
+- a destructive choice would remove user data;
+- definitive authentication, authorization, quota, or entitlement denial;
+- the spec contains a true product decision with materially different user
+  outcomes and no safe default.
+
+Do not interrupt immediately for one of these. Record it as `human_required`,
+finish every other currently reachable task, complete the three-pass protocol
+below for everything reachable, then send **one consolidated request** listing
+all human actions in dependency order.
+
+If the user has already supplied the action or an authenticated Mac automation
+can perform it safely, continue without asking.
+
+### Remediation loop, then three consecutive clean passes
+
+Before telling the user that everything automatable is done, run three
+consecutive passes against the same final source SHA:
+
+First run an uncounted remediation loop:
+
+1. Composer audits implementation, architecture, tests, task ownership, and
+   available command output.
+2. Grok independently attacks security, privacy, false completion, state,
+   failure paths, and missing negative tests.
+3. Accepted findings receive focused tests/fixes, cross-review, integration,
+   and wave tests.
+4. Repeat until both models find no accepted issue.
+5. Only then start counted Pass 1.
+
+Remediation may change the repository. Counted passes are read-only.
+
+**Pass 1 — Composer read-only implementation audit**
+
+- verify every currently reachable `automatable` task in the task graph is
+  integrated;
+- verify worker file ownership and commit ancestry;
+- run every focused test, Linux suite, and available Mac compile/test;
+- inspect every gate result; expected `human_required` or `needs_mac_worker`
+  rows are recorded and do not become false failures;
+- run standards and architecture review;
+- report findings without editing.
+
+**Pass 2 — Grok read-only adversarial audit**
+
+- independently read the spec, plan, complete branch diff, and test inventory;
+- attack containment, stale logs, pause state, recovery, consent, network side
+  effects, ZIPs, HTML/Markdown, deletion, updates, and licenses;
+- run all available tests independently;
+- report findings without editing.
+
+**Pass 3 — Clean-room confirmation**
+
+- create fresh checkouts at the same SHA;
+- regenerate dependencies/build products from scratch;
+- run Linux and available Mac Debug/Release tests;
+- run synthetic inspector/provider/privacy/pack fixtures;
+- verify generated artifacts, status ledger, clean trees, and remote SHAs;
+- write only evidence under `.scrumtrace-autopilot/passes/3/`; the completion
+  report is created later by the guarded `handoff` command.
+
+A pass counts only when it:
+
+- starts and ends at the same source SHA;
+- makes no code, test, plan, project, dependency, or committed-doc change;
+- has zero test failure;
+- has zero unresolved critical/high finding;
+- has no unexplained skipped automated check;
+- records exact commands, exit codes, environment, and artifact paths.
+
+Any finding or failure exits the counted protocol. Return to the remediation
+loop, change/fix/review/integrate as needed, clear passes and confirmations, and
+restart at Pass 1. Three model summaries without commands/artifacts do not
+count.
+
+Expected blocked/manual checks do not invalidate an automatable-scope pass when
+the task graph classifies them as `human_required` or `needs_mac_worker`.
+Unexpected skips or blocks fail the pass. `mac_all_gates.sh --strict` is not a
+Pass 1–3 command while expected human/hardware work remains.
+
+At the end of Pass 3, Composer and Grok each state one of:
+
+- `AUTOMATABLE_SCOPE_CONFIRMED`
+- `NOT_CONFIRMED: <exact failures>`
+
+The coordinator may produce the human handoff only when both independently
+return `AUTOMATABLE_SCOPE_CONFIRMED`.
+
+### Consolidated human handoff
+
+The first user-facing request after autonomous execution contains only:
+
+1. final source SHA and pushed remotes;
+2. completed task IDs;
+3. three clean-pass evidence summaries;
+4. every remaining `human_required` action, grouped into one ordered session;
+5. exact copy/paste commands;
+6. expected visible/audio result for each action;
+7. where evidence will be written;
+8. one command to resume automation afterward.
+
+Do not drip-feed questions. Do not ask the user to inspect code. Do not repeat
+an already completed action.
+
+After the user supplies final-test results, automatically diagnose failures,
+implement fixes, rerun cross-review, reset the pass counter, complete all three
+passes again, rebuild/re-sign when required, and return one new consolidated
+result.
+
 ## 2. Rules for the implementing model
 
-Execute dependency waves in order. Complete and integrate one wave before
-starting the next. Only tasks explicitly separated by `‖` may overlap.
+Waves are scheduling priorities, not artificial barriers. Follow
+`autopilot.py ready`: normally finish a wave first, but continue later disjoint
+tasks when earlier work is legally `needs_mac_worker`/`human_required` and no
+dependency or owned path overlaps. Only tasks returned together by the
+scheduler may overlap.
 
 - The coordinator works only on `develop`; workers use assigned worktree
   branches.
@@ -305,6 +469,31 @@ When a required Mac, permission, account, secret, or hardware artifact is
 missing, report `BLOCKED` with the exact command and output. Do not substitute a
 Linux result.
 
+### Copy/paste prompt for the Composer coordinator
+
+```text
+Run FULL_APP_EXECUTION_PLAN.md autonomously as the Composer 2.5 coordinator.
+Initialize scripts/autopilot.py and obey automation/task-graph.json.
+
+Do not ask the user routine questions, ask which task/fix to choose, request
+ordinary test execution, or provide intermediate approval prompts. Launch all
+dependency-ready conflict-free tasks in each wave using the assigned Composer
+2.5 and Grok 4.6 roles. Use isolated branches, verify ownership, require
+opposite-model review, integrate only green commits, and push each green wave
+to origin/develop and github/develop.
+
+For unavailable Mac/human/secrets, record only the allow-listed blocker state,
+continue every independent task, and do not contact the user yet. Remediate all
+findings, then complete three consecutive read-only clean passes at one SHA.
+Any change or failure resets the passes.
+
+After scripts/autopilot.py verify --mode automatable succeeds and both models
+return AUTOMATABLE_SCOPE_CONFIRMED, send one consolidated handoff containing
+only dependency-ready human actions. After results arrive, resume autonomously,
+fix failures, repeat review and all three passes. Say APP_DONE only when
+verify --mode release returns APP_DONE: true after G03.
+```
+
 ### Copy/paste prompt for a builder
 
 Fill every placeholder. Select the builder model from the wave table.
@@ -327,6 +516,8 @@ and the full suite available in this environment.
 If an owned-file change is insufficient, stop and report INTERFACE_BLOCKED with
 the exact additional file/API needed. Do not expand ownership yourself.
 If Mac, permission, secret, or human evidence is unavailable, report BLOCKED.
+Report blockers to the coordinator, not the user; the coordinator batches all
+human-required actions after three clean passes over reachable work.
 Otherwise commit on the assigned branch with the task's exact subject. Do not
 merge, rebase, push develop, or create a PR. If this is a remote Cursor Auto
 worker, push only the assigned task branch with `git push -u origin <branch>`.
@@ -429,6 +620,228 @@ No inspector may write `samples/GATE_LOG.md`.
 ---
 
 ## Phase O — Prepare conflict-free test ownership
+
+### TASK O00 — Build the autonomous task ledger
+
+This harness records progress and validates completion. Cursor coordinates and
+launches agents; the repository harness does not call proprietary model APIs.
+
+**Owner:** Composer 2.5 builder; Grok 4.6 adversarial reviewer.
+
+**Files**
+
+- `.gitignore`
+- new `automation/task-graph.json`
+- new `scripts/autopilot.py`
+- new `scripts/test_autopilot.py`
+- `scripts/run_linux_tests.sh`
+
+**Static task graph**
+
+For every task/subtask, `automation/task-graph.json` records:
+
+- task ID and title;
+- dependencies and wave;
+- builder/reviewer model family;
+- exact owned and forbidden paths;
+- focused test commands;
+- required environment: Linux, Mac, or either;
+- whether human evidence can be required;
+- expected commit subject;
+- final acceptance artifacts.
+
+The graph is versioned. Runtime state is not.
+
+The required top-level inventory is fixed and tested:
+
+```text
+O00 O01
+A01 A02 A02b A03 A04 A05 A06 A07 A08 A09 A10 A11
+B01 B02 B03 B04
+C01 C02 C03 C04
+D01 D02 D03 D04 D05 D06 D07 D08
+E01-standards E01-spec E01-security E02 E03
+F01-linux F01-mac F02 F03 F04
+G01 G02 G03
+```
+
+The graph marks each entry as `automatable`, `needs_mac_worker_capable`,
+`human_evidence`, or `operator_no_commit`. `B*`, `C*`, `E03`, `F02`–`F04`,
+and `G*` declare their exact human/worker requirements. Missing a listed ID is
+a schema failure, not an empty backlog.
+
+Conditional repair tasks use `spawn-task`; allowed IDs are `A06b`,
+`B01a-NNN`, and `E02-NNN`. A parent cannot complete until every spawned child
+is integrated or has a legal final blocker.
+
+**Runtime state**
+
+Store local state at `.scrumtrace-autopilot/state.json` and ignore the entire
+`.scrumtrace-autopilot/` directory. State may contain only technical metadata:
+task IDs, SHAs, branch names, redacted argv, exit codes, timestamps, machine
+labels, artifact paths, evidence SHA-256/byte lengths, blocker reason codes,
+and sanitized errors. Results and evidence are referenced by path/hash only;
+their bodies are never copied into state or handoff. It must never contain
+secrets, captured content, titles, URLs, notes, transcripts, tokens, or
+passphrases.
+
+**CLI**
+
+Implement:
+
+```text
+python3 scripts/autopilot.py init --base SHA
+python3 scripts/autopilot.py ready --json
+python3 scripts/autopilot.py start TASK --branch BRANCH --base SHA
+python3 scripts/autopilot.py spawn-task --parent TASK --id CHILD --ownership OWNERSHIP.json
+python3 scripts/autopilot.py record TASK --commit SHA --results RESULTS.json
+python3 scripts/autopilot.py block TASK --reason-code CODE --evidence PATH
+python3 scripts/autopilot.py review TASK --model MODEL --result RESULT.json
+python3 scripts/autopilot.py integrate TASK --develop-sha SHA --wave-results RESULTS.json
+python3 scripts/autopilot.py record-operator TASK --results RESULTS.json
+python3 scripts/autopilot.py pass-start --number 1|2|3 --sha SHA --model MODEL
+python3 scripts/autopilot.py pass-finish --number 1|2|3 --sha SHA --model MODEL --results RESULTS.json
+python3 scripts/autopilot.py confirm --model MODEL --sha SHA \
+  --result AUTOMATABLE_SCOPE_CONFIRMED|NOT_CONFIRMED
+python3 scripts/autopilot.py status --json
+python3 scripts/autopilot.py verify --mode automatable|release
+python3 scripts/autopilot.py handoff \
+  --mode automatable|release \
+  --output .scrumtrace-autopilot/AUTOMATION_COMPLETION_REPORT.md
+```
+
+**Behavior**
+
+1. Validate graph schema, fixed inventory, unique IDs, acyclic dependencies,
+   valid waves, model roles, environment tags, and ownership.
+2. Legal states are `ready`, `in_progress`, `recorded`, `reviewed`,
+   `integrated`, `needs_mac_worker`, `human_required`, and `failed`.
+3. `ready` returns only dependency-ready, non-overlapping tasks from the lowest
+   runnable priority. Prior `needs_mac_worker` or `human_required` tasks do not
+   block later work unless the graph declares that dependency; they block only
+   their actual dependents.
+4. `record` verifies the commit exists, derives changed paths from
+   `git diff --name-only BASE...COMMIT`, compares them to ownership, and checks
+   reachability from either the local worktree ref or a verified fetched remote
+   branch. Never trust a RESULTS file list.
+5. Require a review model family different from the builder.
+6. `integrate` first requires every included task to be `reviewed`, performs or
+   verifies the local cherry-pick, and records local `develop` SHA. It
+   re-executes the graph's integration command set at that exact HEAD; a
+   caller-authored green RESULTS claim is insufficient. A source task becomes
+   locally integrated after those commands pass. Remote ancestry is required
+   only after the complete integration batch is green and pushed.
+7. `record-operator` handles no-commit tests/gates. Require command digest,
+   exit code, source SHA, artifact path/hash, machine/environment, and manual
+   state. Reject an artifact already assigned to another scenario.
+8. Permit only these blocker reason codes:
+   `tcc`, `manual_visual_audio`, `signing_material`,
+   `provider_credential`, `destructive_confirm`, `authz_denied`,
+   `product_decision`, and `needs_mac_worker`.
+   Each graph task declares its allowed subset. `block` rejects a reason not
+   declared for that task; an `automatable` task cannot be relabelled
+   `human_required`.
+9. `needs_mac_worker` is unavailable automatable infrastructure, not human test
+   work. Retry worker discovery four times and continue independent Linux work.
+   Compile/test failures, missing tests, interface blockers, ordinary transport
+   failures, and unknown codes are `failed`, never `human_required`. A
+   definitive authentication/authorization denial after four retries may
+   become allow-listed `authz_denied` and be consolidated for the user.
+10. Spawned children inherit parent dependencies, block parent completion, and
+    require opposite review plus integration.
+11. Pass start/finish requires clean `git status --short` including untracked
+    files, current HEAD equal to `--sha`, expected pass model, and commands for
+    currently reachable automatable tasks plus closed integration batches in
+    RESULTS. Exclude `human_evidence`, `operator_no_commit`, and unavailable
+    `needs_mac_worker` commands until their dependency becomes available.
+12. Any HEAD change, dirty tracked/untracked source, plan/test/project/config
+    change, `Package.resolved` change, task-graph change, or failed command
+    clears passes and confirmations. Ignored `.scrumtrace-autopilot/` evidence
+    writes do not reset them. A source SHA change also invalidates F/G/Gate-log
+    result objects and reopens Phase E through G03.
+13. Pass 3 confirmations are explicit records from distinct Composer and Grok
+    families bound to current SHA. The coordinator cannot self-attest both.
+14. `verify --mode automatable` succeeds only when:
+    - every currently reachable automatable task is integrated;
+    - every remaining task is legally `human_required`,
+      `needs_mac_worker`, or has an unmet dependency chain leading to one of
+      those states;
+    - expected blocked/manual rows match graph classifications;
+    - three clean passes and both confirmations exist at current HEAD;
+    - current HEAD equals `origin/develop` and `github/develop`.
+15. `verify --mode release` additionally requires SHA-bound F01–F04 and
+    G01–G03 artifacts, Gate-log source SHA equal to HEAD, artifact-map digest,
+    signing/notary records, and zero blocked/manual row.
+16. `handoff` internally runs the selected verify mode, refuses on nonzero,
+    rejects output outside `.scrumtrace-autopilot/`, and sanitizes output.
+    Automatable handoff starts `APP_DONE: false`; only successful release mode
+    may write `APP_DONE: true`.
+17. Human handoff lists only actions whose automatable dependencies are
+    integrated and artifacts exist. It also lists each unblocked
+    `needs_mac_worker` item once as “enable/attach the Mac worker,” with no test
+    commands. It cannot list E03 before E02, F/G before dependencies, or
+    ordinary test commands.
+18. Use atomic writes and preserve corrupt/truncated state as evidence; never
+    infer completion during recovery.
+19. The harness never edits `samples/GATE_LOG.md`, launches provider calls, or
+    claims hardware PASS.
+
+**Tests**
+
+- JSON graph schema and cycle detection.
+- Missing any fixed task ID fails schema and verification.
+- Parallel-ready tasks never overlap owned paths.
+- Dependencies/lowest runnable wave prevent early readiness while allowing
+  independent Linux work past `needs_mac_worker` and `human_required`.
+- Unowned changed file rejects a commit.
+- Unfetched/unreachable commit rejects `record`.
+- Missing/failed tests reject completion.
+- Human blocker does not block independent work.
+- Unknown blocker and relabelled test failure are rejected.
+- A task cannot use a blocker reason absent from its graph declaration.
+- A Mac-blocked dependency makes downstream waiting tasks legal without
+  relabelling them; independent ready tasks must still complete.
+- `product_decision` cannot be applied to automatable D01 or other tasks that
+  do not declare it.
+- Spawned child blocks parent and release verification.
+- Worker commit is incomplete before integration and wave tests.
+- Local integration succeeds before batch push; deletion waits for both remote
+  ancestry checks.
+- Forged green wave results cannot replace harness-executed commands.
+- Operator result requires same-SHA artifacts and no unrelated commit.
+- State survives restart and rejects truncation.
+- Secret/content fields and evidence bodies are rejected and never echoed.
+- Argv forbidden values are stored only as `[REDACTED]`.
+- Source, untracked, graph, dependency, and package changes reset passes;
+  ignored runtime state does not.
+- Out-of-order or different-SHA passes fail.
+- Dirty start/finish and missing required command fail a pass.
+- Duplicate-model or mismatched-SHA confirmation fails.
+- Three same-SHA no-change passes plus dual-family confirmation succeed.
+- Missing human actions appear once in ordered handoff.
+- Unblocked `needs_mac_worker` produces one attach-worker action while
+  independent Linux work remains ready.
+- Four definitive GitHub auth denials produce one `authz_denied` action;
+  ordinary push failures remain failed.
+- Either remote SHA mismatch prevents confirmation.
+- `handoff` before `verify` fails and cannot write outside ignored state.
+- Automatable report says `APP_DONE: false`.
+- Release mode rejects stale F/G/GATE_LOG artifacts and only then permits
+  `APP_DONE: true`.
+
+**Verify**
+
+```bash
+python3 scripts/test_autopilot.py
+bash scripts/run_linux_tests.sh
+```
+
+**Done when:** the coordinator can resume after interruption, identify all safe
+parallel work, and cannot emit a completion report before three clean passes.
+
+**Commit:** `feat: add autonomous completion ledger`
+
+---
 
 ### TASK O01 — Split the monolithic gate test file
 
@@ -564,9 +977,6 @@ the dedicated A01 module and Wave 1 integration commands must both pass.
 
 **Files**
 
-- `ScrumTrace/Capture/AgentLog.swift`
-- `ScrumTrace/Processing/SessionController.swift`
-- `ScrumTrace/Capture/SessionRecorder.swift`
 - `scripts/gate_inspect_lib.py`
 - `scripts/inspect_gate_minus0.py`
 - `scripts/inspect_gate0_log.py`
@@ -580,51 +990,36 @@ the dedicated A01 module and Wave 1 integration commands must both pass.
 - `scripts/gate_tests/test_gate5.py`
 - `scripts/gate_tests/test_all_gates.py`
 - new `scripts/gate_tests/test_gate_log_window.py`
-- new `ScrumTraceTests/AgentLogTests.swift`
 
 **Implementation**
 
-1. Generate one random, non-secret `run_id` when the app process launches.
-   Include it in every `AgentLog.event` row without changing individual call
-   sites.
-2. Add a process-safe current session context to `AgentLog`.
-   `SessionController` sets it immediately after the session ID is created and
-   clears it only after processing/retry finishes or the controller abandons
-   that session. Include `session` automatically in every event while context
-   is set. Explicit event fields win only when equal;
-   mismatches must be asserted in Debug and logged as a technical error.
-3. Never include titles, URLs, notes, transcripts, tokens, or keys in either
-   identifier.
-4. Add optional `--log-start-line N` to every log-reading inspector. Direct
+1. Add optional `--log-start-line N` to every log-reading inspector. Direct
    child CLIs preserve existing behavior temporarily so their O01 tests stay
    green. A03/A04/A06/A09 make it mandatory for their respective final
    inspector. The aggregate immediately returns exit `2` when `--log` lacks
    `--log-start-line`; A11 later wires the full artifact-map schema.
-5. Add a shared `read_jsonl_window(path, start_line)` helper.
+2. Add a shared `read_jsonl_window(path, start_line)` helper.
    - Lines are one-based.
    - Reject negative values.
    - Exit `2` when the marker is beyond EOF.
-6. Add `bash scripts/mac_all_gates.sh --begin`.
+3. Add `bash scripts/mac_all_gates.sh --begin`.
    - Verify macOS.
    - Create `~/Library/Logs/ScrumTrace/gate-run.json`.
    - Store current log line count + 1, UTC time, current `git rev-parse HEAD`,
      app CDHash, machine name, macOS version, and chip.
    - Do not truncate or rewrite `agent.jsonl`.
-7. Normal `mac_all_gates.sh` loads that marker and passes
+4. Normal `mac_all_gates.sh` loads that marker and passes
    `--log-start-line` to all log inspectors.
-8. `inspect_all_gates.py` must require `--log-start-line` whenever `--log` is
+5. `inspect_all_gates.py` must require `--log-start-line` whenever `--log` is
    supplied. Missing marker is exit `2`, not a whole-log fallback.
-9. Session-aware inspectors must additionally infer `session_id` from
+6. Session-aware inspectors must additionally infer `session_id` from
    `session.manifest.json` and require a matching log event where the event
    schema includes `session`.
-10. Read the applicable `run_id` from the first `launch` event after the
+7. Read the applicable `run_id` from the first `launch` event after the
     marker. A marker must be created after the final TCC relaunch and separately
     for B02, B03, and B04. Require one `run_id` within each individual test
     run—not across multiple gate runs.
-11. Set/clear session context on the AgentLog serialization queue. In Release,
-    a mismatched explicit session is dropped and a content-free
-    `session_mismatch` technical event is emitted; do not rely on `assert`.
-12. Use `TemporaryDirectory` for every parallel Python fixture. No test may
+8. Use `TemporaryDirectory` for every parallel Python fixture. No test may
     share a hard-coded `/tmp/scrumtrace-*` path.
 
 **Tests**
@@ -635,27 +1030,79 @@ the dedicated A01 module and Wave 1 integration commands must both pass.
 - Marker beyond EOF blocks.
 - Missing marker blocks.
 - A different session ID does not satisfy Gate −0 or Gate 5.
-- Every app event receives the same process `run_id`.
-- Session context appears after start, remains through processing/consent/export,
-  and is absent only after processing/retry completes or the session is
-  abandoned.
-- A session mismatch cannot silently overwrite context.
 
 **Verify**
 
 ```bash
 python3 scripts/gate_tests/test_gate_log_window.py
 bash scripts/run_linux_tests.sh
-bash scripts/mac_xcode_test.sh
 ```
 
 **Done when:** no log-based result can be influenced by events before the
-explicit gate-run marker or by another session, and the Swift logging changes
-compile and pass on a Mac. If no Mac is available, this task is `BLOCKED` and
-Wave 2 must not start. `run_linux_tests.sh` alone is insufficient: the
-dedicated A02 module and every Wave 1 integration command must pass.
+explicit gate-run marker or by another session. `run_linux_tests.sh` alone is
+insufficient: the dedicated A02 module and Linux Wave 1 integration commands
+must pass.
 
 **Commit:** `fix: scope gate logs to one run`
+
+---
+
+### TASK A02b — Add process and session identity to app logs
+
+This Mac-capable task is independent of Python inspector implementation. It may
+run alongside A01/A02 on an eligible Mac worker. B01 and every hardware gate
+depend on it; Linux-only A03–A10 do not.
+
+**Owner:** Composer 2.5 builder; Grok 4.6 read-only reviewer.
+
+**Files**
+
+- `ScrumTrace/Capture/AgentLog.swift`
+- `ScrumTrace/Processing/SessionController.swift`
+- `ScrumTrace/Capture/SessionRecorder.swift` only if recorder-created events
+  bypass the shared context
+- new `ScrumTraceTests/AgentLogTests.swift`
+
+**Implementation**
+
+1. Generate one random, non-secret `run_id` when the app process launches.
+   Include it automatically in every `AgentLog.event` row.
+2. Add process-safe session context. Set it immediately after session creation;
+   retain it through stop, processing, consent, export, and retry; clear it only
+   after processing/retry completes or the controller abandons the session.
+3. Include `session` automatically while context is set.
+4. Serialize set/clear/read with the AgentLog queue so asynchronous events
+   cannot race context changes.
+5. An explicit matching session is accepted. In Release, a mismatch is dropped
+   and emits content-free `session_mismatch`; do not rely on `assert`.
+6. Never log titles, URLs, notes, transcripts, tokens, passphrases, keys, or
+   captured content.
+
+**Tests**
+
+- Every event in one process has one `run_id`.
+- Context is absent before start, present through processing/export, and absent
+  after completion/abandon.
+- Async events around set/clear cannot receive the wrong session.
+- Explicit mismatch cannot overwrite context.
+- Termination event flushes with correct technical identity.
+- Privacy denylist remains clean.
+
+**Verify**
+
+```bash
+bash scripts/mac_xcode_test.sh
+bash scripts/run_linux_tests.sh
+```
+
+**Blocked behavior**
+
+If no eligible Mac worker exists, record `needs_mac_worker`, retry discovery
+four times, continue Linux-only A03–A10 after A02, and do not ask the user
+until the consolidated three-pass handoff. Never call this task complete from
+Linux.
+
+**Commit:** `fix: bind agent logs to process and session`
 
 ---
 
@@ -2083,9 +2530,10 @@ xcodebuild \
   build
 ```
 
-Both lanes are read-only and may run in parallel. If either fails, stop both
-lanes, open one serial fix task, complete Phase E again, and rerun both lanes
-from clean clones.
+Both lanes are read-only and may run in parallel. An unavailable Mac records
+`needs_mac_worker` and does not invalidate the completed Linux lane. A real
+test/build failure stops integration, opens one serial fix task, completes
+Phase E again, and reruns both lanes from clean clones.
 
 Then verify:
 
@@ -2377,10 +2825,15 @@ including secrets or captured content.
 
 ## 4. Final verification command set
 
+These commands are supporting automation checks. Linux/mock-only success is
+not app completion. Only `autopilot.py verify --mode release` with same-SHA
+F/G artifacts and a completed G03 may report `APP_DONE: true`.
+
 Linux:
 
 ```bash
 git status --short
+python3 scripts/autopilot.py verify --mode automatable
 bash scripts/run_linux_tests.sh
 python3 scripts/inspect_all_gates.py --mock-only
 ```
@@ -2415,6 +2868,9 @@ Before requesting another review, provide:
 
 - comparison base commit;
 - final commit list;
+- sanitized `.scrumtrace-autopilot/AUTOMATION_COMPLETION_REPORT.md`;
+- Pass 1/2/3 results at one unchanged source SHA;
+- independent Composer and Grok `AUTOMATABLE_SCOPE_CONFIRMED` results;
 - Linux test output;
 - macOS Xcode test output;
 - exact Mac model, macOS version, app commit, signing identity/CDHash;
