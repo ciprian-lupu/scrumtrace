@@ -47,6 +47,12 @@ final class SessionProcessor: @unchecked Sendable {
                     )
                 }
             }
+            if manifest.pauses.isEmpty {
+                let rebuilt = vault.pausesRebuiltFromEvents(sessionId: sessionId)
+                if !rebuilt.isEmpty {
+                    manifest.pauses = rebuilt
+                }
+            }
             manifest.pipelineStatus = .transcribing
             try vault.write(manifest: &manifest)
         }

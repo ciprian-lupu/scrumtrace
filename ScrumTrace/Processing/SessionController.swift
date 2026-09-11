@@ -386,7 +386,10 @@ final class SessionController: ObservableObject {
             AgentLog.setRecording(true, sessionId: created.manifest.sessionId)
             // Await (do not Task.detached.value from MainActor). A detached
             // wrapper that MainActor waits on deadlocks if SCKit hops to main.
-            try await recorder.start(shouldPauseCapture: pauseGate)
+            try await recorder.start(
+                shouldPauseCapture: pauseGate,
+                captureArea: settings.captureArea
+            )
             abandonedId = nil
             self.recorder = recorder
             lastSessionId = created.manifest.sessionId
@@ -437,7 +440,9 @@ final class SessionController: ObservableObject {
                 // alone — that would clear a freeze that just posted (C1).
                 if unpauseCaptureIfPrivacyClear() {
                     phase = .recording
-                    statusLine = "Recording"
+                    statusLine = settings.captureArea.isEntireDisplay
+                        ? "Recording"
+                        : "Recording \(settings.captureArea.summary)"
                     NotificationCenter.default.post(
                         name: .scrumTraceCaptureGate,
                         object: CaptureSessionState.recording
@@ -699,7 +704,7 @@ final class SessionController: ObservableObject {
         }
         guard captureState.allowsNewCapture else { return }
         let media = clock.currentMediaSeconds()
-        guard let image = ScreenSnap.capture() else {
+        guard let image = ScreenSnap.capture(area: settings.captureArea) else {
             lastError = "Could not capture the display."
             AgentLog.event("shot_fail", ["reason": "display"])
             return
@@ -1094,6 +1099,7 @@ final class SessionController: ObservableObject {
         }
         local.duration = memory.duration
         local.pauses = memory.pauses
+        local.pipelineStatus = memory.pipelineStatus
         return local
     }
 
@@ -1130,15 +1136,23 @@ enum SystemPrivacySettings {
 #endif
 
 enum ScreenSnap {
-    static func capture() -> NSImage? {
+    static func capture(area: CaptureArea = .entireDisplay) -> NSImage? {
         #if os(macOS)
-        let display = CGMainDisplayID()
-        guard let cg = CGDisplayCreateImage(display) else { return nil }
-        let scaled = downscale(cg, maxEdge: MediaBudget.stillMaxWidth)
+        let preferred = area.displayID == 0 ? CGMainDisplayID() : CGDirectDisplayID(area.displayID)
+        let image = CGDisplayCreateImage(preferred) ?? CGDisplayCreateImage(CGMainDisplayID())
+        guard let cg = image else { return nil }
+        let cropped = crop(cg, to: area)
+        let scaled = downscale(cropped, maxEdge: MediaBudget.stillMaxWidth)
         return NSImage(cgImage: scaled, size: NSSize(width: scaled.width, height: scaled.height))
         #else
         return nil
         #endif
+    }
+
+    static func crop(_ image: CGImage, to area: CaptureArea) -> CGImage {
+        guard !area.isEntireDisplay else { return image }
+        let rect = area.pixelCrop(imageWidth: image.width, imageHeight: image.height)
+        return image.cropping(to: rect) ?? image
     }
 
     /// CG-09: Shot PNGs are capped at `stillMaxWidth` so 20 Retina captures

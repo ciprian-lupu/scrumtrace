@@ -84,4 +84,50 @@ final class TimelineTests: XCTestCase {
         XCTAssertEqual(TimelineMath.mediaTime(wall: 15, pauses: pauses), 10, accuracy: 0.0001)
         XCTAssertTrue(TimelineMath.isInsidePause(wall: 15, pauses: pauses))
     }
+
+    func testRebuildPausesFromEvents() {
+        let events = [
+            SessionEvent(tWall: 10, tMedia: 10, kind: .pause, payload: [:]),
+            SessionEvent(tWall: 20, tMedia: 10, kind: .resume, payload: [:]),
+            SessionEvent(tWall: 40, tMedia: 30, kind: .privacyPause, payload: [:]),
+            SessionEvent(tWall: 45, tMedia: 30, kind: .resume, payload: [:])
+        ]
+        let pauses = PauseInterval.rebuild(from: events)
+        XCTAssertEqual(pauses.count, 2)
+        XCTAssertEqual(pauses[0].pauseWall, 10, accuracy: 0.0001)
+        XCTAssertEqual(pauses[0].resumeWall ?? -1, 20, accuracy: 0.0001)
+        XCTAssertEqual(pauses[1].pauseWall, 40, accuracy: 0.0001)
+        XCTAssertEqual(pauses[1].resumeWall ?? -1, 45, accuracy: 0.0001)
+    }
+
+    func testCaptureAreaPixelSizeAndCrop() {
+        XCTAssertTrue(CaptureArea.entireDisplay.isEntireDisplay)
+        XCTAssertEqual(CaptureArea.entireDisplay.summary, "Entire display")
+        let region = CaptureArea(
+            capturesFullDisplay: false,
+            displayID: 1,
+            originX: 100,
+            originY: 40,
+            widthPoints: 640,
+            heightPoints: 360,
+            backingScale: 2
+        )
+        XCTAssertFalse(region.isEntireDisplay)
+        let pixels = region.pixelSize(displayPixelWidth: 3024, displayPixelHeight: 1964)
+        XCTAssertEqual(pixels.width, 1280)
+        XCTAssertEqual(pixels.height, 720)
+        let crop = region.pixelCrop(imageWidth: 3024, imageHeight: 1964)
+        XCTAssertEqual(crop.origin.x, 200)
+        XCTAssertEqual(crop.origin.y, 80)
+        XCTAssertEqual(crop.width, 1280)
+        XCTAssertEqual(crop.height, 720)
+    }
+
+    func testScrubbedURLDropsQueryAndFragment() {
+        let cleaned = MetadataSampler.scrubbedURLString(
+            "https://example.com/path?token=SECRETXYZ#frag"
+        )
+        XCTAssertEqual(cleaned, "https://example.com/path")
+        XCTAssertFalse(cleaned.contains("SECRETXYZ"))
+    }
 }

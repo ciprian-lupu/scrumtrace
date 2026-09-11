@@ -99,6 +99,10 @@ final class AppSettings: ObservableObject {
         didSet { defaults.set(meetingNoticeAccepted, forKey: Keys.meetingNotice) }
     }
 
+    @Published var captureArea: CaptureArea {
+        didSet { persistCaptureArea() }
+    }
+
     @Published var apiKeyDraft: String
 
     var productContext: ProductContext {
@@ -120,7 +124,19 @@ final class AppSettings: ObservableObject {
         self.allowGoogleClipUpload = defaults.object(forKey: Keys.allowGoogleClip) as? Bool ?? false
         self.retentionDays = defaults.object(forKey: Keys.retentionDays) as? Int ?? 0
         self.meetingNoticeAccepted = defaults.bool(forKey: Keys.meetingNotice)
+        if let data = defaults.data(forKey: Keys.captureArea),
+           let stored = try? JSONDecoder().decode(CaptureArea.self, from: data) {
+            self.captureArea = stored
+        } else {
+            self.captureArea = .entireDisplay
+        }
         self.apiKeyDraft = KeychainStore.get(account: keyAccount) ?? ""
+    }
+
+    private func persistCaptureArea() {
+        if let data = try? JSONEncoder().encode(captureArea) {
+            defaults.set(data, forKey: Keys.captureArea)
+        }
     }
 
     func saveAPIKey() throws {
@@ -172,5 +188,6 @@ final class AppSettings: ObservableObject {
         static let allowGoogleClip = "scrumtrace.allowGoogleClipUpload"
         static let retentionDays = "scrumtrace.retentionDays"
         static let meetingNotice = "scrumtrace.meetingNoticeAccepted"
+        static let captureArea = "scrumtrace.captureArea"
     }
 }

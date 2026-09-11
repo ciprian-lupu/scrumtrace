@@ -46,7 +46,7 @@ Xcode resolves WhisperKit **0.11.0** from the committed `Package.resolved`. Firs
 
 Archive capture is **3840×2160 at 4 fps, 16 Mbps H.264 High** (keyframe every second). Export clips stay 720p / 1.2 Mbps.
 
-Menu → Settings has Speech, Logs (live `agent.jsonl`), This process, AI, and General. Export a diagnostic bundle from Logs (no `archive/`).
+Menu → Settings has **Speech**, **Capture**, **Logs**, **This process**, **AI**, and **General**. Capture shows the shipped 3840×2160 / 4 fps / 16 Mbps budget and lets you pick a screen region (default: entire display) before Record. Logs can export a diagnostic bundle (no `archive/`).
 
 Inspect a Gate 1 session folder (token and passphrase are the Part F.2 values):
 
@@ -81,6 +81,18 @@ Then open `samples/mock-session/export/SESSION_BRIEF.html`. The image-only failu
 ## Agent debug loop
 
 The Mac writes `~/Library/Logs/ScrumTrace/agent.jsonl` and a LaunchAgent can pull `develop`, rebuild **only on request**, and publish that log to `cursor/scrumtrace-agent-logs-0397`. Cloud agents read it with `bash scripts/fetch_agent_log.sh`. See [AGENT_DEBUG.md](AGENT_DEBUG.md).
+
+## What this Linux / cloud agent can test
+
+This application is ScreenCaptureKit + WhisperKit. A Linux VM cannot compile or run it. What *can* run without a Mac:
+
+```bash
+bash scripts/run_linux_tests.sh
+```
+
+GitHub Actions (`.github/workflows/ci.yml`) runs those tests on Ubuntu and, when the repo is on GitHub with Actions enabled, `xcodebuild` on `macos-15`. That compiles the app. It still cannot grant Screen Recording, show a display, or fill `samples/GATE_LOG.md`.
+
+There is no honest ScreenCaptureKit emulator. Hardware gates stay on one Mac after the code is finished.
 
 ## Next gates (must run on a Mac)
 

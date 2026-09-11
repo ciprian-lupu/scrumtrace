@@ -2,7 +2,7 @@
 
 Read this before changing product code, gates, remotes, or TCC/signing. The working spec is [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md). Mac debug loop: [AGENT_DEBUG.md](AGENT_DEBUG.md). Hardware results: [samples/GATE_LOG.md](samples/GATE_LOG.md) (empty until a Mac run).
 
-Snapshot date: **2026-09-11** (audit TASK-01–17 plus leftover code items: 4 fps / 16 Mbps archive, events append, clonefile, lock timing, onboarding, license display, GitHub update check, Release Developer ID settings; hardware still open). Update the snapshot when status in this file changes.
+Snapshot date: **2026-09-11** (audit TASK-01–17 plus leftover *code* items closed: 4 fps / 16 Mbps, events append, clonefile, lock timing, onboarding, license display, GitHub updates, Release Developer ID settings, review must-fixes, Settings Capture tab, optional capture region). Hardware gates still open. Update the snapshot when status in this file changes.
 
 ## What this is
 
@@ -175,7 +175,9 @@ Do **not** add product surfaces. Prefer the first item you can actually finish i
 
 ### In Swift (Linux-testable; do not call them “gated”)
 
-Code leftovers from the audit that needed a Mac or a secret are still open: Gate −0 through 6, Developer ID team + notary Apple ID, first Whisper download, Sparkle EdDSA keys, a paid license private key. Do not invent `GATE_LOG.md` cells.
+Code leftovers from `SCRUMTRACE_AUDIT.md` that can be done without a Mac or Apple secrets are implemented. Still open only because they need hardware or secrets: Gate −0 through 6, Developer ID team + notary Apple ID, first Whisper download, Sparkle EdDSA keys, a paid license private key. Do not invent `GATE_LOG.md` cells.
+
+Settings is a six-tab window (Speech, Capture, Logs, This process, AI, General). Capture area defaults to the entire display; Menu → **Capture area:** and Settings → Capture can drag-select a region before Start recording.
 
 ### Plan-deferred (leave alone)
 

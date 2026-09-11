@@ -860,10 +860,13 @@ def test_audio_split_and_brief_loader() -> None:
     assert "failCaptureWrite" in persist_wav
     assert "try? file.write" not in persist_wav
     assert "zeroFillPCM" in persist_wav
+    assert "try? persistCaptureLayout()" in persist_wav
     remap = recorder.split("func remappedBuffer")[1].split("func noteRemapFailure")[0]
     assert "CMSampleBufferGetSampleTimingInfo" in remap
     assert "timingInfoOut:" in remap
     assert "CMSampleBufferGetNumSamples(sampleBuffer) == 1" in remap
+    assert "CMTimeMultiplyByFloat64" in remap
+    assert "numSamples > 1" in remap
     assert "func zeroFillPCM" in recorder
     assert "microphoneWav" in recorder
     assert "CaptureAudioLayout" in recorder
@@ -1197,6 +1200,8 @@ def test_pipeline_timing_stays_in_archive() -> None:
     assert "query = nil" in document_url
     assert "fragment = nil" in document_url
     assert "kAXDocumentAttribute" in document_url
+    assert "scrubbedURLString" in document_url
+    assert "func scrubbedURLString" in sampler
     read_fn = sampler.split("func readFrontmost")[1].split("func documentURL")[0]
     assert read_fn.count("isSuspended") >= 3
     assert "if isSuspended { return nil }" in read_fn
@@ -1384,6 +1389,7 @@ def test_agent_log_covers_debug_events() -> None:
         "menu_shot",
         "menu_retry",
         "menu_settings",
+        "menu_select_area",
         "meeting_notice",
         "start_blocked_sheet",
     ):
@@ -2145,6 +2151,9 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "CGRequestScreenCaptureAccess" not in recorder
     assert "screenGrantedAtLaunch" in start_fn
     assert "recorder_sckit_begin" in start_fn
+    assert "sourceRect" in start_fn
+    assert "captureArea" in start_fn
+    assert "regionFitsDisplay" in start_fn
     assert start_fn.index("screenGrantedAtLaunch") < start_fn.index("shareableContentOffMain")
     assert start_fn.index("screenGrantedAtLaunch") < start_fn.index("requestPermission")
     assert "authorizationStatus(for: .audio)" in recorder.split("func requestPermission")[1]
@@ -2767,6 +2776,9 @@ def test_audit_leftovers_are_implemented() -> None:
     assert "func sweepPrivateTemporaryOrphans" in models
     assert "archiveFrameTimescale = 4" in models
     assert "archiveVideoBitrate = 16_000_000" in models
+    assert "static func rebuild(from events" in models
+    assert "struct CaptureArea" in models
+    assert "entireDisplay" in models
     sampler = (ROOT / "ScrumTrace" / "Capture" / "MetadataSampler.swift").read_text()
     assert "timeoutQueue" in sampler
     sample_fn = sampler.split("func sample(")[1].split("func readFrontmost")[0]
@@ -2835,6 +2847,28 @@ def test_audit_leftovers_are_implemented() -> None:
     perms = (ROOT / "ScrumTrace" / "Capture" / "CapturePermissions.swift").read_text()
     assert "func crashReportURLs" in perms
     assert "func revealCrashReports" in perms
+    vault = (ROOT / "ScrumTrace" / "Storage" / "SessionVault.swift").read_text()
+    assert "func pausesRebuiltFromEvents" in vault
+    processor = (ROOT / "ScrumTrace" / "Processing" / "SessionProcessor.swift").read_text()
+    assert "pausesRebuiltFromEvents" in processor
+    recorder = (ROOT / "ScrumTrace" / "Capture" / "SessionRecorder.swift").read_text()
+    assert "config.sourceRect" in recorder
+    assert "captureArea:" in recorder
+    settings = (ROOT / "ScrumTrace" / "UI" / "SettingsView.swift").read_text()
+    assert "Select area on screen" in settings
+    assert "Use entire display" in settings
+    assert "case capture" in settings
+    assert (ROOT / "ScrumTrace" / "UI" / "CaptureAreaPicker.swift").exists()
+    picker = (ROOT / "ScrumTrace" / "UI" / "CaptureAreaPicker.swift").read_text()
+    assert "Drag to select the capture area" in picker
+    assert "eventTracking" not in picker
+    clock = (ROOT / "ScrumTrace" / "Capture" / "ClockSynchronizer.swift").read_text()
+    inside = clock.split("func isInsidePause(hostTime")[1].split("func wallSecondsLocked")[0]
+    assert "max(0, CMTimeGetSeconds" in inside
+    merge = snap.split("func mergeLiveCatalog")[1]
+    assert "local.pipelineStatus = memory.pipelineStatus" in merge
+    persist_talk = shot.split("func persist()")[1].split("func startTalk()")[0]
+    assert "Thread.isMainThread" in persist_talk
 
 
 def test_sanitize_untrusted_strips_whitespace_breakout() -> None:

@@ -13,12 +13,13 @@ struct SettingsView: View {
     var body: some View {
         TabView(selection: $selectedTab) {
             speechTab.tabItem { Label("Speech", systemImage: "waveform") }.tag(SettingsTab.speech)
+            captureTab.tabItem { Label("Capture", systemImage: "record.circle") }.tag(SettingsTab.capture)
             logsTab.tabItem { Label("Logs", systemImage: "text.alignleft") }.tag(SettingsTab.logs)
             permissionsTab.tabItem { Label("This process", systemImage: "lock.shield") }.tag(SettingsTab.permissions)
             aiTab.tabItem { Label("AI", systemImage: "cpu") }.tag(SettingsTab.ai)
             generalTab.tabItem { Label("General", systemImage: "gearshape") }.tag(SettingsTab.general)
         }
-        .frame(minWidth: 560, minHeight: 520)
+        .frame(minWidth: 620, minHeight: 560)
         .padding()
     }
 
@@ -47,12 +48,54 @@ struct SettingsView: View {
                     }
                 }
             }
-            Section("Capture") {
-                Text("Shot  ⌥⌘S    Pin  ⌥⌘Space    Pause  ⌥⌘P")
-                    .font(.system(.body, design: .monospaced))
-                Text("HUD shows t_media. Pause discards screen frames, system audio, microphone PCM, metadata, Shot, and Hold-to-Talk. After Stop, WhisperKit transcribes the room mic and the movie’s system-audio track, then merges on t_media. Archive is 3840×2160 at 4 fps, 16 Mbps H.264 High (keyframe every second).")
+        }
+        .formStyle(.grouped)
+    }
+
+    private var captureTab: some View {
+        Form {
+            Section("Archive movie") {
+                LabeledContent("Resolution", value: "\(MediaBudget.archiveMaxWidth)×\(MediaBudget.archiveMaxHeight)")
+                LabeledContent("Frame rate", value: "\(MediaBudget.archiveExpectedFrameRate) fps")
+                LabeledContent("Video bitrate", value: "\(MediaBudget.archiveVideoBitrate / 1_000_000) Mbps H.264 High")
+                LabeledContent("Keyframe", value: "every \(MediaBudget.archiveKeyFrameInterval) frames")
+                LabeledContent("Export clips", value: "\(MediaBudget.clipWidth)×\(MediaBudget.clipHeight) @ \(MediaBudget.clipVideoBitrate / 1000) kbps")
+                Text("Archive is private (session.mp4). Export clips are the 720p handoff. These values are the shipped capture budget, not a live encoder slider.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+            }
+            Section("Hotkeys") {
+                LabeledContent("Shot", value: "⌥⌘S")
+                LabeledContent("Pin", value: "⌥⌘Space")
+                LabeledContent("Pause", value: "⌥⌘P")
+                Text("HUD shows t_media. Pause discards screen frames, system audio, microphone PCM, metadata, Shot, and Hold-to-Talk.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Section("Capture area") {
+                LabeledContent("Current", value: settings.captureArea.summary)
+                Button("Select area on screen…") {
+                    AgentLog.event("settings_action", ["action": "select_area"])
+                    CaptureAreaPicker.present(current: settings.captureArea) { area in
+                        settings.captureArea = area
+                    }
+                }
+                .disabled(controller.isRecording)
+                Button("Use entire display") {
+                    AgentLog.event("settings_action", ["action": "area_full"])
+                    settings.captureArea = .entireDisplay
+                }
+                .disabled(controller.isRecording || settings.captureArea.isEntireDisplay)
+                Text("Default is the whole display. A region records only that rectangle so the archive stays smaller. Change it before Start recording; it applies to the next session.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Section("Sessions") {
+                LabeledContent("Folder", value: CapturePermissions.scrubHome(controller.vault.rootURL.path))
+                Button("Reveal sessions folder") {
+                    AgentLog.event("settings_action", ["action": "reveal_sessions"])
+                    controller.vault.revealRootInFinder()
+                }
             }
         }
         .formStyle(.grouped)
@@ -102,12 +145,16 @@ struct SettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            Section("Capture") {
+            Section("Accessibility") {
+                LabeledContent(
+                    "Window titles / URLs",
+                    value: MetadataSampler.requestTrust(prompt: false) ? "trusted" : "not trusted"
+                )
                 Button("Enable browser URL metadata (Accessibility)") {
                     AgentLog.event("settings_action", ["action": "ax_prompt"])
                     MetadataSampler.requestTrust(prompt: true)
                 }
-                Text("Optional. Accessibility is not required to Record. It only adds window titles and browser URLs. The looping system sheet on Record is Screen Recording, not this list.")
+                Text("Optional. Accessibility is not required to Record. It only adds window titles and scrubbed browser URLs. The looping system sheet on Record is Screen Recording, not this list.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -245,12 +292,43 @@ struct SettingsView: View {
                     NSWorkspace.shared.open(UpdateChecker.releasesURL)
                 }
             }
-            Button("Show first-run permissions") {
-                AgentLog.event("settings_action", ["action": "onboarding"])
-                OnboardingWindow.present()
+            Section("About") {
+                LabeledContent("Version", value: UpdateChecker.currentVersion)
+                LabeledContent(
+                    "Build",
+                    value: Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "—"
+                )
+                LabeledContent("Bundle", value: Bundle.main.bundleIdentifier ?? "com.str8minds.ScrumTrace")
+                Button("Show first-run permissions") {
+                    AgentLog.event("settings_action", ["action": "onboarding"])
+                    OnboardingWindow.present()
+                }
+                Button("Open privacy notes") {
+                    AgentLog.event("settings_action", ["action": "privacy_doc"])
+                    openRepoDoc("docs/PRIVACY.md")
+                }
+                Button("Open participant notice") {
+                    AgentLog.event("settings_action", ["action": "notice_doc"])
+                    openRepoDoc("docs/PARTICIPANT_NOTICE.md")
+                }
             }
         }
         .formStyle(.grouped)
+    }
+
+    private func openRepoDoc(_ relative: String) {
+        let bundled = Bundle.main.bundleURL
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent(relative)
+        if FileManager.default.fileExists(atPath: bundled.path) {
+            NSWorkspace.shared.open(bundled)
+            return
+        }
+        if let url = URL(string: "https://github.com/ciprian-lupu/scrumtrace/blob/develop/\(relative)") {
+            NSWorkspace.shared.open(url)
+        }
     }
 
     private var capabilities: AIProviderConfiguration {
@@ -270,6 +348,7 @@ struct SettingsView: View {
 
 private enum SettingsTab: Hashable {
     case speech
+    case capture
     case logs
     case permissions
     case ai

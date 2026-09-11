@@ -117,26 +117,27 @@ final class MetadataSampler: @unchecked Sendable {
         var document: AnyObject?
         let status = AXUIElementCopyAttributeValue(window, kAXDocumentAttribute as CFString, &document)
         if status == .success, let value = document as? String, !value.isEmpty {
-            return value
+            return scrubbedURLString(value)
         }
         var extra: AnyObject?
         AXUIElementCopyAttributeValue(window, "AXURL" as CFString, &extra)
         if let url = extra as? URL {
-            var comps = URLComponents(url: url, resolvingAgainstBaseURL: false)
-            comps?.query = nil
-            comps?.fragment = nil
-            return comps?.url?.absoluteString ?? url.absoluteString
+            return scrubbedURLString(url.absoluteString)
         }
         if let text = extra as? String, !text.isEmpty {
-            if let parsed = URL(string: text), parsed.scheme != nil {
-                var comps = URLComponents(url: parsed, resolvingAgainstBaseURL: false)
-                comps?.query = nil
-                comps?.fragment = nil
-                return comps?.url?.absoluteString ?? parsed.absoluteString
-            }
-            return text
+            return scrubbedURLString(text)
         }
         return nil
+    }
+
+    static func scrubbedURLString(_ text: String) -> String {
+        guard let parsed = URL(string: text), parsed.scheme != nil else {
+            return text
+        }
+        var comps = URLComponents(url: parsed, resolvingAgainstBaseURL: false)
+        comps?.query = nil
+        comps?.fragment = nil
+        return comps?.url?.absoluteString ?? parsed.absoluteString
     }
 }
 

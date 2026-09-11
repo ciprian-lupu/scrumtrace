@@ -126,7 +126,8 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         syncWriter { captureWriteMessage }
     }
 
-    func start(shouldPauseCapture: @escaping @Sendable () -> Bool = { false }) async throws {
+    func start(shouldPauseCapture: @escaping @Sendable () -> Bool = { false },
+               captureArea: CaptureArea = .entireDisplay) async throws {
         // Never call SCShareableContent unless Screen Recording was attached
         // at process start. A Settings toggle that flipped mid-process, or a
         // grant for a different Debug copy, makes this API show the system
@@ -140,7 +141,11 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             throw SessionRecorderError.permissionDenied
         }
         try await requestPermission()
-        AgentLog.event("recorder_sckit_begin", [:])
+        AgentLog.event("recorder_sckit_begin", [
+            "area": captureArea.isEntireDisplay ? "full" : "region",
+            "width": String(captureArea.isEntireDisplay ? 0 : Int(captureArea.widthPoints.rounded())),
+            "height": String(captureArea.isEntireDisplay ? 0 : Int(captureArea.heightPoints.rounded()))
+        ])
         // Never fetch shareable content on the MainActor. TCC presents a sheet
         // that cannot drain if Record is waiting on this same run loop — the
         // app beachballs and has to be force-quit.
@@ -155,10 +160,18 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             }
             throw SessionRecorderError.writerFailed(error.localizedDescription)
         }
-        guard let display = content.displays.first else {
+        guard let display = Self.display(in: content, matching: captureArea) else {
             throw SessionRecorderError.writerFailed("No display available for capture.")
         }
-        let size = Self.evenCaptureSize(width: display.width, height: display.height)
+        let regionFitsDisplay = !captureArea.isEntireDisplay
+            && display.displayID == captureArea.displayID
+        let rawSize = regionFitsDisplay
+            ? captureArea.pixelSize(
+                displayPixelWidth: display.width,
+                displayPixelHeight: display.height
+            )
+            : (width: display.width, height: display.height)
+        let size = Self.evenCaptureSize(width: rawSize.width, height: rawSize.height)
         let excluded = content.applications.filter { app in
             app.bundleIdentifier == Bundle.main.bundleIdentifier
         }
@@ -175,6 +188,9 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             let config = SCStreamConfiguration()
             config.width = size.width
             config.height = size.height
+            if regionFitsDisplay {
+                config.sourceRect = captureArea.sourceRect()
+            }
             config.minimumFrameInterval = CMTime(
                 value: Int64(MediaBudget.archiveFrameStep),
                 timescale: Int32(MediaBudget.archiveFrameTimescale)
@@ -243,6 +259,15 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             await abortFailedStart()
             throw error
         }
+    }
+
+    private static func display(in content: SCShareableContent, matching area: CaptureArea) -> SCDisplay? {
+        if !area.isEntireDisplay {
+            if let match = content.displays.first(where: { $0.displayID == area.displayID }) {
+                return match
+            }
+        }
+        return content.displays.first
     }
 
     /// Even pixel size shared by SCStream and AVAssetWriter, capped at 3840×2160.
@@ -661,7 +686,16 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         let media = clock.mediaTime(forSampleBuffer: sampleBuffer, sampleClock: sampleClock)
         var timing = CMSampleTimingInfo()
         let hasTiming = CMSampleBufferGetSampleTimingInfo(sampleBuffer, at: 0, timingInfoOut: &timing) == noErr
+        let numSamples = CMSampleBufferGetNumSamples(sampleBuffer)
+        let wholeDuration = CMSampleBufferGetDuration(sampleBuffer)
         if hasTiming, timing.duration.flags.contains(.valid), CMTimeGetSeconds(timing.duration) > 0 {
+            if numSamples > 1, wholeDuration.flags.contains(.valid) {
+                let per = CMTimeGetSeconds(timing.duration)
+                let all = CMTimeGetSeconds(wholeDuration)
+                if all > 0, per >= all * 0.9 {
+                    timing.duration = CMTimeMultiplyByFloat64(wholeDuration, multiplier: 1.0 / Double(numSamples))
+                }
+            }
             timing.presentationTimeStamp = media
             timing.decodeTimeStamp = .invalid
         } else if CMSampleBufferGetNumSamples(sampleBuffer) == 1 {
@@ -970,6 +1004,7 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             if let media = mediaSeconds {
                 if wavStartMediaSeconds == nil {
                     wavStartMediaSeconds = media
+                    try? persistCaptureLayout()
                 }
                 if let start = wavStartMediaSeconds {
                     let expected = Int64(((media - start) * 16_000).rounded())

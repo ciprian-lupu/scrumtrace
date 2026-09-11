@@ -367,6 +367,10 @@ final class SessionVault: @unchecked Sendable {
         return lines.joined(separator: "\n")
     }
 
+    func pausesRebuiltFromEvents(sessionId: String) -> [PauseInterval] {
+        PauseInterval.rebuild(from: events(sessionId: sessionId))
+    }
+
     private func events(sessionId: String) -> [SessionEvent] {
         guard Self.isValidSessionId(sessionId) else { return [] }
         guard ExportRel.isUsableSessionRoot(rootURL) else { return [] }

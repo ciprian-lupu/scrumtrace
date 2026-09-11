@@ -192,7 +192,7 @@ final class ClockSynchronizer: @unchecked Sendable {
         let localPauses = pauses
         lock.unlock()
         guard start.isValid else { return false }
-        let wall = CMTimeGetSeconds(CMTimeSubtract(hostTime, start))
+        let wall = max(0, CMTimeGetSeconds(CMTimeSubtract(hostTime, start)))
         return TimelineMath.isInsidePause(wall: wall, pauses: localPauses)
     }
 

@@ -1,3 +1,4 @@
+import CoreGraphics
 import Darwin
 import Foundation
 
@@ -2055,6 +2056,93 @@ struct PauseInterval: Codable, Sendable, Hashable {
     mutating func close(at resumeWall: TimeInterval) {
         self.resumeWall = resumeWall
         self.duration = max(0, resumeWall - pauseWall)
+    }
+
+    /// CL-04: rebuild closed pause intervals from `events.jsonl` after a crash
+    /// left `manifest.pauses` empty.
+    static func rebuild(from events: [SessionEvent]) -> [PauseInterval] {
+        var pauses: [PauseInterval] = []
+        for event in events {
+            switch event.kind {
+            case .pause, .privacyPause:
+                if pauses.last?.resumeWall == nil, !pauses.isEmpty {
+                    continue
+                }
+                pauses.append(PauseInterval(pauseWall: event.tWall, resumeWall: nil))
+            case .resume:
+                guard var last = pauses.last, last.resumeWall == nil else { continue }
+                last.close(at: event.tWall)
+                pauses[pauses.count - 1] = last
+            case .start, .stop, .pin, .shot, .url, .window, .error:
+                continue
+            }
+        }
+        return pauses
+    }
+}
+
+/// Display rectangle recorded into the archive movie. Default is the whole display.
+struct CaptureArea: Codable, Equatable, Sendable {
+    var capturesFullDisplay: Bool
+    var displayID: UInt32
+    var originX: Double
+    var originY: Double
+    var widthPoints: Double
+    var heightPoints: Double
+    var backingScale: Double
+
+    static let entireDisplay = CaptureArea(
+        capturesFullDisplay: true,
+        displayID: 0,
+        originX: 0,
+        originY: 0,
+        widthPoints: 0,
+        heightPoints: 0,
+        backingScale: 1
+    )
+
+    var isEntireDisplay: Bool {
+        capturesFullDisplay || widthPoints < 2 || heightPoints < 2
+    }
+
+    var summary: String {
+        if isEntireDisplay {
+            return "Entire display"
+        }
+        return "\(Int(widthPoints.rounded()))×\(Int(heightPoints.rounded())) region"
+    }
+
+    func sourceRect() -> CGRect {
+        CGRect(x: originX, y: originY, width: widthPoints, height: heightPoints)
+    }
+
+    func pixelSize(displayPixelWidth: Int, displayPixelHeight: Int) -> (width: Int, height: Int) {
+        if isEntireDisplay {
+            return (displayPixelWidth, displayPixelHeight)
+        }
+        let scale = backingScale > 0 ? backingScale : 1
+        let width = Int((widthPoints * scale).rounded())
+        let height = Int((heightPoints * scale).rounded())
+        return (max(width, 2), max(height, 2))
+    }
+
+    func pixelCrop(imageWidth: Int, imageHeight: Int) -> CGRect {
+        let scale = backingScale > 0 ? backingScale : 1
+        let x = max(0, Int((originX * scale).rounded()))
+        let y = max(0, Int((originY * scale).rounded()))
+        let width = min(max(Int((widthPoints * scale).rounded()), 2), max(imageWidth - x, 2))
+        let height = min(max(Int((heightPoints * scale).rounded()), 2), max(imageHeight - y, 2))
+        return CGRect(x: x, y: y, width: width, height: height)
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case capturesFullDisplay = "captures_full_display"
+        case displayID = "display_id"
+        case originX = "origin_x"
+        case originY = "origin_y"
+        case widthPoints = "width_points"
+        case heightPoints = "height_points"
+        case backingScale = "backing_scale"
     }
 }
 

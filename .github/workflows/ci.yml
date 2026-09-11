@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [develop, main]
+  pull_request:
+    branches: [develop]
+
+jobs:
+  linux-contracts:
+    name: Linux contract tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run Linux suite
+        run: bash scripts/run_linux_tests.sh
+
+  macos-compile:
+    name: macOS xcodebuild
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build ScrumTrace
+        run: |
+          xcodebuild \
+            -project ScrumTrace.xcodeproj \
+            -scheme ScrumTrace \
+            -destination 'platform=macOS' \
+            -configuration Debug \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+      - name: Xcode tests
+        run: bash scripts/mac_xcode_test.sh
+        env:
+          SCRUMTRACE_DERIVED: ${{ runner.temp }}/ScrumTraceDerived

@@ -67,7 +67,8 @@ final class MenuBarController: NSObject {
             controller.captureState.rawValue,
             controller.privacy.isCurrentlyTripped ? "priv" : "ok",
             readiness.menuLabel,
-            controller.lastError == nil ? "ok" : "err"
+            controller.lastError == nil ? "ok" : "err",
+            controller.settings.captureArea.summary
         ].joined(separator: "|")
         if signature != lastMenuSignature {
             lastMenuSignature = signature
@@ -103,6 +104,12 @@ final class MenuBarController: NSObject {
                 AgentLog.event("start_control_state", ["enabled": start.isEnabled ? "1" : "0"])
             }
             menu.addItem(start)
+            let area = actionItem(
+                "Capture area: \(controller.settings.captureArea.summary)",
+                #selector(selectCaptureArea)
+            )
+            area.isEnabled = !controller.isBusy
+            menu.addItem(area)
         }
         let status = NSMenuItem(title: controller.statusLine, action: nil, keyEquivalent: "")
         status.isEnabled = false
@@ -190,6 +197,14 @@ final class MenuBarController: NSObject {
         let item = NSMenuItem(title: title, action: selector, keyEquivalent: "")
         item.target = self
         return item
+    }
+
+    @objc private func selectCaptureArea() {
+        AgentLog.event("menu_select_area", [:])
+        CaptureAreaPicker.present(current: controller.settings.captureArea) { [weak self] area in
+            self?.controller.settings.captureArea = area
+            self?.rebuild()
+        }
     }
 
     @objc private func start() {

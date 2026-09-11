@@ -160,6 +160,12 @@ final class ShotTalkState: ObservableObject {
     }
 
     func persist() {
+        if !Thread.isMainThread {
+            DispatchQueue.main.async { [weak self] in
+                self?.persist()
+            }
+            return
+        }
         abortTalk()
         guard !saved else { return }
         saved = true
@@ -222,15 +228,25 @@ final class ShotTalkState: ObservableObject {
     }
 
     func abortTalk() {
-        let active = holdingTalk || recorder != nil
-        holdingTalk = false
-        recorder?.stop()
-        if let url = recorder?.url {
+        let rec = recorder
+        let url = rec?.url
+        rec?.stop()
+        if let url {
             ExportRel.removePrivateTemporaryURL(url)
         }
-        recorder = nil
-        if active {
-            AgentLog.event("talk_abort", [:])
+        let apply: () -> Void = { [weak self] in
+            guard let self else { return }
+            let active = self.holdingTalk || self.recorder != nil || rec != nil
+            self.holdingTalk = false
+            self.recorder = nil
+            if active {
+                AgentLog.event("talk_abort", [:])
+            }
+        }
+        if Thread.isMainThread {
+            apply()
+        } else {
+            DispatchQueue.main.async(execute: apply)
         }
     }
 
