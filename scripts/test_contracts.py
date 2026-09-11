@@ -1606,6 +1606,8 @@ def test_pause_privacy_and_metadata_gate() -> None:
     assert "clip audio will leave this Mac" in controller
     assert "and clip video will leave this Mac" not in controller
     assert "includesClipAudio: approved && uploadsClip" in controller
+    assert "includesClipVideo: approved && uploadsClip" in controller
+    assert "previous.includesClipVideo != local.uploadConsent.includesClipVideo" in controller
     assert "willUploadClip" in controller
     assert "Clip video and the master movie are not uploaded" in controller
     assert "NSApp.activate" in controller.split("func requestUploadConsent")[1].split("private func captureShot")[0]
@@ -1903,7 +1905,9 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "canonical: manifest.tasks" in processor
     assert "projected: projection.manifest.tasks" in processor
     assert "manifest.tasks = projection.manifest.tasks" not in processor
-    assert "includesClipAudio != acceptsVideo" in models
+    assert "includesClipAudio != acceptsVideo || includesClipVideo != acceptsVideo" in models
+    assert "includes_clip_video" in models
+    assert "decodeIfPresent(Bool.self, forKey: .includesClipVideo)" in models
     controller = (ROOT / "ScrumTrace" / "Processing" / "SessionController.swift").read_text()
     assert "needsReprompt" in controller
     assert "!local.uploadConsent.approved || destinationChanged" not in controller
@@ -2944,6 +2948,8 @@ def test_audit_leftovers_are_implemented() -> None:
     assert "Show pointer in the archive" in settings_ui
     assert "includeMicrophone" in settings_ui
     assert "showCursor" in settings_ui
+    assert "Stop asks for upload consent before transcription and any upload." in settings_ui
+    assert "The first provider call still asks for upload consent." not in settings_ui
     assert "Peak bitrate" in settings_ui
     assert "MediaBudget.archiveVideoMaxBitrate" in settings_ui
     clock = (ROOT / "ScrumTrace" / "Capture" / "ClockSynchronizer.swift").read_text()

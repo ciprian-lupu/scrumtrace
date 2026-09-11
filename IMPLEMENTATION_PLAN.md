@@ -155,6 +155,7 @@ Zip is built from an **explicit allow-list** of paths under `export/`, never by 
     "endpoint": "https://api.openai.com",
     "model": "gpt-4o",
     "includes_clip_audio": true,
+    "includes_clip_video": true,
     "includes_stills": true
   },
   "shots": [

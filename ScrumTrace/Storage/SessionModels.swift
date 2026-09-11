@@ -2718,6 +2718,7 @@ struct UploadConsent: Codable, Sendable, Hashable {
     var endpoint: String
     var model: String
     var includesClipAudio: Bool
+    var includesClipVideo: Bool
     var includesStills: Bool
 
     enum CodingKeys: String, CodingKey {
@@ -2727,6 +2728,7 @@ struct UploadConsent: Codable, Sendable, Hashable {
         case endpoint
         case model
         case includesClipAudio = "includes_clip_audio"
+        case includesClipVideo = "includes_clip_video"
         case includesStills = "includes_stills"
     }
 
@@ -2737,6 +2739,7 @@ struct UploadConsent: Codable, Sendable, Hashable {
         endpoint: "",
         model: "",
         includesClipAudio: false,
+        includesClipVideo: false,
         includesStills: false
     )
 
@@ -2752,10 +2755,25 @@ struct UploadConsent: Codable, Sendable, Hashable {
         if self.provider != provider || self.endpoint != endpoint || self.model != model {
             return true
         }
-        if includesClipAudio != acceptsVideo {
+        if includesClipAudio != acceptsVideo || includesClipVideo != acceptsVideo {
             return true
         }
         return false
+    }
+}
+
+extension UploadConsent {
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        approved = try container.decode(Bool.self, forKey: .approved)
+        approvedAt = try container.decodeIfPresent(Date.self, forKey: .approvedAt)
+        provider = try container.decode(String.self, forKey: .provider)
+        endpoint = try container.decode(String.self, forKey: .endpoint)
+        model = try container.decode(String.self, forKey: .model)
+        includesClipAudio = try container.decode(Bool.self, forKey: .includesClipAudio)
+        includesClipVideo = try container.decodeIfPresent(Bool.self, forKey: .includesClipVideo)
+            ?? includesClipAudio
+        includesStills = try container.decode(Bool.self, forKey: .includesStills)
     }
 }
 

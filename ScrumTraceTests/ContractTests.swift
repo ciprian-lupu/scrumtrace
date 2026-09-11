@@ -1808,6 +1808,7 @@ final class ContractTests: XCTestCase {
             endpoint: "https://api.openai.com",
             model: "gpt-4o",
             includesClipAudio: false,
+            includesClipVideo: false,
             includesStills: false
         )
         XCTAssertFalse(
@@ -1833,6 +1834,7 @@ final class ContractTests: XCTestCase {
             endpoint: "https://api.openai.com",
             model: "gpt-4o",
             includesClipAudio: true,
+            includesClipVideo: true,
             includesStills: true
         )
         XCTAssertTrue(

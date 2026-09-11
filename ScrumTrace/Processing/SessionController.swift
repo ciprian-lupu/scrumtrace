@@ -605,6 +605,7 @@ final class SessionController: ObservableObject {
                         || previous.endpoint != local.uploadConsent.endpoint
                         || previous.model != local.uploadConsent.model
                         || previous.includesClipAudio != local.uploadConsent.includesClipAudio
+                        || previous.includesClipVideo != local.uploadConsent.includesClipVideo
                     ) {
                         local.completedStages.removeAll {
                             $0 == .evaluating || $0 == .synthesizing || $0 == .completed
@@ -694,6 +695,7 @@ final class SessionController: ObservableObject {
             endpoint: settings.baseURL,
             model: settings.model,
             includesClipAudio: approved && uploadsClip,
+            includesClipVideo: approved && uploadsClip,
             includesStills: approved
         )
         #else
