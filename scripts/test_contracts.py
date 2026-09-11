@@ -2977,6 +2977,9 @@ def test_audit_leftovers_are_implemented() -> None:
     assert "showCursor" in settings_ui
     assert "Stop asks for upload consent before transcription and any upload." in settings_ui
     assert "The first provider call still asks for upload consent." not in settings_ui
+    assert "then Record or Return on that display" in settings_ui
+    readme = (ROOT / "README.md").read_text()
+    assert "Record or Return on that display" in readme
     assert "Peak bitrate" in settings_ui
     assert "MediaBudget.archiveVideoMaxBitrate" in settings_ui
     clock = (ROOT / "ScrumTrace" / "Capture" / "ClockSynchronizer.swift").read_text()
