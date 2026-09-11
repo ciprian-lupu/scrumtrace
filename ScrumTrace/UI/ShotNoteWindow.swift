@@ -176,12 +176,16 @@ final class ShotTalkState: ObservableObject {
 
     func startTalk() {
         guard !holdingTalk, recorder == nil else { return }
-        guard allowsNewCapture() else { return }
+        guard allowsNewCapture() else {
+            AgentLog.event("talk_start_fail", ["reason": "paused"])
+            return
+        }
         let url: URL
         do {
             url = try ExportRel.makePrivateTemporaryURL(prefix: "scrumtrace-note", ext: "wav")
         } catch {
             talkError = "Could not start Hold-to-Talk."
+            AgentLog.event("talk_start_fail", ["reason": "temp"])
             return
         }
         ExportRel.unlinkLastComponentUnfollowed(url)
@@ -195,6 +199,7 @@ final class ShotTalkState: ObservableObject {
         guard let rec = try? AVAudioRecorder(url: url, settings: settings) else {
             ExportRel.removePrivateTemporaryURL(url)
             talkError = "Could not start Hold-to-Talk."
+            AgentLog.event("talk_start_fail", ["reason": "recorder"])
             return
         }
         // Bind the recorder before record() so Pause can abort in-flight (C1).
@@ -203,6 +208,7 @@ final class ShotTalkState: ObservableObject {
             recorder = nil
             ExportRel.removePrivateTemporaryURL(url)
             talkError = "Could not start Hold-to-Talk."
+            AgentLog.event("talk_start_fail", ["reason": "record"])
             return
         }
         holdingTalk = true
@@ -216,12 +222,16 @@ final class ShotTalkState: ObservableObject {
     }
 
     func abortTalk() {
+        let active = holdingTalk || recorder != nil
         holdingTalk = false
         recorder?.stop()
         if let url = recorder?.url {
             ExportRel.removePrivateTemporaryURL(url)
         }
         recorder = nil
+        if active {
+            AgentLog.event("talk_abort", [:])
+        }
     }
 
     func stopTalk() async {
@@ -236,20 +246,29 @@ final class ShotTalkState: ObservableObject {
         // Detach before transcribe so persist()/abortTalk cannot delete the WAV
         // while Whisper is reading it (C1: finish the pre-pause annotation).
         recorder = nil
-        guard let url else { return }
+        guard let url else {
+            AgentLog.event("talk_transcribe_fail", ["reason": "no_url"])
+            return
+        }
         defer { ExportRel.removePrivateTemporaryURL(url) }
         // Pause after release is not a new capture. Still transcribe audio
         // recorded while the gate was open.
+        if !live {
+            AgentLog.event("talk_abort", ["reason": "paused_after_release"])
+        }
         guard live else { return }
         isTranscribing = true
         defer { isTranscribing = false }
+        AgentLog.event("talk_transcribe_begin", [:])
         do {
             try await transcriber.prepare(model: whisperModel)
             let text = try await transcriber.transcribeVoiceNote(at: url)
             guard !text.isEmpty else {
                 talkError = "No speech detected"
+                AgentLog.event("talk_transcribe_empty", [:])
                 return
             }
+            AgentLog.event("talk_transcribe_ok", ["chars": String(text.count)])
             let hadText = !note.isEmpty
             note = hadText ? "\(note) \(text)" : text
             source = hadText ? .mixed : .voice
@@ -258,6 +277,7 @@ final class ShotTalkState: ObservableObject {
             }
         } catch {
             talkError = error.localizedDescription
+            AgentLog.event("talk_transcribe_fail", ["error": AgentLog.sanitize(error.localizedDescription)])
         }
     }
 }

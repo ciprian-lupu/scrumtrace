@@ -83,12 +83,14 @@ final class PrivacyGuard: @unchecked Sendable {
             // must not leave a window where Shot/Pin still see `.recording`.
             freezeCapture?()
             if !wasTripped {
+                AgentLog.event("privacy_trip", ["bundle": match])
                 onTrip?(match)
             }
         } else {
             isTripped = false
             lock.unlock()
             if wasTripped {
+                AgentLog.event("privacy_clear", [:])
                 onClear?()
             }
         }

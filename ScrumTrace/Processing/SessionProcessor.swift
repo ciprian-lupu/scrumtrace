@@ -170,6 +170,12 @@ final class SessionProcessor: @unchecked Sendable {
                 }
                 manifest.slices = exported
                 manifest.markCompleted(.slicing)
+                AgentLog.event("slice_done", [
+                    "session": sessionId,
+                    "clips": String(exported.count),
+                    "shots": String(manifest.shots.count),
+                    "pins": String(pinTimes.count)
+                ])
                 try vault.write(manifest: &manifest)
             }
         }
@@ -188,6 +194,12 @@ final class SessionProcessor: @unchecked Sendable {
             } else if !manifest.uploadConsent.approved {
                 await onStatus(.evaluating, "Upload not approved — local export only")
                 abandonEvaluate(manifest: &manifest, failedStatus: .skipped, markOffline: false)
+                AgentLog.event("eval_done", [
+                    "session": sessionId,
+                    "clips": String(manifest.slices.count),
+                    "approved": "0",
+                    "provider": configuration.kind.rawValue
+                ])
                 try vault.write(manifest: &manifest)
             } else if configuration.kind == .anthropic && (
                 configuration.model.isEmpty
@@ -195,10 +207,24 @@ final class SessionProcessor: @unchecked Sendable {
             ) {
                 await onStatus(.evaluating, "Anthropic model missing or retired — local export only")
                 abandonEvaluate(manifest: &manifest, failedStatus: .skipped, markOffline: false)
+                AgentLog.event("eval_done", [
+                    "session": sessionId,
+                    "clips": String(manifest.slices.count),
+                    "approved": "1",
+                    "provider": configuration.kind.rawValue,
+                    "error": "model_refused"
+                ])
                 try vault.write(manifest: &manifest)
             } else if configuration.apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 await onStatus(.evaluating, "API key missing — local export only")
                 abandonEvaluate(manifest: &manifest, failedStatus: .offlineFailed, markOffline: true)
+                AgentLog.event("eval_done", [
+                    "session": sessionId,
+                    "clips": String(manifest.slices.count),
+                    "approved": "1",
+                    "provider": configuration.kind.rawValue,
+                    "error": "key_missing"
+                ])
                 try vault.write(manifest: &manifest)
             } else {
                 resetEvalAuthGate()
@@ -243,6 +269,12 @@ final class SessionProcessor: @unchecked Sendable {
                 if anyFailed {
                     manifest.pipelineStatus = .offlineFailed
                 }
+                AgentLog.event("eval_done", [
+                    "session": sessionId,
+                    "clips": String(manifest.slices.count),
+                    "approved": manifest.uploadConsent.approved ? "1" : "0",
+                    "provider": configuration.kind.rawValue
+                ])
                 try vault.write(manifest: &manifest)
             }
         }
@@ -413,6 +445,11 @@ final class SessionProcessor: @unchecked Sendable {
         }
         timing.zipBytes = zipBytes
         timing.omittedCount = zipResult.omitted.count
+        AgentLog.event("zip_ok", [
+            "session": sessionId,
+            "bytes": String(zipBytes),
+            "omitted": String(zipResult.omitted.count)
+        ])
         try timing.write(sessionURL: sessionURL)
         manifest.omitted = zipResult.omitted
         // C5: canonical SoT must not keep `confirmed` after export evidence was dropped.
@@ -475,7 +512,10 @@ final class SessionProcessor: @unchecked Sendable {
             }
             await onStatus(.transcribing, "Transcribing locally with WhisperKit")
         } catch {
-            AgentLog.event("whisper_pass_fail", ["source": "prepare", "error": error.localizedDescription])
+            AgentLog.event("whisper_pass_fail", [
+                "source": "prepare",
+                "error": AgentLog.sanitize(error.localizedDescription)
+            ])
             return (FullTranscript(sessionId: "", language: "en", segments: []), true)
         }
         let layout = CaptureAudioLayout.load(sessionURL: sessionURL)
@@ -503,7 +543,10 @@ final class SessionProcessor: @unchecked Sendable {
             } catch {
                 // Keep shots/clips; Retry Analysis can transcribe again.
                 requiredFailed = true
-                AgentLog.event("whisper_pass_fail", ["source": "wav", "error": error.localizedDescription])
+                AgentLog.event("whisper_pass_fail", [
+                    "source": "wav",
+                    "error": AgentLog.sanitize(error.localizedDescription)
+                ])
             }
         }
         let wantsMoviePass = layout.systemAudioInMovie && (layout.microphoneWav || !wavExists)
@@ -530,7 +573,10 @@ final class SessionProcessor: @unchecked Sendable {
                 ])
             } catch {
                 requiredFailed = true
-                AgentLog.event("whisper_pass_fail", ["source": "movie", "error": error.localizedDescription])
+                AgentLog.event("whisper_pass_fail", [
+                    "source": "movie",
+                    "error": AgentLog.sanitize(error.localizedDescription)
+                ])
             }
             }
         }
@@ -728,6 +774,11 @@ final class SessionProcessor: @unchecked Sendable {
             && !hasStill && excerpt.isEmpty && shotNote.isEmpty {
             slice.analysisStatus = .skipped
             let skipped = AIProviderError.skippedNoSendableMedia
+            AgentLog.event("eval_slice", [
+                "slice": slice.sliceId,
+                "status": slice.analysisStatus.rawValue,
+                "media": mediaSent.joined(separator: "+")
+            ])
             return (slice, reviewTasks(
                 shots: linked,
                 slice: slice,
@@ -778,6 +829,12 @@ final class SessionProcessor: @unchecked Sendable {
         do {
             let response = try await provider.evaluate(request: request)
             slice.analysisStatus = .success
+            AgentLog.event("eval_slice", [
+                "slice": slice.sliceId,
+                "status": slice.analysisStatus.rawValue,
+                "media": mediaSent.joined(separator: "+"),
+                "tasks": String(response.candidates.count)
+            ])
             let tasks = tasks(
                 from: response,
                 slice: slice,
@@ -793,6 +850,11 @@ final class SessionProcessor: @unchecked Sendable {
                 markEvalAuthFailed()
             }
             slice.analysisStatus = .offlineFailed
+            AgentLog.event("eval_slice", [
+                "slice": slice.sliceId,
+                "status": slice.analysisStatus.rawValue,
+                "error": AgentLog.sanitize(error.localizedDescription)
+            ])
             return (slice, reviewTasks(
                 shots: linked,
                 slice: slice,
@@ -1102,6 +1164,11 @@ final class SessionProcessor: @unchecked Sendable {
         guard evalAuthHasFailed() else { return nil }
         var slice = slice
         slice.analysisStatus = .offlineFailed
+        AgentLog.event("eval_slice", [
+            "slice": slice.sliceId,
+            "status": slice.analysisStatus.rawValue,
+            "error": "auth_skipped"
+        ])
         let skipped = AIProviderError.httpStatus(
             401,
             "Skipped remaining slices after provider authentication failed."

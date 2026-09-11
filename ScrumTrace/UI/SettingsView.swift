@@ -38,13 +38,9 @@ struct SettingsView: View {
                 LabeledContent("Model ready", value: controller.transcriber.isReady ? "yes" : "not loaded yet")
                 Button("Preload Whisper model") {
                     let model = settings.whisperModel
+                    AgentLog.event("settings_action", ["action": "preload_whisper"])
                     Task.detached {
-                        do {
-                            try await controller.transcriber.prepare(model: model)
-                            AgentLog.event("whisper_prepare_ok", ["model": model, "source": "settings"])
-                        } catch {
-                            AgentLog.event("whisper_prepare_fail", ["error": error.localizedDescription])
-                        }
+                        try? await controller.transcriber.prepare(model: model)
                     }
                 }
             }
@@ -74,23 +70,29 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
                     .textSelection(.enabled)
                 Button("Ask for Screen Recording") {
+                    AgentLog.event("settings_action", ["action": "ask_screen"])
                     Task.detached {
                         _ = CapturePermissions.requestScreenAccess()
                     }
                 }
                 Button("Open Screen Recording settings") {
+                    AgentLog.event("settings_action", ["action": "screen_settings"])
                     SystemPrivacySettings.openScreenRecording()
                 }
                 Button("Open Microphone settings") {
+                    AgentLog.event("settings_action", ["action": "mic_settings"])
                     SystemPrivacySettings.openMicrophone()
                 }
                 Button("Relaunch ScrumTrace") {
+                    AgentLog.event("settings_action", ["action": "relaunch"])
                     CapturePermissions.relaunchRunningApp()
                 }
                 Button("Reveal agent log") {
+                    AgentLog.event("settings_action", ["action": "reveal_log"])
                     AgentLog.reveal()
                 }
                 Button("Log permission probe") {
+                    AgentLog.event("settings_action", ["action": "probe"])
                     CapturePermissions.probeAndLog()
                 }
                 Text("macOS lists every Debug copy as “ScrumTrace”. A toggle that is already on is often a different binary. After mac_gate01.sh, open ~/Applications/ScrumTrace.app only. Enabling Screen Recording never applies until this app quits.")
@@ -99,6 +101,7 @@ struct SettingsView: View {
             }
             Section("Capture") {
                 Button("Enable browser URL metadata (Accessibility)") {
+                    AgentLog.event("settings_action", ["action": "ax_prompt"])
                     MetadataSampler.requestTrust(prompt: true)
                 }
                 Text("Optional. Accessibility is not required to Record. It only adds window titles and browser URLs. The looping system sheet on Record is Screen Recording, not this list.")
@@ -145,8 +148,16 @@ struct SettingsView: View {
                         try settings.saveAPIKey()
                         let empty = settings.apiKeyDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                         keyStatus = empty ? "Key removed from Keychain." : "Key saved on this Mac."
+                        AgentLog.event("settings_action", [
+                            "action": "save_key",
+                            "empty": empty ? "1" : "0"
+                        ])
                     } catch {
                         keyStatus = error.localizedDescription
+                        AgentLog.event("settings_action", [
+                            "action": "save_key_fail",
+                            "error": AgentLog.sanitize(error.localizedDescription)
+                        ])
                     }
                 }
                 if !keyStatus.isEmpty {
@@ -240,14 +251,22 @@ struct AgentLogPane: View {
             HStack {
                 Text("Agent log").font(.headline)
                 Spacer()
-                Button("Refresh") { reload() }
+                Button("Refresh") {
+                    AgentLog.event("settings_action", ["action": "log_refresh"])
+                    reload()
+                }
                 Button("Copy") {
+                    AgentLog.event("settings_action", ["action": "log_copy"])
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(logText, forType: .string)
                     status = "Copied"
                 }
-                Button("Reveal in Finder") { AgentLog.reveal() }
+                Button("Reveal in Finder") {
+                    AgentLog.event("settings_action", ["action": "reveal_log"])
+                    AgentLog.reveal()
+                }
                 Button("Export diagnostic bundle") {
+                    AgentLog.event("settings_action", ["action": "diagnostics"])
                     do {
                         let url = try AgentLog.exportDiagnosticBundle()
                         NSWorkspace.shared.activateFileViewerSelecting([url])
@@ -278,13 +297,16 @@ struct AgentLogPane: View {
             .background(Color(nsColor: .textBackgroundColor))
             HStack {
                 Button("Log permission probe") {
+                    AgentLog.event("settings_action", ["action": "probe"])
                     CapturePermissions.probeAndLog()
                     reload()
                 }
                 Button("Reveal sessions folder") {
+                    AgentLog.event("settings_action", ["action": "reveal_sessions"])
                     controller.vault.revealRootInFinder()
                 }
                 Button("Check for updates") {
+                    AgentLog.event("settings_action", ["action": "updates"])
                     if let url = URL(string: "https://github.com/ciprian-lupu/scrumtrace/releases") {
                         NSWorkspace.shared.open(url)
                     }

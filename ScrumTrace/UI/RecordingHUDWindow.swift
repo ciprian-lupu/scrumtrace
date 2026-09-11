@@ -162,18 +162,22 @@ final class RecordingHUDWindow: NSPanel {
     }
 
     @objc private func shotClicked() {
+        AgentLog.event("hud_shot", [:])
         controller.openShot()
     }
 
     @objc private func pinClicked() {
+        AgentLog.event("hud_pin", [:])
         controller.pin()
     }
 
     @objc private func pauseClicked() {
+        AgentLog.event("hud_pause", [:])
         controller.togglePause()
     }
 
     @objc private func stopClicked() {
+        AgentLog.event("hud_stop", [:])
         controller.stopRecording()
     }
 

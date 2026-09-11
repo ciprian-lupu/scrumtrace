@@ -49,6 +49,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc func showSettingsWindow(_ sender: Any?) {
+        AgentLog.event("settings_open", [:])
         if settingsWindow == nil {
             let hosting = NSHostingController(
                 rootView: SettingsView(settings: controller.settings, controller: controller)

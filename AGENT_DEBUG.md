@@ -19,9 +19,17 @@ Fields: `ts`, `event`, `pid`, path, Screen Recording at launch vs now, mic, Acce
 
 Live session: `recording.lock` (session id + pid).
 
-Useful events: `launch`, `permission_probe`, `start_control_state`, `start_*`, `recorder_sckit_*`, `mic_*`, `stop_requested`, `halt`, `terminate`.
+Useful events (technical fields only — no titles, URLs, notes, transcripts, or keys):
 
-Menu / Settings: **Log permission probe** (same checks as Record, no capture) and **Reveal agent log**.
+- Launch: `launch`, `permission_probe`, `screen_request`, `relaunch_requested`, `terminate`
+- Start / stop: `start_control_state`, `start_*`, `start_blocked_sheet`, `stop_clicked`, `stop_requested`, `stop_capture_ok`, `stop_capture_fail`, `stop_manifest_missing`, `stop_ignored`, `halt`, `halt_stop_*`
+- Capture: `recorder_sckit_*`, `recorder_first_sample`, `mic_*`, `capture_write_fail`, `capture_stream_failed`, `wav_ahead_frames`
+- Pause / privacy: `hotkey_pause`, `pause_ok`, `resume_ok`, `resume_blocked`, `privacy_trip`, `privacy_clear`, `privacy_pause`, `privacy_resume`
+- Shot / pin / PTT: `hotkey_shot`, `hotkey_pin`, `shot_*`, `pin_*`, `talk_press`, `talk_release`, `talk_start_fail`, `talk_abort`, `talk_transcribe_*`
+- Pipeline: `processor_begin`, `processor_ok`, `processor_fail`, `pipeline_status` (every HUD line after Stop — this is how to debug a stuck “Transcribing” state), `whisper_prepare_*`, `whisper_file_*`, `whisper_pass_*`, `extract_audio_*`, `slice_done`, `eval_*`, `zip_ok`, `consent_result`, `retry_*`
+- UI: `menu_*`, `hud_*`, `settings_open`, `settings_action`, `meeting_notice`, `meta_frontmost` (bundle id + has_url only)
+
+Menu / Settings: **Log permission probe** (same checks as Record, no capture) and **Reveal agent log**. Settings → Logs tails `agent.jsonl` live.
 
 ## Mac loop
 
@@ -46,4 +54,4 @@ bash scripts/mac_agent_loop.sh
 bash scripts/fetch_agent_log.sh
 ```
 
-Triage the last `launch` → `start_control_state` / `start_*` → `recorder_sckit_*` / `mic_*` lines. Compare `cdhash` across launches. One diagnosed bucket, then one action (grant this CDHash, relaunch, or request a rebuild).
+Triage the last `launch` → `start_*` / `stop_clicked` → `pipeline_status` / `whisper_*` / `talk_*` lines. Compare `cdhash` across launches. One diagnosed bucket, then one action (grant this CDHash, relaunch, or request a rebuild).

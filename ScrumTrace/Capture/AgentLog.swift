@@ -23,10 +23,19 @@ enum AgentLog {
         directoryURL.appendingPathComponent("recording.lock")
     }
 
+    /// Home-scrubbed, truncated technical text. Never pass titles, notes, transcripts, or keys.
+    static func sanitize(_ text: String) -> String {
+        var out = CapturePermissions.scrubHome(text)
+        if out.count > 280 {
+            out = String(out.prefix(280))
+        }
+        return out
+    }
+
     static func fields(_ extra: [String: String] = [:]) -> [String: String] {
         var merged = CapturePermissions.logFields()
         for (key, value) in extra {
-            merged[key] = value
+            merged[key] = sanitize(value)
         }
         return merged
     }

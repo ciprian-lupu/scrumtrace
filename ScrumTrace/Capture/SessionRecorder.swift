@@ -916,6 +916,7 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             return true
         }
         guard shouldNotify else { return }
+        AgentLog.event("capture_write_fail", ["error": AgentLog.sanitize(message)])
         freezeWriters()
         NotificationCenter.default.post(
             name: .scrumTraceCaptureFailed,

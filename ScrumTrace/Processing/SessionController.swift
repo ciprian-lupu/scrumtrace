@@ -109,6 +109,12 @@ final class SessionController: ObservableObject {
     }
 
     func stopRecording() {
+        AgentLog.event("stop_clicked", [
+            "session": manifest?.sessionId ?? "",
+            "recording": isRecording ? "1" : "0",
+            "busy": isBusy ? "1" : "0",
+            "inflight": startInFlight ? "1" : "0"
+        ])
         // Freeze before the unstructured Task hop so HUD/menu Stop cannot
         // leave a window where SCStream still appends (C1).
         recorder?.freezeWriters()
@@ -123,7 +129,7 @@ final class SessionController: ObservableObject {
         guard isRecording else { return }
         lastError = message
         statusLine = "Capture ended: \(message)"
-        AgentLog.event("capture_stream_failed", ["error": message])
+        AgentLog.event("capture_stream_failed", ["error": AgentLog.sanitize(message)])
         stopRecording()
     }
 
@@ -135,15 +141,18 @@ final class SessionController: ObservableObject {
         if captureState == .paused {
             if privacy.isCurrentlyTripped || privacy.currentCredentialApp() != nil {
                 statusLine = "Still auto-paused for a password manager"
+                AgentLog.event("resume_blocked", ["reason": "privacy"])
                 return
             }
             if !unpauseCaptureIfPrivacyClear() {
                 statusLine = "Still auto-paused for a password manager"
+                AgentLog.event("resume_blocked", ["reason": "privacy"])
                 return
             }
             pausedByPrivacy = false
             phase = .recording
             statusLine = "Recording"
+            AgentLog.event("resume_ok", ["source": "toggle"])
             log(.resume, [:])
             persistLivePipelineStatus()
             NotificationCenter.default.post(name: .scrumTraceCaptureGate, object: CaptureSessionState.recording)
@@ -154,6 +163,7 @@ final class SessionController: ObservableObject {
             sampler.isSuspended = true
             phase = .paused
             statusLine = "Paused — nothing is written"
+            AgentLog.event("pause_ok", ["source": "toggle"])
             log(.pause, [:])
             persistLivePipelineStatus()
             NotificationCenter.default.post(name: .scrumTraceCaptureGate, object: CaptureSessionState.paused)
@@ -161,11 +171,18 @@ final class SessionController: ObservableObject {
     }
 
     func pin() {
+        if !isRecording {
+            AgentLog.event("pin_ignored", ["reason": "not_recording"])
+        }
         guard isRecording else { return }
-        guard captureState.allowsNewCapture else { return }
+        guard captureState.allowsNewCapture else {
+            AgentLog.event("pin_ignored", ["reason": "paused"])
+            return
+        }
         let media = clock.currentMediaSeconds()
         pinTimes.append(media)
         pinTimesSessionId = manifest?.sessionId
+        AgentLog.event("pin_ok", ["t_media": String(format: "%.2f", media)])
         log(.pin, ["t_media": String(format: "%.2f", media)])
         statusLine = "Pinned \(Self.clock(media))"
         flashStatus()
@@ -187,24 +204,37 @@ final class SessionController: ObservableObject {
     }
 
     func openShot() {
+        if !isRecording {
+            AgentLog.event("shot_ignored", ["reason": "not_recording"])
+        }
         guard isRecording else { return }
         guard captureState.allowsNewCapture else {
             statusLine = "Paused — Shot is disabled"
+            AgentLog.event("shot_ignored", ["reason": "paused"])
             return
         }
+        AgentLog.event("shot_begin", ["session": manifest?.sessionId ?? ""])
         Task { await captureShot() }
     }
 
     func retryAnalysis() {
-        guard let id = lastSessionId ?? manifest?.sessionId else { return }
+        guard let id = lastSessionId ?? manifest?.sessionId else {
+            AgentLog.event("retry_ignored", ["reason": "no_session"])
+            return
+        }
         retryAnalysis(sessionId: id)
     }
 
     func retryAnalysis(sessionId: String) {
         guard !isBusy, !isRecording else {
             statusLine = isBusy ? "Already processing a session" : "Stop recording before retry"
+            AgentLog.event("retry_ignored", [
+                "reason": isBusy ? "busy" : "recording",
+                "session": sessionId
+            ])
             return
         }
+        AgentLog.event("retry_begin", ["session": sessionId])
         lastSessionId = sessionId
         Task { await runProcessor(sessionId: sessionId) }
     }
@@ -221,6 +251,7 @@ final class SessionController: ObservableObject {
         if startInFlight && !isRecording {
             captureFreeze.holdPauseThroughStart()
             sampler.isSuspended = true
+            AgentLog.event("pause_ok", ["source": "hotkey_hold_start"])
             return
         }
         guard isRecording else { return }
@@ -229,6 +260,7 @@ final class SessionController: ObservableObject {
             sampler.isSuspended = true
             phase = .paused
             statusLine = "Paused — nothing is written"
+            AgentLog.event("pause_ok", ["source": "hotkey"])
             log(.pause, ["source": "hotkey"])
             persistLivePipelineStatus()
             return
@@ -285,10 +317,14 @@ final class SessionController: ObservableObject {
         let waitResult = lock.wait(timeout: .now() + 5)
         if let message = stopBox.message {
             lastError = message
+            AgentLog.event("halt_stop_fail", ["error": AgentLog.sanitize(message)])
             log(.error, ["reason": "quit-stop", "error": message])
         } else if waitResult == .timedOut {
             lastError = "Quit wait for movie close timed out."
+            AgentLog.event("halt_stop_timeout", [:])
             log(.error, ["reason": "quit-stop-timeout"])
+        } else {
+            AgentLog.event("halt_stop_ok", [:])
         }
     }
 
@@ -312,7 +348,13 @@ final class SessionController: ObservableObject {
     private func startRecordingAsync() async {
         defer { startInFlight = false }
         defer { captureFreeze.markStartInFlight(false) }
-        guard !isRecording, !isBusy else { return }
+        guard !isRecording, !isBusy else {
+            AgentLog.event("start_aborted", [
+                "recording": isRecording ? "1" : "0",
+                "busy": isBusy ? "1" : "0"
+            ])
+            return
+        }
         lastError = nil
         var abandonedId: String?
         do {
@@ -359,6 +401,7 @@ final class SessionController: ObservableObject {
                 lastError = writeFail
                 phase = .recording
                 statusLine = writeFail
+                AgentLog.event("start_audio_write_fail", ["error": AgentLog.sanitize(writeFail)])
                 stopRecording()
                 return
             }
@@ -424,10 +467,8 @@ final class SessionController: ObservableObject {
             Task.detached {
                 do {
                     try await transcriber.prepare(model: model)
-                    AgentLog.event("whisper_prepare_ok", ["model": model])
                 } catch {
                     let message = error.localizedDescription
-                    AgentLog.event("whisper_prepare_fail", ["error": message])
                     await MainActor.run { [weak self] in
                         self?.lastError = message
                     }
@@ -448,7 +489,7 @@ final class SessionController: ObservableObject {
             }
             lastError = error.localizedDescription
             statusLine = error.localizedDescription
-            AgentLog.event("start_fail", ["error": error.localizedDescription])
+            AgentLog.event("start_fail", ["error": AgentLog.sanitize(error.localizedDescription)])
             #if os(macOS)
             Self.presentStartFailureAlert(error.localizedDescription)
             #endif
@@ -456,7 +497,10 @@ final class SessionController: ObservableObject {
     }
 
     private func stopRecordingAsync() async {
-        guard isRecording else { return }
+        guard isRecording else {
+            AgentLog.event("stop_ignored", ["reason": "not_recording"])
+            return
+        }
         isBusy = true
         statusLine = "Stopping capture"
         AgentLog.event("stop_requested", ["session": manifest?.sessionId ?? ""])
@@ -470,8 +514,10 @@ final class SessionController: ObservableObject {
         phase = .transcribing
         do {
             try await recorder?.stop()
+            AgentLog.event("stop_capture_ok", ["session": manifest?.sessionId ?? ""])
         } catch {
             lastError = error.localizedDescription
+            AgentLog.event("stop_capture_fail", ["error": AgentLog.sanitize(error.localizedDescription)])
         }
         do {
             try recorder?.reclaimLiveCaptureIfRewritten()
@@ -503,6 +549,7 @@ final class SessionController: ObservableObject {
             isBusy = false
             phase = .offlineFailed
             statusLine = "Session manifest missing after stop"
+            AgentLog.event("stop_manifest_missing", [:])
         }
         recorder = nil
         captureFreeze.attach(nil)
@@ -510,6 +557,7 @@ final class SessionController: ObservableObject {
 
     private func runProcessor(sessionId: String) async {
         isBusy = true
+        AgentLog.event("processor_begin", ["session": sessionId])
         do {
             var local = try? vault.loadManifest(id: sessionId)
             if let memory = manifest, memory.sessionId == sessionId {
@@ -558,20 +606,34 @@ final class SessionController: ObservableObject {
                 configuration: settings.providerConfiguration(),
                 whisperModel: settings.whisperModel,
                 onStatus: { [weak self] status, line in
+                    AgentLog.event("pipeline_status", [
+                        "status": status.rawValue,
+                        "line": AgentLog.sanitize(line)
+                    ])
                     self?.phase = status
                     self?.statusLine = line
                 }
             )
             if let result {
+                AgentLog.event("processor_ok", [
+                    "session": result.sessionId,
+                    "phase": result.pipelineStatus.rawValue
+                ])
                 manifest = result
                 lastSessionId = result.sessionId
                 phase = result.pipelineStatus
                 vault.revealInFinder(sessionId: result.sessionId)
+            } else {
+                AgentLog.event("processor_fail", ["session": sessionId, "error": "processor_missing"])
             }
         } catch {
             lastError = error.localizedDescription
             phase = .offlineFailed
             statusLine = error.localizedDescription
+            AgentLog.event("processor_fail", [
+                "session": sessionId,
+                "error": AgentLog.sanitize(error.localizedDescription)
+            ])
         }
         isBusy = false
     }
@@ -599,6 +661,11 @@ final class SessionController: ObservableObject {
         alert.addButton(withTitle: "Approve upload")
         alert.addButton(withTitle: "Local export only")
         let approved = alert.runModal() == .alertFirstButtonReturn
+        AgentLog.event("consent_result", [
+            "approved": approved ? "1" : "0",
+            "provider": settings.provider.rawValue,
+            "clip": (approved && uploadsClip) ? "1" : "0"
+        ])
         return UploadConsent(
             approved: approved,
             approvedAt: Date(),
@@ -623,13 +690,20 @@ final class SessionController: ObservableObject {
             suppressHUD = false
             NotificationCenter.default.post(name: .scrumTraceHUDSuppress, object: nil)
         }
+        if !captureState.allowsNewCapture {
+            AgentLog.event("shot_fail", ["reason": "paused"])
+        }
         guard captureState.allowsNewCapture else { return }
         let media = clock.currentMediaSeconds()
         guard let image = ScreenSnap.capture() else {
             lastError = "Could not capture the display."
+            AgentLog.event("shot_fail", ["reason": "display"])
             return
         }
         // Pause can land during CGDisplayCreateImage. Do not persist that frame (C1).
+        if !captureState.allowsNewCapture {
+            AgentLog.event("shot_fail", ["reason": "paused"])
+        }
         guard captureState.allowsNewCapture else { return }
         let index = vault.nextShotIndex(sessionId: manifest.sessionId)
         let stem = String(format: "%03d", index)
@@ -639,6 +713,7 @@ final class SessionController: ObservableObject {
               let rep = NSBitmapImageRep(data: tiff),
               let png = rep.representation(using: .png, properties: [:]) else {
             lastError = "Could not encode the Shot PNG."
+            AgentLog.event("shot_fail", ["reason": "encode"])
             return
         }
         do {
@@ -646,6 +721,10 @@ final class SessionController: ObservableObject {
         } catch {
             lastError = error.localizedDescription
             statusLine = "Could not write the Shot PNG."
+            AgentLog.event("shot_fail", [
+                "reason": "write",
+                "error": AgentLog.sanitize(error.localizedDescription)
+            ])
             return
         }
         let record = ShotRecord(
@@ -719,6 +798,7 @@ final class SessionController: ObservableObject {
             }
         } else {
             lastError = "Could not encode the annotated Shot."
+            AgentLog.event("shot_fail", ["reason": "annotate_encode"])
             return
         }
         let jsonRel = "\(ScrumTracePath.shots)/\(stemFrom(record.id)).json"
@@ -754,6 +834,11 @@ final class SessionController: ObservableObject {
             lastError = error.localizedDescription
             statusLine = "Shot annotated; catalog write failed. Stop still keeps this Shot."
         }
+        AgentLog.event("shot_save", [
+            "id": stored.id,
+            "source": source.rawValue,
+            "note_chars": String(note.count)
+        ])
         log(.shot, ["id": stored.id, "note": note])
         shotWindow = nil
     }
@@ -780,6 +865,7 @@ final class SessionController: ObservableObject {
         sampler.isSuspended = true
         phase = .paused
         statusLine = "Auto-paused for \(bundle)"
+        AgentLog.event("privacy_pause", ["bundle": bundle])
         log(.privacyPause, ["bundle": bundle])
         persistLivePipelineStatus()
         NotificationCenter.default.post(name: .scrumTraceCaptureGate, object: CaptureSessionState.paused)
@@ -793,6 +879,7 @@ final class SessionController: ObservableObject {
             pausedByPrivacy = false
             phase = .recording
             statusLine = "Recording"
+            AgentLog.event("privacy_resume", [:])
             log(.resume, ["reason": "privacy_clear"])
             persistLivePipelineStatus()
             NotificationCenter.default.post(name: .scrumTraceCaptureGate, object: CaptureSessionState.recording)
@@ -870,6 +957,10 @@ final class SessionController: ObservableObject {
         let signature = "\(meta.bundleIdentifier)|\(meta.windowTitle)|\(meta.url ?? "")"
         guard signature != lastMetaSignature else { return }
         lastMetaSignature = signature
+        AgentLog.event("meta_frontmost", [
+            "bundle": meta.bundleIdentifier,
+            "has_url": (meta.url?.isEmpty == false) ? "1" : "0"
+        ])
         if let url = meta.url, !url.isEmpty {
             log(.url, ["url": url, "title": meta.windowTitle, "app": meta.appName])
         } else {

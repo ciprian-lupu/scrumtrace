@@ -87,16 +87,20 @@ final class HotkeyManager {
         guard hotKeyID.signature == signature, let action = Action(rawValue: hotKeyID.id) else {
             return noErr
         }
+        let host = String(format: "%.3f", CMTimeGetSeconds(CMClockGetTime(CMClockGetHostTimeClock())))
         if action == .pause {
-            AgentLog.event("hotkey_pause", [
-                "host": String(format: "%.3f", CMTimeGetSeconds(CMClockGetTime(CMClockGetHostTimeClock())))
-            ])
+            AgentLog.event("hotkey_pause", ["host": host])
             // Freeze screen/audio/mic/metadata before the MainActor hop (C1).
             let froze = captureFreeze.freezeForPauseHotkey()
             Task { @MainActor [weak self] in
                 self?.controller?.applyHotkeyPause(didFreezeWriters: froze)
             }
             return noErr
+        }
+        if action == .shot {
+            AgentLog.event("hotkey_shot", ["host": host])
+        } else if action == .pin {
+            AgentLog.event("hotkey_pin", ["host": host])
         }
         Task { @MainActor [weak self] in
             guard let self else { return }

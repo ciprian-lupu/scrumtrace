@@ -23,20 +23,40 @@ final class WhisperTranscriber: @unchecked Sendable {
     }
 
     func prepare(model: String = WhisperTranscriber.defaultStoredModel) async throws {
+        let started = Date()
+        let resolved = Self.whisperKitModelName(model)
         let work: Task<Void, Error>
         lock.lock()
         if ready {
             lock.unlock()
+            AgentLog.event("whisper_prepare_ok", [
+                "model": resolved,
+                "reuse": "1",
+                "elapsed_ms": "0"
+            ])
             return
         }
         if let preparing {
             work = preparing
             lock.unlock()
-            try await work.value
-            return
+            AgentLog.event("whisper_prepare_wait", ["model": resolved])
+            do {
+                try await work.value
+                AgentLog.event("whisper_prepare_ok", [
+                    "model": resolved,
+                    "reuse": "1",
+                    "elapsed_ms": String(Int(Date().timeIntervalSince(started) * 1000))
+                ])
+                return
+            } catch {
+                AgentLog.event("whisper_prepare_fail", [
+                    "model": resolved,
+                    "error": AgentLog.sanitize(error.localizedDescription)
+                ])
+                throw error
+            }
         }
         work = Task.detached {
-            let resolved = Self.whisperKitModelName(model)
             AgentLog.event("whisper_prepare_begin", ["model": resolved])
             let config = WhisperKitConfig(
                 model: resolved,
@@ -56,69 +76,99 @@ final class WhisperTranscriber: @unchecked Sendable {
         lock.unlock()
         do {
             try await work.value
+            AgentLog.event("whisper_prepare_ok", [
+                "model": resolved,
+                "reuse": "0",
+                "elapsed_ms": String(Int(Date().timeIntervalSince(started) * 1000))
+            ])
         } catch {
             lock.lock()
             if !self.ready {
                 preparing = nil
             }
             lock.unlock()
+            AgentLog.event("whisper_prepare_fail", [
+                "model": resolved,
+                "error": AgentLog.sanitize(error.localizedDescription)
+            ])
             throw error
         }
     }
 
     func transcribeFile(at url: URL, sessionURL: URL? = nil) async throws -> FullTranscript {
-        try Self.refuseSymlinkMedia(url, sessionRoot: sessionURL)
-        let work: URL
-        if let sessionURL {
-            guard let rel = ExportRel.unfollowedRelative(url, sessionRoot: sessionURL) else {
+        let via = sessionURL == nil ? "tmp" : "session"
+        let started = Date()
+        AgentLog.event("whisper_file_begin", ["via": via])
+        do {
+            try Self.refuseSymlinkMedia(url, sessionRoot: sessionURL)
+            let work: URL
+            if let sessionURL {
+                guard let rel = ExportRel.unfollowedRelative(url, sessionRoot: sessionURL) else {
+                    throw NSError(
+                        domain: "ScrumTrace",
+                        code: 4,
+                        userInfo: [NSLocalizedDescriptionKey: "Refusing to transcribe a symbolic link."]
+                    )
+                }
+                work = try ExportRel.copyContainedToTemporaryFile(
+                    relative: rel,
+                    sessionURL: sessionURL,
+                    prefix: "scrumtrace-whisper"
+                )
+            } else {
+                // Hold-to-Talk and extracted AAC live under TMPDIR. `/tmp` is a
+                // symlink on macOS; copy via O_NOFOLLOW instead of refusing the parent.
+                work = try ExportRel.copyUnfollowedToTemporaryFile(
+                    url,
+                    prefix: "scrumtrace-whisper"
+                )
+            }
+            defer { ExportRel.removePrivateTemporaryURL(work) }
+            let local = lockKit()
+            guard let local else {
                 throw NSError(
                     domain: "ScrumTrace",
-                    code: 4,
-                    userInfo: [NSLocalizedDescriptionKey: "Refusing to transcribe a symbolic link."]
+                    code: 1,
+                    userInfo: [NSLocalizedDescriptionKey: "Whisper model is not loaded yet."]
                 )
             }
-            work = try ExportRel.copyContainedToTemporaryFile(
-                relative: rel,
-                sessionURL: sessionURL,
-                prefix: "scrumtrace-whisper"
-            )
-        } else {
-            // Hold-to-Talk and extracted AAC live under TMPDIR. `/tmp` is a
-            // symlink on macOS; copy via O_NOFOLLOW instead of refusing the parent.
-            work = try ExportRel.copyUnfollowedToTemporaryFile(
-                url,
-                prefix: "scrumtrace-whisper"
-            )
-        }
-        defer { ExportRel.removePrivateTemporaryURL(work) }
-        let local = lockKit()
-        guard let local else {
-            throw NSError(
-                domain: "ScrumTrace",
-                code: 1,
-                userInfo: [NSLocalizedDescriptionKey: "Whisper model is not loaded yet."]
-            )
-        }
-        let options = DecodingOptions(wordTimestamps: true)
-        let results = try await local.transcribe(audioPath: work.path, decodeOptions: options)
-        var segments: [TranscriptSegment] = []
-        for result in results {
-            for segment in result.segments {
-                let words = (segment.words ?? []).map { word in
-                    TranscriptWord(start: TimeInterval(word.start), end: TimeInterval(word.end), text: word.word)
-                }
-                segments.append(
-                    TranscriptSegment(
-                        start: TimeInterval(segment.start),
-                        end: TimeInterval(segment.end),
-                        text: segment.text.trimmingCharacters(in: .whitespacesAndNewlines),
-                        speaker: nil,
-                        words: words
+            let options = DecodingOptions(wordTimestamps: true)
+            let results = try await local.transcribe(audioPath: work.path, decodeOptions: options)
+            var segments: [TranscriptSegment] = []
+            for result in results {
+                for segment in result.segments {
+                    let words = (segment.words ?? []).map { word in
+                        TranscriptWord(start: TimeInterval(word.start), end: TimeInterval(word.end), text: word.word)
+                    }
+                    segments.append(
+                        TranscriptSegment(
+                            start: TimeInterval(segment.start),
+                            end: TimeInterval(segment.end),
+                            text: segment.text.trimmingCharacters(in: .whitespacesAndNewlines),
+                            speaker: nil,
+                            words: words
+                        )
                     )
-                )
+                }
             }
+            let transcript = FullTranscript(
+                sessionId: "",
+                language: results.first?.language ?? "en",
+                segments: segments
+            )
+            AgentLog.event("whisper_file_ok", [
+                "via": via,
+                "segments": String(transcript.segments.count),
+                "ms": String(Int(Date().timeIntervalSince(started) * 1000))
+            ])
+            return transcript
+        } catch {
+            AgentLog.event("whisper_file_fail", [
+                "via": via,
+                "error": AgentLog.sanitize(error.localizedDescription)
+            ])
+            throw error
         }
-        return FullTranscript(sessionId: "", language: results.first?.language ?? "en", segments: segments)
     }
 
     func transcribeVoiceNote(at url: URL) async throws -> String {
@@ -140,6 +190,7 @@ final class WhisperTranscriber: @unchecked Sendable {
         do {
             dest = try ExportRel.makePrivateTemporaryURL(prefix: "scrumtrace-system-audio", ext: "m4a")
         } catch {
+            AgentLog.event("extract_audio_fail", ["error": "temp_url"])
             return try await transcribeFile(at: movieCopy)
         }
         do {
@@ -147,6 +198,7 @@ final class WhisperTranscriber: @unchecked Sendable {
             defer { ExportRel.removePrivateTemporaryURL(dest) }
             return try await transcribeFile(at: dest)
         } catch {
+            AgentLog.event("extract_audio_fail", ["error": AgentLog.sanitize(error.localizedDescription)])
             ExportRel.removePrivateTemporaryURL(dest)
             return try await transcribeFile(at: movieCopy)
         }
@@ -176,6 +228,7 @@ final class WhisperTranscriber: @unchecked Sendable {
                 userInfo: [NSLocalizedDescriptionKey: "System-audio extract from session.mp4 failed."]
             )
         }
+        AgentLog.event("extract_audio_ok", [:])
     }
 
     private func lockKit() -> WhisperKit? {

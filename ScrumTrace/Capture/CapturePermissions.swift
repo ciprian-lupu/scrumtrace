@@ -139,8 +139,11 @@ enum CapturePermissions {
     @discardableResult
     static func requestScreenAccess() -> Bool {
         #if os(macOS)
-        return CGRequestScreenCaptureAccess()
+        let granted = CGRequestScreenCaptureAccess()
+        AgentLog.event("screen_request", ["granted": granted ? "1" : "0"])
+        return granted
         #else
+        AgentLog.event("screen_request", ["granted": "0"])
         return false
         #endif
     }

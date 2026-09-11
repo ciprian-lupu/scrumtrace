@@ -193,6 +193,7 @@ final class MenuBarController: NSObject {
     }
 
     @objc private func start() {
+        AgentLog.event("menu_start", [:])
         let readiness = CapturePermissions.readiness()
         if !controller.settings.meetingNoticeAccepted {
             presentMeetingNotice()
@@ -215,12 +216,15 @@ final class MenuBarController: NSObject {
         alert.addButton(withTitle: "I will tell participants")
         alert.addButton(withTitle: "Cancel")
         NSApp.activate(ignoringOtherApps: true)
-        if alert.runModal() == .alertFirstButtonReturn {
+        let accepted = alert.runModal() == .alertFirstButtonReturn
+        AgentLog.event("meeting_notice", ["accepted": accepted ? "1" : "0"])
+        if accepted {
             controller.settings.meetingNoticeAccepted = true
         }
     }
 
     private func presentStartBlocked(_ readiness: CaptureReadiness) {
+        AgentLog.event("start_blocked_sheet", ["reason": CapturePermissions.readinessLabel()])
         let alert = NSAlert()
         alert.messageText = "Cannot start recording"
         alert.informativeText = readiness.userMessage
@@ -262,24 +266,46 @@ final class MenuBarController: NSObject {
             }
         }
     }
-    @objc private func stop() { controller.stopRecording() }
-    @objc private func pause() { controller.togglePause() }
-    @objc private func shot() { controller.openShot() }
-    @objc private func pin() { controller.pin() }
-    @objc private func retry() { controller.retryAnalysis() }
-    @objc private func reveal() { controller.revealLast() }
+    @objc private func stop() {
+        AgentLog.event("menu_stop", [:])
+        controller.stopRecording()
+    }
+    @objc private func pause() {
+        AgentLog.event("menu_pause", [:])
+        controller.togglePause()
+    }
+    @objc private func shot() {
+        AgentLog.event("menu_shot", [:])
+        controller.openShot()
+    }
+    @objc private func pin() {
+        AgentLog.event("menu_pin", [:])
+        controller.pin()
+    }
+    @objc private func retry() {
+        AgentLog.event("menu_retry", [:])
+        controller.retryAnalysis()
+    }
+    @objc private func reveal() {
+        AgentLog.event("menu_reveal", [:])
+        controller.revealLast()
+    }
     @objc private func revealLog() {
+        AgentLog.event("menu_reveal_log", [:])
         AgentLog.reveal()
     }
     @objc private func probePermissions() {
+        AgentLog.event("menu_probe", [:])
         CapturePermissions.probeAndLog()
         controller.statusLine = "Permission probe written to agent log"
     }
     @objc private func settings() {
+        AgentLog.event("menu_settings", [:])
         NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
         NSApp.activate(ignoringOtherApps: true)
     }
     @objc private func exportDiagnostics() {
+        AgentLog.event("menu_diagnostics", [:])
         do {
             let url = try AgentLog.exportDiagnosticBundle()
             NSWorkspace.shared.activateFileViewerSelecting([url])
@@ -289,39 +315,48 @@ final class MenuBarController: NSObject {
         }
     }
     @objc private func revealSessions() {
+        AgentLog.event("menu_reveal_sessions", [:])
         controller.vault.revealRootInFinder()
     }
     @objc private func askScreen() {
+        AgentLog.event("menu_ask_screen", [:])
         Task.detached {
             _ = CapturePermissions.requestScreenAccess()
         }
     }
     @objc private func openScreenSettings() {
+        AgentLog.event("menu_screen_settings", [:])
         SystemPrivacySettings.openScreenRecording()
     }
     @objc private func openMicSettings() {
+        AgentLog.event("menu_mic_settings", [:])
         SystemPrivacySettings.openMicrophone()
     }
     @objc private func checkUpdates() {
+        AgentLog.event("menu_updates", [:])
         if let url = URL(string: "https://github.com/ciprian-lupu/scrumtrace/releases") {
             NSWorkspace.shared.open(url)
         }
     }
     @objc private func relaunch() {
+        AgentLog.event("menu_relaunch", [:])
         controller.relaunchForPermissions()
     }
     @objc private func quit() {
+        AgentLog.event("menu_quit", [:])
         // applicationWillTerminate freezes writers. Do not start the
         // transcription pipeline — that would run Whisper/AI on a dying process.
         NSApp.terminate(nil)
     }
     @objc private func openRecent(_ sender: NSMenuItem) {
         guard let id = sender.representedObject as? String else { return }
+        AgentLog.event("menu_reveal", ["session": id])
         controller.vault.revealInFinder(sessionId: id)
     }
 
     @objc private func retryRecent(_ sender: NSMenuItem) {
         guard let id = sender.representedObject as? String else { return }
+        AgentLog.event("menu_retry", ["session": id])
         controller.retryAnalysis(sessionId: id)
     }
 }

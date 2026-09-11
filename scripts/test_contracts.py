@@ -962,6 +962,10 @@ def test_dual_transcript_merge_wired() -> None:
     assert "openai_whisper-large-v3_turbo" in speech
     assert "openai_whisper-large-v3-v20240930_turbo_632MB" in speech
     assert "whisper_prepare_begin" in speech
+    assert "whisper_prepare_wait" in speech
+    assert "whisper_file_begin" in speech
+    assert "whisper_file_ok" in speech
+    assert "whisper_file_fail" in speech
     assert "Refusing to transcribe a symbolic link" in speech
     assert "parentIsSymbolicLink" in speech
     assert "isReadableSessionFile" in speech
@@ -1140,6 +1144,7 @@ def test_pipeline_timing_stays_in_archive() -> None:
     assert "screenGrantedNeedsRelaunch" in perms
     assert "CGRequestScreenCaptureAccess" in perms
     assert "func requestScreenAccess" in perms
+    assert "screen_request" in perms
     assert "func signingFields" in perms
     assert "cdhash" in perms
     assert "func probeAndLog" in perms
@@ -1164,6 +1169,9 @@ def test_pipeline_timing_stays_in_archive() -> None:
     assert "windowTitle" not in agent_log
     assert "apiKey" not in agent_log
     assert "NSLog" in agent_log
+    assert "static func sanitize" in agent_log
+    assert "scrubHome" in agent_log
+    assert "prefix(280)" in agent_log
     loop = (ROOT / "scripts" / "mac_agent_loop.sh").read_text()
     assert "recording.lock" in loop
     assert "mac_publish_agent_log.sh" in loop
@@ -1219,8 +1227,10 @@ def test_pipeline_timing_stays_in_archive() -> None:
     assert "markStartInFlight(true)" in start_btn
     assert start_btn.index("startInFlight = true") < start_btn.index("markStartInFlight(true)")
     stop_btn = controller.split("func stopRecording()")[1].split("func handleCaptureStreamFailure")[0]
+    assert "stop_clicked" in stop_btn
     assert "freezeWriters" in stop_btn
     assert "scrumTraceCaptureGate" in stop_btn
+    assert stop_btn.index("stop_clicked") < stop_btn.index("freezeWriters")
     assert stop_btn.index("freezeWriters") < stop_btn.index("Task { await stopRecordingAsync()")
     assert stop_btn.index("freezeWriters") < stop_btn.index("scrumTraceCaptureGate")
     start_rec = controller.split("func startRecordingAsync")[1].split("func stopRecordingAsync")[0]
@@ -1291,6 +1301,111 @@ def test_pipeline_timing_stays_in_archive() -> None:
     assert "NSHostingView" not in hud
     assert "import SwiftUI" not in hud
     assert "buttonStyle" not in hud
+
+
+def test_agent_log_covers_debug_events() -> None:
+    agent = (ROOT / "ScrumTrace" / "Capture" / "AgentLog.swift").read_text()
+    assert "static func sanitize" in agent
+    assert "scrubHome" in agent
+    controller = (ROOT / "ScrumTrace" / "Processing" / "SessionController.swift").read_text()
+    for name in (
+        "stop_clicked",
+        "stop_capture_ok",
+        "stop_capture_fail",
+        "stop_manifest_missing",
+        "stop_ignored",
+        "processor_begin",
+        "processor_ok",
+        "processor_fail",
+        "pipeline_status",
+        "consent_result",
+        "retry_begin",
+        "retry_ignored",
+        "pause_ok",
+        "resume_ok",
+        "resume_blocked",
+        "pin_ok",
+        "pin_ignored",
+        "shot_begin",
+        "shot_fail",
+        "shot_save",
+        "shot_ignored",
+        "privacy_pause",
+        "privacy_resume",
+        "meta_frontmost",
+        "halt_stop_ok",
+        "halt_stop_fail",
+        "halt_stop_timeout",
+        "start_audio_write_fail",
+        "start_aborted",
+    ):
+        assert name in controller, name
+    assert "note_chars" in controller
+    assert '"note": note' in controller
+    speech = (ROOT / "ScrumTrace" / "Speech" / "WhisperTranscriber.swift").read_text()
+    for name in (
+        "whisper_prepare_begin",
+        "whisper_prepare_ok",
+        "whisper_prepare_fail",
+        "whisper_prepare_wait",
+        "whisper_file_begin",
+        "whisper_file_ok",
+        "whisper_file_fail",
+        "extract_audio_ok",
+        "extract_audio_fail",
+    ):
+        assert name in speech, name
+    processor = (ROOT / "ScrumTrace" / "Processing" / "SessionProcessor.swift").read_text()
+    for name in ("slice_done", "eval_done", "eval_slice", "zip_ok", "whisper_pass_ok", "whisper_pass_fail"):
+        assert name in processor, name
+    shot = (ROOT / "ScrumTrace" / "UI" / "ShotNoteWindow.swift").read_text()
+    for name in (
+        "talk_press",
+        "talk_release",
+        "talk_start_fail",
+        "talk_abort",
+        "talk_transcribe_begin",
+        "talk_transcribe_ok",
+        "talk_transcribe_empty",
+        "talk_transcribe_fail",
+    ):
+        assert name in shot, name
+    assert "chars" in shot
+    menu = (ROOT / "ScrumTrace" / "UI" / "MenuBarController.swift").read_text()
+    for name in (
+        "menu_start",
+        "menu_stop",
+        "menu_pause",
+        "menu_pin",
+        "menu_shot",
+        "menu_retry",
+        "menu_settings",
+        "meeting_notice",
+        "start_blocked_sheet",
+    ):
+        assert name in menu, name
+    hotkey = (ROOT / "ScrumTrace" / "UI" / "HotkeyManager.swift").read_text()
+    assert "hotkey_pause" in hotkey
+    assert "hotkey_shot" in hotkey
+    assert "hotkey_pin" in hotkey
+    privacy = (ROOT / "ScrumTrace" / "Capture" / "PrivacyGuard.swift").read_text()
+    assert "privacy_trip" in privacy
+    assert "privacy_clear" in privacy
+    recorder = (ROOT / "ScrumTrace" / "Capture" / "SessionRecorder.swift").read_text()
+    assert "capture_write_fail" in recorder
+    perms = (ROOT / "ScrumTrace" / "Capture" / "CapturePermissions.swift").read_text()
+    assert "screen_request" in perms
+    settings = (ROOT / "ScrumTrace" / "UI" / "SettingsView.swift").read_text()
+    assert "settings_action" in settings
+    app = (ROOT / "ScrumTrace" / "App" / "AppDelegate.swift").read_text()
+    assert "settings_open" in app
+    hud = (ROOT / "ScrumTrace" / "UI" / "RecordingHUDWindow.swift").read_text()
+    assert "hud_stop" in hud
+    assert "hud_pause" in hud
+    debug = (ROOT / "AGENT_DEBUG.md").read_text()
+    assert "pipeline_status" in debug
+    assert "stop_clicked" in debug
+    assert "whisper_file_" in debug
 
 
 def test_pause_privacy_and_metadata_gate() -> None:
