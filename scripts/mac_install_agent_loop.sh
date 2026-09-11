@@ -43,6 +43,8 @@ cat > "$PLIST" <<EOF
   <dict>
     <key>SCRUMTRACE_REPO</key>
     <string>${REPO}</string>
+    <key>SCRUMTRACE_BRANCH</key>
+    <string>develop</string>
     <key>PATH</key>
     <string>/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:/opt/homebrew/bin</string>
   </dict>

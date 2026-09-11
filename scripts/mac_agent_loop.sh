@@ -10,7 +10,7 @@ if [[ "$(uname -s)" != "Darwin" ]]; then
 fi
 
 REPO="${SCRUMTRACE_REPO:-$HOME/development/scrumtrace}"
-BRANCH="${SCRUMTRACE_BRANCH:-cursor/scrumtrace-implementation-0397}"
+BRANCH="${SCRUMTRACE_BRANCH:-develop}"
 STABLE="${SCRUMTRACE_STABLE:-$HOME/Applications/ScrumTrace.app}"
 LOG_DIR="${HOME}/Library/Logs/ScrumTrace"
 RECORD_LOCK="${LOG_DIR}/recording.lock"

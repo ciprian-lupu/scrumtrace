@@ -17,10 +17,12 @@ The working spec is [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) (contracts 
 
 ## Open in Cursor
 
+Working branch is **`develop`**. GitHub `main` is an older spec-only history — do not merge or force-push it. Agents: start at [AGENTS.md](AGENTS.md).
+
 This repo is the Cursor project. On a Mac:
 
 ```bash
-git clone -b cursor/scrumtrace-implementation-0397 https://github.com/ciprian-lupu/scrumtrace.git
+git clone -b develop https://github.com/ciprian-lupu/scrumtrace.git
 cd scrumtrace
 cursor .
 ```
@@ -65,7 +67,7 @@ Then open `samples/mock-session/export/SESSION_BRIEF.html`. The image-only failu
 
 ## Agent debug loop
 
-The Mac writes `~/Library/Logs/ScrumTrace/agent.jsonl` and a LaunchAgent can pull, rebuild, and publish that log to `cursor/scrumtrace-agent-logs-0397`. Cloud agents read it with `bash scripts/fetch_agent_log.sh`. See [AGENT_DEBUG.md](AGENT_DEBUG.md).
+The Mac writes `~/Library/Logs/ScrumTrace/agent.jsonl` and a LaunchAgent can pull `develop`, rebuild **only on request**, and publish that log to `cursor/scrumtrace-agent-logs-0397`. Cloud agents read it with `bash scripts/fetch_agent_log.sh`. See [AGENT_DEBUG.md](AGENT_DEBUG.md).
 
 ## Next gates (must run on a Mac)
 

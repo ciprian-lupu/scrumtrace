@@ -29,7 +29,7 @@ Menu / Settings: **Log permission probe** (same checks as Record, no capture) an
 
 1. Drop a stale `recording.lock` if that pid is gone. Skip restart if the pid is live.
 2. Skip `git pull` if the working tree is dirty.
-3. Fast-forward `cursor/scrumtrace-implementation-0397`.
+3. Fast-forward **`develop`**.
 4. Rebuild `~/Applications/ScrumTrace.app` only on explicit request or a missing app.
 5. Publish the last 4000 log lines to `cursor/scrumtrace-agent-logs-0397`.
 

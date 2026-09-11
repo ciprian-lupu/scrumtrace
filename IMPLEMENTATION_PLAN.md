@@ -3,6 +3,8 @@
 
 Status: **contracts revised 2026-09-09** after second spec review. Direction is approved. The full spec is **not locked** and is **not production-ready**. No new product surface until the five contract closures below are implemented and gated.
 
+Implementation lives on GitHub branch **`develop`**. Continuation handbook: [AGENTS.md](AGENTS.md). Software for phases -1–6 is in tree; hardware gates in [samples/GATE_LOG.md](samples/GATE_LOG.md) are still open.
+
 ---
 
 ## 0. Spec-review closures (do these; do not redesign)

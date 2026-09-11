@@ -1,0 +1,16 @@
+---
+description: ScrumTrace remotes, gates, and agent continuation
+alwaysApply: true
+---
+
+# ScrumTrace
+
+Before product, remote, TCC, or gate work, read `AGENTS.md`.
+
+- Implementation branch: **`develop`** on `https://github.com/ciprian-lupu/scrumtrace`.
+- GitHub `main` is an unrelated spec history. Do not merge, rebase, or force-push it.
+- Spec: `IMPLEMENTATION_PLAN.md`. Do not add product surfaces until C1–C5 are gated on a Mac.
+- Linux green (`bash scripts/run_linux_tests.sh`) is not a hardware gate. Fill `samples/GATE_LOG.md` only from Mac evidence.
+- Rebuild `~/Applications/ScrumTrace.app` only on request. Ad-hoc Debug builds are a new TCC client.
+- Leave regenerated `samples/mock-session/export/session-pack.zip` uncommitted unless mock content changed.
+- `scripts/test_contracts.py` greps required snippets; keep those strings.
