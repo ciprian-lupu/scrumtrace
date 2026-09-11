@@ -172,6 +172,8 @@ def gate1_required_keys(*, audio_wav_exists: bool, ffprobe_available: bool) -> l
         "export_missing_passphrase",
         "no_new_shot_png_during_pause",
         "manifest_pauses_closed",
+        "manifest_pause_count_ge_3",
+        "manifest_media_ge_1200",
         "capture_layout_exists",
         "wav_start_present",
     ]
@@ -213,6 +215,27 @@ def manifest_pauses_closed(manifest: dict[str, object] | None) -> bool:
     return all(
         isinstance(pause, dict) and pause.get("resume_wall") is not None for pause in pauses
     )
+
+
+def manifest_pause_count(manifest: dict[str, object] | None) -> int:
+    if manifest is None:
+        return 0
+    pauses = manifest.get("pauses")
+    if not isinstance(pauses, list):
+        return 0
+    return len(pauses)
+
+
+def manifest_media_seconds(manifest: dict[str, object] | None) -> float | None:
+    if manifest is None:
+        return None
+    duration = manifest.get("duration")
+    if not isinstance(duration, dict):
+        return None
+    media_seconds = duration.get("media_seconds")
+    if not isinstance(media_seconds, (int, float)) or isinstance(media_seconds, bool):
+        return None
+    return float(media_seconds)
 
 
 def zip_member_text(zip_path: Path) -> str:
@@ -331,6 +354,8 @@ def main() -> int:
         manifest_media_matches_durations = manifest_media_matches(mp4_duration, manifest)
 
     manifest = read_manifest(manifest_path)
+    pause_count = manifest_pause_count(manifest)
+    media_seconds = manifest_media_seconds(manifest)
 
     checks: dict[str, object] = {
         "session_mp4_exists": mp4.is_file(),
@@ -362,6 +387,10 @@ def main() -> int:
         "wav_within_half_second_of_mp4": wav_within_half_second_of_mp4,
         "manifest_media_matches_durations": manifest_media_matches_durations,
         "manifest_pauses_closed": manifest_pauses_closed(manifest),
+        "manifest_pause_count": pause_count,
+        "manifest_pause_count_ge_3": pause_count >= 3,
+        "manifest_media_seconds": media_seconds,
+        "manifest_media_ge_1200": media_seconds is not None and media_seconds >= 1200,
     }
     required = gate1_required_keys(
         audio_wav_exists=wav.is_file(),

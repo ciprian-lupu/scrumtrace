@@ -55,3 +55,9 @@ bash scripts/fetch_agent_log.sh
 ```
 
 Triage the last `launch` → `start_*` / `stop_clicked` → `pipeline_status` / `whisper_*` / `talk_*` lines. Compare `cdhash` across launches. One diagnosed bucket, then one action (grant this CDHash, relaunch, or request a rebuild).
+
+After a session exists, score every plan gate that has artifacts (does not write `samples/GATE_LOG.md`):
+
+```bash
+bash scripts/mac_all_gates.sh --no-build --latest
+```

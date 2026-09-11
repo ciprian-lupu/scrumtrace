@@ -3,6 +3,21 @@
 Fill this in on a **Mac**. Linux CI and this cloud agent cannot run ScreenCaptureKit, WhisperKit, or Gate 0/1.
 
 Do not treat a passing `bash scripts/run_linux_tests.sh` as Gate 0–6.
+Do not invent PASS cells. Inspectors print JSON; this file is filled by a human.
+
+```bash
+# Mac: build Debug, then inspect whatever session/log exists
+bash scripts/mac_all_gates.sh --latest
+
+# After a named session
+python3 scripts/inspect_all_gates.py \
+  --session ~/Movies/ScrumTrace/sessions/<id> \
+  --log ~/Library/Logs/ScrumTrace/agent.jsonl \
+  --token 'ST-G1-PAUSE-TOKEN-9F3C' \
+  --passphrase 'orchid lantern seven'
+```
+
+Order stays −0 → 0 → 1 → 3–6. Phase 2 Shot/pause is `inspect_gate2_shot.py` (log half of Gate 1). Phase −1 is `inspect_gate_minus1.py` (Linux-safe mock pack).
 
 Machine: `_` · macOS: `_` · chip: `_` · ScrumTrace build: `_`
 

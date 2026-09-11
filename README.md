@@ -48,20 +48,19 @@ Archive capture is **3840×2160 at 4 fps, 16 Mbps H.264 High** (keyframe every s
 
 Menu → Settings has **Speech**, **Capture**, **Logs**, **This process**, **AI**, and **General**. Capture shows the shipped 3840×2160 / 4 fps / 16 Mbps (24 Mbps cap) budget, plus pointer and microphone toggles. Start recording opens a selection overlay like macOS screen recording (lasting box, move, resize, then Record or Return on that display). Logs can export a diagnostic bundle (no `archive/`).
 
-Inspect a Gate 0 log (fails if Shot became key and activated the app, or if Start requested capture without the overlay Record button) and a Gate 1 session folder (token and passphrase are the Part F.2 values). ASCII `strings` checks are required and still do not replace a manual media scrub:
+Inspect every gate that has artifacts (Phase −1 mock, −0, 0, 1, Shot-pause log, 3–6). ASCII / JSON checks are required and still do not replace a Keynote focus check or a manual media scrub. The helpers never write `samples/GATE_LOG.md`:
 
 ```bash
-python3 scripts/inspect_gate0_log.py --log ~/Library/Logs/ScrumTrace/agent.jsonl
-```
-
-Inspect a Gate 1 session folder (token and passphrase are the Part F.2 values):
-
-```bash
-python3 scripts/inspect_gate1_session.py --session /path/to/session \
+bash scripts/mac_all_gates.sh --latest
+python3 scripts/inspect_all_gates.py --session /path/to/session \
+  --log ~/Library/Logs/ScrumTrace/agent.jsonl \
   --token 'ST-G1-PAUSE-TOKEN-9F3C' \
   --passphrase 'orchid lantern seven' \
   --shot-before-pause "$BEFORE"
 ```
+
+Gate 0 only: `python3 scripts/inspect_gate0_log.py --log ~/Library/Logs/ScrumTrace/agent.jsonl`  
+Gate 1 only: `python3 scripts/inspect_gate1_session.py --session /path/to/session --token 'ST-G1-PAUSE-TOKEN-9F3C' --passphrase 'orchid lantern seven'`
 
 ## Hotkeys
 
@@ -104,6 +103,7 @@ There is no honest ScreenCaptureKit emulator. Hardware gates stay on one Mac aft
 
 Use the fill-in log at [`samples/GATE_LOG.md`](samples/GATE_LOG.md). Linux tests do **not** prove these.
 
-1. Phase 0–1: 20 min record, 3 pauses, all-source pause token test (screen, system audio, mic, Shot, Hold-to-Talk)
-2. Phase 3: WhisperKit elapsed time on a named Mac; confirm `full_transcript.json` `sources` includes room and system when both were captured
-3. Phase 5–6: invalid key does not crash; measured zip ≤ 35 MB; remaining `AGENT_CONTEXT.md` paths exist
+1. Phase −0: 30 s Record, then `inspect_gate_minus0.py` (movie + WAV + first samples)
+2. Phase 0–1: Keynote focus; 20 min record, 3 pauses, all-source pause token test (screen, system audio, mic, Shot, Hold-to-Talk)
+3. Phase 3: WhisperKit elapsed time on a named Mac; confirm `full_transcript.json` `sources` includes room and system when both were captured
+4. Phase 4–6: ≤ 12 slices; measured zip ≤ 35 MB; consent / evidence; remaining `AGENT_CONTEXT.md` paths exist

@@ -1205,6 +1205,8 @@ def test_pipeline_timing_stays_in_archive() -> None:
     assert "audio_wav_no_ascii_passphrase" in required
     assert "capture_layout_exists" in required
     assert "wav_start_present" in required
+    assert "manifest_pause_count_ge_3" in required
+    assert "manifest_media_ge_1200" in required
     assert "wav_start_media_seconds" in inspect_g1
     assert "capture-layout.json" in inspect_g1
     assert "gate1_required_keys" in inspect_g1
@@ -1212,6 +1214,8 @@ def test_pipeline_timing_stays_in_archive() -> None:
     assert "audio_wav_exists" in helper
     assert "capture_layout_exists" in helper
     assert "wav_start_present" in helper
+    assert "manifest_pause_count_ge_3" in helper
+    assert "manifest_media_ge_1200" in helper
     assert (ROOT / "scripts" / "inspect_gate0_log.py").exists()
     inspect_g0 = (ROOT / "scripts" / "inspect_gate0_log.py").read_text()
     assert "shot_window_key" in inspect_g0
@@ -1222,6 +1226,47 @@ def test_pipeline_timing_stays_in_archive() -> None:
     assert "start_requested" in inspect_g0
     assert "def record_overlay_step" in inspect_g0
     assert 'mode == "record"' in inspect_g0
+    assert (ROOT / "scripts" / "inspect_all_gates.py").exists()
+    assert (ROOT / "scripts" / "inspect_gate_minus1.py").exists()
+    assert (ROOT / "scripts" / "inspect_gate_minus0.py").exists()
+    assert (ROOT / "scripts" / "inspect_gate2_shot.py").exists()
+    assert (ROOT / "scripts" / "inspect_gate3_whisper.py").exists()
+    assert (ROOT / "scripts" / "inspect_gate4_slicer.py").exists()
+    assert (ROOT / "scripts" / "inspect_gate5_provider.py").exists()
+    assert (ROOT / "scripts" / "inspect_gate6_pack.py").exists()
+    assert (ROOT / "scripts" / "mac_all_gates.sh").exists()
+    all_gates = (ROOT / "scripts" / "inspect_all_gates.py").read_text()
+    assert "Do not invent GATE_LOG.md cells" in all_gates
+    assert "GATE_LOG.md" in all_gates
+    assert "open(" not in all_gates or "GATE_LOG.md" not in all_gates.split("open(")[-1][:80]
+    mac_all = (ROOT / "scripts" / "mac_all_gates.sh").read_text()
+    assert "Do not invent PASS cells" in mac_all
+    assert "does not write GATE_LOG.md" in mac_all
+    assert "inspect_all_gates.py" in mac_all
+    assert "mac_gate01.sh" in mac_all
+    minus0 = (ROOT / "scripts" / "inspect_gate_minus0.py").read_text()
+    assert "recorder_first_sample" in minus0 or "first_sample_screen" in minus0
+    assert "first_sample_audio" in minus0
+    assert "first_sample_wav" in minus0
+    gate2 = (ROOT / "scripts" / "inspect_gate2_shot.py").read_text()
+    assert "shot_save" in gate2
+    assert "pin_ok" in gate2
+    gate3 = (ROOT / "scripts" / "inspect_gate3_whisper.py").read_text()
+    assert "whisper_wall_seconds" in gate3
+    assert "dual_pass_when_both_captured" in gate3
+    gate4 = (ROOT / "scripts" / "inspect_gate4_slicer.py").read_text()
+    assert "candidate_windows_le_12" in gate4
+    assert "zip_bytes" in gate4
+    gate5 = (ROOT / "scripts" / "inspect_gate5_provider.py").read_text()
+    assert "no_eval_after_denied_consent" in gate5
+    assert "confirmed_evidence_on_disk" in gate5
+    assert "is_retired_anthropic" in gate5
+    gate6 = (ROOT / "scripts" / "inspect_gate6_pack.py").read_text()
+    assert "zip_le_35mb" in gate6
+    assert "omitted_md_iff_dropped" in gate6
+    assert "html_specials_escaped" in gate6
+    linux = (ROOT / "scripts" / "run_linux_tests.sh").read_text()
+    assert "inspect_all_gates.py --mock-only" in linux
     audit = (ROOT / "SCRUMTRACE_AUDIT.md").read_text()
     assert "**Historical.**" in audit
     assert "014cca7" in audit
@@ -1229,6 +1274,15 @@ def test_pipeline_timing_stays_in_archive() -> None:
     gate_log = (ROOT / "samples" / "GATE_LOG.md").read_text()
     assert "openai_whisper-large-v3-v20240930_turbo_632MB" in gate_log
     assert "openai_whisper-large-v3-turbo`" not in gate_log
+    assert "inspect_all_gates.py" in gate_log
+    assert "Do not invent PASS cells" in gate_log
+    assert "mac_all_gates.sh" in gate_log
+    agents = (ROOT / "AGENTS.md").read_text()
+    assert "inspect_all_gates.py" in agents
+    assert "mac_all_gates.sh" in agents
+    readme = (ROOT / "README.md").read_text()
+    assert "inspect_all_gates.py" in readme
+    assert "mac_all_gates.sh" in readme
     hotkey = (ROOT / "ScrumTrace" / "UI" / "HotkeyManager.swift").read_text()
     assert "hotkey_front" in hotkey
     shot = (ROOT / "ScrumTrace" / "UI" / "ShotNoteWindow.swift").read_text()
@@ -1477,6 +1531,8 @@ def test_agent_log_covers_debug_events() -> None:
     assert "pipeline_status" in debug
     assert "stop_clicked" in debug
     assert "whisper_file_" in debug
+    assert "mac_all_gates.sh" in debug
+    assert "does not write" in debug
 
 
 def test_pause_privacy_and_metadata_gate() -> None:

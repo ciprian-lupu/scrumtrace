@@ -2,7 +2,7 @@
 
 Read this before changing product code, gates, remotes, or TCC/signing. The working spec is [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md). Mac debug loop: [AGENT_DEBUG.md](AGENT_DEBUG.md). Hardware results: [samples/GATE_LOG.md](samples/GATE_LOG.md) (empty until a Mac run).
 
-Snapshot date: **2026-09-11** (audit TASK-01–17 plus leftover *code* items closed: 4 fps / 16 Mbps / 24 Mbps cap, ⌘⇧5-style Start overlay, engine-mic tap host time, Gate 0 overlay + focus inspectors, Debug signing admin-trust retry, events append, clonefile, lock timing, onboarding, license display, GitHub updates, Release Developer ID settings, review must-fixes, Settings Capture tab). Hardware gates still open. Update the snapshot when status in this file changes.
+Snapshot date: **2026-09-11** (audit TASK-01–17 plus leftover *code* items closed; all-gate inspectors: `inspect_all_gates.py` / `mac_all_gates.sh`). Hardware gates still open. Update the snapshot when status in this file changes.
 
 ## What this is
 
@@ -77,7 +77,7 @@ scripts/                   Linux tests, mock pack, Mac build, gate inspect
 .cursor/environment.json   Linux: regenerate mock pack, preview :43147
 ```
 
-Linux / cloud agents **cannot** compile ScreenCaptureKit or close Gate 0/1. They can change Swift, run Python contract tests, and serve the mock brief. After a Mac run, `scripts/inspect_gate0_log.py` and `scripts/inspect_gate1_session.py` are the helpers that fail closed on the signals they can see.
+Linux / cloud agents **cannot** compile ScreenCaptureKit or close Gate 0/1. They can change Swift, run Python contract tests, and serve the mock brief. After a Mac run, `scripts/inspect_all_gates.py` runs every inspector that has artifacts (Phase −1 mock, −0, 0, 1, Phase 2 Shot-pause log, 3–6). Those scripts fail closed on the signals they can see. They do not write `samples/GATE_LOG.md`.
 
 ## Commands
 
@@ -103,14 +103,17 @@ That copies a Debug build to `~/Applications/ScrumTrace.app` and signs it with a
 
 Xcode resolves WhisperKit **0.11.0** from the committed `Package.resolved`. First WhisperKit launch downloads `openai_whisper-large-v3-v20240930_turbo_632MB`. HUD: Loading Whisper model… then Transcribing. Archive capture is 3840×2160 at 4 fps / 16 Mbps.
 
-Gate 1 inspect (after a real session folder exists):
+All-gate inspect (after a real session folder exists). Gate 1 still needs the Part F.2 token and three closed pauses / ≥ 20 min of `t_media`:
 
 ```bash
-python3 scripts/inspect_gate1_session.py --session /path/to/session \
+python3 scripts/inspect_all_gates.py --session /path/to/session \
+  --log ~/Library/Logs/ScrumTrace/agent.jsonl \
   --token 'ST-G1-PAUSE-TOKEN-9F3C' \
   --passphrase 'orchid lantern seven' \
   --shot-before-pause "$BEFORE"
 ```
+
+On a Mac, `bash scripts/mac_all_gates.sh --latest` builds Debug (unless `--no-build`) and runs that inspector against the newest session folder. It never writes GATE_LOG.md.
 
 ## TCC and Record (Mac)
 
@@ -167,11 +170,11 @@ Do **not** add product surfaces. Prefer the first item you can actually finish i
 
 ### On a Mac (blocks “done”)
 
-1. Force-quit ScrumTrace, `git checkout develop && git pull`, `bash scripts/mac_gate01.sh`, open `~/Applications/ScrumTrace.app`.
-2. Grant Screen Recording + Microphone for **that** CDHash, Relaunch, get a **stable Record** (seconds, not 20 min).
+1. Force-quit ScrumTrace, `git checkout develop && git pull`, `bash scripts/mac_all_gates.sh` (or `mac_gate01.sh`), open `~/Applications/ScrumTrace.app`.
+2. Grant Screen Recording + Microphone for **that** CDHash, Relaunch, get a **stable Record** (seconds, not 20 min). Gate −0: 30 s, then `inspect_all_gates.py`.
 3. Gate 0: Keynote full-screen; Shot / Pin / Pause must not steal focus. Watch `ShotNoteWindow.canBecomeKey` — it is `true` today and can steal focus.
 4. Gate 1: ≥ 20 min, three pauses, token `ST-G1-PAUSE-TOKEN-9F3C`, passphrase `orchid lantern seven`. Fill [samples/GATE_LOG.md](samples/GATE_LOG.md).
-5. Only then treat Whisper / slicer / AI as gateable (Gates 3–6).
+5. Only then treat Whisper / slicer / AI as gateable (Gates 3–6). Re-run `inspect_all_gates.py --strict` on that folder.
 
 ### In Swift (Linux-testable; do not call them “gated”)
 
