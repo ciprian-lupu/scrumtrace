@@ -2,8 +2,8 @@ import AVFoundation
 import Foundation
 import WhisperKit
 
-/// Local WhisperKit CoreML / ANE transcriber. Model: large-v3-turbo
-/// (`openai_whisper-large-v3-turbo`).
+/// Local WhisperKit CoreML / ANE transcriber. Model: large-v3_turbo
+/// (`openai_whisper-large-v3_turbo`).
 final class WhisperTranscriber: @unchecked Sendable {
     private var kit: WhisperKit?
     private let lock = NSLock()
@@ -16,7 +16,7 @@ final class WhisperTranscriber: @unchecked Sendable {
         return ready
     }
 
-    func prepare(model: String = "large-v3-turbo") async throws {
+    func prepare(model: String = "large-v3_turbo") async throws {
         let work: Task<Void, Error>
         lock.lock()
         if ready {
@@ -198,11 +198,14 @@ final class WhisperTranscriber: @unchecked Sendable {
         }
     }
 
-    /// Spec model is `large-v3-turbo`; WhisperKit downloads `openai_whisper-large-v3-turbo`.
+    /// Spec model is `large-v3_turbo`; WhisperKit downloads `openai_whisper-large-v3_turbo`.
     static func whisperKitModelName(_ requested: String) -> String {
         let trimmed = requested.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty {
-            return "openai_whisper-large-v3-turbo"
+            return "openai_whisper-large-v3_turbo"
+        }
+        if trimmed == "large-v3-turbo" || trimmed == "openai_whisper-large-v3-turbo" {
+            return "openai_whisper-large-v3_turbo"
         }
         if trimmed.hasPrefix("openai_whisper-") || trimmed.hasPrefix("distil-whisper_") {
             return trimmed

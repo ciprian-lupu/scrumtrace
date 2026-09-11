@@ -99,7 +99,7 @@ final class AppSettings: ObservableObject {
         self.provider = storedProvider ?? .openaiCompatible
         self.baseURL = defaults.string(forKey: Keys.baseURL) ?? AIProviderKind.openaiCompatible.defaultBaseURL
         self.model = defaults.string(forKey: Keys.model) ?? AIProviderKind.openaiCompatible.defaultModel
-        self.whisperModel = defaults.string(forKey: Keys.whisperModel) ?? "large-v3-turbo"
+        self.whisperModel = defaults.string(forKey: Keys.whisperModel) ?? "large-v3_turbo"
         self.appName = defaults.string(forKey: Keys.appName) ?? ""
         self.repoURL = defaults.string(forKey: Keys.repoURL) ?? ""
         self.techStack = defaults.string(forKey: Keys.techStack) ?? ""

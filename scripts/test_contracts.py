@@ -950,7 +950,7 @@ def test_dual_transcript_merge_wired() -> None:
     assert "AVAssetExportPresetAppleM4A" in speech
     assert "wordTimestamps: true" in speech
     assert "whisperKitModelName" in speech
-    assert "openai_whisper-large-v3-turbo" in speech
+    assert "openai_whisper-large-v3_turbo" in speech
     assert "Refusing to transcribe a symbolic link" in speech
     assert "parentIsSymbolicLink" in speech
     assert "isReadableSessionFile" in speech

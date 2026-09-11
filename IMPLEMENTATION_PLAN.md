@@ -239,7 +239,7 @@ Zip is built from an **explicit allow-list** of paths under `export/`, never by 
 
 ### Local Speech (`WhisperKit`)
 - Pin: `https://github.com/argmaxinc/WhisperKit` **0.11.0**.
-- Model: `large-v3-turbo` (CoreML / ANE; upstream name `openai_whisper-large-v3-turbo`).
+- Model: `large-v3_turbo` (CoreML / ANE; upstream name `openai_whisper-large-v3_turbo`).
 - Writes `archive/full_transcript.json` with word-level timestamps.
 - **Target (measure, do not guarantee):** 5 minutes of 16 kHz mono on Apple Silicon, model already on disk, wall time recorded in the Gate 3 log. No reference Mac is claimed here.
 - Diarization deferred; speaker labels are hypotheses.

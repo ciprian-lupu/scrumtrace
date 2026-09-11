@@ -1,3 +1,4 @@
+import AVFoundation
 import XCTest
 @testable import ScrumTrace
 
@@ -938,16 +939,24 @@ final class ContractTests: XCTestCase {
 
     func testWhisperKitModelNamePrefixesShortAlias() {
         XCTAssertEqual(
-            WhisperTranscriber.whisperKitModelName("large-v3-turbo"),
-            "openai_whisper-large-v3-turbo"
+            WhisperTranscriber.whisperKitModelName("large-v3_turbo"),
+            "openai_whisper-large-v3_turbo"
         )
         XCTAssertEqual(
-            WhisperTranscriber.whisperKitModelName("openai_whisper-large-v3-turbo"),
-            "openai_whisper-large-v3-turbo"
+            WhisperTranscriber.whisperKitModelName("openai_whisper-large-v3_turbo"),
+            "openai_whisper-large-v3_turbo"
         )
         XCTAssertEqual(
             WhisperTranscriber.whisperKitModelName(""),
-            "openai_whisper-large-v3-turbo"
+            "openai_whisper-large-v3_turbo"
+        )
+        XCTAssertEqual(
+            WhisperTranscriber.whisperKitModelName("large-v3-turbo"),
+            "openai_whisper-large-v3_turbo"
+        )
+        XCTAssertEqual(
+            WhisperTranscriber.whisperKitModelName("openai_whisper-large-v3-turbo"),
+            "openai_whisper-large-v3_turbo"
         )
     }
 
@@ -1562,6 +1571,21 @@ final class ContractTests: XCTestCase {
         XCTAssertFalse(systemWav.shouldTranscribeMovie(wavExists: false, movieExists: false))
     }
 
+    func testTranscriptMergeOneRoomPassYieldsRoomSource() {
+        let room = FullTranscript(
+            sessionId: "",
+            language: "en",
+            segments: [
+                TranscriptSegment(start: 1, end: 3, text: "hello", speaker: nil, words: [])
+            ]
+        )
+        let merged = TranscriptQuery.merge(
+            [TranscriptQuery.SourcePass(speaker: "room", transcript: room)],
+            sessionId: "s"
+        )
+        XCTAssertEqual(merged.sources, ["room"])
+    }
+
     func testTranscriptMergeCollapsesBleedAndKeepsDistinctSpeech() {
         let room = FullTranscript(
             sessionId: "",
@@ -1592,6 +1616,18 @@ final class ContractTests: XCTestCase {
         XCTAssertTrue(merged.segments.contains { $0.text == "restart ingest-worker" })
         XCTAssertEqual(merged.segments.filter { EvidenceValidator.normalize($0.text) == "this does nothing" }.count, 1)
     }
+
+    #if os(macOS)
+    func testFreshPCMBufferIsZeroFilled() {
+        let format = AVAudioFormat(standardFormatWithSampleRate: 16000, channels: 1)!
+        let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 1024)!
+        buffer.frameLength = 1024
+        let channelData = buffer.floatChannelData![0]
+        for index in 0..<Int(buffer.frameLength) {
+            XCTAssertEqual(channelData[index], 0, accuracy: 0.0001)
+        }
+    }
+    #endif
 
     func testPipelineTimingRoundTrip() throws {
         let timing = PipelineTiming(
@@ -1792,7 +1828,7 @@ final class ContractTests: XCTestCase {
         )
     }
 
-    func testShippedAdaptersNeverAttachMp4() {
+    func testOpenAIAndAnthropicNeverAttachMp4() {
         let configuration = AIProviderConfiguration(
             kind: .openaiCompatible,
             baseURL: "https://api.openai.com",
@@ -1824,11 +1860,13 @@ final class ContractTests: XCTestCase {
         )
         XCTAssertNil(ProviderWireMedia.mp4BodyURL(configuration: configuration, request: request))
         XCTAssertFalse(ProviderWireMedia.willUploadClip(configuration: configuration))
-        XCTAssertFalse(ProviderWireMedia.adaptersUploadVideo)
         var noVideo = configuration
         noVideo.acceptsVideo = false
         XCTAssertNil(ProviderWireMedia.mp4BodyURL(configuration: noVideo, request: request))
         XCTAssertFalse(ProviderWireMedia.willUploadClip(configuration: noVideo))
+        XCTAssertTrue(ProviderWireMedia.adapterCanUploadVideo(.google))
+        XCTAssertFalse(ProviderWireMedia.adapterCanUploadVideo(.openaiCompatible))
+        XCTAssertFalse(ProviderWireMedia.adapterCanUploadVideo(.anthropic))
     }
 
     func testApplyExportEvidenceDemotesConfirmedWithoutExportFile() throws {

@@ -266,7 +266,7 @@ final class ShotNoteWindow: NSPanel, NSTextFieldDelegate {
     init(
         screenshot: NSImage,
         transcriber: WhisperTranscriber,
-        whisperModel: String = "large-v3-turbo",
+        whisperModel: String = "large-v3_turbo",
         allowsNewCapture: @escaping () -> Bool = { true },
         onSave: @escaping (String, NSImage, ShotSource) -> Void
     ) {

@@ -60,7 +60,7 @@ struct SettingsView: View {
             }
             Section("Speech") {
                 TextField("WhisperKit model", text: $settings.whisperModel)
-                Text("Pinned default is large-v3-turbo (openai_whisper-large-v3-turbo). First run downloads the CoreML model.")
+                Text("Pinned default is large-v3_turbo (openai_whisper-large-v3_turbo). First run downloads the CoreML model.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
