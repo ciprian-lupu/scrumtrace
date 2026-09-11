@@ -918,14 +918,16 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
     /// TCC-6: mid-session Microphone revocation is not delivered as an SCStream
     /// error. Poll `authorizationStatus` while writers are live.
     private func startMicRevocationWatch() {
-        stopMicRevocationWatch()
         let timer = DispatchSource.makeTimerSource(queue: writerQueue)
         timer.schedule(deadline: .now() + 2, repeating: 2)
         timer.setEventHandler { [weak self] in
             self?.checkMicAuthorizationLocked()
         }
         timer.resume()
-        micWatchTimer = timer
+        syncWriter {
+            self.micWatchTimer?.cancel()
+            self.micWatchTimer = timer
+        }
     }
 
     private func stopMicRevocationWatch() {
