@@ -32,6 +32,7 @@ xcodebuild \
   -destination 'platform=macOS,arch=arm64' \
   CODE_SIGN_IDENTITY=- \
   CODE_SIGNING_REQUIRED=NO \
+  ENABLE_DEBUG_DYLIB=NO \
   build 2>&1 | tee "$LOG"
 status=${PIPESTATUS[0]}
 set -e
@@ -71,6 +72,13 @@ sign_app() {
   local identity="${IDENTITY:--}"
   # macOS /bin/bash is 3.2: `set -u` treats an empty array as unbound, so
   # pass --deep only on the Frameworks branch instead of an optional array.
+  # Xcode Debug can leave a stub + ScrumTrace.debug.dylib under MacOS.
+  # Those are not Contents/Frameworks, so --deep never sees them.
+  if [[ -f "$target/Contents/MacOS/ScrumTrace.debug.dylib" ]]; then
+    codesign --force --sign "$identity" --identifier com.str8minds.ScrumTrace \
+      --entitlements "$ENTITLEMENTS" \
+      "$target/Contents/MacOS/ScrumTrace.debug.dylib"
+  fi
   if [[ -d "$target/Contents/Frameworks" ]]; then
     codesign --force --deep --sign "$identity" --identifier com.str8minds.ScrumTrace \
       --entitlements "$ENTITLEMENTS" "$target"
@@ -90,8 +98,8 @@ sign_app "$STABLE"
 codesign -d --entitlements - "$STABLE" 2>/dev/null | grep -E 'app-sandbox|audio-input|microphone' || true
 echo "stable_app=$STABLE"
 codesign -dv --verbose=2 "$STABLE" 2>&1 | grep -E 'Authority|Identifier|Signature' || true
-echo "Force-quit every other ScrumTrace, then open this copy only:"
-echo "  open \"$STABLE\""
+echo "Force-quit every other ScrumTrace, wait a second, then open this copy only:"
+echo "  sleep 1 && open -n \"$STABLE\""
 
 echo "sessions_root=$HOME/Movies/ScrumTrace/sessions"
 ls -1 "$HOME/Movies/ScrumTrace/sessions" 2>/dev/null | tail -5 || echo "no sessions yet"
