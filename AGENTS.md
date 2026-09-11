@@ -77,7 +77,7 @@ scripts/                   Linux tests, mock pack, Mac build, gate inspect
 .cursor/environment.json   Linux: regenerate mock pack, preview :43147
 ```
 
-Linux / cloud agents **cannot** compile ScreenCaptureKit or close Gate 0/1. They can change Swift, run Python contract tests, and serve the mock brief.
+Linux / cloud agents **cannot** compile ScreenCaptureKit or close Gate 0/1. They can change Swift, run Python contract tests, and serve the mock brief. After a Mac run, `scripts/inspect_gate0_log.py` and `scripts/inspect_gate1_session.py` are the helpers that fail closed on the signals they can see.
 
 ## Commands
 

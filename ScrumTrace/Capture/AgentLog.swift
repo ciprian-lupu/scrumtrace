@@ -53,14 +53,15 @@ enum AgentLog {
     }
 
     static func setRecording(_ active: Bool, sessionId: String?) {
-        queue.async {
-            if active {
-                let body = "\(sessionId ?? "")\n\(ProcessInfo.processInfo.processIdentifier)\n"
-                try? FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
-                try? body.write(to: recordingLockURL, atomically: true, encoding: .utf8)
-            } else {
-                try? FileManager.default.removeItem(at: recordingLockURL)
-            }
+        // Write the lock on this thread so it exists before startCapture.
+        // The JSONL queue stays async; a sync hop here can deadlock if a
+        // logger is already on that queue.
+        if active {
+            let body = "\(sessionId ?? "")\n\(ProcessInfo.processInfo.processIdentifier)\n"
+            try? FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
+            try? body.write(to: recordingLockURL, atomically: true, encoding: .utf8)
+        } else {
+            try? FileManager.default.removeItem(at: recordingLockURL)
         }
     }
 

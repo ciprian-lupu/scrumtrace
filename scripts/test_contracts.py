@@ -1176,6 +1176,19 @@ def test_pipeline_timing_stays_in_archive() -> None:
     assert "static func sanitize" in agent_log
     assert "scrubHome" in agent_log
     assert "prefix(280)" in agent_log
+    lock_fn = agent_log.split("func setRecording")[1].split("func readTail")[0]
+    assert "recordingLockURL" in lock_fn
+    assert "atomically: true" in lock_fn
+    assert "queue.async" not in lock_fn
+    inspect_g1 = (ROOT / "scripts" / "inspect_gate1_session.py").read_text()
+    required = inspect_g1.split("required = [")[1].split("]")[0]
+    assert "session_mp4_no_ascii_token" in required
+    assert "audio_wav_no_ascii_token" in required
+    assert "audio_wav_no_ascii_passphrase" in required
+    assert (ROOT / "scripts" / "inspect_gate0_log.py").exists()
+    inspect_g0 = (ROOT / "scripts" / "inspect_gate0_log.py").read_text()
+    assert "shot_window_key" in inspect_g0
+    assert "app_active" in inspect_g0
     loop = (ROOT / "scripts" / "mac_agent_loop.sh").read_text()
     assert "recording.lock" in loop
     assert "mac_publish_agent_log.sh" in loop

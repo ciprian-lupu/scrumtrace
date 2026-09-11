@@ -295,7 +295,7 @@ final class SessionProcessor: @unchecked Sendable {
                 // Still write a local export/ so Stop is not a dead folder.
                 await onStatus(
                     .transcribing,
-                    "Transcription incomplete — writing a local export. Retry Analysis to transcribe again"
+                    "Transcription incomplete — local export written. Use Retry Analysis."
                 )
                 manifest.pipelineStatus = .transcribing
                 try writeIncompleteHandoff(

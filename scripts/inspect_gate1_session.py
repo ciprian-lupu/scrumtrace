@@ -291,11 +291,14 @@ def main() -> int:
 
     required = [
         "session_mp4_exists",
+        "session_mp4_no_ascii_token",
         "audio_wav_exists",
+        "audio_wav_no_ascii_token",
+        "audio_wav_no_ascii_passphrase",
         "transcript_exists",
-        "events_exists",
         "transcript_missing_token",
         "transcript_missing_passphrase",
+        "events_exists",
         "events_missing_token",
         "export_missing_token",
         "export_missing_passphrase",
