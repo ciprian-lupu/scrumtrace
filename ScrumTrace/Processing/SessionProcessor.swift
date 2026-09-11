@@ -292,11 +292,17 @@ final class SessionProcessor: @unchecked Sendable {
             if !hasHumanAnchors {
                 // Do not stamp synthesizing/completed while Whisper never produced
                 // a usable pass and there are no shots. Retry Analysis transcribes first (D14).
+                // Still write a local export/ so Stop is not a dead folder.
                 await onStatus(
                     .transcribing,
-                    "Transcription incomplete — Retry Analysis to transcribe again"
+                    "Transcription incomplete — writing a local export. Retry Analysis to transcribe again"
                 )
                 manifest.pipelineStatus = .transcribing
+                try writeIncompleteHandoff(
+                    sessionURL: sessionURL,
+                    manifest: &manifest,
+                    transcript: transcript
+                )
                 try vault.write(manifest: &manifest)
                 return manifest
             }
@@ -480,6 +486,54 @@ final class SessionProcessor: @unchecked Sendable {
         PackBudget.removeEscapingExportLinks(exportDir: exportDir)
         if PackBudget.exportStillContainsSymlink(exportDir: exportDir) {
             throw error
+        }
+    }
+
+    /// Folder handoff when Whisper did not finish. Does not mark synthesizing
+    /// or completed, so Retry Analysis can transcribe again (D14).
+    private func writeIncompleteHandoff(
+        sessionURL: URL,
+        manifest: inout SessionManifest,
+        transcript: FullTranscript
+    ) throws {
+        let excerpts = excerptMap(manifest: manifest, transcript: transcript)
+        let projector = ExportProjector()
+        var projection = try projector.project(
+            sessionURL: sessionURL,
+            manifest: manifest,
+            includeFullTranscript: false
+        )
+        projection.manifest.tasks = EvidenceValidator.applyExportEvidence(
+            tasks: projection.manifest.tasks,
+            sessionURL: sessionURL,
+            transcript: transcript,
+            slices: projection.manifest.slices,
+            shots: projection.manifest.shots,
+            omitted: projection.manifest.omitted
+        )
+        manifest.omitted = projection.omitted
+        try writeExportDocuments(
+            sessionURL: sessionURL,
+            projected: projection.manifest,
+            excerpts: excerpts,
+            projector: projector
+        )
+        try zipper.writeOmittedMarkdown(sessionURL: sessionURL, omitted: projection.omitted)
+        do {
+            let bytes = try zipper.writeZip(
+                sessionURL: sessionURL,
+                includeFullTranscript: false
+            )
+            AgentLog.event("incomplete_handoff", [
+                "session": manifest.sessionId,
+                "bytes": String(bytes)
+            ])
+        } catch {
+            AgentLog.event("incomplete_handoff", [
+                "session": manifest.sessionId,
+                "bytes": "0",
+                "error": AgentLog.sanitize(error.localizedDescription)
+            ])
         }
     }
 

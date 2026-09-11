@@ -1996,8 +1996,13 @@ def test_phase45_clip_consent_and_budget() -> None:
     incomplete = processor.split("Transcription incomplete")[1].split("Writing AGENT_CONTEXT.md")[0]
     assert "return manifest" in incomplete
     assert "pipelineStatus = .transcribing" in incomplete
+    assert "writeIncompleteHandoff" in incomplete
     assert "markCompleted(.synthesizing)" not in incomplete
     assert "markCompleted(.completed)" not in incomplete
+    handoff = processor.split("func writeIncompleteHandoff")[1].split("func writeExportDocuments")[0]
+    assert "writeExportDocuments" in handoff
+    assert "markCompleted(.synthesizing)" not in handoff
+    assert "markCompleted(.completed)" not in handoff
     assert "hasCompleted(.transcribing)" in processor.split("try requireUsableSession(sessionURL, id: sessionId)")[-1].split("Writing AGENT_CONTEXT.md")[0]
     assert "async -> (transcript: FullTranscript, incomplete: Bool)" in processor
     assert "justFinishedTranscribing" in processor
