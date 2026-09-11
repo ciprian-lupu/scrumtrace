@@ -1,5 +1,6 @@
 #if os(macOS)
 import AppKit
+import CoreGraphics
 #endif
 import Foundation
 
@@ -95,18 +96,43 @@ final class PrivacyGuard: @unchecked Sendable {
 
     func currentCredentialApp() -> String? {
         #if os(macOS)
-        guard let bundle = NSWorkspace.shared.frontmostApplication?.bundleIdentifier else {
-            return nil
+        if let front = NSWorkspace.shared.frontmostApplication?.bundleIdentifier,
+           Self.matchesCredential(front) {
+            return front
         }
-        if Self.credentialBundleIDs.contains(bundle) {
-            return bundle
+        return overlayCredentialOwner()
+        #else
+        return nil
+        #endif
+    }
+
+    static func matchesCredential(_ bundle: String) -> Bool {
+        if credentialBundleIDs.contains(bundle) {
+            return true
         }
         let lowered = bundle.lowercased()
-        if lowered.contains("1password") || lowered.contains("bitwarden") || lowered.contains("lastpass")
+        return lowered.contains("1password") || lowered.contains("bitwarden") || lowered.contains("lastpass")
             || lowered.contains("keepass") || lowered.contains("nordpass") || lowered.contains("enpass")
             || lowered.contains("protonpass") || lowered.contains("proton.pass")
-            || lowered.contains("strongbox") || lowered.contains("dashlane") {
-            return bundle
+            || lowered.contains("strongbox") || lowered.contains("dashlane")
+            || lowered.contains("passwords")
+    }
+
+    /// Overlays that never become frontmost (Quick Access, menu extras).
+    private func overlayCredentialOwner() -> String? {
+        #if os(macOS)
+        guard let info = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else {
+            return nil
+        }
+        for row in info {
+            let owner = (row[kCGWindowOwnerName as String] as? String) ?? ""
+            let lowered = owner.lowercased()
+            if lowered.contains("1password") || lowered.contains("bitwarden") || lowered.contains("lastpass")
+                || lowered.contains("keepass") || lowered.contains("nordpass") || lowered.contains("enpass")
+                || lowered.contains("proton pass") || lowered.contains("dashlane")
+                || lowered == "passwords" {
+                return owner
+            }
         }
         return nil
         #else
