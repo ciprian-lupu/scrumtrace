@@ -42,7 +42,16 @@ The script copies the Debug build to `~/Applications/ScrumTrace.app` and signs i
 
 Open **that** copy only. In System Settings, remove extra ScrumTrace rows, enable Screen Recording and Microphone for this app, then **Relaunch** from the menu. A grant never applies to the process that was already running. Accessibility is optional.
 
-Xcode resolves WhisperKit **0.11.0** on first open (`Package.resolved` is not checked in). First WhisperKit launch downloads `large-v3-turbo`.
+Xcode resolves WhisperKit **0.11.0** on first open (`Package.resolved` is not checked in). First WhisperKit launch downloads `large-v3_turbo`.
+
+Inspect a Gate 1 session folder (token and passphrase are the Part F.2 values):
+
+```bash
+python3 scripts/inspect_gate1_session.py --session /path/to/session \
+  --token 'ST-G1-PAUSE-TOKEN-9F3C' \
+  --passphrase 'orchid lantern seven' \
+  --shot-before-pause "$BEFORE"
+```
 
 ## Hotkeys
 

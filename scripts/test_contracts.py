@@ -782,6 +782,7 @@ def test_audio_split_and_brief_loader() -> None:
     assert "guard frames > 0 else { return }" not in write_wav
     assert "noteWavEmptyConvert()" in write_wav.split("CMSampleBufferGetNumSamples")[1].split("AVAudioPCMBuffer")[0]
     engine_buf = recorder.split("func writeEngineBuffer")[1].split("func requestPermission")[0]
+    assert "clock.currentMediaSeconds()" in engine_buf
     assert "format conversion failed" in engine_buf
     assert "WAV writer is missing" in engine_buf
     assert "guard !paused, started else { return }" in engine_buf
@@ -857,6 +858,12 @@ def test_audio_split_and_brief_loader() -> None:
     persist_wav = recorder.split("func persistWav")[1].split("func prepareWriters")[0]
     assert "failCaptureWrite" in persist_wav
     assert "try? file.write" not in persist_wav
+    assert "zeroFillPCM" in persist_wav
+    remap = recorder.split("func remappedBuffer")[1].split("func noteRemapFailure")[0]
+    assert "CMSampleBufferGetSampleTimingInfo" in remap
+    assert "timingInfoOut:" in remap
+    assert "CMSampleBufferGetNumSamples(sampleBuffer) == 1" in remap
+    assert "func zeroFillPCM" in recorder
     assert "microphoneWav" in recorder
     assert "CaptureAudioLayout" in recorder
     assert "try layout.write" in recorder
@@ -1165,6 +1172,10 @@ def test_pipeline_timing_stays_in_archive() -> None:
     assert "private var suspended = false" in sampler
     sample_fn = sampler.split("func sample(")[1].split("func readFrontmost")[0]
     assert sample_fn.count("isSuspended") >= 3
+    document_url = sampler.split("func documentURL")[1]
+    assert "query = nil" in document_url
+    assert "fragment = nil" in document_url
+    assert "kAXDocumentAttribute" in document_url
     read_fn = sampler.split("func readFrontmost")[1].split("func documentURL")[0]
     assert read_fn.count("isSuspended") >= 3
     assert "if isSuspended { return nil }" in read_fn
@@ -1788,6 +1799,7 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "requiredFailed" in transcribe
     assert "if passes.isEmpty {" in transcribe
     assert "passes.isEmpty || requiredFailed" not in transcribe
+    assert "archive/session.mp4 is missing" in transcribe
     assert "Movie audio is optional" not in transcribe
     load_tr = processor.split("private func loadTranscript")[1].split("private func evaluateSlice")[0]
     assert "existingSessionFile(ScrumTracePath.fullTranscript" in load_tr
@@ -1829,6 +1841,7 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "transcriber.isReady || !hadAudio" in processor
     whisper_gate = processor.split("transcriber.isReady || !hadAudio")[1].split("let transcript = loadTranscript")[0]
     assert "transcript.sources" in whisper_gate
+    assert "!transcribed.incomplete" in whisper_gate
     assert "markCompleted(.transcribing)" in whisper_gate
     slicing_gate = processor.split("if !manifest.hasCompleted(.slicing)")[1].split("let needsEvaluate")[0]
     assert "hasCompleted(.transcribing)" in slicing_gate

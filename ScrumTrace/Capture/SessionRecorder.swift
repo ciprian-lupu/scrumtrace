@@ -931,6 +931,7 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
                             frameCapacity: silenceCount
                         ) {
                             silence.frameLength = silence.frameCapacity
+                            Self.zeroFillPCM(silence)
                             try file.write(from: silence)
                             wavFramesWritten += AVAudioFramePosition(silence.frameLength)
                         }
@@ -1189,6 +1190,36 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         return copied ? copy : nil
     }
 
+    /// AVAudioPCMBuffer allocation is not guaranteed to zero int16 frames.
+    static func zeroFillPCM(_ buffer: AVAudioPCMBuffer) {
+        let frames = Int(buffer.frameLength)
+        guard frames > 0 else { return }
+        let channels = Int(buffer.format.channelCount)
+        if let data = buffer.floatChannelData {
+            for channel in 0..<channels {
+                data[channel].initialize(repeating: 0, count: frames)
+            }
+            return
+        }
+        if let data = buffer.int16ChannelData {
+            for channel in 0..<channels {
+                data[channel].initialize(repeating: 0, count: frames)
+            }
+            return
+        }
+        if let data = buffer.int32ChannelData {
+            for channel in 0..<channels {
+                data[channel].initialize(repeating: 0, count: frames)
+            }
+            return
+        }
+        let buffers = UnsafeMutableAudioBufferListPointer(buffer.mutableAudioBufferList)
+        for index in 0..<buffers.count {
+            guard let bytes = buffers[index].mData else { continue }
+            memset(bytes, 0, Int(buffers[index].mDataByteSize))
+        }
+    }
+
     private func writeEngineBuffer(_ buffer: AVAudioPCMBuffer, hostTime: CMTime?) {
         guard !paused, started else { return }
         guard let wavFile else {
@@ -1201,6 +1232,7 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             return
         }
         let mediaSeconds = hostTime.map { CMTimeGetSeconds(clock.mediaTime(forHostTime: $0)) }
+            ?? clock.currentMediaSeconds()
         let target = wavFile.processingFormat
         if buffer.format == target {
             wavEmptyConvertStreak = 0

@@ -1619,12 +1619,22 @@ final class ContractTests: XCTestCase {
 
     #if os(macOS)
     func testFreshPCMBufferIsZeroFilled() {
-        let format = AVAudioFormat(standardFormatWithSampleRate: 16000, channels: 1)!
-        let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 1024)!
-        buffer.frameLength = 1024
-        let channelData = buffer.floatChannelData![0]
+        let format = AVAudioFormat(
+            commonFormat: .pcmFormatInt16,
+            sampleRate: 16_000,
+            channels: 1,
+            interleaved: false
+        )!
+        let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 320)!
+        buffer.frameLength = buffer.frameCapacity
+        if let dirty = buffer.int16ChannelData?[0] {
+            dirty[0] = 12_345
+            dirty[319] = -9
+        }
+        SessionRecorder.zeroFillPCM(buffer)
+        let channelData = buffer.int16ChannelData![0]
         for index in 0..<Int(buffer.frameLength) {
-            XCTAssertEqual(channelData[index], 0, accuracy: 0.0001)
+            XCTAssertEqual(channelData[index], 0)
         }
     }
     #endif
@@ -1633,6 +1643,7 @@ final class ContractTests: XCTestCase {
         let timing = PipelineTiming(
             whisperWallSeconds: 12.5,
             whisperSources: ["room", "system"],
+            whisperIncomplete: true,
             zipBytes: 1_048_576,
             omittedCount: 2
         )
@@ -1640,9 +1651,11 @@ final class ContractTests: XCTestCase {
         let decoded = try JSONDecoder().decode(PipelineTiming.self, from: data)
         XCTAssertEqual(decoded.whisperWallSeconds, 12.5)
         XCTAssertEqual(decoded.whisperSources, ["room", "system"])
+        XCTAssertTrue(decoded.whisperIncomplete)
         XCTAssertEqual(decoded.zipBytes, 1_048_576)
         XCTAssertEqual(decoded.omittedCount, 2)
         XCTAssertTrue(String(data: data, encoding: .utf8)?.contains("whisper_wall_seconds") == true)
+        XCTAssertTrue(String(data: data, encoding: .utf8)?.contains("whisper_incomplete") == true)
     }
 
     func testFrameReferenceResolvesBasename() throws {

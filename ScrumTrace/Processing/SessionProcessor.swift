@@ -486,7 +486,14 @@ final class SessionProcessor: @unchecked Sendable {
                 AgentLog.event("whisper_pass_fail", ["source": "wav", "error": error.localizedDescription])
             }
         }
-        if layout.shouldTranscribeMovie(wavExists: wavExists, movieExists: movieExists) {
+        let wantsMoviePass = layout.systemAudioInMovie && (layout.microphoneWav || !wavExists)
+        if wantsMoviePass && !movieExists {
+            requiredFailed = true
+            AgentLog.event("whisper_pass_fail", [
+                "source": "movie",
+                "error": "archive/session.mp4 is missing"
+            ])
+        } else if layout.shouldTranscribeMovie(wavExists: wavExists, movieExists: movieExists) {
             do {
                 let movieTranscript = try await transcriber.transcribeMovieAudio(at: movie, sessionURL: sessionURL)
                 passes.append(TranscriptQuery.SourcePass(speaker: "system", transcript: movieTranscript))
