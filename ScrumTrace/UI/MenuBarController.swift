@@ -226,10 +226,10 @@ final class MenuBarController: NSObject {
 
     @objc private func start() {
         AgentLog.event("menu_start", [:])
-        let readiness = CapturePermissions.readiness()
         if !controller.settings.meetingNoticeAccepted {
             presentMeetingNotice()
         }
+        let readiness = CapturePermissions.readiness()
         if !readiness.allowsStart {
             if case .screenDenied = readiness {
                 Task.detached {
@@ -237,8 +237,22 @@ final class MenuBarController: NSObject {
                 }
             }
             presentStartBlocked(readiness)
+            return
         }
-        controller.startRecording()
+        CaptureAreaPicker.present(current: controller.settings.captureArea, mode: .record) { [weak self] outcome in
+            guard let self else { return }
+            switch outcome {
+            case .cancelled:
+                return
+            case .selected(let area):
+                self.controller.settings.captureArea = area
+                self.rebuild()
+            case .record(let area):
+                self.controller.settings.captureArea = area
+                self.rebuild()
+                self.controller.startRecording()
+            }
+        }
     }
 
     private func presentMeetingNotice() {

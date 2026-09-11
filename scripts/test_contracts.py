@@ -2862,10 +2862,19 @@ def test_audit_leftovers_are_implemented() -> None:
     picker = (ROOT / "ScrumTrace" / "UI" / "CaptureAreaPicker.swift").read_text()
     assert "Drag to select the capture area" in picker
     assert "Space = entire display" in picker
+    assert '"Record"' in picker
+    assert '"Use this area"' in picker
+    assert '"Entire Display"' in picker
     assert "eventTracking" not in picker
+    assert "nextEvent" not in picker
     menu = (ROOT / "ScrumTrace" / "UI" / "MenuBarController.swift").read_text()
     assert "Start recording —" in menu
     assert "Use entire display" in menu
+    start_menu = menu.split("func start()")[1].split("func presentMeetingNotice")[0]
+    assert "CaptureAreaPicker.present" in start_menu
+    assert "mode: .record" in start_menu
+    assert start_menu.index("CaptureAreaPicker.present") < start_menu.index("startRecording()")
+    assert "presentStartBlocked" in start_menu
     clock = (ROOT / "ScrumTrace" / "Capture" / "ClockSynchronizer.swift").read_text()
     inside = clock.split("func isInsidePause(hostTime")[1].split("func wallSecondsLocked")[0]
     assert "max(0, CMTimeGetSeconds" in inside
