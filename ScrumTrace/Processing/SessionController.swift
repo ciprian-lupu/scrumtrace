@@ -402,7 +402,10 @@ final class SessionController: ObservableObject {
             abandonedId = nil
             self.recorder = recorder
             lastSessionId = created.manifest.sessionId
-            AgentLog.event("start_ok", ["session": created.manifest.sessionId])
+            AgentLog.event("start_ok", [
+                "session": created.manifest.sessionId,
+                "area": settings.captureArea.isEntireDisplay ? "full" : "region"
+            ])
             pinTimes = []
             pinTimesSessionId = created.manifest.sessionId
             // Quit may have frozen writers while start() was still awaiting.

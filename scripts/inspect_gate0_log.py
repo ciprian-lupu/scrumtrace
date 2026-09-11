@@ -5,7 +5,7 @@ This cannot prove Keynote kept focus. It fails when the log shows the Shot
 panel became key and activated the app, which is the steal we can see.
 
 It also fails when menu Start requested capture without opening and confirming
-the capture-area overlay (Record after the lasting dashed rectangle).
+the capture-area overlay in record mode (Record after the lasting dashed rectangle).
 
 Usage:
   python3 scripts/inspect_gate0_log.py --log ~/Library/Logs/ScrumTrace/agent.jsonl
@@ -17,6 +17,12 @@ import argparse
 import json
 import sys
 from pathlib import Path
+
+
+def record_overlay_step(mode: str, awaiting_start: bool) -> bool:
+    if not awaiting_start:
+        return False
+    return mode in ("", "record")
 
 
 def parse_line(raw: str) -> dict[str, object] | None:
@@ -73,6 +79,7 @@ def main() -> int:
             continue
         name = str(row.get("event") or row.get("name") or "")
         action = str(row.get("action") or "")
+        picker_mode = str(row.get("mode") or "")
         if name.startswith("hotkey_"):
             hotkeys += 1
         if name == "shot_window_shown":
@@ -85,10 +92,12 @@ def main() -> int:
         if name == "capture_area_picker":
             if action == "open":
                 picker_open += 1
-                saw_open = True
+                if record_overlay_step(picker_mode, awaiting_overlay):
+                    saw_open = True
             elif action == "confirm":
                 picker_confirm += 1
-                saw_confirm = True
+                if record_overlay_step(picker_mode, awaiting_overlay):
+                    saw_confirm = True
             elif action == "cancel":
                 picker_cancel += 1
                 awaiting_overlay = False

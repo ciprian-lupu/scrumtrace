@@ -145,6 +145,7 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         try await requestPermission(includeMicrophone: includeMicrophone)
         AgentLog.event("recorder_sckit_begin", [
             "area": captureArea.isEntireDisplay ? "full" : "region",
+            "display": captureArea.isEntireDisplay ? "all" : String(captureArea.displayID),
             "width": String(captureArea.isEntireDisplay ? 0 : Int(captureArea.widthPoints.rounded())),
             "height": String(captureArea.isEntireDisplay ? 0 : Int(captureArea.heightPoints.rounded())),
             "cursor": showCursor ? "1" : "0",

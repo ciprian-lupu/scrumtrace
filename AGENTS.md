@@ -2,7 +2,7 @@
 
 Read this before changing product code, gates, remotes, or TCC/signing. The working spec is [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md). Mac debug loop: [AGENT_DEBUG.md](AGENT_DEBUG.md). Hardware results: [samples/GATE_LOG.md](samples/GATE_LOG.md) (empty until a Mac run).
 
-Snapshot date: **2026-09-11** (audit TASK-01–17 plus leftover *code* items closed: 4 fps / 16 Mbps, events append, clonefile, lock timing, onboarding, license display, GitHub updates, Release Developer ID settings, review must-fixes, Settings Capture tab, optional capture region). Hardware gates still open. Update the snapshot when status in this file changes.
+Snapshot date: **2026-09-11** (audit TASK-01–17 plus leftover *code* items closed: 4 fps / 16 Mbps / 24 Mbps cap, ⌘⇧5-style Start overlay, engine-mic tap host time, Gate 0 overlay + focus inspectors, Debug signing admin-trust retry, events append, clonefile, lock timing, onboarding, license display, GitHub updates, Release Developer ID settings, review must-fixes, Settings Capture tab). Hardware gates still open. Update the snapshot when status in this file changes.
 
 ## What this is
 

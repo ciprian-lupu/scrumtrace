@@ -1208,6 +1208,8 @@ def test_pipeline_timing_stays_in_archive() -> None:
     assert "start_without_overlay" in inspect_g0
     assert "capture_area_picker" in inspect_g0
     assert "start_requested" in inspect_g0
+    assert "def record_overlay_step" in inspect_g0
+    assert 'mode in ("", "record")' in inspect_g0
     hotkey = (ROOT / "ScrumTrace" / "UI" / "HotkeyManager.swift").read_text()
     assert "hotkey_front" in hotkey
     shot = (ROOT / "ScrumTrace" / "UI" / "ShotNoteWindow.swift").read_text()
@@ -2196,6 +2198,11 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "CGRequestScreenCaptureAccess" not in recorder
     assert "screenGrantedAtLaunch" in start_fn
     assert "recorder_sckit_begin" in start_fn
+    begin = recorder.split('AgentLog.event("recorder_sckit_begin"')[1].split("let content")[0]
+    assert '"display"' in begin
+    assert '"area"' in begin
+    start_ok = controller.split('AgentLog.event("start_ok"')[1].split("pinTimes")[0]
+    assert '"area"' in start_ok
     assert "sourceRect" in start_fn
     assert "captureArea" in start_fn
     assert "regionFitsDisplay" in start_fn
