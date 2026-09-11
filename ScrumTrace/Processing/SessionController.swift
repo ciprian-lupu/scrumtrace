@@ -69,6 +69,13 @@ final class SessionController: ObservableObject {
         vault.pruneAbandonedStarts()
         if let recent = vault.recentSessions(limit: 1).first {
             lastSessionId = recent.sessionId
+            switch recent.pipelineStatus {
+            case .idle, .completed:
+                break
+            case .recording, .paused, .transcribing, .slicing, .evaluating, .synthesizing, .offlineFailed:
+                statusLine = "Last session is unfinished — Retry Analysis to finish"
+                AgentLog.event("interrupted_session", ["status": recent.pipelineStatus.rawValue])
+            }
         }
     }
 

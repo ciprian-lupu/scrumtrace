@@ -987,6 +987,8 @@ def test_dual_transcript_merge_wired() -> None:
     assert "if let sessionRoot" in refuse_fn
     assert refuse_fn.index("if let sessionRoot") < refuse_fn.index("parentIsSymbolicLink")
     movie_audio = speech.split("func transcribeMovieAudio")[1].split("func extractAudio")[0]
+    assert "extractAudio(from: movie," in movie_audio
+    assert movie_audio.index("extractAudio(from: movie,") < movie_audio.index("copyContainedToTemporaryFile")
     assert "copyContainedToTemporaryFile" in movie_audio
     assert "scrumtrace-movie" in movie_audio
     assert "transcribeFile(at: movieCopy)" in movie_audio
@@ -1308,6 +1310,8 @@ def test_pipeline_timing_stays_in_archive() -> None:
     assert "pruneAbandonedStarts" in controller
     init_fn = controller.split("init(settings:")[1].split("var isRecording")[0]
     assert init_fn.index("pruneAbandonedStarts") < init_fn.index("lastSessionId")
+    assert "interrupted_session" in init_fn
+    assert "Retry Analysis to finish" in init_fn
     assert "persistLivePipelineStatus" in controller
     assert "shouldPauseCapture" in start_rec
     assert "currentCredentialApp" in start_rec

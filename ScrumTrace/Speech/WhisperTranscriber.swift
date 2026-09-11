@@ -180,28 +180,26 @@ final class WhisperTranscriber: @unchecked Sendable {
     /// Temp AAC is not under the session folder — do not pass `sessionURL` into that transcribe.
     func transcribeMovieAudio(at movie: URL, sessionURL: URL) async throws -> FullTranscript {
         try Self.refuseSymlinkMedia(movie, sessionRoot: sessionURL)
+        do {
+            let dest = try ExportRel.makePrivateTemporaryURL(prefix: "scrumtrace-system-audio", ext: "m4a")
+            do {
+                try await extractAudio(from: movie, to: dest)
+                defer { ExportRel.removePrivateTemporaryURL(dest) }
+                return try await transcribeFile(at: dest)
+            } catch {
+                AgentLog.event("extract_audio_fail", ["error": AgentLog.sanitize(error.localizedDescription)])
+                ExportRel.removePrivateTemporaryURL(dest)
+            }
+        } catch {
+            AgentLog.event("extract_audio_fail", ["error": "temp_url"])
+        }
         let movieCopy = try ExportRel.copyContainedToTemporaryFile(
             relative: ScrumTracePath.sessionMovie,
             sessionURL: sessionURL,
             prefix: "scrumtrace-movie"
         )
         defer { ExportRel.removePrivateTemporaryURL(movieCopy) }
-        let dest: URL
-        do {
-            dest = try ExportRel.makePrivateTemporaryURL(prefix: "scrumtrace-system-audio", ext: "m4a")
-        } catch {
-            AgentLog.event("extract_audio_fail", ["error": "temp_url"])
-            return try await transcribeFile(at: movieCopy)
-        }
-        do {
-            try await extractAudio(from: movieCopy, to: dest)
-            defer { ExportRel.removePrivateTemporaryURL(dest) }
-            return try await transcribeFile(at: dest)
-        } catch {
-            AgentLog.event("extract_audio_fail", ["error": AgentLog.sanitize(error.localizedDescription)])
-            ExportRel.removePrivateTemporaryURL(dest)
-            return try await transcribeFile(at: movieCopy)
-        }
+        return try await transcribeFile(at: movieCopy)
     }
 
     func extractAudio(from movie: URL, to dest: URL) async throws {

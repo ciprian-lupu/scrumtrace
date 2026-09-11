@@ -621,7 +621,7 @@ final class SessionProcessor: @unchecked Sendable {
                 requiredFailed = true
                 AgentLog.event("whisper_pass_fail", [
                     "source": "movie",
-                    "error": "Not enough free disk space to copy archive/session.mp4 for Whisper"
+                    "error": "Not enough free disk space for the Whisper movie pass"
                 ])
             } else {
             do {
@@ -703,7 +703,7 @@ final class SessionProcessor: @unchecked Sendable {
             relative: ScrumTracePath.sessionMovie,
             sessionURL: sessionURL
         ) ?? 0
-        return max(Int64(bytes) * 3, 64 * 1024 * 1024)
+        return max(Int64(bytes) / 8, 64 * 1024 * 1024)
     }
 
     private func loadTranscript(sessionURL: URL, sessionId: String) -> FullTranscript {
