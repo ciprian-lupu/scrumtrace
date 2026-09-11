@@ -22,7 +22,7 @@ from pathlib import Path
 def record_overlay_step(mode: str, awaiting_start: bool) -> bool:
     if not awaiting_start:
         return False
-    return mode in ("", "record")
+    return mode == "record"
 
 
 def parse_line(raw: str) -> dict[str, object] | None:

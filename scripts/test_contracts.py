@@ -1221,7 +1221,7 @@ def test_pipeline_timing_stays_in_archive() -> None:
     assert "capture_area_picker" in inspect_g0
     assert "start_requested" in inspect_g0
     assert "def record_overlay_step" in inspect_g0
-    assert 'mode in ("", "record")' in inspect_g0
+    assert 'mode == "record"' in inspect_g0
     audit = (ROOT / "SCRUMTRACE_AUDIT.md").read_text()
     assert "**Historical.**" in audit
     assert "014cca7" in audit
