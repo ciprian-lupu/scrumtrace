@@ -8,6 +8,21 @@ Machine: `_` · macOS: `_` · chip: `_` · ScrumTrace build: `_`
 
 ---
 
+## Gate −0 — 30 s record (not in the original spec)
+
+Record 30 seconds, Stop or Quit, confirm the session folder exists.
+
+| Check | Pass? | Notes |
+|---|---|---|
+| `archive/session.mp4` exists and duration > 0 |  | |
+| `archive/audio.wav` exists and duration > 0 |  | |
+| Inspector exists-fields true (no pause token; you did not pause) |  | |
+| `agent.jsonl` has `recorder_first_sample` for screen, audio, wav |  | |
+
+If this fails, do not run Gate 0 or Gate 1.
+
+---
+
 ## Gate 0 — shell (Phase 0)
 
 Hotkeys from **full-screen Keynote** must not steal focus.

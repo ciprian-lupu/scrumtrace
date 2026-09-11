@@ -2,7 +2,7 @@
 
 Read this before changing product code, gates, remotes, or TCC/signing. The working spec is [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md). Mac debug loop: [AGENT_DEBUG.md](AGENT_DEBUG.md). Hardware results: [samples/GATE_LOG.md](samples/GATE_LOG.md) (empty until a Mac run).
 
-Snapshot date: **2026-09-11**. Update the snapshot when status in this file changes.
+Snapshot date: **2026-09-11** (audit TASK-01–17 landed on `develop`; hardware still open). Update the snapshot when status in this file changes.
 
 ## What this is
 
@@ -47,9 +47,9 @@ Hard rules:
 
 ## Honest status
 
-**Software for phases -1 through 6 and contracts C1–C5 is in the tree.** Linux contract tests pass: `bash scripts/run_linux_tests.sh`.
+**Software for phases -1 through 6 and contracts C1–C5 is in the tree.** The `SCRUMTRACE_AUDIT.md` Part E queue (TASK-01–17) is implemented on `develop`. Linux contract tests pass: `bash scripts/run_linux_tests.sh`.
 
-**Hardware gates are not closed.** `samples/GATE_LOG.md` is blank. No stable Record session has been proven on a Mac. Whisper, slicing, and AI shipped before Gate 1 (the plan said to wait). Treat them as **unproven**, not missing.
+**Hardware gates are not closed.** `samples/GATE_LOG.md` has no PASS rows. No Mac has run Gate −0 after these fixes. Treat Record, pause, Whisper, and drift as **unproven** until that log is filled.
 
 Explicitly deferred by the plan: speaker diarization, 60-minute drift claims, new product surfaces.
 
