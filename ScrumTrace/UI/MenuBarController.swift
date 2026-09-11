@@ -97,19 +97,30 @@ final class MenuBarController: NSObject {
             menu.addItem(pinItem)
             menu.addItem(actionItem("Stop & process", #selector(stop)))
         } else {
-            let start = actionItem("Start recording", #selector(start))
+            let start = actionItem(
+                "Start recording — \(controller.settings.captureArea.summary)",
+                #selector(start)
+            )
             start.isEnabled = !controller.isBusy
             if lastStartEnabled != start.isEnabled {
                 lastStartEnabled = start.isEnabled
                 AgentLog.event("start_control_state", ["enabled": start.isEnabled ? "1" : "0"])
             }
             menu.addItem(start)
-            let area = actionItem(
-                "Capture area: \(controller.settings.captureArea.summary)",
-                #selector(selectCaptureArea)
+            let areaRoot = NSMenuItem(
+                title: "Capture area: \(controller.settings.captureArea.summary)",
+                action: nil,
+                keyEquivalent: ""
             )
-            area.isEnabled = !controller.isBusy
-            menu.addItem(area)
+            let areaMenu = NSMenu()
+            let change = actionItem("Select area on screen…", #selector(selectCaptureArea))
+            change.isEnabled = !controller.isBusy
+            areaMenu.addItem(change)
+            let full = actionItem("Use entire display", #selector(useEntireDisplay))
+            full.isEnabled = !controller.isBusy && !controller.settings.captureArea.isEntireDisplay
+            areaMenu.addItem(full)
+            areaRoot.submenu = areaMenu
+            menu.addItem(areaRoot)
         }
         let status = NSMenuItem(title: controller.statusLine, action: nil, keyEquivalent: "")
         status.isEnabled = false
@@ -205,6 +216,12 @@ final class MenuBarController: NSObject {
             self?.controller.settings.captureArea = area
             self?.rebuild()
         }
+    }
+
+    @objc private func useEntireDisplay() {
+        AgentLog.event("menu_area_full", [:])
+        controller.settings.captureArea = .entireDisplay
+        rebuild()
     }
 
     @objc private func start() {
