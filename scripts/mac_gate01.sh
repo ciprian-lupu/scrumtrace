@@ -48,25 +48,36 @@ if [[ ! -x "$APP/Contents/MacOS/ScrumTrace" ]]; then
   exit 1
 fi
 defaults read "$APP/Contents/Info.plist" LSUIElement || true
-codesign -d --entitlements - "$APP" 2>/dev/null | grep -E 'app-sandbox|audio-input|microphone' || true
 
 # Ad-hoc (`-`) signing keys TCC to the binary hash. Re-sign the build and
 # the stable copy with one local identity so Screen Recording / Microphone
 # survive the next rebuild.
+SIGN_NAME="${SCRUMTRACE_SIGN_IDENTITY:-ScrumTrace Debug}"
 IDENTITY=""
 if IDENTITY="$(bash "$(dirname "$0")/ensure_debug_signing_identity.sh")"; then
   echo "sign_identity=$IDENTITY"
 else
-  echo "warning: could not create '$IDENTITY' signing identity; TCC will reset on every rebuild" >&2
+  echo "warning: could not create '$SIGN_NAME' signing identity; TCC will reset on every rebuild" >&2
+  if [[ "${SCRUMTRACE_ALLOW_ADHOC:-}" != "1" ]]; then
+    exit 1
+  fi
   IDENTITY=""
 fi
 
+ENTITLEMENTS="$(dirname "$0")/../ScrumTrace/App/ScrumTrace.entitlements"
+
 sign_app() {
   local target="$1"
+  local deep_flag=()
+  if [[ -d "$target/Contents/Frameworks" ]]; then
+    deep_flag=(--deep)
+  fi
   if [[ -n "$IDENTITY" ]]; then
-    codesign --force --deep --sign "$IDENTITY" --identifier com.str8minds.ScrumTrace "$target"
+    codesign --force "${deep_flag[@]}" --sign "$IDENTITY" --identifier com.str8minds.ScrumTrace \
+      --entitlements "$ENTITLEMENTS" "$target"
   else
-    codesign --force --deep --sign - --identifier com.str8minds.ScrumTrace "$target"
+    codesign --force "${deep_flag[@]}" --sign - --identifier com.str8minds.ScrumTrace \
+      --entitlements "$ENTITLEMENTS" "$target"
   fi
 }
 
@@ -77,6 +88,7 @@ mkdir -p "$(dirname "$STABLE")"
 rm -rf "$STABLE"
 ditto "$APP" "$STABLE"
 sign_app "$STABLE"
+codesign -d --entitlements - "$STABLE" 2>/dev/null | grep -E 'app-sandbox|audio-input|microphone' || true
 echo "stable_app=$STABLE"
 codesign -dv --verbose=2 "$STABLE" 2>&1 | grep -E 'Authority|Identifier|Signature' || true
 echo "Force-quit every other ScrumTrace, then open this copy only:"
