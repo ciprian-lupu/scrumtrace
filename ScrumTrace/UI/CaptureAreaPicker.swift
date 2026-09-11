@@ -67,10 +67,16 @@ private final class CaptureAreaPickerController {
             }
             window.onEdited = { [weak self, weak window] in
                 self?.lastEditedWindow = window
+                window?.makeKey()
             }
             window.orderFrontRegardless()
             return window
         }
+        let starter = windows.first(where: {
+            if let area = $0.proposedArea(), !area.isEntireDisplay { return true }
+            return false
+        }) ?? windows.first(where: { $0.screen == NSScreen.main }) ?? windows.first
+        starter?.makeKey()
         monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self else { return event }
             switch event.keyCode {
@@ -248,7 +254,6 @@ private final class CaptureAreaPickerView: NSView {
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        window?.makeKey()
         NSCursor.crosshair.set()
     }
 
@@ -302,6 +307,7 @@ private final class CaptureAreaPickerView: NSView {
     }
 
     override func mouseDown(with event: NSEvent) {
+        window?.makeKey()
         let point = convert(event.locationInWindow, from: nil)
         if let hole = liveRect, let handle = hitHandle(point, in: hole) {
             drag = .resizing(handle)

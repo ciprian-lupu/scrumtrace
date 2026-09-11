@@ -2952,6 +2952,12 @@ def test_audit_leftovers_are_implemented() -> None:
     assert "isKeyWindow" in picker
     assert 'self?.confirmSelection()' not in picker
     assert "self.confirmSelection()" not in picker
+    moved = picker.split("func viewDidMoveToWindow")[1].split("func resetCursorRects")[0]
+    assert "makeKey" not in moved
+    mouse_down = picker.split("func mouseDown")[1].split("func mouseDragged")[0]
+    assert "makeKey" in mouse_down
+    assert "NSScreen.main" in picker
+    assert "window?.makeKey()" in picker.split("window.onEdited")[1].split("orderFrontRegardless")[0]
     menu = (ROOT / "ScrumTrace" / "UI" / "MenuBarController.swift").read_text()
     assert "Start recording —" in menu
     assert "Use entire display" in menu
