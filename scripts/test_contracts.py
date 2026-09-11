@@ -1850,14 +1850,14 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "omitted: omitted" in agent.split("private func taskBlock")[1].split("private func displayPath")[0]
     assert "remain in archive/" not in processor
     assert "applyExportEvidence" in processor
-    assert processor.count("EvidenceValidator.applyExportEvidence") == 3
+    assert processor.count("EvidenceValidator.applyExportEvidence") == 4
     for chunk in processor.split("EvidenceValidator.applyExportEvidence")[1:]:
         head = chunk.split(")")[0]
         assert "transcript: transcript" in head
         assert "omitted: projection.manifest.omitted" in head
-    assert processor.count("slices: projection.manifest.slices") == 3
-    assert processor.count("shots: projection.manifest.shots") == 3
-    assert processor.count("omitted: projection.manifest.omitted") == 3
+    assert processor.count("slices: projection.manifest.slices") == 4
+    assert processor.count("shots: projection.manifest.shots") == 4
+    assert processor.count("omitted: projection.manifest.omitted") == 4
     assert "mergeCanonicalStatuses" in processor
     assert "canonical: manifest.tasks" in processor
     assert "projected: projection.manifest.tasks" in processor
