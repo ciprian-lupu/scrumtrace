@@ -122,6 +122,76 @@ def read_manifest(path: Path) -> dict[str, object] | None:
     return data if isinstance(data, dict) else None
 
 
+def read_capture_layout(path: Path) -> dict[str, object] | None:
+    """Load archive/capture-layout.json. Missing or unreadable → None (fail-closed)."""
+    if not path.is_file():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def is_json_number(value: object) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def wav_start_media_seconds(layout: dict[str, object] | None) -> int | float | None:
+    """Return wav_start_media_seconds when it is a JSON number; otherwise None.
+
+    No numeric range is enforced here (hardware-only). Absent, null, or
+    non-numeric values fail closed via wav_start_present.
+    """
+    if layout is None:
+        return None
+    value = layout.get("wav_start_media_seconds")
+    if not is_json_number(value):
+        return None
+    if isinstance(value, int) and not isinstance(value, bool):
+        return value
+    if isinstance(value, float):
+        return value
+    return None
+
+
+def gate1_required_keys(*, audio_wav_exists: bool, ffprobe_available: bool) -> list[str]:
+    """Required check names. Layout/wav_start only when archive/audio.wav exists."""
+    required = [
+        "session_mp4_exists",
+        "session_mp4_no_ascii_token",
+        "audio_wav_exists",
+        "audio_wav_no_ascii_token",
+        "audio_wav_no_ascii_passphrase",
+        "transcript_exists",
+        "transcript_missing_token",
+        "transcript_missing_passphrase",
+        "events_exists",
+        "events_missing_token",
+        "export_missing_token",
+        "export_missing_passphrase",
+        "no_new_shot_png_during_pause",
+        "manifest_pauses_closed",
+        "capture_layout_exists",
+        "wav_start_present",
+    ]
+    if not audio_wav_exists:
+        required = [
+            key
+            for key in required
+            if key not in ("capture_layout_exists", "wav_start_present")
+        ]
+    if ffprobe_available:
+        required.extend(
+            [
+                "session_mp4_has_duration",
+                "wav_within_half_second_of_mp4",
+                "manifest_media_matches_durations",
+            ]
+        )
+    return required
+
+
 def manifest_media_matches(mp4_duration: float | None, manifest: dict[str, object] | None) -> bool:
     if mp4_duration is None or manifest is None:
         return False
@@ -217,10 +287,15 @@ def main() -> int:
 
     mp4 = archive / "session.mp4"
     wav = archive / "audio.wav"
+    layout_path = archive / "capture-layout.json"
     transcript = archive / "full_transcript.json"
     events = archive / "events.jsonl"
     shots = archive / "shots"
     zip_path = export / "session-pack.zip"
+    layout = read_capture_layout(layout_path)
+    wav_start = wav_start_media_seconds(layout)
+    capture_layout_exists = layout is not None
+    wav_start_present = wav_start is not None
 
     mp4_text = strings_blob(mp4) if mp4.is_file() else ""
     wav_text = strings_blob(wav) if wav.is_file() else ""
@@ -263,6 +338,9 @@ def main() -> int:
         "audio_wav_exists": wav.is_file(),
         "audio_wav_no_ascii_token": (not contains(wav_text, token)) if wav.is_file() else False,
         "audio_wav_no_ascii_passphrase": (not contains(wav_text, phrase)) if wav.is_file() else False,
+        "capture_layout_exists": capture_layout_exists,
+        "wav_start_media_seconds": wav_start,
+        "wav_start_present": wav_start_present,
         "transcript_exists": transcript.is_file(),
         "transcript_missing_token": not contains(transcript_text, token),
         "transcript_missing_passphrase": not contains(transcript_text, phrase),
@@ -285,36 +363,16 @@ def main() -> int:
         "manifest_media_matches_durations": manifest_media_matches_durations,
         "manifest_pauses_closed": manifest_pauses_closed(manifest),
     }
+    required = gate1_required_keys(
+        audio_wav_exists=wav.is_file(),
+        ffprobe_available=ffprobe is not None,
+    )
+    failed = [key for key in required if checks.get(key) is not True]
     report["checks"] = checks
+    report["required"] = required
+    report["failed"] = failed
     print(json.dumps(report, indent=2))
     print(MEDIA_SCRUB_NOTE, file=sys.stderr)
-
-    required = [
-        "session_mp4_exists",
-        "session_mp4_no_ascii_token",
-        "audio_wav_exists",
-        "audio_wav_no_ascii_token",
-        "audio_wav_no_ascii_passphrase",
-        "transcript_exists",
-        "transcript_missing_token",
-        "transcript_missing_passphrase",
-        "events_exists",
-        "events_missing_token",
-        "export_missing_token",
-        "export_missing_passphrase",
-        "no_new_shot_png_during_pause",
-        "manifest_pauses_closed",
-    ]
-    if ffprobe is not None:
-        required.extend(
-            [
-                "session_mp4_has_duration",
-                "wav_within_half_second_of_mp4",
-                "manifest_media_matches_durations",
-            ]
-        )
-
-    failed = [key for key in required if checks.get(key) is not True]
     return 1 if failed else 0
 
 

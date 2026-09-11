@@ -1200,6 +1200,15 @@ def test_pipeline_timing_stays_in_archive() -> None:
     assert "session_mp4_no_ascii_token" in required
     assert "audio_wav_no_ascii_token" in required
     assert "audio_wav_no_ascii_passphrase" in required
+    assert "capture_layout_exists" in required
+    assert "wav_start_present" in required
+    assert "wav_start_media_seconds" in inspect_g1
+    assert "capture-layout.json" in inspect_g1
+    assert "gate1_required_keys" in inspect_g1
+    helper = inspect_g1.split("def gate1_required_keys")[1].split("def main")[0]
+    assert "audio_wav_exists" in helper
+    assert "capture_layout_exists" in helper
+    assert "wav_start_present" in helper
     assert (ROOT / "scripts" / "inspect_gate0_log.py").exists()
     inspect_g0 = (ROOT / "scripts" / "inspect_gate0_log.py").read_text()
     assert "shot_window_key" in inspect_g0
