@@ -53,19 +53,240 @@ Explicitly out of v1 unless `IMPLEMENTATION_PLAN.md` is revised first:
 This boundary prevents an implementing model from growing an unfinishable
 backlog while claiming the app is incomplete.
 
-## 1. Rules for the implementing model
+## 1. Cursor Auto model and parallel-work strategy
 
-Execute tasks in order. Complete one task and its tests before starting the
-next.
+Use only the user's Cursor Auto subscription. Do not add model API keys, call
+these models from ScrumTrace, or introduce an orchestration dependency into the
+app.
 
-- Work only on `develop`.
+### Model roles
+
+| Role | Cursor model | Responsibilities |
+|---|---|---|
+| Coordinator/integrator | **Composer 2.5** | Own `develop`, freeze interfaces, assign worktrees, integrate commits in dependency order, run aggregate tests, resolve blockers |
+| Stateful implementation | **Composer 2.5** | Changes involving `SessionController`, `SessionProcessor`, `SessionModels`, capture lifecycle, consent state, or recovery |
+| Isolated implementation | **Grok 4.6** | Inspectors, contained helpers, new standalone views, focused fixtures, negative-path tests |
+| Adversarial reviewer | **Grok 4.6** | Search for false passes, path escapes, privacy leaks, stale state, missing negative tests, and spec violations |
+| Cross-reviewer | Opposite model | Composer reviews Grok changes; Grok reviews Composer changes before integration |
+
+Use Composer 2.5 for coordination/integration and Grok 4.6 for adversarial
+implementation/review. Correct prompts, ownership, tests, and cross-review are
+the quality controls; do not claim a reasoning setting that Cursor did not
+expose. Do not substitute an unavailable model silently.
+
+### Worktree protocol
+
+The coordinator stays on `develop`. Every write-capable parallel worker gets an
+isolated worktree from the exact same wave base:
+
+```bash
+git checkout develop
+git pull --ff-only origin develop
+BASE="$(git rev-parse develop 2>/dev/null || git rev-parse origin/develop)"
+TASK="a03"
+BRANCH="cursor/scrumtrace-${TASK}-0397"
+DIR="../scrumtrace-${TASK}"
+git worktree add -b "$BRANCH" "$DIR" "$BASE"
+```
+
+Rules:
+
+1. One task or explicitly listed subtask per worktree.
+2. Record `BASE` in every worker prompt and response.
+3. Workers never switch to, merge, pull, or push `develop`.
+4. Workers commit only files in their ownership list.
+5. Workers do not edit shared docs, aggregate runners, project settings,
+   `SessionModels.swift`, `SessionController.swift`, or `SessionProcessor.swift`
+   unless the wave table explicitly assigns ownership.
+6. A read-only reviewer may inspect any file but creates no commit.
+7. The coordinator verifies each worker commit with:
+
+   ```bash
+   git diff --name-only "$BASE"...<worker-commit>
+   git diff --check "$BASE"...<worker-commit>
+   ```
+
+8. If a worker changed an unowned file, reject the commit and ask that worker
+   to split it. Do not resolve avoidable conflicts in the integration branch.
+9. Same-machine worktrees return a commit SHA directly. Remote Cursor Auto
+   workers push only their task branch:
+
+   ```bash
+   git push -u origin "$BRANCH"
+   ```
+
+   The coordinator fetches it explicitly:
+
+   ```bash
+   git fetch origin "$BRANCH"
+   git ls-remote --heads origin "$BRANCH"
+   ```
+
+   A commit is not accepted until the remote branch resolves. The required
+   lowercase `cursor/…-0397` name is an explicit user override for these tasks.
+10. Integrate with `git cherry-pick <worker-commit>` in the table's order.
+11. Run the wave test command only after all commits in that wave are
+    integrated.
+12. Delete integrated worktrees and branches:
+
+    ```bash
+    git worktree remove "$DIR"
+    git branch -D "$BRANCH"
+    git push origin --delete "$BRANCH"
+    ```
+
+    `-D` is intentional because a cherry-picked commit has a different commit
+    identity and Git does not consider the task branch merged.
+13. Push `develop` only after the complete wave is green.
+
+Branch names must remain lowercase and end in `-0397`.
+
+### High-contention files: one writer at a time
+
+Never assign concurrent write access to:
+
+- `ScrumTrace/Storage/SessionModels.swift`
+- `ScrumTrace/Processing/SessionController.swift`
+- `ScrumTrace/Processing/SessionProcessor.swift`
+- `ScrumTrace/Capture/SessionRecorder.swift`
+- `scripts/gate_inspect_lib.py`
+- `scripts/inspect_all_gates.py`
+- `scripts/mac_all_gates.sh`
+- `scripts/run_linux_tests.sh`
+- `scripts/test_contracts.py`
+- `scripts/test_inspect_gates.py`
+- `README.md`, `AGENTS.md`, `IMPLEMENTATION_PLAN.md`,
+  `samples/GATE_LOG.md`, and this plan
+- `ScrumTrace.xcodeproj/project.pbxproj`
+
+New Swift files beneath synchronized `ScrumTrace/` and `ScrumTraceTests/`
+groups do not require a project-file edit. Composer still exclusively owns SPM
+changes, entitlements, `Package.resolved`, and project settings.
+
+The coordinator owns shared documentation and aggregate runners unless a task
+explicitly transfers ownership.
+
+### Parallel execution waves
+
+`→` means sequential dependency. Items separated by `‖` may run concurrently
+from the same base because their write sets are disjoint.
+
+| Wave | Work | Builder / reviewer | Integration order |
+|---|---|---|---|
+| 0 | **O01** split gate tests into owned modules | Composer / Grok | O01 |
+| 1 | **A01 → A02** shared containment and log-window foundations | Composer / Grok | A01, then A02 |
+| 2 | **A03 ‖ A04 ‖ A05 ‖ A06 ‖ A07 ‖ A08 ‖ A09** | Composer: A04/A05/A07/A09; Grok: A03/A06/A08; opposite model reviews each | Numeric order |
+| 3 | **A10 → A11** ZIP helper, then aggregate wiring/docs | Grok then Composer; cross-review | A10, then A11 |
+| 4 | **B01 → B02 → B03 → B04** one Mac/TCC identity | Composer operator / Grok log review | Strictly sequential |
+| 5 | **C01 → C02 → C03 → C04** on the operator Mac | Composer operator / Grok artifact review | Strictly sequential |
+| 6 | **D01 → D02 → D03 → D04 → D05 → D06 → D07 → D08** | Composer stateful core; Grok isolated UI/tests and review | Strict task order |
+| 7 | **E01 standards ‖ E01 spec ‖ E01 security**, then **E02 → E03** | Composer architecture; Grok spec/security | Reviews may parallel; fixes serial |
+| 8 | **F01-linux ‖ F01-mac**, then **F02 → F03 → F04** | Parallel tests are read-only; hardware flows are sequential | Stop both lanes on any failure |
+| 9 | **G01 → G02 → G03** | Composer operator / Grok artifact review | Strictly sequential |
+
+Do not parallelize merely because tokens are available. TCC, one physical
+display, one persistent agent log, shared session manifests, final packaging,
+and release signing are serial resources.
+
+Wave 2 exception: if A06 reports `INTERFACE_BLOCKED`, pause Wave 2 integration
+before A06. Composer performs serial TASK A06b on a new base, owning only the
+required Swift logging files and tests, runs Mac tests, and integrates A06b.
+Restart A06 from that base. Do not cherry-pick A07–A09 until A06 is complete.
+
+For a parallel wave, launch all eligible builders in one Cursor batch after
+recording the common base SHA. Do not start downstream review agents until
+their corresponding builder commit exists. Reviews of completed sibling tasks
+may run concurrently.
+
+Wave integration checks:
+
+```bash
+# Wave 0
+python3 scripts/test_inspect_gates.py
+
+# Wave 1 (new modules are not aggregate-registered until A11)
+python3 scripts/gate_tests/test_gate_inspect_lib.py
+python3 scripts/gate_tests/test_gate_log_window.py
+bash scripts/run_linux_tests.sh
+bash scripts/mac_xcode_test.sh
+
+# Wave 2, after all seven commits are cherry-picked
+for test_file in \
+  test_gate_minus0.py \
+  test_gate0.py \
+  test_gate1.py \
+  test_gate2.py \
+  test_gate3.py \
+  test_gate4.py \
+  test_gate5.py; do
+  python3 "scripts/gate_tests/${test_file}"
+done
+bash scripts/run_linux_tests.sh
+bash scripts/mac_xcode_test.sh
+
+# Wave 3 / final inspector integration
+python3 scripts/test_inspect_gates.py
+bash scripts/run_linux_tests.sh
+bash scripts/mac_xcode_test.sh
+```
+
+The Wave 2 loop uses the exact O01 filenames. If O01 selects a different
+spelling for minus-zero, update this plan and the command in O01 before
+launching parallel work. Never let a shell glob silently skip a test module.
+
+### Within-task parallelism for Phase D
+
+Phase D tasks touch shared state and cannot safely run as whole tasks in
+parallel. They may use three short-lived lanes **after Composer freezes the
+public interface in a compiling commit**:
+
+1. **Core lane — Composer 2.5:** existing stateful files and service logic.
+2. **UI lane — Grok 4.6:** only the task's new standalone UI file.
+3. **Test lane — Grok 4.6:** only the task's new dedicated test file.
+
+Launch a UI lane only when the task explicitly lists a `new
+ScrumTrace/UI/*.swift` file. Composer owns every edit to an existing UI file.
+When a task lists multiple new test files, one Grok test lane owns all of them.
+
+The interface commit must define type names, initializers, protocols, and
+observable properties needed by UI/tests. Lanes may not change that interface.
+If an interface proves insufficient, stop all lanes, update and compile the
+interface centrally, then restart them from the new base.
+
+The frozen interface commit must pass `bash scripts/mac_xcode_test.sh` on a Mac
+before UI/test lanes launch. Linux contract tests cannot approve a Swift
+interface. With no Mac worker, Phase D is `BLOCKED`.
+
+### Dual-model completion rule
+
+A task is ready to integrate only when:
+
+1. the assigned builder reports exact changed files and green focused tests;
+2. the opposite model performs a read-only diff review;
+3. every critical/high finding is fixed by the original builder;
+4. the reviewer confirms the revised diff or lists remaining findings;
+5. the coordinator verifies file ownership and cherry-picks the commit;
+6. wave-level tests pass after integration.
+
+Unlimited tokens permit deeper review and more fixtures, not duplicate
+implementations of the same stateful code.
+
+## 2. Rules for the implementing model
+
+Execute dependency waves in order. Complete and integrate one wave before
+starting the next. Only tasks explicitly separated by `‖` may overlap.
+
+- The coordinator works only on `develop`; workers use assigned worktree
+  branches.
 - Before editing: `git status --short`. Preserve unrelated user changes.
 - Read every file named by the task before modifying it.
 - Add or update tests in the same commit as behavior.
 - Run the task-specific command, then `bash scripts/run_linux_tests.sh`.
 - Commit each task separately with the exact proposed Conventional Commit
   subject.
-- Push with `git push -u origin develop` and `git push github develop`.
+- Workers return their commit SHA and do not push `develop`.
+- The coordinator pushes each green integrated wave with
+  `git push -u origin develop` and `git push github develop`.
 - Never edit `samples/GATE_LOG.md` to add PASS without a real Mac run.
 - Never weaken `scripts/test_contracts.py` to make a failure disappear.
 - Never put titles, URLs, notes, transcripts, tokens, or API keys in
@@ -84,28 +305,77 @@ When a required Mac, permission, account, secret, or hardware artifact is
 missing, report `BLOCKED` with the exact command and output. Do not substitute a
 Linux result.
 
-### Copy/paste prompt for each task
+### Copy/paste prompt for a builder
 
-Give the implementing model exactly one task at a time:
+Fill every placeholder. Select the builder model from the wave table.
 
 ```text
-Implement TASK <ID> from FULL_APP_EXECUTION_PLAN.md.
+You are the <Composer 2.5 | Grok 4.6> builder for TASK <ID> from
+FULL_APP_EXECUTION_PLAN.md.
 
-Read AGENTS.md, IMPLEMENTATION_PLAN.md, and every file listed by the task.
-Implement only that task. Preserve unrelated changes. Add every listed test.
-Do not weaken existing tests or contracts. Do not edit GATE_LOG PASS cells.
-Run the task verification commands and the full Linux suite. If a Mac,
-permission, secret, or human check is required and unavailable, stop and report
-BLOCKED with exact evidence. Otherwise commit with the task's exact commit
-subject and push develop to origin and github.
+Wave base: <BASE SHA>
+Branch: <cursor/scrumtrace-<TASK_ID_LOWER>-0397>
+Owned files: <exact list>
+Forbidden shared files: <exact list>
+
+Read AGENTS.md, IMPLEMENTATION_PLAN.md, the complete task, and every owned file.
+Implement only this task. Do not modify an unowned file. Preserve unrelated
+changes. Add every listed test in the dedicated task test file. Do not weaken
+existing tests/contracts or edit GATE_LOG PASS cells. Run focused verification
+and the full suite available in this environment.
+
+If an owned-file change is insufficient, stop and report INTERFACE_BLOCKED with
+the exact additional file/API needed. Do not expand ownership yourself.
+If Mac, permission, secret, or human evidence is unavailable, report BLOCKED.
+Otherwise commit on the assigned branch with the task's exact subject. Do not
+merge, rebase, push develop, or create a PR. If this is a remote Cursor Auto
+worker, push only the assigned task branch with `git push -u origin <branch>`.
 
 Return:
+1. base SHA and branch;
+2. exact changed files;
+3. behavior implemented;
+4. tests added and negative cases covered;
+5. exact command results and exit codes;
+6. blockers or assumptions;
+7. commit SHA;
+8. task-branch push result, or `same-machine worktree`.
+```
+
+### Copy/paste prompt for the opposite-model reviewer
+
+The reviewer is read-only and uses the opposite model family:
+
+```text
+Review TASK <ID> commit <SHA> against base <BASE SHA> in
+FULL_APP_EXECUTION_PLAN.md.
+
+Builder model: <MODEL>. You are the opposite-model adversarial reviewer.
+Do not edit files or create commits. Read AGENTS.md, IMPLEMENTATION_PLAN.md,
+the task, and `git diff <BASE SHA>...<SHA>`.
+
+Check:
 1. changed files;
-2. behavior implemented;
-3. tests added;
-4. exact command results;
-5. remaining blockers;
-6. commit SHA and push result.
+2. task requirements implemented exactly;
+3. false pass/fail and missing-artifact behavior;
+4. privacy, containment, symlink, traversal, and side effects;
+5. state transitions, retries, cancellation, and concurrency;
+6. tests that would fail before and pass after;
+7. unowned files, scope creep, weakened pins, or missing exhaustive handling.
+
+Return findings only, ordered critical/high/medium/low, with file:line,
+reproduction, and required fix. Say `NO FINDINGS` if none. Do not praise or
+summarize.
+```
+
+### Copy/paste prompt for Composer integration
+
+```text
+Integrate TASK <ID> commit <SHA> onto develop at expected base <BASE SHA>.
+First verify changed files are within task ownership and review findings are
+resolved. Cherry-pick the commit. Do not manually combine unrelated changes.
+Run the focused task tests and the wave-level suite. If green, report the new
+develop SHA. If not, stop and return exact failure output; do not weaken tests.
 ```
 
 Reject an implementation response that says “should work,” omits tests, changes
@@ -128,7 +398,7 @@ during development.
 - A failure in Phase F or G03 reopens one focused implementation task, then
   requires the complete Phase E review and Phase F/G03 tests again.
 
-## 2. Inspector result contract
+## 3. Inspector result contract
 
 All gate inspectors must emit JSON and use these exit codes:
 
@@ -158,6 +428,75 @@ No inspector may write `samples/GATE_LOG.md`.
 
 ---
 
+## Phase O — Prepare conflict-free test ownership
+
+### TASK O01 — Split the monolithic gate test file
+
+This is a behavior-preserving prerequisite for parallel inspector work.
+
+**Owner:** Composer 2.5 builder; Grok 4.6 reviewer.
+
+**Files**
+
+- `scripts/test_inspect_gates.py`
+- new `scripts/gate_tests/__init__.py`
+- new `scripts/gate_tests/support.py`
+- new `scripts/gate_tests/test_gate_minus1.py`
+- new `scripts/gate_tests/test_gate_minus0.py`
+- new `scripts/gate_tests/test_gate0.py`
+- new `scripts/gate_tests/test_gate1.py`
+- new `scripts/gate_tests/test_gate2.py`
+- new `scripts/gate_tests/test_gate3.py`
+- new `scripts/gate_tests/test_gate4.py`
+- new `scripts/gate_tests/test_gate5.py`
+- new `scripts/gate_tests/test_gate6.py`
+- new `scripts/gate_tests/test_all_gates.py`
+
+**Implementation**
+
+1. Move existing fixtures and subprocess helpers into `support.py`.
+2. Move every existing test unchanged into the matching gate module.
+3. Keep `scripts/test_inspect_gates.py` as a thin deterministic runner.
+4. Use only the Python standard library. Do not add pytest.
+5. The runner discovers a fixed sorted module list and invokes each module in a
+   child Python process.
+6. Run every module even after a failure, preserve each stdout/stderr/exit code,
+   and return nonzero at the end.
+7. Print one concise result line per module.
+8. Preserve direct execution of each module:
+
+   ```bash
+   python3 scripts/gate_tests/test_gate3.py
+   ```
+
+9. Do not change inspector behavior in this task.
+
+**Tests**
+
+- Record the current `python3 scripts/test_inspect_gates.py` output/exit first.
+- Run every split module directly.
+- Run the thin aggregate runner.
+- Confirm the same number of test functions exists before and after using an
+  AST-based count, not text grep.
+- Assert the fixed module list equals the AST-discovered test-module set and
+  every listed module emitted one result line.
+
+**Verify**
+
+```bash
+python3 scripts/test_inspect_gates.py
+bash scripts/run_linux_tests.sh
+```
+
+**Done when:** test behavior is unchanged and each TASK A03–A09 worker can own
+one test module without editing a shared test file. Freeze `support.py` after
+this commit; later tasks keep gate-specific fixtures in their owned test module.
+Do not start A01 until O01 is integrated and the aggregate test runner passes.
+
+**Commit:** `test: split gate inspector test ownership`
+
+---
+
 ## Phase A — Make gate evidence trustworthy
 
 ### TASK A01 — Contain every export evidence path
@@ -168,8 +507,7 @@ No inspector may write `samples/GATE_LOG.md`.
 **Files**
 
 - `scripts/gate_inspect_lib.py`
-- `scripts/test_inspect_gates.py`
-- `scripts/test_contracts.py`
+- new `scripts/gate_tests/test_gate_inspect_lib.py`
 
 **Implementation**
 
@@ -185,6 +523,10 @@ No inspector may write `samples/GATE_LOG.md`.
    - require a non-empty regular file.
 2. Do not fall back to `session / rel`.
 3. Keep one shared helper; Gates 5 and 6 must call it.
+4. Replace `emit()` with the Section 3 result schema. Require explicit
+   `pass`, `fail`, `blocked`, or `manual_required`; never infer the two exit-2
+   states from a Boolean alone. Existing inspectors keep their current outcome
+   while adopting the schema.
 
 **Tests**
 
@@ -195,6 +537,7 @@ Add cases proving all of these are false:
 - `/tmp/outside.png`
 - `export/../archive/session.mp4`
 - a symlink under `export/shots/` to an outside file
+- a symlink under `export/shots/` to another file still inside `export/`
 - a zero-byte file
 
 Add one positive case for `shots/inside.png`.
@@ -202,12 +545,13 @@ Add one positive case for `shots/inside.png`.
 **Verify**
 
 ```bash
-python3 scripts/test_inspect_gates.py
+python3 scripts/gate_tests/test_gate_inspect_lib.py
 bash scripts/run_linux_tests.sh
 ```
 
 **Done when:** only a non-empty regular file contained under the real
-`export/` root can satisfy evidence.
+`export/` root can satisfy evidence. `run_linux_tests.sh` alone is insufficient:
+the dedicated A01 module and Wave 1 integration commands must both pass.
 
 **Commit:** `fix: contain gate evidence under export`
 
@@ -230,8 +574,13 @@ bash scripts/run_linux_tests.sh
 - `scripts/inspect_gate5_provider.py`
 - `scripts/inspect_all_gates.py`
 - `scripts/mac_all_gates.sh`
-- `scripts/test_inspect_gates.py`
-- `scripts/test_contracts.py`
+- `scripts/gate_tests/test_gate_minus0.py`
+- `scripts/gate_tests/test_gate0.py`
+- `scripts/gate_tests/test_gate2.py`
+- `scripts/gate_tests/test_gate5.py`
+- `scripts/gate_tests/test_all_gates.py`
+- new `scripts/gate_tests/test_gate_log_window.py`
+- new `ScrumTraceTests/AgentLogTests.swift`
 
 **Implementation**
 
@@ -240,12 +589,17 @@ bash scripts/run_linux_tests.sh
    sites.
 2. Add a process-safe current session context to `AgentLog`.
    `SessionController` sets it immediately after the session ID is created and
-   clears it after stop/termination. Include `session` automatically in every
-   event while context is set. Explicit event fields win only when equal;
+   clears it only after processing/retry finishes or the controller abandons
+   that session. Include `session` automatically in every event while context
+   is set. Explicit event fields win only when equal;
    mismatches must be asserted in Debug and logged as a technical error.
 3. Never include titles, URLs, notes, transcripts, tokens, or keys in either
    identifier.
-4. Add `--log-start-line N` to every log-reading inspector.
+4. Add optional `--log-start-line N` to every log-reading inspector. Direct
+   child CLIs preserve existing behavior temporarily so their O01 tests stay
+   green. A03/A04/A06/A09 make it mandatory for their respective final
+   inspector. The aggregate immediately returns exit `2` when `--log` lacks
+   `--log-start-line`; A11 later wires the full artifact-map schema.
 5. Add a shared `read_jsonl_window(path, start_line)` helper.
    - Lines are one-based.
    - Reject negative values.
@@ -254,8 +608,7 @@ bash scripts/run_linux_tests.sh
    - Verify macOS.
    - Create `~/Library/Logs/ScrumTrace/gate-run.json`.
    - Store current log line count + 1, UTC time, current `git rev-parse HEAD`,
-     app CDHash, app `run_id` when available, machine name, macOS version, and
-     chip.
+     app CDHash, machine name, macOS version, and chip.
    - Do not truncate or rewrite `agent.jsonl`.
 7. Normal `mac_all_gates.sh` loads that marker and passes
    `--log-start-line` to all log inspectors.
@@ -264,8 +617,15 @@ bash scripts/run_linux_tests.sh
 9. Session-aware inspectors must additionally infer `session_id` from
    `session.manifest.json` and require a matching log event where the event
    schema includes `session`.
-10. Require one `run_id` throughout a gate window. Gate 0 remains run-window
-    scoped because it intentionally happens outside a session.
+10. Read the applicable `run_id` from the first `launch` event after the
+    marker. A marker must be created after the final TCC relaunch and separately
+    for B02, B03, and B04. Require one `run_id` within each individual test
+    run—not across multiple gate runs.
+11. Set/clear session context on the AgentLog serialization queue. In Release,
+    a mismatched explicit session is dropped and a content-free
+    `session_mismatch` technical event is emitted; do not rely on `assert`.
+12. Use `TemporaryDirectory` for every parallel Python fixture. No test may
+    share a hard-coded `/tmp/scrumtrace-*` path.
 
 **Tests**
 
@@ -276,18 +636,24 @@ bash scripts/run_linux_tests.sh
 - Missing marker blocks.
 - A different session ID does not satisfy Gate −0 or Gate 5.
 - Every app event receives the same process `run_id`.
-- Session context appears after start and is absent after a clean stop.
+- Session context appears after start, remains through processing/consent/export,
+  and is absent only after processing/retry completes or the session is
+  abandoned.
 - A session mismatch cannot silently overwrite context.
 
 **Verify**
 
 ```bash
-python3 scripts/test_inspect_gates.py
+python3 scripts/gate_tests/test_gate_log_window.py
 bash scripts/run_linux_tests.sh
+bash scripts/mac_xcode_test.sh
 ```
 
 **Done when:** no log-based result can be influenced by events before the
-explicit gate-run marker or by another session.
+explicit gate-run marker or by another session, and the Swift logging changes
+compile and pass on a Mac. If no Mac is available, this task is `BLOCKED` and
+Wave 2 must not start. `run_linux_tests.sh` alone is insufficient: the
+dedicated A02 module and every Wave 1 integration command must pass.
 
 **Commit:** `fix: scope gate logs to one run`
 
@@ -298,14 +664,13 @@ explicit gate-run marker or by another session.
 **Files**
 
 - `scripts/inspect_gate_minus0.py`
-- `scripts/test_inspect_gates.py`
-- `samples/GATE_LOG.md`
-- `README.md`
+- `scripts/gate_tests/test_gate_minus0.py`
 
 **Implementation**
 
 Require:
 
+0. `--log-start-line` is mandatory; missing marker returns exit `2`.
 1. `archive/`, `export/`, canonical manifest, MP4, WAV, events, and capture
    layout exist.
 2. MP4 duration is at least 30.0 seconds.
@@ -335,7 +700,7 @@ large media files to git.
 **Verify**
 
 ```bash
-python3 scripts/test_inspect_gates.py
+python3 scripts/gate_tests/test_gate_minus0.py
 bash scripts/run_linux_tests.sh
 ```
 
@@ -351,17 +716,20 @@ bash scripts/run_linux_tests.sh
 
 - `scripts/inspect_gate0_log.py`
 - `scripts/mac_gate01.sh`
-- `scripts/test_inspect_gates.py`
-- `samples/GATE_LOG.md`
+- `ScrumTrace/UI/HotkeyManager.swift`
+- `scripts/gate_tests/test_gate0.py`
 
 **Implementation**
 
 Within the scoped log window require:
 
-1. One `hotkey_shot`, one `hotkey_pin`, and one `hotkey_pause`.
-2. A `hotkey_front` result for each action.
-3. Every result has `app_active == "0"`.
-4. `front == "com.apple.iWork.Keynote"` for each action.
+1. `--log-start-line` is mandatory; missing marker returns exit `2`.
+2. One `hotkey_shot`, one `hotkey_pin`, and one `hotkey_pause`.
+3. Capture `front` and `app_active` before performing Shot or Pin and log one
+   `hotkey_front` result for each. Pause is proven by `hotkey_pause` plus
+   `pause_ok`/`resume_ok`; it does not require `hotkey_front`.
+4. Shot and Pin pre-action results have `app_active == "0"` and
+   `front == "com.apple.iWork.Keynote"`.
 5. Shot may become key, but `shot_window_key` must still show
    `app_active == "0"` and Keynote frontmost.
 6. Pause has a corresponding `pause_ok` or `resume_ok`.
@@ -386,8 +754,9 @@ An empty log or partial hotkey sequence must block or fail, never pass.
 **Verify**
 
 ```bash
-python3 scripts/test_inspect_gates.py
+python3 scripts/gate_tests/test_gate0.py
 bash scripts/run_linux_tests.sh
+bash scripts/mac_xcode_test.sh
 ```
 
 **Done when:** Gate 0 output proves the three requested actions happened during
@@ -405,11 +774,7 @@ in PCM/AAC.
 **Files**
 
 - `scripts/inspect_gate1_session.py`
-- `scripts/inspect_all_gates.py`
-- `scripts/mac_all_gates.sh`
-- `scripts/test_inspect_gates.py`
-- `samples/GATE_LOG.md`
-- `README.md`
+- `scripts/gate_tests/test_gate1.py`
 
 **Implementation**
 
@@ -424,7 +789,7 @@ in PCM/AAC.
    `manual_required`, exit `2`.
 5. Reject non-finite or negative offset. Offset above 50 ms fails the current
    target row but error copy must call it a measured target, not a guarantee.
-6. Require exactly or at least three closed pauses and at least 1,200 seconds
+6. Require at least three closed pauses and at least 1,200 seconds
    of media.
 7. Require pause durations to be finite, positive, and consistent with
    `resume_wall - pause_wall` within 10 ms.
@@ -434,6 +799,8 @@ in PCM/AAC.
    in Task A06. A filename set cannot distinguish a valid post-resume Shot.
 10. Continue scanning transcript, events, loose export text, and every ZIP text
     member for token/passphrase.
+11. Do not edit aggregate runners in this task. TASK A11 wires these arguments
+    into `inspect_all_gates.py` and `mac_all_gates.sh`.
 
 **Tests**
 
@@ -448,12 +815,12 @@ in PCM/AAC.
 **Verify**
 
 ```bash
-python3 scripts/test_inspect_gates.py
+python3 scripts/gate_tests/test_gate1.py
 bash scripts/run_linux_tests.sh
 ```
 
-**Done when:** aggregate output can never label Gate 1 passed without explicit
-human media checks and offset measurement.
+**Done when:** this inspector's CLI cannot label Gate 1 passed without explicit
+human media checks and offset measurement. Aggregate wiring remains A11.
 
 **Commit:** `fix: require manual evidence for Gate one`
 
@@ -464,21 +831,21 @@ human media checks and offset measurement.
 **Files**
 
 - `scripts/inspect_gate2_shot.py`
-- `scripts/test_inspect_gates.py`
-- `ScrumTrace/Processing/SessionController.swift` only if an event lacks the
-  technical fields needed below
-- `ScrumTrace/UI/ShotNoteWindow.swift` only if an event lacks the technical
-  fields needed below
+- `scripts/gate_tests/test_gate2.py`
 
 **Implementation**
 
 Within one scoped pause window require:
 
+0. `--log-start-line` is mandatory; missing marker returns exit `2`.
 1. A Shot attempt and `shot_ignored`/`shot_fail` with `reason=paused`.
 2. A Pin attempt and `pin_ignored` with `reason=paused`.
 3. A Hold-to-Talk attempt and `talk_start_fail reason=paused`, **or** an
    in-flight `talk_press` before Pause followed by `talk_abort` before Resume.
-4. No `shot_begin` or `shot_save` during Pause.
+4. No `shot_begin` during Pause. A `shot_save` is allowed only when its
+   captured frame `t_media` predates the pause; this is the permitted completion
+   of a pre-pause annotation. A save whose capture `t_media` lies inside the
+   pause fails.
 5. No `pin_ok` during Pause.
 6. No `talk_transcribe_begin`, `talk_transcribe_ok`, or persisted voice-note
    result for a paused attempt.
@@ -491,18 +858,23 @@ same monotonic timestamp.
 If product logging changes, log only action, reason, session ID, booleans, and
 numeric timing. Never log note or transcript content.
 
+This Grok-owned task may not edit Swift. If the required capture-time field is
+missing, return `INTERFACE_BLOCKED`. Composer creates a separate serial A06b
+logging commit, runs Mac tests, and Grok restarts A06 from that new base.
+
 **Tests**
 
 - Pause with no attempts blocks.
 - Each missing required action blocks.
 - Refused Shot + Pin + PTT passes.
 - In-flight PTT abort passes.
-- `shot_save`, `pin_ok`, or transcription during Pause fails.
+- A newly captured `shot_save`, `pin_ok`, or transcription during Pause fails.
+- Saving a pre-pause annotation during Pause passes.
 
 **Verify**
 
 ```bash
-python3 scripts/test_inspect_gates.py
+python3 scripts/gate_tests/test_gate2.py
 bash scripts/run_linux_tests.sh
 ```
 
@@ -524,7 +896,7 @@ capture controls.
 **Files**
 
 - `scripts/inspect_gate3_whisper.py`
-- `scripts/test_inspect_gates.py`
+- `scripts/gate_tests/test_gate3.py`
 
 **Implementation**
 
@@ -555,7 +927,7 @@ Require:
 **Verify**
 
 ```bash
-python3 scripts/test_inspect_gates.py
+python3 scripts/gate_tests/test_gate3.py
 bash scripts/run_linux_tests.sh
 ```
 
@@ -571,7 +943,7 @@ never close Gate 3.
 **Files**
 
 - `scripts/inspect_gate4_slicer.py`
-- `scripts/test_inspect_gates.py`
+- `scripts/gate_tests/test_gate4.py`
 
 **Implementation**
 
@@ -602,7 +974,7 @@ Require:
 **Verify**
 
 ```bash
-python3 scripts/test_inspect_gates.py
+python3 scripts/gate_tests/test_gate4.py
 bash scripts/run_linux_tests.sh
 ```
 
@@ -616,16 +988,13 @@ merely numeric manifest fields.
 ### TASK A09 — Split Gate 5 into four explicit scenarios
 
 Gate 5 cannot be proven by one session. It requires separate consent-denied,
-invalid-key, retired-model, and evidence-validation scenarios.
+invalid-key, retired-model, and evidence-validation scenarios. Use only canned,
+non-sensitive synthetic content for scenarios that may contact a provider.
 
 **Files**
 
 - `scripts/inspect_gate5_provider.py`
-- `scripts/inspect_all_gates.py`
-- `scripts/mac_all_gates.sh`
-- `scripts/test_inspect_gates.py`
-- `samples/GATE_LOG.md`
-- `README.md`
+- `scripts/gate_tests/test_gate5.py`
 
 **Implementation**
 
@@ -642,6 +1011,7 @@ Requirements:
 
 **Denied**
 
+- `--log-start-line` is mandatory for every log-backed scenario;
 - manifest records a denied consent with provider, endpoint, model;
 - scoped log has matching `consent_result approved=0`;
 - no `eval_slice` or provider-call event follows;
@@ -672,8 +1042,9 @@ Requirements:
 - failed quotes are represented only by `needs_review`;
 - inferred text alone cannot establish confirmation.
 
-The all-gates runner accepts four named Gate 5 session directories. If any is
-missing, Gate 5 is blocked.
+Define a stable CLI for four named Gate 5 session directories. Do not edit
+aggregate runners in this task. TASK A11 wires the four scenarios and blocks
+when any is missing.
 
 **Tests**
 
@@ -684,7 +1055,7 @@ events, and provider/model mismatch.
 **Verify**
 
 ```bash
-python3 scripts/test_inspect_gates.py
+python3 scripts/gate_tests/test_gate5.py
 bash scripts/run_linux_tests.sh
 ```
 
@@ -700,15 +1071,17 @@ bash scripts/run_linux_tests.sh
 
 - `scripts/gate_inspect_lib.py`
 - `scripts/inspect_gate6_pack.py`
-- `scripts/test_inspect_gates.py`
-- `ScrumTraceTests/ContractTests.swift`
+- `scripts/gate_tests/test_gate6.py`
+- new `ScrumTraceTests/PackGateTests.swift`
 
 **Implementation**
 
-1. Replace `zip_names()` with a result that distinguishes:
+1. Add typed `zip_inventory()` with states that distinguish:
    - missing;
    - valid;
    - corrupt/unreadable.
+   Keep the existing `zip_names() -> list[str]` behavior for Gate 3 and
+   implement it through the typed inventory without changing its public type.
 2. Require a valid ZIP containing:
    - `AGENT_CONTEXT.md`;
    - `SESSION_BRIEF.html`;
@@ -754,7 +1127,7 @@ bash scripts/run_linux_tests.sh
 **Verify**
 
 ```bash
-python3 scripts/test_inspect_gates.py
+python3 scripts/gate_tests/test_gate6.py
 bash scripts/run_linux_tests.sh
 ```
 
@@ -776,13 +1149,21 @@ bash scripts/mac_xcode_test.sh
 
 - `scripts/inspect_all_gates.py`
 - `scripts/mac_all_gates.sh`
+- new `scripts/inspect_agent_log_privacy.py`
 - `scripts/test_inspect_gates.py`
 - `scripts/test_contracts.py`
+- `scripts/gate_tests/test_all_gates.py`
+- new `scripts/gate_tests/test_agent_log_privacy.py`
+- `README.md`
+- `AGENTS.md`
+- `IMPLEMENTATION_PLAN.md`
+- `samples/GATE_LOG.md`
 
 **Implementation**
 
 1. Aggregate subprocess output using the explicit inspector result contract.
-2. Treat malformed/non-JSON inspector output as failure.
+2. Treat malformed/non-JSON inspector output or a missing `status`,
+   `blocked_reasons`, or `manual_checks` field as failure.
 3. Treat unexpected exit codes as failure.
 4. `--strict` succeeds only when all requested gates are `pass`.
 5. Preserve the required order: −1, −0, 0, 1, 2, 3, 4, 5, 6.
@@ -791,6 +1172,30 @@ bash scripts/mac_xcode_test.sh
 8. Print exact next actions for blocked/manual rows.
 9. Never include secret values or captured content in aggregate output.
 10. Never write `GATE_LOG.md`.
+11. Wire all manual Gate 1/3/4 assertions introduced by A05/A07/A08.
+12. Wire all four Gate 5 scenario artifacts introduced by A09.
+13. Add every new test module from A01–A10 to the thin sorted test runner.
+    Assert its fixed list equals the test modules on disk.
+14. Update shared docs and source-text contract pins in this integration commit.
+    `samples/GATE_LOG.md` edits are command/example changes only—never PASS
+    cells.
+15. Preserve every symbol currently pinned by `scripts/test_contracts.py`
+    during A03–A10. A11 may update a pin only in the same commit that wires the
+    replacement behavior.
+16. Add `--artifact-map PATH` to both aggregate runners. The JSON map contains
+    separate entries for −0, 0, 1/2, 3, 4, 5, and 6. Every log-backed entry
+    carries `log` and `log_start_line`; every session-backed entry carries
+    `session`. Gate 5 contains nested `denied`, `invalid_key`,
+    `retired_model`, and `evidence` entries. Document and JSON-validate this
+    schema. Reject missing/unknown keys in strict mode.
+17. Preserve direct per-inspector arguments for debugging, but strict all-gate
+    acceptance requires the artifact map so one session cannot satisfy
+    unrelated scenarios.
+18. Add `inspect_agent_log_privacy.py`. Parse JSONL structurally; reject
+    forbidden content keys and user-supplied marker values while permitting
+    documented technical keys such as `has_url`. Never print a rejected secret
+    value—print line number and key only.
+19. Do not use `--strict` as sign-off before A11 is integrated.
 
 **Tests**
 
@@ -800,10 +1205,13 @@ bash scripts/mac_xcode_test.sh
 - Gate −0 failure prevents later execution.
 - Gate 1 blocked prevents 3–6.
 - All synthetic passes return zero.
+- Privacy inspector catches forbidden keys/values without echoing them and does
+  not flag `has_url`.
 
 **Verify**
 
 ```bash
+python3 scripts/gate_tests/test_all_gates.py
 python3 scripts/test_inspect_gates.py
 bash scripts/run_linux_tests.sh
 ```
@@ -820,10 +1228,11 @@ Do not begin this phase until Phase A is merged on `develop`.
 
 ### TASK B01 — Mac compile and Xcode tests
 
-**No code changes unless the command fails.**
+**Coordinator/operator-only on the canonical Mac `develop` clone. This is not
+a worktree worker task. No code changes unless the command fails.**
 
 ```bash
-cd ~/development/scrumtrace
+cd "$(git rev-parse --show-toplevel)"
 git checkout develop
 git pull --ff-only origin develop
 bash scripts/mac_xcode_test.sh
@@ -834,13 +1243,20 @@ bash scripts/mac_gate01.sh
 
 - Swift app compiles in Debug.
 - All `ScrumTraceTests` pass.
+- The actual exit code from both commands is `0` on macOS; Linux output is
+  `BLOCKED`, never PASS.
 - Stable app exists at `~/Applications/ScrumTrace.app`.
 - Signature identifier is `com.str8minds.ScrumTrace`.
 - Local `ScrumTrace Debug` identity is used.
 - App Sandbox is off.
 
-If compilation fails, create one focused fix commit. Do not combine compile
-fixes with runtime behavior.
+`mac_xcode_test.sh` proves compilation/tests only and may use ad-hoc signing.
+Signing identity, sandbox, bundle ID, and `LSUIElement` are verified by
+`mac_gate01.sh`.
+
+If compilation fails, create a numbered B01a focused task with an exact
+owned-file list and one fix commit. Do not turn B01 into an unbounded cleanup.
+Do not start B02 until Mac tests pass.
 
 ---
 
@@ -851,15 +1267,16 @@ fixes with runtime behavior.
 ```bash
 pkill -x ScrumTrace || true
 launchctl bootout gui/$(id -u)/com.str8minds.ScrumTrace.agentloop 2>/dev/null || true
-bash scripts/mac_all_gates.sh --begin
 open -n ~/Applications/ScrumTrace.app
 ```
 
 1. Grant Screen Recording and Microphone to that stable app.
 2. Relaunch. Do not rebuild after granting.
-3. Record at least 31 seconds with visible motion, system audio, and microphone.
-4. Stop and wait for local processing.
-5. Run the Gate −0 inspector for that exact session and marker.
+3. After the post-TCC relaunch is running, execute
+   `bash scripts/mac_all_gates.sh --begin`.
+4. Record at least 31 seconds with visible motion, system audio, and microphone.
+5. Stop and wait for local processing.
+6. Run the Gate −0 inspector for that exact session and marker.
 
 **Pass criteria**
 
@@ -873,12 +1290,14 @@ If this fails, stop. Do not run Gate 0 or Gate 1.
 
 ### TASK B03 — Gate 0 over full-screen Keynote
 
-1. Start a short recording so Pin has a valid timeline.
-2. Enter full-screen Keynote.
-3. Press Shot, Pin, and Pause hotkeys once each.
-4. Confirm Keynote remains visually frontmost after each.
-5. Resume and stop.
-6. Run Gate 0 against the saved run marker.
+1. Create a fresh marker with `bash scripts/mac_all_gates.sh --begin`.
+2. Open the Start overlay and begin a short recording so overlay sequencing is
+   inside the marked window and Pin has a valid timeline.
+3. Enter full-screen Keynote.
+4. Press Shot, Pin, and Pause hotkeys once each.
+5. Confirm Keynote remains visually frontmost after each.
+6. Resume and stop.
+7. Run Gate 0 against the saved run marker.
 
 **Pass criteria**
 
@@ -896,7 +1315,7 @@ Record machine evidence in `samples/GATE_LOG.md`.
 Use token `ST-G1-PAUSE-TOKEN-9F3C` and passphrase
 `orchid lantern seven`.
 
-1. Begin a new marked gate run.
+1. Begin a new marked gate run with `bash scripts/mac_all_gates.sh --begin`.
 2. Record at least 20 minutes of **media time**.
 3. Make exactly three or more pauses.
 4. During one pause:
@@ -927,6 +1346,10 @@ Commit only the factual Gate log update:
 
 `docs: record Gate one Mac results`
 
+Before accepting the commit, Grok 4.6 performs a read-only review of the scoped
+gate JSON and `samples/GATE_LOG.md` diff for stale events, missing manual rows,
+content leakage, and overstated PASS claims.
+
 Do not continue if Gate 1 fails.
 
 ---
@@ -956,7 +1379,6 @@ Use the Gate 1 session plus a separate warm five-minute session.
 - Sources include `room` and `system` when both were captured.
 - Segments are non-empty and use `t_media`.
 - Timing file remains archive-only.
-- Retry Analysis succeeds after a recoverable interrupted processing run.
 
 ---
 
@@ -978,11 +1400,17 @@ Use a session with speech, at least one Pin, and at least one Shot.
 ### TASK C03 — Gate 5 provider scenarios
 
 Create four disposable sessions or copies as required by Task A09.
+Use canned, non-sensitive synthetic sessions for every network-provider
+scenario. Hardware captures may validate local processing but must not be
+uploaded for this gate.
 
 1. Deny consent.
 2. Approve consent with an invalid key.
 3. Select a retired Anthropic ID.
-4. Run one valid OpenAI-compatible evaluation with a user-provided key.
+4. Run one valid OpenAI-compatible evaluation with a user-provided key against
+   a synthetic session containing only canned, non-sensitive stills and
+   transcript. Never upload the Gate 1 hardware session or real captured
+   meeting content for this validation.
 
 Never commit keys or provider responses containing captured content.
 
@@ -1019,6 +1447,9 @@ Never commit keys or provider responses containing captured content.
 Commit only factual Gate 3–6 evidence:
 
 `docs: record processing gate results`
+
+Grok 4.6 reviews the Gate 3–6 JSON artifacts and Gate-log diff read-only before
+the coordinator accepts these provisional results.
 
 ---
 
@@ -1153,16 +1584,15 @@ remove sensitive items before any network request.
 - `ScrumTrace/Processing/SessionController.swift`
 - `ScrumTrace/Processing/SessionProcessor.swift`
 - `ScrumTrace/AI/AIProviderProtocol.swift`
-- `ScrumTrace/AI/ProviderWireMedia.swift`
 - `ScrumTrace/Export/ExportProjector.swift`
 - `ScrumTrace/Storage/SessionModels.swift`
 - new `ScrumTrace/UI/UploadReviewWindow.swift`
 - new `ScrumTraceTests/UploadReviewTests.swift`
 - new `ScrumTraceTests/ProviderRequestTests.swift`
 
-If protocol files have different names, locate the existing declarations with
-`rg 'AIProviderProtocol|ProviderWireMedia' ScrumTrace` and edit those files; do
-not create duplicate types.
+Verify the existing declarations with
+`rg 'AIProviderProtocol|ProviderWireMedia' ScrumTrace/AI/AIProviderProtocol.swift`.
+Do not create a duplicate `ProviderWireMedia.swift`.
 
 **Implementation**
 
@@ -1185,6 +1615,10 @@ not create duplicate types.
 7. Immediately before the provider call, rebuild the plan and require the
    fingerprint to match. A mismatch requires new consent.
 8. Cancel always produces local export and zero provider requests.
+9. Expose one `presentConsentIfNeeded(payloadPlan:)` integration hook.
+   Processing completion must call this hook rather than directly constructing
+   the consent UI. TASK D05 inserts Session Review before this hook without
+   rewriting payload/consent state.
 
 **Tests**
 
@@ -1445,6 +1879,75 @@ captured content to a new index.
 
 ---
 
+### TASK D08 — Implement signed updates and license display
+
+This source-code task must finish before Phase E so update and license code is
+included in final review and release-candidate tests.
+
+**Files**
+
+- `ScrumTrace.xcodeproj/project.pbxproj`
+- `ScrumTrace.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved`
+- `ScrumTrace/App/UpdateChecker.swift`
+- `ScrumTrace/App/AppDelegate.swift`
+- `ScrumTrace/App/Info.plist`
+- `ScrumTrace/UI/SettingsView.swift`
+- `scripts/mac_release.sh`
+- update-feed/release automation files selected by the coordinator
+- new `ScrumTraceTests/UpdateAndLicenseTests.swift`
+
+**Implementation**
+
+1. Add Sparkle as the required v1 installer:
+   - resolve the latest stable package on a Mac, never Linux;
+   - commit `Package.resolved`;
+   - integrate its updater without changing Record availability;
+   - keep EdDSA private keys outside git;
+   - support signed feed, download, install, and relaunch;
+   - reject tampered or unsigned updates.
+2. Keep GitHub release-check failure nonfatal.
+3. Keep license verification local and signature-based.
+4. Test missing, invalid, expired, and valid license display.
+5. Confirm Record works in all four license states.
+6. Never place update/license private keys or full license values in logs.
+7. Extend `mac_release.sh` to accept both
+   `SCRUMTRACE_MARKETING_VERSION` and `SCRUMTRACE_BUILD_NUMBER` as paired,
+   validated build-setting overrides. If only one is present, fail before
+   `xcodebuild`. Pass them as `MARKETING_VERSION` and
+   `CURRENT_PROJECT_VERSION` without editing tracked files. Preserve existing
+   behavior when neither is set.
+8. Replace hardcoded `CFBundleShortVersionString` and `CFBundleVersion` values
+   in `ScrumTrace/App/Info.plist` with `$(MARKETING_VERSION)` and
+   `$(CURRENT_PROJECT_VERSION)`. The target uses a checked-in Info.plist, so
+   build-setting overrides are not valid until these substitutions exist.
+
+**Tests**
+
+- Valid signed update metadata accepted.
+- Tampered/unsigned update rejected.
+- Feed/network failure is nonfatal.
+- Missing/invalid/expired/valid license states render correctly.
+- Record availability is identical in every license state.
+- Secrets and full license values are absent from logs.
+- Release script rejects a partial/invalid version override and does not dirty
+  the source tree.
+- Built-app plist tests prove both build-setting substitutions resolve to the
+  requested concrete values.
+
+**Verify**
+
+```bash
+bash scripts/mac_xcode_test.sh
+bash scripts/run_linux_tests.sh
+```
+
+**Done when:** update and license code is complete, Mac-tested, and ready for
+Phase E review. Actual signed release/feed installation is proven in Phase G.
+
+**Commit:** `feat: add signed updates without gating record`
+
+---
+
 ## Phase E — Code review and product audit
 
 Phase E happens after all implementation tasks. Do not start the final test with
@@ -1452,9 +1955,10 @@ unresolved review findings.
 
 ### TASK E01 — Automated branch review
 
-Use the commit immediately before TASK A01 as the fixed comparison point.
+Use the parent of TASK O01 as the fixed comparison point so the test split is
+also reviewed.
 
-Run two independent reviews:
+Run three independent reviews in parallel:
 
 1. **Standards review**
    - `AGENTS.md`;
@@ -1467,7 +1971,7 @@ Run two independent reviews:
    - `samples/GATE_LOG.md`;
    - required states and negative paths.
 
-Also run a dedicated security review of:
+3. **Security review**
 
 - export containment;
 - ZIP member validation;
@@ -1479,7 +1983,13 @@ Also run a dedicated security review of:
 
 **Output**
 
-Create `FINAL_REVIEW.md` containing only:
+Each reviewer owns one file:
+
+- `FINAL_REVIEW_STANDARDS.md`
+- `FINAL_REVIEW_SPEC.md`
+- `FINAL_REVIEW_SECURITY.md`
+
+Each file contains only:
 
 - comparison base and reviewed HEAD;
 - finding severity;
@@ -1487,7 +1997,9 @@ Create `FINAL_REVIEW.md` containing only:
 - reproduction or failing test;
 - disposition: accepted, rejected with reason, or blocked.
 
-Do not copy captured content or secrets into the review.
+Do not copy captured content or secrets into the review. After all three
+reviews finish, Composer serially combines them into `FINAL_REVIEW.md` and is
+the only writer of that merged file.
 
 ---
 
@@ -1548,13 +2060,32 @@ end test on the installed notarized artifact.
 On Linux and a Mac, clone `develop` into new directories. Do not reuse build
 products, generated mock media, DerivedData, app installation, or TCC state.
 
-Run:
+**F01-linux lane**
 
 ```bash
 bash scripts/run_linux_tests.sh
 python3 scripts/inspect_all_gates.py --mock-only
-bash scripts/mac_xcode_test.sh
 ```
+
+This proves Linux contracts and Phase −1 only. It is never evidence for Mac
+Gates −0 through 6.
+
+**F01-mac lane**
+
+```bash
+bash scripts/mac_xcode_test.sh
+xcodebuild \
+  -project ScrumTrace.xcodeproj \
+  -scheme ScrumTrace \
+  -configuration Release \
+  -destination 'platform=macOS' \
+  CODE_SIGNING_ALLOWED=NO \
+  build
+```
+
+Both lanes are read-only and may run in parallel. If either fails, stop both
+lanes, open one serial fix task, complete Phase E again, and rerun both lanes
+from clean clones.
 
 Then verify:
 
@@ -1608,8 +2139,9 @@ For every failure:
 
 - capture the scoped technical log;
 - write an exact reproduction;
-- make one focused code/test commit;
-- rerun the affected gate and all automated tests.
+- reopen one focused implementation task with exact ownership;
+- complete the E02 fix/review loop;
+- restart all of F01–F04 from clean artifacts.
 
 **Done when:** a fresh user can record, pause, annotate, process, inspect, and
 hand off a session without Xcode or Terminal after installation.
@@ -1618,11 +2150,25 @@ hand off a session without Xcode or Terminal after installation.
 
 ### TASK F03 — Privacy and negative-path audit
 
-Run:
+Run the structured privacy inspector from A11:
 
 ```bash
-rg -n 'title|url|note|transcript|api.?key' ~/Library/Logs/ScrumTrace/agent.jsonl
-unzip -l /path/to/export/session-pack.zip
+python3 scripts/inspect_agent_log_privacy.py \
+  --log ~/Library/Logs/ScrumTrace/agent.jsonl \
+  --forbidden-value 'ST-G1-PAUSE-TOKEN-9F3C' \
+  --forbidden-value 'orchid lantern seven' \
+  --forbidden-value "$SEEDED_SYNTHETIC_SECRET"
+```
+
+It fails on forbidden content keys such as `title`, `window_title`, `url`,
+`note`, `transcript`, `api_key`, `token`, `passphrase`, or `secret`, and on
+forbidden marker values. It permits documented technical booleans such as
+`has_url` and never echoes a secret.
+
+List and inspect the ZIP with:
+
+```bash
+unzip -Z -1 /path/to/export/session-pack.zip
 ```
 
 Inspect provider request construction with synthetic markers.
@@ -1645,14 +2191,21 @@ If a security defect appears, fix it before distribution.
 Create new artifacts after the last code-review fix. Do not reuse provisional
 Phase B/C PASS evidence.
 
+Do not start F04 unless every Phase D commit is integrated, all Mac tests pass,
+E02 has zero unresolved critical/high finding, and E03 human approval is
+recorded.
+
 Run Gate −0, Gate 0, Gate 1, and Gates 3–6 in order. Exercise:
 
+- create a new `mac_all_gates.sh --begin` marker immediately before each
+  separate −0, 0, and 1 run;
 - all three export profiles;
 - payload exclusion and image redaction;
 - processing crash/recovery at every stage;
 - session review edits;
 - session history recover/reveal/delete;
-- consent denied, invalid key, retired model, and valid provider;
+- consent denied, invalid key, retired model, and valid provider using canned
+  non-sensitive sessions only—never upload the Gate 1 hardware capture;
 - 8-clip/20-shot stress pack.
 
 Update `samples/GATE_LOG.md` only with these final run results. Include commit
@@ -1678,16 +2231,65 @@ Phase F; do not rerun only the failed line.
 
 ### TASK G01 — Release signing and notarization
 
+Phase D08 already implemented Sparkle and licensing before review/testing.
+Build two artifacts from the exact reviewed source commit: baseline version N
+and update version N+1. Only version/build metadata may differ.
+
 **Prerequisites supplied by the human**
 
 - Developer ID Application identity/team.
 - Notary credentials.
-- Release version/build number.
+- Baseline and update version/build numbers.
+- Sparkle EdDSA signing key outside git.
 
 **Commands**
 
 Use `scripts/mac_release.sh`; do not invent replacement signing commands unless
 that script is proven broken.
+
+Build into distinct destinations so the second archive cannot overwrite the
+first. Example values must be replaced with the approved release numbers:
+
+```bash
+SOURCE_SHA="$(git rev-parse HEAD)"
+test -z "$(git status --short)"
+
+SCRUMTRACE_DERIVED="$HOME/Library/Developer/Xcode/DerivedData/ScrumTrace-N" \
+SCRUMTRACE_DMG="$HOME/Desktop/ScrumTrace-N.dmg" \
+SCRUMTRACE_MARKETING_VERSION="1.0.0" \
+SCRUMTRACE_BUILD_NUMBER="100" \
+bash scripts/mac_release.sh
+
+SCRUMTRACE_DERIVED="$HOME/Library/Developer/Xcode/DerivedData/ScrumTrace-N1" \
+SCRUMTRACE_DMG="$HOME/Desktop/ScrumTrace-N1.dmg" \
+SCRUMTRACE_MARKETING_VERSION="1.0.1" \
+SCRUMTRACE_BUILD_NUMBER="101" \
+bash scripts/mac_release.sh
+
+N_APP="$HOME/Library/Developer/Xcode/DerivedData/ScrumTrace-N/ScrumTrace.xcarchive/Products/Applications/ScrumTrace.app"
+N1_APP="$HOME/Library/Developer/Xcode/DerivedData/ScrumTrace-N1/ScrumTrace.xcarchive/Products/Applications/ScrumTrace.app"
+N_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$N_APP/Contents/Info.plist")"
+N_BUILD="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$N_APP/Contents/Info.plist")"
+N1_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$N1_APP/Contents/Info.plist")"
+N1_BUILD="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$N1_APP/Contents/Info.plist")"
+test "$N_VERSION" = "1.0.0"
+test "$N_BUILD" = "100"
+test "$N1_VERSION" = "1.0.1"
+test "$N1_BUILD" = "101"
+python3 - "$N_BUILD" "$N1_BUILD" <<'PY'
+import sys
+
+if int(sys.argv[2]) <= int(sys.argv[1]):
+    raise SystemExit("update CFBundleVersion must increase")
+PY
+
+test "$SOURCE_SHA" = "$(git rev-parse HEAD)"
+git diff --exit-code
+test -z "$(git status --short)"
+```
+
+Copying one binary twice is not an update. Require
+`CFBundleVersion(N+1) > CFBundleVersion(N)` and a newer marketing version.
 
 **Pass criteria**
 
@@ -1700,49 +2302,49 @@ that script is proven broken.
 - Bundle ID and entitlements match the Debug-gated app except expected signing
   identity differences.
 - Record is never license-gated.
+- Both N and N+1 originate from the same reviewed source commit.
+- N and N+1 have distinct SHA-256 values and increasing bundle versions.
 
-After installation, repeat a short Gate −0 and export smoke test on the Release
-build.
+Store SHA-256, version/build, Team ID, CDHash, notarization result, and stapling
+result for both artifacts.
 
 ---
 
-### TASK G02 — Updates and licensing
+### TASK G02 — Publish and verify the signed update
 
-Do this only after the functional Release app passes G01.
+1. Publish baseline N and update N+1 to the test release channel.
+2. Generate and sign the Sparkle feed outside the repository.
+3. Install notarized baseline N on a clean user account.
+4. Verify feed/network failure is nonfatal.
+5. Verify a tampered/unsigned update is rejected.
+6. Install signed update N+1 and verify relaunch.
+7. Verify settings and session history survive update.
+8. Re-run `codesign`, Gatekeeper assessment, and stapler validation on the
+   updated installed app.
 
-1. Validate GitHub update-check behavior using a real test release.
-2. If adding Sparkle:
-   - resolve the latest stable package on a Mac;
-   - commit `Package.resolved`;
-   - provide and protect the EdDSA private key outside git;
-   - test signed feed and update installation.
-3. Generate license signatures outside the repository.
-4. Test valid, invalid, expired, and missing license displays.
-5. Confirm Record works in all four license states.
-
-**Pass criteria**
-
-- Update check failure is nonfatal.
-- A signed update installs and relaunches.
-- Invalid license never crashes and never disables Record.
-- No signing or license private key is committed.
+No source change is permitted in G02. Any required code change returns to a
+focused implementation task, Phase E review, Phase F, and G01.
 
 ---
 
 ### TASK G03 — Final installed-release acceptance test
 
-This is the final test at the end of the plan. Use the exact notarized and
-stapled artifact produced by G01, installed on a clean macOS user account. Do
-not rebuild between signing and this test.
+This is the final test at the end of the plan. Start with exact notarized
+baseline N from G01 on a clean account; step 11 updates it to exact notarized
+N+1 through the G02 feed. Do not rebuild either artifact.
 
-1. Record artifact SHA-256, version, build, Team ID, CDHash, notarization
-   result, machine, macOS, and chip.
-2. Complete onboarding and fresh TCC grants.
-3. Run Gate −0.
-4. Run the full-screen Keynote Gate 0 sequence.
-5. Run the 20-minute, three-pause Gate 1 sequence.
-6. Complete local Whisper, slicing, review, provider scenarios, and all three
-   export profiles.
+1. Record both artifact SHA-256 values, versions, builds, Team ID, CDHashes,
+   notarization results, machine, macOS, and chip.
+2. Complete onboarding and fresh TCC grants, then relaunch.
+3. After relaunch, create a fresh `mac_all_gates.sh --begin` marker and run
+   Gate −0.
+4. Create another fresh marker, then run the full-screen Keynote Gate 0
+   sequence.
+5. Create another fresh marker, then run the 20-minute, three-pause Gate 1
+   sequence.
+6. Complete local Whisper, slicing, review, provider scenarios using canned
+   non-sensitive sessions only, and all three export profiles. Never upload the
+   Gate 1 hardware capture.
 7. Exercise payload removal/redaction and verify exact consent binding.
 8. Terminate during each processing stage and recover.
 9. Verify session-history search/reveal/recover/delete.
@@ -1773,7 +2375,7 @@ including secrets or captured content.
 
 ---
 
-## 3. Final verification command set
+## 4. Final verification command set
 
 Linux:
 
@@ -1788,10 +2390,12 @@ Mac:
 ```bash
 bash scripts/mac_xcode_test.sh
 bash scripts/mac_all_gates.sh --no-build --strict \
-  --session /path/to/gate1-session \
-  --log ~/Library/Logs/ScrumTrace/agent.jsonl \
-  --log-start-line "$(python3 -c 'import json, pathlib; print(json.loads(pathlib.Path.home().joinpath(\"Library/Logs/ScrumTrace/gate-run.json\").read_text())[\"log_start_line\"])')"
+  --artifact-map /path/to/final-gate-artifacts.json
 ```
+
+The artifact map is produced by A11 and must identify separate Gate 5
+`denied`, `invalid_key`, `retired_model`, and `evidence` sessions. Do not point
+all entries at the Gate 1 capture.
 
 Release:
 
@@ -1801,7 +2405,11 @@ spctl --assess --type execute --verbose=2 /Applications/ScrumTrace.app
 xcrun stapler validate /Applications/ScrumTrace.app
 ```
 
-## 4. Review handoff checklist
+`~/Applications/ScrumTrace.app` is the locally signed Debug gate build.
+`/Applications/ScrumTrace.app` in these Release commands must be the exact
+notarized G01 artifact. Never sign or assess the Debug copy as the release.
+
+## 5. Review handoff checklist
 
 Before requesting another review, provide:
 
