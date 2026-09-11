@@ -41,6 +41,7 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
     private var wavFile: AVAudioFile?
     private var converter: AVAudioConverter?
     private var engine: AVAudioEngine?
+    private var engineConfigObserver: NSObjectProtocol?
     private var paused = false
     private var started = false
     private var microphoneWav = false
@@ -272,6 +273,7 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             self.stream = nil
             let engine = self.engine
             self.engine = nil
+            self.clearEngineObserver()
             return (stream, engine)
         }
         if let live = snapshot.stream {
@@ -361,6 +363,7 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             self.stream = nil
             let engine = self.engine
             self.engine = nil
+            self.clearEngineObserver()
             return (captured, self.microphoneWav, engine)
         }
         do {
@@ -1129,6 +1132,9 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         let engine = AVAudioEngine()
         let input = engine.inputNode
         let format = input.outputFormat(forBus: 0)
+        guard format.sampleRate > 0, format.channelCount > 0 else {
+            throw SessionRecorderError.writerFailed("No usable microphone input format.")
+        }
         input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, when in
             guard let self else { return }
             // The tap reuses `buffer`. Copy before hopping queues or pause-dropped
@@ -1150,8 +1156,27 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             }
         }
         try engine.start()
+        let token = NotificationCenter.default.addObserver(
+            forName: .AVAudioEngineConfigurationChange,
+            object: engine,
+            queue: nil
+        ) { [weak self] _ in
+            AgentLog.event("mic_engine_config_change", [:])
+            self?.failCaptureWrite("Microphone input changed. Stop and start a new session.")
+        }
         syncWriter {
+            if let previous = self.engineConfigObserver {
+                NotificationCenter.default.removeObserver(previous)
+            }
+            self.engineConfigObserver = token
             self.engine = engine
+        }
+    }
+
+    private func clearEngineObserver() {
+        if let token = engineConfigObserver {
+            NotificationCenter.default.removeObserver(token)
+            engineConfigObserver = nil
         }
     }
 
@@ -1321,6 +1346,7 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             self.stream = nil
             let engine = self.engine
             self.engine = nil
+            self.clearEngineObserver()
             self.wavFile = nil
             if let writer = self.writer, writer.status == .writing || writer.status == .unknown {
                 writer.cancelWriting()
