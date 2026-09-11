@@ -1226,6 +1226,9 @@ def test_pipeline_timing_stays_in_archive() -> None:
     assert "**Historical.**" in audit
     assert "014cca7" in audit
     assert "Do not invent PASS cells here." in audit
+    gate_log = (ROOT / "samples" / "GATE_LOG.md").read_text()
+    assert "openai_whisper-large-v3-v20240930_turbo_632MB" in gate_log
+    assert "openai_whisper-large-v3-turbo`" not in gate_log
     hotkey = (ROOT / "ScrumTrace" / "UI" / "HotkeyManager.swift").read_text()
     assert "hotkey_front" in hotkey
     shot = (ROOT / "ScrumTrace" / "UI" / "ShotNoteWindow.swift").read_text()

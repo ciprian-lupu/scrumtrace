@@ -66,7 +66,7 @@ Hold-to-Talk in-flight at Pause: temp WAV deleted? `_`
 
 ## Gate 3 — WhisperKit (Phase 3)
 
-Model on disk: `openai_whisper-large-v3-turbo` / Settings value: `_`
+Model on disk: `openai_whisper-large-v3-v20240930_turbo_632MB` / Settings value: `_`
 
 | Run | Media seconds | Wall time | Notes |
 |---|---|---|---|
