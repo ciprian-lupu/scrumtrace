@@ -1230,9 +1230,10 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
                 self.failCaptureWrite("Could not copy microphone PCM.")
                 return
             }
+            // Host time on this thread. After the queue hop it is too late.
             let host: CMTime? = when.isHostTimeValid
                 ? CMClockMakeHostTimeFromSystemUnits(when.hostTime)
-                : nil
+                : CMClockGetTime(CMClockGetHostTimeClock())
             self.writerQueue.async {
                 guard !self.paused, self.started else { return }
                 if let host, self.clock.isInsidePause(hostTime: host) {

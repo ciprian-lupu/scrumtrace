@@ -925,6 +925,14 @@ def test_audio_split_and_brief_loader() -> None:
     assert "failCaptureWrite" in tap
     assert "Could not copy microphone PCM" in tap
     assert "else { return }" not in tap.split("copyPCM(buffer)")[1].split("writerQueue.async")[0]
+    assert "when.isHostTimeValid" in tap
+    assert "CMClockMakeHostTimeFromSystemUnits(when.hostTime)" in tap
+    assert "CMClockGetTime(CMClockGetHostTimeClock())" in tap
+    host_choice = tap.split("when.isHostTimeValid")[1].split("writerQueue.async")[0]
+    assert ": nil" not in host_choice
+    assert host_choice.index("CMClockMakeHostTimeFromSystemUnits") < host_choice.index(
+        "CMClockGetTime(CMClockGetHostTimeClock())"
+    )
     copy_pcm = recorder.split("func copyPCM")[1].split("func writeEngineBuffer")[0]
     assert "copied ? copy : nil" in copy_pcm
     assert "return copy" in copy_pcm
@@ -2898,6 +2906,10 @@ def test_audit_leftovers_are_implemented() -> None:
     assert '"Entire Display"' in picker
     assert "eventTracking" not in picker
     assert "nextEvent" not in picker
+    assert "func confirmSelection(from preferred" in picker
+    assert "preferred?.proposedArea()" in picker
+    assert "confirmSelection(from: window)" in picker
+    assert 'self?.confirmSelection()' not in picker
     menu = (ROOT / "ScrumTrace" / "UI" / "MenuBarController.swift").read_text()
     assert "Start recording —" in menu
     assert "Use entire display" in menu

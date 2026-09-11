@@ -56,8 +56,8 @@ private final class CaptureAreaPickerController {
         NSApp.activate(ignoringOtherApps: true)
         windows = NSScreen.screens.map { screen in
             let window = CaptureAreaPickerWindow(screen: screen, current: current, mode: mode)
-            window.onUseSelection = { [weak self] in
-                self?.confirmSelection()
+            window.onUseSelection = { [weak self, weak window] in
+                self?.confirmSelection(from: window)
             }
             window.onUseEntire = { [weak self] in
                 self?.finish(.entireDisplay)
@@ -100,6 +100,7 @@ private final class CaptureAreaPickerController {
         AgentLog.event("capture_area_picker", [
             "action": "confirm",
             "full": area.isEntireDisplay ? "1" : "0",
+            "display": area.isEntireDisplay ? "all" : String(area.displayID),
             "mode": mode == .record ? "record" : "choose"
         ])
         switch mode {
@@ -110,7 +111,11 @@ private final class CaptureAreaPickerController {
         }
     }
 
-    private func confirmSelection() {
+    private func confirmSelection(from preferred: CaptureAreaPickerWindow? = nil) {
+        if let preferredArea = preferred?.proposedArea() {
+            finish(preferredArea)
+            return
+        }
         if let edited = lastEditedWindow?.proposedArea(), !edited.isEntireDisplay {
             finish(edited)
             return
