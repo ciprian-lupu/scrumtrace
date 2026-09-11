@@ -2249,6 +2249,8 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "6_000_000" not in recorder
     assert "AVVideoMaxKeyFrameIntervalKey" in recorder
     assert "AVVideoExpectedSourceFrameRateKey" in recorder
+    assert "AVVideoProfileLevelH264HighAutoLevel" in recorder
+    assert "AVVideoAllowFrameReorderingKey: false" in recorder
     assert "func closeWavWriter" in recorder
     assert "func startMicRevocationWatch" in recorder
     assert "Microphone access was revoked" in recorder
@@ -2823,6 +2825,7 @@ def test_audit_leftovers_are_implemented() -> None:
     assert "func sweepPrivateTemporaryOrphans" in models
     assert "archiveFrameTimescale = 4" in models
     assert "archiveVideoBitrate = 16_000_000" in models
+    assert "archiveVideoMaxBitrate = 24_000_000" in models
     assert "static func rebuild(from events" in models
     assert "struct CaptureArea" in models
     assert "entireDisplay" in models
@@ -2912,6 +2915,7 @@ def test_audit_leftovers_are_implemented() -> None:
     assert '"Record"' in picker
     assert '"Use this area"' in picker
     assert '"Entire Display"' in picker
+    assert "case n, s, e, w, ne, nw, se, sw" in picker
     assert "eventTracking" not in picker
     assert "nextEvent" not in picker
     assert "func confirmSelection(from preferred" in picker
