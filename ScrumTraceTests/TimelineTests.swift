@@ -46,4 +46,14 @@ final class TimelineTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(odd.width, 2)
         XCTAssertGreaterThanOrEqual(odd.height, 2)
     }
+
+    func testIsInsidePauseClosedAndOpenIntervals() {
+        let pauses = [PauseInterval(pauseWall: 10, resumeWall: 20)]
+        XCTAssertFalse(TimelineMath.isInsidePause(wall: 9.99, pauses: pauses))
+        XCTAssertTrue(TimelineMath.isInsidePause(wall: 10, pauses: pauses))
+        XCTAssertTrue(TimelineMath.isInsidePause(wall: 19.99, pauses: pauses))
+        XCTAssertFalse(TimelineMath.isInsidePause(wall: 20, pauses: pauses))
+        let open = [PauseInterval(pauseWall: 10, resumeWall: nil)]
+        XCTAssertTrue(TimelineMath.isInsidePause(wall: 25, pauses: open))
+    }
 }

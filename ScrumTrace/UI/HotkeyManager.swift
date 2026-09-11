@@ -1,4 +1,5 @@
 import Carbon
+import CoreMedia
 import Foundation
 #if os(macOS)
 import AppKit
@@ -87,6 +88,9 @@ final class HotkeyManager {
             return noErr
         }
         if action == .pause {
+            AgentLog.event("hotkey_pause", [
+                "host": String(format: "%.3f", CMTimeGetSeconds(CMClockGetTime(CMClockGetHostTimeClock())))
+            ])
             // Freeze screen/audio/mic/metadata before the MainActor hop (C1).
             let froze = captureFreeze.freezeForPauseHotkey()
             Task { @MainActor [weak self] in

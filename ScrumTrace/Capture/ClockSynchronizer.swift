@@ -28,6 +28,12 @@ enum TimelineMath {
         max(0, wall - pausedDelta(at: wall, pauses: pauses))
     }
 
+    static func isInsidePause(wall: TimeInterval, pauses: [PauseInterval]) -> Bool {
+        pauses.contains { pause in
+            pause.pauseWall <= wall && wall < (pause.resumeWall ?? .infinity)
+        }
+    }
+
     /// Inverse of `mediaTime`. Walks pauses in wall order.
     static func wallTime(media: TimeInterval, pauses: [PauseInterval]) -> TimeInterval {
         let completed = pauses.compactMap { pause -> (TimeInterval, TimeInterval)? in
@@ -178,6 +184,16 @@ final class ClockSynchronizer: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         return startHost.isValid
+    }
+
+    func isInsidePause(hostTime: CMTime) -> Bool {
+        lock.lock()
+        let start = startHost
+        let localPauses = pauses
+        lock.unlock()
+        guard start.isValid else { return false }
+        let wall = CMTimeGetSeconds(CMTimeSubtract(hostTime, start))
+        return TimelineMath.isInsidePause(wall: wall, pauses: localPauses)
     }
 
     private func wallSecondsLocked() -> TimeInterval {

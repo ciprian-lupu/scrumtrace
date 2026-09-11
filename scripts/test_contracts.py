@@ -760,7 +760,7 @@ def test_audio_split_and_brief_loader() -> None:
     recorder = (ROOT / "ScrumTrace" / "Capture" / "SessionRecorder.swift").read_text()
     assert "appendAudioToMovie" in recorder
     assert "case .microphone:" in recorder
-    assert "writeWav(from: sampleBuffer)" in recorder
+    assert "writeWav(from: sampleBuffer, sampleClock: sampleClock)" in recorder
     assert "func persistWav" in recorder
     assert "try file.write(from: buffer)" in recorder
     assert "try? wavFile.write" not in recorder
@@ -829,16 +829,18 @@ def test_audio_split_and_brief_loader() -> None:
     assert "noteWavFormatFailure" in wav_fmt
     assert "wavFormatFailStreak = 0" in wav_fmt
     freeze = recorder.split("func freezeWriters")[1].split("func persistCaptureLayout")[0]
-    assert "remapFailStreak = 0" in freeze
-    assert "wavFormatFailStreak = 0" in freeze
-    assert "videoBackpressureStreak = 0" in freeze
-    assert "audioBackpressureStreak = 0" in freeze
-    assert "videoSampleNotReadyStreak = 0" in freeze
-    assert "audioSampleNotReadyStreak = 0" in freeze
-    assert "wavSampleNotReadyStreak = 0" in freeze
-    assert "videoWriterNotWritingStreak = 0" in freeze
-    assert "audioWriterNotWritingStreak = 0" in freeze
-    assert "wavEmptyConvertStreak = 0" in freeze
+    assert "resetStallCountersLocked()" in freeze
+    reset_stall = recorder.split("func resetStallCountersLocked")[1].split("func isCompleteScreenFrame")[0]
+    assert "remapFailStreak = 0" in reset_stall
+    assert "wavFormatFailStreak = 0" in reset_stall
+    assert "videoBackpressureStreak = 0" in reset_stall
+    assert "audioBackpressureStreak = 0" in reset_stall
+    assert "videoSampleNotReadyStreak = 0" in reset_stall
+    assert "audioSampleNotReadyStreak = 0" in reset_stall
+    assert "wavSampleNotReadyStreak = 0" in reset_stall
+    assert "videoWriterNotWritingStreak = 0" in reset_stall
+    assert "audioWriterNotWritingStreak = 0" in reset_stall
+    assert "wavEmptyConvertStreak = 0" in reset_stall
     not_ready = recorder.split("func noteVideoSampleNotReady")[1].split("func writeWav")[0]
     assert "failCaptureWrite" in not_ready
     assert "video sample was not ready" in not_ready
@@ -989,6 +991,7 @@ def test_dual_transcript_merge_wired() -> None:
     models = (ROOT / "ScrumTrace" / "Storage" / "SessionModels.swift").read_text()
     assert "capture-layout.json" in models
     assert "microphone_wav" in models
+    assert "wav_start_media_seconds" in models
     controller = (ROOT / "ScrumTrace" / "Processing" / "SessionController.swift").read_text()
     assert "guard !isBusy, !isRecording" in controller
     assert 'phase = .transcribing' in controller
@@ -1783,7 +1786,8 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "transcribeMovieAudio(at: movie, sessionURL: sessionURL)" in transcribe
     assert "Keep shots/clips; Retry Analysis can transcribe again." in transcribe
     assert "requiredFailed" in transcribe
-    assert "passes.isEmpty || requiredFailed" in transcribe
+    assert "if passes.isEmpty {" in transcribe
+    assert "passes.isEmpty || requiredFailed" not in transcribe
     assert "Movie audio is optional" not in transcribe
     load_tr = processor.split("private func loadTranscript")[1].split("private func evaluateSlice")[0]
     assert "existingSessionFile(ScrumTracePath.fullTranscript" in load_tr
@@ -1838,7 +1842,7 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "markCompleted(.synthesizing)" not in incomplete
     assert "markCompleted(.completed)" not in incomplete
     assert "hasCompleted(.transcribing)" in processor.split("try requireUsableSession(sessionURL, id: sessionId)")[-1].split("Writing AGENT_CONTEXT.md")[0]
-    assert "async -> FullTranscript" in processor
+    assert "async -> (transcript: FullTranscript, incomplete: Bool)" in processor
     assert "justFinishedTranscribing" in processor
     retry_block = processor.split("if justFinishedTranscribing")[1].split("if !manifest.hasCompleted(.slicing)")[0]
     assert "completedStages.removeAll" in retry_block

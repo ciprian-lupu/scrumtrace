@@ -76,6 +76,22 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
     /// One primed converter output is expected; a stall means room/system
     /// audio is no longer reaching `archive/audio.wav` (C1).
     private var wavEmptyConvertStreak = 0
+    private var remapFailStallStart: CMTime = .invalid
+    private var wavFormatFailStallStart: CMTime = .invalid
+    private var videoBackpressureStallStart: CMTime = .invalid
+    private var audioBackpressureStallStart: CMTime = .invalid
+    private var videoSampleNotReadyStallStart: CMTime = .invalid
+    private var audioSampleNotReadyStallStart: CMTime = .invalid
+    private var wavSampleNotReadyStallStart: CMTime = .invalid
+    private var videoWriterNotWritingStallStart: CMTime = .invalid
+    private var audioWriterNotWritingStallStart: CMTime = .invalid
+    private var wavEmptyConvertStallStart: CMTime = .invalid
+    private var loggedFirstVideo = false
+    private var loggedFirstAudio = false
+    private var loggedFirstWav = false
+    private var wavStartMediaSeconds: TimeInterval?
+    private var wavFramesWritten: AVAudioFramePosition = 0
+    private var loggedWavAhead = false
 
     init(sessionURL: URL, clock: ClockSynchronizer) {
         self.sessionURL = sessionURL
@@ -100,6 +116,11 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
     /// Disk-full / AVAudioFile / AVAssetWriter failure. Start checks this if
     /// the capture-failed notification landed before `phase` was `.recording`.
     var audioWriteFailure: String? {
+        syncWriter { captureWriteMessage }
+    }
+
+    /// Writer failure text for the archive `.stop` event (TASK-02).
+    var captureFailureReason: String? {
         syncWriter { captureWriteMessage }
     }
 
@@ -292,16 +313,7 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         syncWriter {
             guard self.paused != next else { return }
             self.paused = next
-            self.remapFailStreak = 0
-            self.wavFormatFailStreak = 0
-            self.videoBackpressureStreak = 0
-            self.audioBackpressureStreak = 0
-            self.videoSampleNotReadyStreak = 0
-            self.audioSampleNotReadyStreak = 0
-            self.wavSampleNotReadyStreak = 0
-            self.videoWriterNotWritingStreak = 0
-            self.audioWriterNotWritingStreak = 0
-            self.wavEmptyConvertStreak = 0
+            self.resetStallCountersLocked()
             if next {
                 self.clock.beginPause()
             } else {
@@ -315,16 +327,7 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         syncWriter {
             self.paused = true
             self.started = false
-            self.remapFailStreak = 0
-            self.wavFormatFailStreak = 0
-            self.videoBackpressureStreak = 0
-            self.audioBackpressureStreak = 0
-            self.videoSampleNotReadyStreak = 0
-            self.audioSampleNotReadyStreak = 0
-            self.wavSampleNotReadyStreak = 0
-            self.videoWriterNotWritingStreak = 0
-            self.audioWriterNotWritingStreak = 0
-            self.wavEmptyConvertStreak = 0
+            self.resetStallCountersLocked()
             self.clock.markRecordingStopped()
         }
     }
@@ -332,10 +335,12 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
     /// Dual-pass Whisper needs this before `stopCapture` / `finishWriting`.
     /// Quit only waits 5s; the layout must already be on disk (Gate 3).
     func persistCaptureLayout(microphoneWav: Bool? = nil) throws {
-        let mic = microphoneWav ?? syncWriter { self.microphoneWav }
+        let snapshot = syncWriter { (self.microphoneWav, self.wavStartMediaSeconds) }
+        let mic = microphoneWav ?? snapshot.0
         let layout = CaptureAudioLayout(
             microphoneWav: mic,
-            systemAudioInMovie: true
+            systemAudioInMovie: true,
+            wavStartMediaSeconds: snapshot.1
         )
         try layout.write(sessionURL: sessionURL)
     }
@@ -506,16 +511,22 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         guard !paused, started else { return }
         if liveCaptureWasRewritten() { return }
         let sampleClock = stream.synchronizationClock
+        let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
+        let host = sampleClock.map { CMSyncConvertTime(pts, from: $0, to: CMClockGetHostTimeClock()) } ?? pts
+        if clock.isInsidePause(hostTime: host) {
+            AgentLog.event("resume_edge_drop", ["type": String(type.rawValue)])
+            return
+        }
         switch type {
         case .screen:
             appendVideo(sampleBuffer, sampleClock: sampleClock)
         case .audio:
             appendAudioToMovie(sampleBuffer, sampleClock: sampleClock)
             if !microphoneWav {
-                writeWav(from: sampleBuffer)
+                writeWav(from: sampleBuffer, sampleClock: sampleClock)
             }
         case .microphone:
-            writeWav(from: sampleBuffer)
+            writeWav(from: sampleBuffer, sampleClock: sampleClock)
         @unknown default:
             break
         }
@@ -531,11 +542,13 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
 
     private func appendVideo(_ sampleBuffer: CMSampleBuffer, sampleClock: CMClock?) {
         guard !paused, started else { return }
+        guard isCompleteScreenFrame(sampleBuffer) else { return }
         guard CMSampleBufferDataIsReady(sampleBuffer) else {
             noteVideoSampleNotReady()
             return
         }
         videoSampleNotReadyStreak = 0
+        videoSampleNotReadyStallStart = .invalid
         guard let writer, let videoInput else {
             failCaptureWrite("Could not write archive/session.mp4: movie writer is missing.")
             return
@@ -551,20 +564,32 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             return
         }
         videoWriterNotWritingStreak = 0
+        videoWriterNotWritingStallStart = .invalid
         guard videoInput.isReadyForMoreMediaData else {
             noteVideoBackpressure()
             return
         }
         videoBackpressureStreak = 0
+        videoBackpressureStallStart = .invalid
         guard let remapped = remappedBuffer(sampleBuffer, sampleClock: sampleClock) else {
             noteRemapFailure()
             return
         }
         remapFailStreak = 0
+        remapFailStallStart = .invalid
         if !videoInput.append(remapped) {
             failCaptureWrite(
                 "Could not write archive/session.mp4: \(writer.error?.localizedDescription ?? "AVAssetWriter rejected a video sample.")"
             )
+            return
+        }
+        if !loggedFirstVideo {
+            loggedFirstVideo = true
+            let pts = CMTimeGetSeconds(CMSampleBufferGetPresentationTimeStamp(remapped))
+            AgentLog.event("recorder_first_sample", [
+                "type": "screen",
+                "media_seconds": String(format: "%.3f", pts)
+            ])
         }
     }
 
@@ -575,6 +600,7 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             return
         }
         audioSampleNotReadyStreak = 0
+        audioSampleNotReadyStallStart = .invalid
         guard let writer, let audioInput else {
             failCaptureWrite("Could not write archive/session.mp4: movie writer is missing.")
             return
@@ -590,37 +616,51 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             return
         }
         audioWriterNotWritingStreak = 0
+        audioWriterNotWritingStallStart = .invalid
         guard audioInput.isReadyForMoreMediaData else {
             noteAudioBackpressure()
             return
         }
         audioBackpressureStreak = 0
+        audioBackpressureStallStart = .invalid
         guard let remapped = remappedBuffer(sampleBuffer, sampleClock: sampleClock) else {
             noteRemapFailure()
             return
         }
         remapFailStreak = 0
+        remapFailStallStart = .invalid
         if !audioInput.append(remapped) {
             failCaptureWrite(
                 "Could not write archive/session.mp4: \(writer.error?.localizedDescription ?? "AVAssetWriter rejected an audio sample.")"
             )
+            return
+        }
+        if !loggedFirstAudio {
+            loggedFirstAudio = true
+            let pts = CMTimeGetSeconds(CMSampleBufferGetPresentationTimeStamp(remapped))
+            AgentLog.event("recorder_first_sample", [
+                "type": "audio",
+                "media_seconds": String(format: "%.3f", pts)
+            ])
         }
     }
 
     private func remappedBuffer(_ sampleBuffer: CMSampleBuffer, sampleClock: CMClock?) -> CMSampleBuffer? {
         let media = clock.mediaTime(forSampleBuffer: sampleBuffer, sampleClock: sampleClock)
-        let rawDuration = CMSampleBufferGetDuration(sampleBuffer)
-        let duration: CMTime
-        if rawDuration.flags.contains(.valid), CMTimeGetSeconds(rawDuration) > 0 {
-            duration = rawDuration
+        var timing = CMSampleTimingInfo()
+        let hasTiming = CMSampleBufferGetSampleTimingInfo(sampleBuffer, at: 0, timingInfoOut: &timing) == noErr
+        if hasTiming, timing.duration.flags.contains(.valid), CMTimeGetSeconds(timing.duration) > 0 {
+            timing.presentationTimeStamp = media
+            timing.decodeTimeStamp = .invalid
+        } else if CMSampleBufferGetNumSamples(sampleBuffer) == 1 {
+            timing = CMSampleTimingInfo(
+                duration: CMTime(value: 1, timescale: 30),
+                presentationTimeStamp: media,
+                decodeTimeStamp: .invalid
+            )
         } else {
-            duration = CMTime(value: 1, timescale: 30)
+            return nil
         }
-        var timing = CMSampleTimingInfo(
-            duration: duration,
-            presentationTimeStamp: media,
-            decodeTimeStamp: .invalid
-        )
         var output: CMSampleBuffer?
         let status = CMSampleBufferCreateCopyWithNewTiming(
             allocator: kCFAllocatorDefault,
@@ -634,82 +674,154 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
     }
 
     private func noteRemapFailure() {
-        remapFailStreak += 1
-        if remapFailStreak >= 12 {
-            failCaptureWrite("Could not timestamp capture samples for the master clock.")
-        }
+        advanceStall(
+            streak: &remapFailStreak,
+            start: &remapFailStallStart,
+            failAfterFrames: 12,
+            message: "Could not timestamp capture samples for the master clock."
+        )
     }
 
     private func noteWavFormatFailure() {
-        wavFormatFailStreak += 1
-        if wavFormatFailStreak >= 12 {
-            failCaptureWrite("Could not decode audio samples for archive/audio.wav.")
-        }
+        advanceStall(
+            streak: &wavFormatFailStreak,
+            start: &wavFormatFailStallStart,
+            failAfterFrames: 12,
+            message: "Could not decode audio samples for archive/audio.wav."
+        )
     }
 
     private func noteVideoBackpressure() {
-        videoBackpressureStreak += 1
-        if videoBackpressureStreak >= MediaBudget.captureStallFrames {
-            failCaptureWrite("Could not write archive/session.mp4: video writer was not ready.")
-        }
+        advanceStall(
+            streak: &videoBackpressureStreak,
+            start: &videoBackpressureStallStart,
+            failAfterFrames: MediaBudget.captureStallFrames,
+            message: "Could not write archive/session.mp4: video writer was not ready."
+        )
     }
 
     private func noteAudioBackpressure() {
-        audioBackpressureStreak += 1
-        if audioBackpressureStreak >= MediaBudget.captureStallFrames {
-            failCaptureWrite("Could not write archive/session.mp4: audio writer was not ready.")
-        }
+        advanceStall(
+            streak: &audioBackpressureStreak,
+            start: &audioBackpressureStallStart,
+            failAfterFrames: MediaBudget.captureStallFrames,
+            message: "Could not write archive/session.mp4: audio writer was not ready."
+        )
     }
 
     private func noteVideoSampleNotReady() {
-        videoSampleNotReadyStreak += 1
-        if videoSampleNotReadyStreak >= MediaBudget.captureStallFrames {
-            failCaptureWrite("Could not write archive/session.mp4: video sample was not ready.")
-        }
+        advanceStall(
+            streak: &videoSampleNotReadyStreak,
+            start: &videoSampleNotReadyStallStart,
+            failAfterFrames: MediaBudget.captureStallFrames,
+            message: "Could not write archive/session.mp4: video sample was not ready."
+        )
     }
 
     private func noteAudioSampleNotReady() {
-        audioSampleNotReadyStreak += 1
-        if audioSampleNotReadyStreak >= MediaBudget.captureStallFrames {
-            failCaptureWrite("Could not write archive/session.mp4: audio sample was not ready.")
-        }
+        advanceStall(
+            streak: &audioSampleNotReadyStreak,
+            start: &audioSampleNotReadyStallStart,
+            failAfterFrames: MediaBudget.captureStallFrames,
+            message: "Could not write archive/session.mp4: audio sample was not ready."
+        )
     }
 
     private func noteWavSampleNotReady() {
-        wavSampleNotReadyStreak += 1
-        if wavSampleNotReadyStreak >= MediaBudget.captureStallFrames {
-            failCaptureWrite("Could not write archive/audio.wav: audio sample was not ready.")
-        }
+        advanceStall(
+            streak: &wavSampleNotReadyStreak,
+            start: &wavSampleNotReadyStallStart,
+            failAfterFrames: MediaBudget.captureStallFrames,
+            message: "Could not write archive/audio.wav: audio sample was not ready."
+        )
     }
 
     private func noteVideoWriterNotWriting() {
-        videoWriterNotWritingStreak += 1
-        if videoWriterNotWritingStreak >= MediaBudget.captureStallFrames {
-            failCaptureWrite("Could not write archive/session.mp4: video writer was not writing.")
-        }
+        advanceStall(
+            streak: &videoWriterNotWritingStreak,
+            start: &videoWriterNotWritingStallStart,
+            failAfterFrames: MediaBudget.captureStallFrames,
+            message: "Could not write archive/session.mp4: video writer was not writing."
+        )
     }
 
     private func noteAudioWriterNotWriting() {
-        audioWriterNotWritingStreak += 1
-        if audioWriterNotWritingStreak >= MediaBudget.captureStallFrames {
-            failCaptureWrite("Could not write archive/session.mp4: audio writer was not writing.")
-        }
+        advanceStall(
+            streak: &audioWriterNotWritingStreak,
+            start: &audioWriterNotWritingStallStart,
+            failAfterFrames: MediaBudget.captureStallFrames,
+            message: "Could not write archive/session.mp4: audio writer was not writing."
+        )
     }
 
     private func noteWavEmptyConvert() {
-        wavEmptyConvertStreak += 1
-        if wavEmptyConvertStreak >= MediaBudget.captureStallFrames {
-            failCaptureWrite("Could not write archive/audio.wav: converted audio was empty.")
+        advanceStall(
+            streak: &wavEmptyConvertStreak,
+            start: &wavEmptyConvertStallStart,
+            failAfterFrames: MediaBudget.captureStallFrames,
+            message: "Could not write archive/audio.wav: converted audio was empty."
+        )
+    }
+
+    private func advanceStall(
+        streak: inout Int,
+        start: inout CMTime,
+        failAfterFrames: Int,
+        message: String
+    ) {
+        streak += 1
+        let now = CMClockGetTime(CMClockGetHostTimeClock())
+        if !start.flags.contains(.valid) {
+            start = now
+        }
+        if streak >= failAfterFrames
+            && CMTimeGetSeconds(CMTimeSubtract(now, start)) >= MediaBudget.captureStallSeconds {
+            failCaptureWrite(message)
         }
     }
 
-    private func writeWav(from sampleBuffer: CMSampleBuffer) {
+    private func resetStallCountersLocked() {
+        remapFailStreak = 0
+        wavFormatFailStreak = 0
+        videoBackpressureStreak = 0
+        audioBackpressureStreak = 0
+        videoSampleNotReadyStreak = 0
+        audioSampleNotReadyStreak = 0
+        wavSampleNotReadyStreak = 0
+        videoWriterNotWritingStreak = 0
+        audioWriterNotWritingStreak = 0
+        wavEmptyConvertStreak = 0
+        remapFailStallStart = .invalid
+        wavFormatFailStallStart = .invalid
+        videoBackpressureStallStart = .invalid
+        audioBackpressureStallStart = .invalid
+        videoSampleNotReadyStallStart = .invalid
+        audioSampleNotReadyStallStart = .invalid
+        wavSampleNotReadyStallStart = .invalid
+        videoWriterNotWritingStallStart = .invalid
+        audioWriterNotWritingStallStart = .invalid
+        wavEmptyConvertStallStart = .invalid
+    }
+
+    private func isCompleteScreenFrame(_ sampleBuffer: CMSampleBuffer) -> Bool {
+        guard let attachments = CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, createIfNecessary: false) as? [[SCStreamFrameInfo: Any]],
+              let statusRaw = attachments.first?[SCStreamFrameInfo.status] as? Int,
+              let status = SCFrameStatus(rawValue: statusRaw),
+              status == .complete,
+              CMSampleBufferGetImageBuffer(sampleBuffer) != nil else {
+            return false
+        }
+        return true
+    }
+
+    private func writeWav(from sampleBuffer: CMSampleBuffer, sampleClock: CMClock?) {
         guard !paused, started else { return }
         guard CMSampleBufferDataIsReady(sampleBuffer) else {
             noteWavSampleNotReady()
             return
         }
         wavSampleNotReadyStreak = 0
+        wavSampleNotReadyStallStart = .invalid
         guard let wavFile else {
             failCaptureWrite("Could not write archive/audio.wav: WAV writer is missing.")
             return
@@ -725,6 +837,7 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             return
         }
         wavFormatFailStreak = 0
+        wavFormatFailStallStart = .invalid
         let frames = AVAudioFrameCount(CMSampleBufferGetNumSamples(sampleBuffer))
         guard frames > 0 else {
             noteWavEmptyConvert()
@@ -745,10 +858,12 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             failCaptureWrite("Could not write archive/audio.wav: PCM copy failed.")
             return
         }
+        let mediaSeconds = CMTimeGetSeconds(clock.mediaTime(forSampleBuffer: sampleBuffer, sampleClock: sampleClock))
         let target = wavFile.processingFormat
         if buffer.format == target {
             wavEmptyConvertStreak = 0
-            persistWav(buffer, file: wavFile)
+            wavEmptyConvertStallStart = .invalid
+            persistWav(buffer, file: wavFile, mediaSeconds: mediaSeconds)
             return
         }
         if converter?.inputFormat != buffer.format {
@@ -776,7 +891,8 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         }
         if converted.frameLength > 0 {
             wavEmptyConvertStreak = 0
-            persistWav(converted, file: wavFile)
+            wavEmptyConvertStallStart = .invalid
+            persistWav(converted, file: wavFile, mediaSeconds: mediaSeconds)
             return
         }
         noteWavEmptyConvert()
@@ -799,9 +915,41 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         )
     }
 
-    private func persistWav(_ buffer: AVAudioPCMBuffer, file: AVAudioFile) {
+    private func persistWav(_ buffer: AVAudioPCMBuffer, file: AVAudioFile, mediaSeconds: TimeInterval?) {
         do {
+            if let media = mediaSeconds {
+                if wavStartMediaSeconds == nil {
+                    wavStartMediaSeconds = media
+                }
+                if let start = wavStartMediaSeconds {
+                    let expected = Int64(((media - start) * 16_000).rounded())
+                    let gap = expected - wavFramesWritten
+                    if gap > 320 {
+                        let silenceCount = AVAudioFrameCount(gap)
+                        if let silence = AVAudioPCMBuffer(
+                            pcmFormat: file.processingFormat,
+                            frameCapacity: silenceCount
+                        ) {
+                            silence.frameLength = silence.frameCapacity
+                            try file.write(from: silence)
+                            wavFramesWritten += AVAudioFramePosition(silence.frameLength)
+                        }
+                    } else if gap < -320 && !loggedWavAhead {
+                        loggedWavAhead = true
+                        AgentLog.event("wav_ahead_frames", ["frames": String(gap)])
+                    }
+                }
+            }
             try file.write(from: buffer)
+            wavFramesWritten += AVAudioFramePosition(buffer.frameLength)
+            if !loggedFirstWav {
+                loggedFirstWav = true
+                let logged = mediaSeconds ?? clock.currentMediaSeconds()
+                AgentLog.event("recorder_first_sample", [
+                    "type": "wav",
+                    "media_seconds": String(format: "%.3f", logged)
+                ])
+            }
         } catch {
             failCaptureWrite("Could not write archive/audio.wav: \(error.localizedDescription)")
         }
@@ -859,6 +1007,7 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         let w = max(width - width % 2, 2)
         let h = max(height - height % 2, 2)
         let writer = try AVAssetWriter(outputURL: liveMovieURL, fileType: .mp4)
+        writer.movieFragmentInterval = CMTime(seconds: 10, preferredTimescale: 600)
         let videoSettings: [String: Any] = [
             AVVideoCodecKey: AVVideoCodecType.h264,
             AVVideoWidthKey: w,
@@ -955,6 +1104,12 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             throw SessionRecorderError.writerFailed("archive capture paths escaped the session folder.")
         }
         self.liveWavRel = liveWavRel
+        self.wavStartMediaSeconds = nil
+        self.wavFramesWritten = 0
+        self.loggedWavAhead = false
+        self.loggedFirstVideo = false
+        self.loggedFirstAudio = false
+        self.loggedFirstWav = false
         // Do not clear a privacy freeze from the permission sheet. If writers
         // are already paused, open the t_media interval now that
         // markRecordingStarted has run (C1 / D4).
@@ -968,7 +1123,7 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         let engine = AVAudioEngine()
         let input = engine.inputNode
         let format = input.outputFormat(forBus: 0)
-        input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
+        input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, when in
             guard let self else { return }
             // The tap reuses `buffer`. Copy before hopping queues or pause-dropped
             // frames can still scribble into a later WAV write (C1).
@@ -976,9 +1131,16 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
                 self.failCaptureWrite("Could not copy microphone PCM.")
                 return
             }
+            let host: CMTime? = when.isHostTimeValid
+                ? CMClockMakeHostTimeFromSystemUnits(when.hostTime)
+                : nil
             self.writerQueue.async {
                 guard !self.paused, self.started else { return }
-                self.writeEngineBuffer(copy)
+                if let host, self.clock.isInsidePause(hostTime: host) {
+                    AgentLog.event("resume_edge_drop", ["type": "engine"])
+                    return
+                }
+                self.writeEngineBuffer(copy, hostTime: host)
             }
         }
         try engine.start()
@@ -1027,7 +1189,7 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         return copied ? copy : nil
     }
 
-    private func writeEngineBuffer(_ buffer: AVAudioPCMBuffer) {
+    private func writeEngineBuffer(_ buffer: AVAudioPCMBuffer, hostTime: CMTime?) {
         guard !paused, started else { return }
         guard let wavFile else {
             failCaptureWrite("Could not write archive/audio.wav: WAV writer is missing.")
@@ -1038,10 +1200,12 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             noteWavEmptyConvert()
             return
         }
+        let mediaSeconds = hostTime.map { CMTimeGetSeconds(clock.mediaTime(forHostTime: $0)) }
         let target = wavFile.processingFormat
         if buffer.format == target {
             wavEmptyConvertStreak = 0
-            persistWav(buffer, file: wavFile)
+            wavEmptyConvertStallStart = .invalid
+            persistWav(buffer, file: wavFile, mediaSeconds: mediaSeconds)
             return
         }
         if converter?.inputFormat != buffer.format {
@@ -1069,7 +1233,8 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         }
         if converted.frameLength > 0 {
             wavEmptyConvertStreak = 0
-            persistWav(converted, file: wavFile)
+            wavEmptyConvertStallStart = .invalid
+            persistWav(converted, file: wavFile, mediaSeconds: mediaSeconds)
             return
         }
         noteWavEmptyConvert()

@@ -1802,6 +1802,7 @@ enum MediaBudget {
     static let metadataSampleTimeoutMs: UInt64 = 200
     /// Consecutive dropped realtime samples before capture fails. ~0.5 s at 30 fps.
     static let captureStallFrames = 15
+    static let captureStallSeconds: TimeInterval = 2.0
     static let manifestVersion = "1.1.0"
 }
 
@@ -2304,19 +2305,39 @@ struct FullTranscript: Codable, Sendable {
 struct CaptureAudioLayout: Codable, Sendable, Hashable {
     var microphoneWav: Bool
     var systemAudioInMovie: Bool
+    var wavStartMediaSeconds: TimeInterval?
+
+    init(
+        microphoneWav: Bool,
+        systemAudioInMovie: Bool,
+        wavStartMediaSeconds: TimeInterval? = nil
+    ) {
+        self.microphoneWav = microphoneWav
+        self.systemAudioInMovie = systemAudioInMovie
+        self.wavStartMediaSeconds = wavStartMediaSeconds
+    }
 
     enum CodingKeys: String, CodingKey {
         case microphoneWav = "microphone_wav"
         case systemAudioInMovie = "system_audio_in_movie"
+        case wavStartMediaSeconds = "wav_start_media_seconds"
     }
 
-    static let both = CaptureAudioLayout(microphoneWav: true, systemAudioInMovie: true)
+    static let both = CaptureAudioLayout(
+        microphoneWav: true,
+        systemAudioInMovie: true,
+        wavStartMediaSeconds: nil
+    )
 
     static func load(sessionURL: URL) -> CaptureAudioLayout {
         // Missing layout: WAV may be the system-audio fallback
         // (`if !microphoneWav { writeWav }`). `.both` would label that WAV as
         // room and also transcribe the movie (duplicate + wrong speaker).
-        let unknownMic = CaptureAudioLayout(microphoneWav: false, systemAudioInMovie: true)
+        let unknownMic = CaptureAudioLayout(
+            microphoneWav: false,
+            systemAudioInMovie: true,
+            wavStartMediaSeconds: nil
+        )
         guard ExportRel.existingSessionFile(ScrumTracePath.captureLayout, sessionURL: sessionURL) != nil else {
             return unknownMic
         }
@@ -2328,7 +2349,11 @@ struct CaptureAudioLayout: Codable, Sendable, Hashable {
             // File is present but unreadable: dual-pass rather than dropping
             // movie system audio (Gate 3). Do not use `.both` here — tests
             // pin that missing files must not take that path.
-            return CaptureAudioLayout(microphoneWav: true, systemAudioInMovie: true)
+            return CaptureAudioLayout(
+                microphoneWav: true,
+                systemAudioInMovie: true,
+                wavStartMediaSeconds: nil
+            )
         }
         return layout
     }
@@ -2356,12 +2381,14 @@ struct CaptureAudioLayout: Codable, Sendable, Hashable {
 struct PipelineTiming: Codable, Sendable, Hashable {
     var whisperWallSeconds: TimeInterval?
     var whisperSources: [String]
+    var whisperIncomplete: Bool
     var zipBytes: Int?
     var omittedCount: Int
 
     enum CodingKeys: String, CodingKey {
         case whisperWallSeconds = "whisper_wall_seconds"
         case whisperSources = "whisper_sources"
+        case whisperIncomplete = "whisper_incomplete"
         case zipBytes = "zip_bytes"
         case omittedCount = "omitted_count"
     }
@@ -2369,13 +2396,33 @@ struct PipelineTiming: Codable, Sendable, Hashable {
     init(
         whisperWallSeconds: TimeInterval? = nil,
         whisperSources: [String] = [],
+        whisperIncomplete: Bool = false,
         zipBytes: Int? = nil,
         omittedCount: Int = 0
     ) {
         self.whisperWallSeconds = whisperWallSeconds
         self.whisperSources = whisperSources
+        self.whisperIncomplete = whisperIncomplete
         self.zipBytes = zipBytes
         self.omittedCount = omittedCount
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        whisperWallSeconds = try container.decodeIfPresent(TimeInterval.self, forKey: .whisperWallSeconds)
+        whisperSources = try container.decodeIfPresent([String].self, forKey: .whisperSources) ?? []
+        whisperIncomplete = try container.decodeIfPresent(Bool.self, forKey: .whisperIncomplete) ?? false
+        zipBytes = try container.decodeIfPresent(Int.self, forKey: .zipBytes)
+        omittedCount = try container.decodeIfPresent(Int.self, forKey: .omittedCount) ?? 0
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(whisperWallSeconds, forKey: .whisperWallSeconds)
+        try container.encode(whisperSources, forKey: .whisperSources)
+        try container.encode(whisperIncomplete, forKey: .whisperIncomplete)
+        try container.encodeIfPresent(zipBytes, forKey: .zipBytes)
+        try container.encode(omittedCount, forKey: .omittedCount)
     }
 
     static func load(sessionURL: URL) -> PipelineTiming? {

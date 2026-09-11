@@ -1,3 +1,5 @@
+import AVFoundation
+import CoreMedia
 import Foundation
 
 /// Resumable pipeline: transcribing → slicing → evaluating → synthesizing → completed.
@@ -34,6 +36,20 @@ final class SessionProcessor: @unchecked Sendable {
         if writtenTranscript?.sessionId != sessionId {
             writtenTranscript = nil
         }
+        if manifest.pipelineStatus == .recording || manifest.pipelineStatus == .paused {
+            let movie = sessionURL.appendingPathComponent(ScrumTracePath.sessionMovie)
+            if ExportRel.existingSessionFile(ScrumTracePath.sessionMovie, sessionURL: sessionURL) != nil {
+                let asset = AVURLAsset(url: movie)
+                if let duration = try? await asset.load(.duration) {
+                    manifest.duration.mediaSeconds = max(
+                        manifest.duration.mediaSeconds,
+                        CMTimeGetSeconds(duration)
+                    )
+                }
+            }
+            manifest.pipelineStatus = .transcribing
+            try vault.write(manifest: &manifest)
+        }
 
         var timing = PipelineTiming.load(sessionURL: sessionURL) ?? PipelineTiming()
 
@@ -43,8 +59,10 @@ final class SessionProcessor: @unchecked Sendable {
             manifest.pipelineStatus = .transcribing
             try vault.write(manifest: &manifest)
             let whisperStarted = Date()
-            var transcript = await transcribe(sessionURL: sessionURL, model: whisperModel)
+            var transcribed = await transcribe(sessionURL: sessionURL, model: whisperModel)
+            var transcript = transcribed.transcript
             transcript.sessionId = sessionId
+            timing.whisperIncomplete = transcribed.incomplete
             try requireUsableSession(sessionURL, id: sessionId)
             let persistablePass = !(transcript.sources ?? []).isEmpty || !transcript.segments.isEmpty
             // A failed Whisper pass must not replace a transcript already on
@@ -70,7 +88,7 @@ final class SessionProcessor: @unchecked Sendable {
             // successful load still completes (sources is non-empty).
             if transcriber.isReady || !hadAudio {
                 let ranAPass = !(transcript.sources ?? []).isEmpty || !transcript.segments.isEmpty
-                if !hadAudio || ranAPass {
+                if !hadAudio || (ranAPass && !transcribed.incomplete) {
                     manifest.markCompleted(.transcribing)
                     justFinishedTranscribing = true
                 }
@@ -431,13 +449,14 @@ final class SessionProcessor: @unchecked Sendable {
         try projector.writeProjectionManifest(projected, sessionURL: sessionURL)
     }
 
-    private func transcribe(sessionURL: URL, model: String) async -> FullTranscript {
+    private func transcribe(sessionURL: URL, model: String) async -> (transcript: FullTranscript, incomplete: Bool) {
         do {
             if !transcriber.isReady {
                 try await transcriber.prepare(model: model)
             }
         } catch {
-            return FullTranscript(sessionId: "", language: "en", segments: [])
+            AgentLog.event("whisper_pass_fail", ["source": "prepare", "error": error.localizedDescription])
+            return (FullTranscript(sessionId: "", language: "en", segments: []), true)
         }
         let layout = CaptureAudioLayout.load(sessionURL: sessionURL)
         let wavExists = ExportRel.existingSessionFile(ScrumTracePath.audioWav, sessionURL: sessionURL) != nil
@@ -450,24 +469,40 @@ final class SessionProcessor: @unchecked Sendable {
             do {
                 let speaker = layout.microphoneWav ? "room" : "system"
                 let wavTranscript = try await transcriber.transcribeFile(at: wav, sessionURL: sessionURL)
-                passes.append(TranscriptQuery.SourcePass(speaker: speaker, transcript: wavTranscript))
+                passes.append(
+                    TranscriptQuery.SourcePass(
+                        speaker: speaker,
+                        transcript: wavTranscript,
+                        offsetSeconds: layout.wavStartMediaSeconds ?? 0
+                    )
+                )
+                AgentLog.event("whisper_pass_ok", [
+                    "source": "wav",
+                    "segments": String(wavTranscript.segments.count)
+                ])
             } catch {
                 // Keep shots/clips; Retry Analysis can transcribe again.
                 requiredFailed = true
+                AgentLog.event("whisper_pass_fail", ["source": "wav", "error": error.localizedDescription])
             }
         }
         if layout.shouldTranscribeMovie(wavExists: wavExists, movieExists: movieExists) {
             do {
                 let movieTranscript = try await transcriber.transcribeMovieAudio(at: movie, sessionURL: sessionURL)
                 passes.append(TranscriptQuery.SourcePass(speaker: "system", transcript: movieTranscript))
+                AgentLog.event("whisper_pass_ok", [
+                    "source": "movie",
+                    "segments": String(movieTranscript.segments.count)
+                ])
             } catch {
                 requiredFailed = true
+                AgentLog.event("whisper_pass_fail", ["source": "movie", "error": error.localizedDescription])
             }
         }
-        if passes.isEmpty || requiredFailed {
-            return FullTranscript(sessionId: "", language: "en", segments: [])
+        if passes.isEmpty {
+            return (FullTranscript(sessionId: "", language: "en", segments: []), true)
         }
-        return TranscriptQuery.merge(passes, sessionId: "")
+        return (TranscriptQuery.merge(passes, sessionId: ""), requiredFailed)
     }
 
     private func loadTranscript(sessionURL: URL, sessionId: String) -> FullTranscript {

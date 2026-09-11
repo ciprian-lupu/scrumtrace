@@ -218,6 +218,7 @@ enum TranscriptQuery {
     struct SourcePass: Sendable {
         var speaker: String
         var transcript: FullTranscript
+        var offsetSeconds: TimeInterval = 0
     }
 
     static func excerpt(from transcript: FullTranscript, start: TimeInterval, end: TimeInterval) -> String {
@@ -258,6 +259,16 @@ enum TranscriptQuery {
             }
             for segment in pass.transcript.segments where !segment.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 var copy = segment
+                if pass.offsetSeconds != 0 {
+                    copy.start += pass.offsetSeconds
+                    copy.end += pass.offsetSeconds
+                    copy.words = copy.words.map { word in
+                        var shifted = word
+                        shifted.start += pass.offsetSeconds
+                        shifted.end += pass.offsetSeconds
+                        return shifted
+                    }
+                }
                 if copy.speaker == nil || copy.speaker?.isEmpty == true {
                     copy.speaker = pass.speaker
                 }

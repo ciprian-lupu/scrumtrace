@@ -26,6 +26,7 @@ final class SessionController: ObservableObject {
     private var recorder: SessionRecorder?
     private var processor: SessionProcessor?
     private var hudTimer: Timer?
+    private var hudTickCount = 0
     private var metadataTimer: Timer?
     private var pinTimes: [TimeInterval] = []
     private var pinTimesSessionId: String?
@@ -423,8 +424,10 @@ final class SessionController: ObservableObject {
             Task.detached {
                 do {
                     try await transcriber.prepare(model: model)
+                    AgentLog.event("whisper_prepare_ok", ["model": model])
                 } catch {
                     let message = error.localizedDescription
+                    AgentLog.event("whisper_prepare_fail", ["error": message])
                     await MainActor.run { [weak self] in
                         self?.lastError = message
                     }
@@ -491,7 +494,7 @@ final class SessionController: ObservableObject {
                 statusLine = "Could not persist session catalog; Stop still continues with in-memory shots."
             }
             manifest = local
-            log(.stop, [:])
+            log(.stop, recorder?.captureFailureReason.map { ["error": $0] } ?? [:])
             await runProcessor(sessionId: local.sessionId)
         } else {
             isBusy = false
@@ -834,12 +837,17 @@ final class SessionController: ObservableObject {
     private func startTimer() {
         wallElapsed = clock.currentWallSeconds()
         mediaElapsed = clock.currentMediaSeconds()
+        hudTickCount = 0
         hudTimer?.invalidate()
         hudTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 guard let self else { return }
                 self.wallElapsed = self.clock.currentWallSeconds()
                 self.mediaElapsed = self.clock.currentMediaSeconds()
+                self.hudTickCount += 1
+                if self.isRecording && self.hudTickCount % 300 == 0 {
+                    self.persistLivePipelineStatus()
+                }
             }
         }
         metadataTimer?.invalidate()
@@ -903,6 +911,11 @@ final class SessionController: ObservableObject {
         guard var local = manifest else { return }
         if isRecording {
             local.pipelineStatus = captureState == .paused ? .paused : .recording
+            local.pauses = clock.snapshotPauses()
+            local.duration = DurationPair(
+                wallSeconds: clock.currentWallSeconds(),
+                mediaSeconds: clock.currentMediaSeconds()
+            )
         } else {
             local.pipelineStatus = phase
         }
@@ -950,7 +963,7 @@ final class SessionController: ObservableObject {
         return String(format: "%02d:%02d", m, s)
     }
 
-    static func mergePins(_ live: [TimeInterval], _ stored: [TimeInterval]) -> [TimeInterval] {
+    nonisolated static func mergePins(_ live: [TimeInterval], _ stored: [TimeInterval]) -> [TimeInterval] {
         var seen = Set<String>()
         var out: [TimeInterval] = []
         for value in live + stored {
@@ -963,7 +976,7 @@ final class SessionController: ObservableObject {
     }
 
     /// Disk catalog can lag a failed `vault.write` during Shot. Prefer in-memory shots.
-    static func mergeLiveCatalog(disk: SessionManifest, memory: SessionManifest) -> SessionManifest {
+    nonisolated static func mergeLiveCatalog(disk: SessionManifest, memory: SessionManifest) -> SessionManifest {
         var local = disk
         for shot in memory.shots {
             if let idx = local.shots.firstIndex(where: { $0.id == shot.id }) {

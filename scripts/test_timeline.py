@@ -33,6 +33,13 @@ def wall_time(media: float, pauses: list[tuple[float, float | None]]) -> float:
     return wall
 
 
+def is_inside_pause(wall: float, pauses: list[tuple[float, float | None]]) -> bool:
+    return any(
+        pause_at <= wall < (resume if resume is not None else float("inf"))
+        for pause_at, resume in pauses
+    )
+
+
 def even_capture_size(width: int, height: int) -> tuple[int, int]:
     w = max(width, 2)
     h = max(height, 2)
@@ -78,6 +85,13 @@ def main() -> None:
     stopped = [(10.0, 20.0), (50.0, 55.0)]
     assert_close(media_time(55, stopped), 40, "stop-while-paused")
     assert_close(media_time(80, stopped), 65, "after-stop-closed")
+
+    closed = [(10.0, 20.0)]
+    assert is_inside_pause(9.99, closed) is False
+    assert is_inside_pause(10.0, closed) is True
+    assert is_inside_pause(19.99, closed) is True
+    assert is_inside_pause(20.0, closed) is False
+    assert is_inside_pause(25.0, [(10.0, None)]) is True
 
     assert even_capture_size(1920, 1080) == (1920, 1080)
     rw, rh = even_capture_size(3024, 1964)

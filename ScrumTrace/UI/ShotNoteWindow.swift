@@ -1,6 +1,7 @@
 import AVFoundation
 import Combine
 import AppKit
+import CoreMedia
 
 enum DrawTool: String, CaseIterable {
     case rectangle
@@ -141,11 +142,11 @@ final class ShotTalkState: ObservableObject {
         // Privacy freeze posts from a background queue. Prefer the posted
         // gate so we do not read MainActor `phase` off-thread (C1).
         let allowed = posted?.allowsNewCapture ?? allowsNewCapture()
-        if !allowed {
-            abortTalk()
-        }
         if Thread.isMainThread {
             canTalk = allowed
+            if !allowed {
+                abortTalk()
+            }
         } else {
             Task { @MainActor [weak self] in
                 guard let self else { return }
@@ -205,6 +206,9 @@ final class ShotTalkState: ObservableObject {
         }
         holdingTalk = true
         talkError = nil
+        AgentLog.event("talk_press", [
+            "host": String(format: "%.3f", CMTimeGetSeconds(CMClockGetTime(CMClockGetHostTimeClock())))
+        ])
         if !allowsNewCapture() {
             abortTalk()
         }
@@ -221,6 +225,9 @@ final class ShotTalkState: ObservableObject {
 
     func stopTalk() async {
         guard holdingTalk else { return }
+        AgentLog.event("talk_release", [
+            "host": String(format: "%.3f", CMTimeGetSeconds(CMClockGetTime(CMClockGetHostTimeClock())))
+        ])
         let live = allowsNewCapture()
         holdingTalk = false
         recorder?.stop()
@@ -340,6 +347,18 @@ final class ShotNoteWindow: NSPanel, NSTextFieldDelegate {
         let screen = NSScreen.main?.visibleFrame ?? .zero
         setFrameOrigin(NSPoint(x: screen.midX - 370, y: screen.midY - 270))
         orderFrontRegardless()
+        AgentLog.event("shot_window_shown", [
+            "app_active": NSApp.isActive ? "1" : "0",
+            "front": NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? ""
+        ])
+    }
+
+    override func becomeKey() {
+        super.becomeKey()
+        AgentLog.event("shot_window_key", [
+            "app_active": NSApp.isActive ? "1" : "0",
+            "front": NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? ""
+        ])
     }
 
     /// Close finishes the pre-pause annotation (C1). Persist is idempotent.

@@ -22,6 +22,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var settingsWindow: NSWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Hosted XCTest sets this; skip prune/hotkeys/launch rows (TASK-16).
+        if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil {
+            return
+        }
         CapturePermissions.snapshotLaunchState()
         AgentLog.eventSync("launch", ["ax_silent": MetadataSampler.requestTrust(prompt: false) ? "1" : "0"])
         NSApp.setActivationPolicy(.accessory)

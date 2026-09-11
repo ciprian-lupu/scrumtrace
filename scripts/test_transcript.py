@@ -48,12 +48,16 @@ def collapse(segments: list[tuple[float, float, str, str]]) -> list[tuple[float,
     return result
 
 
-def merge(passes: list[tuple[str, list[tuple[float, float, str]]]]) -> list[tuple[float, float, str, str]]:
+def merge(
+    passes: list[tuple[str, list[tuple[float, float, str]]]],
+    offsets: list[float] | None = None,
+) -> list[tuple[float, float, str, str]]:
     labeled: list[tuple[float, float, str, str]] = []
-    for speaker, segs in passes:
+    for index, (speaker, segs) in enumerate(passes):
+        offset = 0.0 if offsets is None else offsets[index]
         for start, end, text in segs:
             if text.strip():
-                labeled.append((start, end, text, speaker))
+                labeled.append((start + offset, end + offset, text, speaker))
     labeled.sort(key=lambda item: (item[0], item[1]))
     return collapse(labeled)
 
@@ -103,6 +107,13 @@ def main() -> None:
         ]
     )
     assert len(distinct) == 2
+
+    shifted = merge(
+        [("room", [(0.0, 1.0, "hello")])],
+        offsets=[0.5],
+    )
+    assert shifted[0][0] == 0.5
+    assert shifted[0][1] == 1.5
     print("transcript merge ok")
 
 
