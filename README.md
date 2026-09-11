@@ -46,7 +46,7 @@ Xcode resolves WhisperKit **0.11.0** from the committed `Package.resolved`. Firs
 
 Archive capture is **3840×2160 at 4 fps, 16 Mbps H.264 High** (keyframe every second). Export clips stay 720p / 1.2 Mbps.
 
-Menu → Settings has **Speech**, **Capture**, **Logs**, **This process**, **AI**, and **General**. Capture shows the shipped 3840×2160 / 4 fps / 16 Mbps (24 Mbps cap) budget, plus pointer and microphone toggles. Start recording opens a selection overlay like macOS screen recording (lasting box, move, resize, then Record). Logs can export a diagnostic bundle (no `archive/`).
+Menu → Settings has **Speech**, **Capture**, **Logs**, **This process**, **AI**, and **General**. Capture shows the shipped 3840×2160 / 4 fps / 16 Mbps (24 Mbps cap) budget, plus pointer and microphone toggles. Start recording opens a selection overlay like macOS screen recording (lasting box, move, resize, then Record or Return on that display). Logs can export a diagnostic bundle (no `archive/`).
 
 Inspect a Gate 0 log (fails if Shot became key and activated the app, or if Start requested capture without the overlay Record button) and a Gate 1 session folder (token and passphrase are the Part F.2 values). ASCII `strings` checks are required and still do not replace a manual media scrub:
 

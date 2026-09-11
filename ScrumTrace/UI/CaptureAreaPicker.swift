@@ -295,8 +295,15 @@ private final class CaptureAreaPickerView: NSView {
             )
             text.draw(at: NSPoint(x: hole.minX + 8, y: hole.maxY + 8))
         }
+        let hintText: String
+        switch mode {
+        case .record:
+            hintText = "Drag to select the capture area. Drag the box or handles to adjust. Return records this display. Space = entire display. Esc cancels."
+        case .choose:
+            hintText = "Drag to select the capture area. Drag the box or handles to adjust. Return uses this display. Space = entire display. Esc cancels."
+        }
         let hint = NSAttributedString(
-            string: "Drag to select the capture area. Drag the box or handles to adjust. Space = entire display. Esc cancels.",
+            string: hintText,
             attributes: [
                 .font: NSFont.systemFont(ofSize: 14, weight: .medium),
                 .foregroundColor: NSColor.white

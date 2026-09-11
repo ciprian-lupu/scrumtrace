@@ -96,7 +96,7 @@ struct SettingsView: View {
                     settings.captureArea = .entireDisplay
                 }
                 .disabled(controller.isRecording || settings.captureArea.isEntireDisplay)
-                Text("Default is the whole display. Start recording opens a macOS-style overlay: drag a rectangle, move or resize it, then Record. A saved region here is the starting box.")
+                Text("Default is the whole display. Start recording opens a macOS-style overlay: drag a rectangle, move or resize it, then Record or Return on that display. A saved region here is the starting box.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

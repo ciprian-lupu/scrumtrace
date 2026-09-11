@@ -2938,6 +2938,8 @@ def test_audit_leftovers_are_implemented() -> None:
     assert (ROOT / "ScrumTrace" / "UI" / "CaptureAreaPicker.swift").exists()
     picker = (ROOT / "ScrumTrace" / "UI" / "CaptureAreaPicker.swift").read_text()
     assert "Drag to select the capture area" in picker
+    assert "Return records this display" in picker
+    assert "Return uses this display" in picker
     assert "Space = entire display" in picker
     assert '"Record"' in picker
     assert '"Use this area"' in picker

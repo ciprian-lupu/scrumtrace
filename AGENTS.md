@@ -177,7 +177,7 @@ Do **not** add product surfaces. Prefer the first item you can actually finish i
 
 Code leftovers from `SCRUMTRACE_AUDIT.md` that can be done without a Mac or Apple secrets are implemented. Still open only because they need hardware or secrets: Gate −0 through 6, Developer ID team + notary Apple ID, first Whisper download, Sparkle EdDSA keys, a paid license private key. Do not invent `GATE_LOG.md` cells.
 
-Settings is a six-tab window (Speech, Capture, Logs, This process, AI, General). Start recording opens a macOS-style overlay (dashed rectangle, move/resize, Record / Entire Display / Cancel) and does not request Screen Recording from that click. Capture can turn the pointer and microphone off for the next session.
+Settings is a six-tab window (Speech, Capture, Logs, This process, AI, General). Start recording opens a macOS-style overlay (dashed rectangle, move/resize, Record / Entire Display / Cancel; Return confirms the key display) and does not request Screen Recording from that click. Capture can turn the pointer and microphone off for the next session.
 
 ### Plan-deferred (leave alone)
 
