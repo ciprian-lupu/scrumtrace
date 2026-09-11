@@ -861,6 +861,9 @@ def test_audio_split_and_brief_loader() -> None:
     assert "try? file.write" not in persist_wav
     assert "zeroFillPCM" in persist_wav
     assert "try? persistCaptureLayout()" in persist_wav
+    assert "wavFramesWritten" in persist_wav
+    assert "gap > 320" in persist_wav
+    assert "wav_ahead_frames" in persist_wav
     remap = recorder.split("func remappedBuffer")[1].split("func noteRemapFailure")[0]
     assert "CMSampleBufferGetSampleTimingInfo" in remap
     assert "timingInfoOut:" in remap
