@@ -124,7 +124,7 @@ final class AppSettings: ObservableObject {
             apiKey: KeychainStore.get(account: keyAccount) ?? apiKeyDraft,
             acceptsText: true,
             acceptsImages: provider != .anthropic || !model.isEmpty,
-            acceptsVideo: false
+            acceptsVideo: ProviderWireMedia.adapterCanUploadVideo(provider)
         )
     }
 

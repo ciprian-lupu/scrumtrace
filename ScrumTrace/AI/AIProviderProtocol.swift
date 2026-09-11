@@ -69,18 +69,24 @@ enum AIProviderError: LocalizedError {
 }
 
 enum ProviderWireMedia {
-    /// Shipped adapters have no MP4 mapping. Stay false until a client returns a body URL.
-    static let adaptersUploadVideo = false
+    /// Gemini accepts inline MP4. Chat Completions and Anthropic Messages do not.
+    static func adapterCanUploadVideo(_ kind: AIProviderKind) -> Bool {
+        switch kind {
+        case .google:
+            return true
+        case .openaiCompatible, .anthropic:
+            return false
+        }
+    }
 
     /// What actually leaves the Mac: capability flag **and** a wired adapter mapping.
     static func willUploadClip(configuration: AIProviderConfiguration) -> Bool {
-        configuration.acceptsVideo && adaptersUploadVideo
+        configuration.acceptsVideo && adapterCanUploadVideo(configuration.kind)
     }
 
     /// Clip file bytes that may be placed on the HTTP body.
-    /// Nil unless `accepts_video` is true **and** `adaptersUploadVideo` is true
-    /// **and** the clip is a contained visual file. Shipped adapters have no
-    /// MP4 body field — they throw rather than evaluate stills-only (C4).
+    /// Nil unless `accepts_video` is true **and** this adapter maps MP4
+    /// **and** the clip is a contained visual file (C4).
     static func mp4BodyURL(configuration: AIProviderConfiguration, request: SliceEvaluationRequest) -> URL? {
         guard willUploadClip(configuration: configuration) else { return nil }
         guard let clipURL = request.clipURL else { return nil }
@@ -219,5 +225,27 @@ enum ImageBase64 {
         #else
         return ("image/jpeg", data.base64EncodedString())
         #endif
+    }
+}
+
+enum VideoBase64 {
+    static let maxInlineBytes = 12_000_000
+
+    static func mp4Payload(url: URL, sessionRoot: URL) -> (mime: String, base64: String)? {
+        if (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+            return nil
+        }
+        if ExportRel.parentIsSymbolicLink(url) {
+            return nil
+        }
+        guard let rel = ExportRel.unfollowedRelative(url, sessionRoot: sessionRoot),
+              !ExportRel.containsSymlinkComponent(rel, sessionURL: sessionRoot) else {
+            return nil
+        }
+        guard ExportRel.isReadableSessionFile(url, sessionRoot: sessionRoot) else { return nil }
+        guard ExportRel.isVisualEvidence(rel) else { return nil }
+        guard let data = ExportRel.readContainedData(url, sessionRoot: sessionRoot) else { return nil }
+        guard !data.isEmpty, data.count <= maxInlineBytes else { return nil }
+        return ("video/mp4", data.base64EncodedString())
     }
 }

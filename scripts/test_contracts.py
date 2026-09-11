@@ -1731,7 +1731,9 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "mp4BodyURL" in google
     assert "func mp4BodyURL" in protocol_src
     assert "willUploadClip" in protocol_src
-    assert "adaptersUploadVideo" in protocol_src
+    assert "adapterCanUploadVideo" in protocol_src
+    assert "enum VideoBase64" in protocol_src
+    assert "maxInlineBytes" in protocol_src
     mp4_fn = protocol_src.split("static func mp4BodyURL")[1].split("enum AIEngine")[0]
     assert "unfollowedRelative" in mp4_fn
     assert "existingSessionFile" in mp4_fn
@@ -1739,11 +1741,12 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "Data(contentsOf:" not in mp4_fn
     assert "This adapter does not upload clip video." in openai
     assert "This adapter does not upload clip video." in anthropic
-    assert "This adapter does not upload clip video." in google
+    assert "This adapter does not upload clip video." not in google
     assert "willUploadClip(configuration: configuration)" in openai
     assert "willUploadClip(configuration: configuration)" in anthropic
-    assert "willUploadClip(configuration: configuration)" in google
-    assert 'mediaSent.append("video")' not in processor
+    assert "mp4BodyURL" in google
+    assert "VideoBase64.mp4Payload" in google
+    assert 'mediaSent.append("video")' in processor
     assert "Data(contentsOf: request.clipURL" not in openai
     assert "Data(contentsOf: request.clipURL" not in anthropic
     assert "Data(contentsOf: request.clipURL" not in google

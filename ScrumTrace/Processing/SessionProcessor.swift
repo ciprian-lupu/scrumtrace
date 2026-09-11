@@ -584,11 +584,13 @@ final class SessionProcessor: @unchecked Sendable {
                 }
             }
             if let contained {
-                clipURL = sessionURL.appendingPathComponent(contained)
+                let candidate = sessionURL.appendingPathComponent(contained)
+                if VideoBase64.mp4Payload(url: candidate, sessionRoot: sessionURL) != nil {
+                    clipURL = candidate
+                    mediaSent.append("video")
+                }
             }
         }
-        // media_sent is what actually leaves the Mac. Shipped adapters never
-        // attach MP4, even when the internal request carries clipURL.
         slice.mediaSent = mediaSent
         let hasStill = !images.isEmpty
         // No still + no wired video upload → needs_review, do not drop the slice.

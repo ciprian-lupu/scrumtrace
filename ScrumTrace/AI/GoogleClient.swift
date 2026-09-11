@@ -5,10 +5,6 @@ struct GoogleClient: AIProvider {
     var kind: AIProviderKind { .google }
 
     func evaluate(request: SliceEvaluationRequest) async throws -> CandidateEvaluationResponse {
-        _ = ProviderWireMedia.mp4BodyURL(configuration: configuration, request: request)
-        if ProviderWireMedia.willUploadClip(configuration: configuration) {
-            throw AIProviderError.invalidURL("This adapter does not upload clip video.")
-        }
         let key = configuration.apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !key.isEmpty else { throw AIProviderError.missingAPIKey }
         let root = configuration.baseURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
@@ -37,6 +33,15 @@ struct GoogleClient: AIProvider {
                     ])
                 }
             }
+        }
+        if let clip = ProviderWireMedia.mp4BodyURL(configuration: configuration, request: request),
+           let payload = VideoBase64.mp4Payload(url: clip, sessionRoot: request.sessionURL) {
+            parts.append([
+                "inline_data": [
+                    "mime_type": payload.mime,
+                    "data": payload.base64
+                ]
+            ])
         }
 
         let body: [String: Any] = [
