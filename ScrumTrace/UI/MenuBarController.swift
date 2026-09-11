@@ -58,7 +58,7 @@ final class MenuBarController: NSObject {
         }
         // Do not include statusLine — rebuilding the menu closes it. Update the
         // disabled status item in place while processing.
-        let readiness = CapturePermissions.readiness()
+        let readiness = CapturePermissions.readiness(requireMicrophone: controller.settings.includeMicrophone)
         let signature = [
             controller.captureState == .paused ? "paused" : "live",
             controller.isRecording ? "1" : "0",
@@ -127,7 +127,7 @@ final class MenuBarController: NSObject {
         status.isHidden = false
         menu.addItem(status)
         statusMenuItem = status
-        let readiness = CapturePermissions.readiness()
+        let readiness = CapturePermissions.readiness(requireMicrophone: controller.settings.includeMicrophone)
         let perm = NSMenuItem(title: readiness.menuLabel, action: nil, keyEquivalent: "")
         perm.isEnabled = false
         menu.addItem(perm)
@@ -227,15 +227,12 @@ final class MenuBarController: NSObject {
     @objc private func start() {
         AgentLog.event("menu_start", [:])
         if !controller.settings.meetingNoticeAccepted {
-            presentMeetingNotice()
-        }
-        let readiness = CapturePermissions.readiness()
-        if !readiness.allowsStart {
-            if case .screenDenied = readiness {
-                Task.detached {
-                    _ = CapturePermissions.requestScreenAccess()
-                }
+            if !presentMeetingNotice() {
+                return
             }
+        }
+        let readiness = CapturePermissions.readiness(requireMicrophone: controller.settings.includeMicrophone)
+        if !readiness.allowsStart {
             presentStartBlocked(readiness)
             return
         }
@@ -255,7 +252,8 @@ final class MenuBarController: NSObject {
         }
     }
 
-    private func presentMeetingNotice() {
+    @discardableResult
+    private func presentMeetingNotice() -> Bool {
         let alert = NSAlert()
         alert.messageText = "This Mac will record the meeting"
         alert.informativeText = "Screen, system audio, and microphone are captured locally. Tell other participants before you press Record. See docs/PARTICIPANT_NOTICE.md."
@@ -267,6 +265,7 @@ final class MenuBarController: NSObject {
         if accepted {
             controller.settings.meetingNoticeAccepted = true
         }
+        return accepted
     }
 
     private func presentStartBlocked(_ readiness: CaptureReadiness) {

@@ -93,7 +93,7 @@ final class SessionController: ObservableObject {
         // Do not open System Settings or call ScreenCaptureKit here. Those
         // both look like "the app is asking again" when the user already
         // flipped a ScrumTrace row that belongs to a different binary.
-        let readiness = CapturePermissions.readiness()
+        let readiness = CapturePermissions.readiness(requireMicrophone: settings.includeMicrophone)
         if !readiness.allowsStart {
             lastError = readiness.userMessage
             statusLine = readiness.menuLabel
@@ -388,7 +388,9 @@ final class SessionController: ObservableObject {
             // wrapper that MainActor waits on deadlocks if SCKit hops to main.
             try await recorder.start(
                 shouldPauseCapture: pauseGate,
-                captureArea: settings.captureArea
+                captureArea: settings.captureArea,
+                showCursor: settings.showCursor,
+                includeMicrophone: settings.includeMicrophone
             )
             abandonedId = nil
             self.recorder = recorder

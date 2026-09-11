@@ -43,6 +43,7 @@ private final class CaptureAreaPickerController {
     private var completion: ((CaptureAreaPicker.Outcome) -> Void)?
     private var monitor: Any?
     private var mode: CaptureAreaPicker.Mode = .choose
+    private weak var lastEditedWindow: CaptureAreaPickerWindow?
 
     func begin(
         current: CaptureArea,
@@ -63,6 +64,9 @@ private final class CaptureAreaPickerController {
             }
             window.onCancel = { [weak self] in
                 self?.cancel()
+            }
+            window.onEdited = { [weak self, weak window] in
+                self?.lastEditedWindow = window
             }
             window.orderFrontRegardless()
             return window
@@ -107,6 +111,10 @@ private final class CaptureAreaPickerController {
     }
 
     private func confirmSelection() {
+        if let edited = lastEditedWindow?.proposedArea(), !edited.isEntireDisplay {
+            finish(edited)
+            return
+        }
         let areas = windows.compactMap { $0.proposedArea() }
         if let region = areas.first(where: { !$0.isEntireDisplay }) {
             finish(region)
@@ -130,6 +138,7 @@ private final class CaptureAreaPickerController {
         monitor = nil
         windows.forEach { $0.orderOut(nil) }
         windows = []
+        lastEditedWindow = nil
         completion = nil
     }
 }
@@ -138,6 +147,7 @@ private final class CaptureAreaPickerWindow: NSWindow {
     var onUseSelection: (() -> Void)?
     var onUseEntire: (() -> Void)?
     var onCancel: (() -> Void)?
+    var onEdited: (() -> Void)?
     private let pickerView: CaptureAreaPickerView
 
     init(screen: NSScreen, current: CaptureArea, mode: CaptureAreaPicker.Mode) {
@@ -170,6 +180,9 @@ private final class CaptureAreaPickerWindow: NSWindow {
         pickerView.onCancel = { [weak self] in
             self?.onCancel?()
         }
+        pickerView.onEdited = { [weak self] in
+            self?.onEdited?()
+        }
         contentView = pickerView
     }
 
@@ -195,6 +208,7 @@ private final class CaptureAreaPickerView: NSView {
     var onUseSelection: (() -> Void)?
     var onUseEntire: (() -> Void)?
     var onCancel: (() -> Void)?
+    var onEdited: (() -> Void)?
 
     private let screen: NSScreen
     private let mode: CaptureAreaPicker.Mode
@@ -203,6 +217,7 @@ private final class CaptureAreaPickerView: NSView {
     private var dragStart: NSPoint = .zero
     private var dragOriginRect: NSRect = .zero
 
+    private let toolbar = NSVisualEffectView()
     private let recordButton = NSButton()
     private let entireButton = NSButton()
     private let cancelButton = NSButton()
@@ -210,7 +225,7 @@ private final class CaptureAreaPickerView: NSView {
     init(frame: NSRect, current: CaptureArea, screen: NSScreen, mode: CaptureAreaPicker.Mode) {
         self.screen = screen
         self.mode = mode
-        self.liveRect = Self.rect(for: current, on: screen, in: frame)
+        self.liveRect = Self.rect(for: current, on: screen, in: frame) ?? frame
         super.init(frame: frame)
         wantsLayer = true
         setupButtons()
@@ -320,6 +335,7 @@ private final class CaptureAreaPickerView: NSView {
         needsDisplay = true
         layoutButtons()
         window?.invalidateCursorRects(for: self)
+        onEdited?()
     }
 
     override func mouseUp(with event: NSEvent) {
@@ -335,6 +351,7 @@ private final class CaptureAreaPickerView: NSView {
         needsDisplay = true
         layoutButtons()
         window?.invalidateCursorRects(for: self)
+        onEdited?()
     }
 
     override func cancelOperation(_ sender: Any?) {
@@ -356,9 +373,19 @@ private final class CaptureAreaPickerView: NSView {
         configure(recordButton, title: recordTitle, action: #selector(confirmSelection))
         configure(entireButton, title: "Entire Display", action: #selector(confirmEntire))
         configure(cancelButton, title: "Cancel", action: #selector(cancelSelection))
-        addSubview(recordButton)
-        addSubview(entireButton)
-        addSubview(cancelButton)
+        if mode == .record {
+            recordButton.keyEquivalent = "\r"
+        }
+        toolbar.material = .hudWindow
+        toolbar.blendingMode = .withinWindow
+        toolbar.state = .active
+        toolbar.wantsLayer = true
+        toolbar.layer?.cornerRadius = 10
+        toolbar.layer?.masksToBounds = true
+        addSubview(toolbar)
+        toolbar.addSubview(recordButton)
+        toolbar.addSubview(entireButton)
+        toolbar.addSubview(cancelButton)
     }
 
     private func configure(_ button: NSButton, title: String, action: Selector) {
@@ -371,15 +398,18 @@ private final class CaptureAreaPickerView: NSView {
 
     private func layoutButtons() {
         let bar = toolbarRect()
-        let gap: CGFloat = 8
-        let width = (bar.width - gap * 2) / 3
-        recordButton.frame = NSRect(x: bar.minX, y: bar.minY, width: width, height: bar.height)
-        entireButton.frame = NSRect(x: bar.minX + width + gap, y: bar.minY, width: width, height: bar.height)
-        cancelButton.frame = NSRect(x: bar.minX + (width + gap) * 2, y: bar.minY, width: width, height: bar.height)
+        toolbar.frame = bar
+        let inset: CGFloat = 6
+        let gap: CGFloat = 6
+        let width = (bar.width - inset * 2 - gap * 2) / 3
+        let height = max(24, bar.height - inset * 2)
+        recordButton.frame = NSRect(x: inset, y: inset, width: width, height: height)
+        entireButton.frame = NSRect(x: inset + width + gap, y: inset, width: width, height: height)
+        cancelButton.frame = NSRect(x: inset + (width + gap) * 2, y: inset, width: width, height: height)
     }
 
     private func toolbarRect() -> NSRect {
-        let size = NSSize(width: 420, height: 36)
+        let size = NSSize(width: 440, height: 44)
         if let hole = liveRect {
             let below = NSRect(
                 x: hole.midX - size.width / 2,

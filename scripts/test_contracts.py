@@ -1221,13 +1221,14 @@ def test_pipeline_timing_stays_in_archive() -> None:
     start_btn = controller.split("func startRecording()")[1].split("func stopRecording()")[0]
     assert "Starting capture" in start_btn
     assert "!startInFlight" in start_btn
-    assert "CapturePermissions.readiness()" in start_btn
+    assert "CapturePermissions.readiness(" in start_btn
+    assert "requireMicrophone" in start_btn
     assert "allowsStart" in start_btn
     assert "start_blocked" in start_btn
     assert "start_requested" in start_btn
     assert "openScreenCaptureSettings" not in start_btn
     assert "CGRequestScreenCaptureAccess" not in start_btn
-    assert start_btn.index("CapturePermissions.readiness()") < start_btn.index("startInFlight = true")
+    assert start_btn.index("CapturePermissions.readiness(") < start_btn.index("startInFlight = true")
     assert "startInFlight = true" in start_btn
     assert start_btn.index("startInFlight = true") < start_btn.index("startRecordingAsync")
     assert "markStartInFlight(true)" in start_btn
@@ -2199,6 +2200,8 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "MediaBudget.archiveFrameStep" in start_fn
     assert "MediaBudget.archiveMaxWidth" in recorder
     assert "MediaBudget.archiveVideoBitrate" in recorder
+    assert "MediaBudget.archiveVideoMaxBitrate" in recorder
+    assert "AVVideoMaxBitRateKey" in recorder
     assert "6_000_000" not in recorder
     assert "AVVideoMaxKeyFrameIntervalKey" in recorder
     assert "AVVideoExpectedSourceFrameRateKey" in recorder
@@ -2875,6 +2878,13 @@ def test_audit_leftovers_are_implemented() -> None:
     assert "mode: .record" in start_menu
     assert start_menu.index("CaptureAreaPicker.present") < start_menu.index("startRecording()")
     assert "presentStartBlocked" in start_menu
+    assert "requestScreenAccess" not in start_menu
+    assert "presentMeetingNotice()" in start_menu
+    settings_ui = (ROOT / "ScrumTrace" / "UI" / "SettingsView.swift").read_text()
+    assert "Record microphone" in settings_ui
+    assert "Show pointer in the archive" in settings_ui
+    assert "includeMicrophone" in settings_ui
+    assert "showCursor" in settings_ui
     clock = (ROOT / "ScrumTrace" / "Capture" / "ClockSynchronizer.swift").read_text()
     inside = clock.split("func isInsidePause(hostTime")[1].split("func wallSecondsLocked")[0]
     assert "max(0, CMTimeGetSeconds" in inside

@@ -99,7 +99,7 @@ enum CapturePermissions {
         #endif
     }
 
-    static func readiness() -> CaptureReadiness {
+    static func readiness(requireMicrophone: Bool = true) -> CaptureReadiness {
         snapshotLaunchState()
         #if os(macOS)
         let now = CGPreflightScreenCaptureAccess()
@@ -108,6 +108,9 @@ enum CapturePermissions {
         }
         if !now {
             return .screenDenied
+        }
+        guard requireMicrophone else {
+            return .ready
         }
         switch AVCaptureDevice.authorizationStatus(for: .audio) {
         case .denied, .restricted:

@@ -103,6 +103,14 @@ final class AppSettings: ObservableObject {
         didSet { persistCaptureArea() }
     }
 
+    @Published var showCursor: Bool {
+        didSet { defaults.set(showCursor, forKey: Keys.showCursor) }
+    }
+
+    @Published var includeMicrophone: Bool {
+        didSet { defaults.set(includeMicrophone, forKey: Keys.includeMicrophone) }
+    }
+
     @Published var apiKeyDraft: String
 
     var productContext: ProductContext {
@@ -130,6 +138,8 @@ final class AppSettings: ObservableObject {
         } else {
             self.captureArea = .entireDisplay
         }
+        self.showCursor = defaults.object(forKey: Keys.showCursor) as? Bool ?? true
+        self.includeMicrophone = defaults.object(forKey: Keys.includeMicrophone) as? Bool ?? true
         self.apiKeyDraft = KeychainStore.get(account: keyAccount) ?? ""
     }
 
@@ -189,5 +199,7 @@ final class AppSettings: ObservableObject {
         static let retentionDays = "scrumtrace.retentionDays"
         static let meetingNotice = "scrumtrace.meetingNoticeAccepted"
         static let captureArea = "scrumtrace.captureArea"
+        static let showCursor = "scrumtrace.showCursor"
+        static let includeMicrophone = "scrumtrace.includeMicrophone"
     }
 }

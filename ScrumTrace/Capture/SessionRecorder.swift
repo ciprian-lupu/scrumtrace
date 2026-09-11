@@ -127,7 +127,9 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
     }
 
     func start(shouldPauseCapture: @escaping @Sendable () -> Bool = { false },
-               captureArea: CaptureArea = .entireDisplay) async throws {
+               captureArea: CaptureArea = .entireDisplay,
+               showCursor: Bool = true,
+               includeMicrophone: Bool = true) async throws {
         // Never call SCShareableContent unless Screen Recording was attached
         // at process start. A Settings toggle that flipped mid-process, or a
         // grant for a different Debug copy, makes this API show the system
@@ -140,11 +142,13 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             AgentLog.event("recorder_blocked", ["reason": "permissionDenied"])
             throw SessionRecorderError.permissionDenied
         }
-        try await requestPermission()
+        try await requestPermission(includeMicrophone: includeMicrophone)
         AgentLog.event("recorder_sckit_begin", [
             "area": captureArea.isEntireDisplay ? "full" : "region",
             "width": String(captureArea.isEntireDisplay ? 0 : Int(captureArea.widthPoints.rounded())),
-            "height": String(captureArea.isEntireDisplay ? 0 : Int(captureArea.heightPoints.rounded()))
+            "height": String(captureArea.isEntireDisplay ? 0 : Int(captureArea.heightPoints.rounded())),
+            "cursor": showCursor ? "1" : "0",
+            "mic": includeMicrophone ? "1" : "0"
         ])
         // Never fetch shareable content on the MainActor. TCC presents a sheet
         // that cannot drain if Record is waiting on this same run loop — the
@@ -196,34 +200,36 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
                 timescale: Int32(MediaBudget.archiveFrameTimescale)
             )
             config.queueDepth = 8
-            config.showsCursor = true
+            config.showsCursor = showCursor
             config.capturesAudio = true
             config.pixelFormat = kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
             if #available(macOS 15.0, *) {
-                config.captureMicrophone = true
+                config.captureMicrophone = includeMicrophone
             }
             let stream = SCStream(filter: filter, configuration: config, delegate: self)
             try stream.addStreamOutput(self, type: .screen, sampleHandlerQueue: writerQueue)
             try stream.addStreamOutput(self, type: .audio, sampleHandlerQueue: writerQueue)
             var mic = false
-            if #available(macOS 15.0, *) {
-                do {
-                    try stream.addStreamOutput(self, type: .microphone, sampleHandlerQueue: writerQueue)
-                    mic = true
-                } catch {
+            if includeMicrophone {
+                if #available(macOS 15.0, *) {
+                    do {
+                        try stream.addStreamOutput(self, type: .microphone, sampleHandlerQueue: writerQueue)
+                        mic = true
+                    } catch {
+                        do {
+                            try startMicrophoneFallback()
+                            mic = true
+                        } catch {
+                            mic = false
+                        }
+                    }
+                } else {
                     do {
                         try startMicrophoneFallback()
                         mic = true
                     } catch {
                         mic = false
                     }
-                }
-            } else {
-                do {
-                    try startMicrophoneFallback()
-                    mic = true
-                } catch {
-                    mic = false
                 }
             }
             // Evaluate the privacy gate after writers exist and before the
@@ -1100,6 +1106,7 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             AVVideoHeightKey: h,
             AVVideoCompressionPropertiesKey: [
                 AVVideoAverageBitRateKey: MediaBudget.archiveVideoBitrate,
+                AVVideoMaxBitRateKey: MediaBudget.archiveVideoMaxBitrate,
                 AVVideoMaxKeyFrameIntervalKey: MediaBudget.archiveKeyFrameInterval,
                 AVVideoExpectedSourceFrameRateKey: MediaBudget.archiveExpectedFrameRate,
                 AVVideoProfileLevelKey: AVVideoProfileLevelH264HighAutoLevel,
@@ -1385,7 +1392,11 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
     /// Microphone only. Screen Recording is preflighted before this runs so
     /// we never pop the looping Screen Recording sheet from Record.
     /// `requestAccess` on an already-denied client re-prompts every Start.
-    private func requestPermission() async throws {
+    private func requestPermission(includeMicrophone: Bool = true) async throws {
+        guard includeMicrophone else {
+            AgentLog.event("mic_skipped", [:])
+            return
+        }
         switch AVCaptureDevice.authorizationStatus(for: .audio) {
         case .authorized:
             AgentLog.event("mic_already_authorized", [:])

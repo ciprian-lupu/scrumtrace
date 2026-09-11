@@ -64,6 +64,15 @@ struct SettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+            Section("Sources") {
+                Toggle("Show pointer in the archive", isOn: $settings.showCursor)
+                    .disabled(controller.isRecording)
+                Toggle("Record microphone", isOn: $settings.includeMicrophone)
+                    .disabled(controller.isRecording)
+                Text("System audio is always captured. Turn the microphone off for a silent room or when this process does not have Microphone access. The pointer toggle only affects the archive movie.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
             Section("Hotkeys") {
                 LabeledContent("Shot", value: "⌥⌘S")
                 LabeledContent("Pin", value: "⌥⌘Space")
@@ -111,7 +120,7 @@ struct SettingsView: View {
                 LabeledContent("Screen Recording", value: screenRecordingLabel)
                 LabeledContent("Microphone", value: CapturePermissions.microphoneStatus())
                 LabeledContent("App path", value: CapturePermissions.runningAppPath())
-                Text(CapturePermissions.readiness().userMessage)
+                Text(CapturePermissions.readiness(requireMicrophone: settings.includeMicrophone).userMessage)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .textSelection(.enabled)
