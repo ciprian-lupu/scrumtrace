@@ -81,7 +81,8 @@ private final class CaptureAreaPickerController {
                 self.finish(.entireDisplay)
                 return nil
             case 36, 76:
-                self.confirmSelection()
+                let key = self.windows.first(where: { $0.isKeyWindow })
+                self.confirmSelection(from: key)
                 return nil
             default:
                 return event

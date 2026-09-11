@@ -2948,7 +2948,10 @@ def test_audit_leftovers_are_implemented() -> None:
     assert "func confirmSelection(from preferred" in picker
     assert "preferred?.proposedArea() ?? .entireDisplay" in picker
     assert "confirmSelection(from: window)" in picker
+    assert "confirmSelection(from: key)" in picker
+    assert "isKeyWindow" in picker
     assert 'self?.confirmSelection()' not in picker
+    assert "self.confirmSelection()" not in picker
     menu = (ROOT / "ScrumTrace" / "UI" / "MenuBarController.swift").read_text()
     assert "Start recording —" in menu
     assert "Use entire display" in menu
