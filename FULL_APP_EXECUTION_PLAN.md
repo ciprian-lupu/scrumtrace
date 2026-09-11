@@ -22,9 +22,36 @@ The app is done only when all of the following are true:
 7. Record remains available regardless of license state.
 8. No private `archive/` asset appears in `export/`, the zip, provider payloads,
    diagnostics, or agent logs.
+9. The v1 product improvements in Phase D are implemented: preflight and
+   capture health, payload review and redaction, crash-safe processing,
+   pre-export session review, export profiles, and searchable session history.
+10. The complete branch receives both an automated diff review and a human
+    review, with every accepted finding fixed and retested.
+11. The release-candidate test in Phase F and the final installed/notarized
+    acceptance test in TASK G03 pass after implementation and review. Earlier
+    task tests do not replace these integrated runs.
 
 Passing inspectors is supporting evidence, not hardware proof. A gate is not
 closed until its manual checks are also recorded.
+
+### V1 scope boundary
+
+“Entire app” means the complete record → pause/annotate → process → review →
+consent → export → install/update workflow described in this document. It does
+not mean every possible future recorder feature.
+
+Explicitly out of v1 unless `IMPLEMENTATION_PLAN.md` is revised first:
+
+- speaker diarization;
+- a 60-minute zero-drift claim;
+- cloud accounts or hosted storage;
+- team collaboration;
+- mobile applications;
+- live meeting bots;
+- automatic code changes from meeting content.
+
+This boundary prevents an implementing model from growing an unfinishable
+backlog while claiming the app is incomplete.
 
 ## 1. Rules for the implementing model
 
@@ -83,6 +110,23 @@ Return:
 
 Reject an implementation response that says “should work,” omits tests, changes
 multiple task IDs, or calls a hardware gate passed without the named artifact.
+
+### Testing policy
+
+“Test at the end” means there is one comprehensive final test after all
+implementation and code-review fixes. It does **not** mean skipping feedback
+during development.
+
+- Each implementation task adds and runs focused regression tests.
+- Phase A runs Linux tests because it changes Python inspectors.
+- Swift tasks compile and run targeted Xcode tests on a Mac before commit.
+- Hardware gates are provisional evidence until the final integrated rerun.
+- Phase E performs final code review after feature implementation.
+- Phase F starts from a clean checkout and reruns the whole product as the
+  release candidate before signing.
+- TASK G03 is the final test at the end, using the distributed notarized app.
+- A failure in Phase F or G03 reopens one focused implementation task, then
+  requires the complete Phase E review and Phase F/G03 tests again.
 
 ## 2. Inspector result contract
 
@@ -176,6 +220,9 @@ bash scripts/run_linux_tests.sh
 
 **Files**
 
+- `ScrumTrace/Capture/AgentLog.swift`
+- `ScrumTrace/Processing/SessionController.swift`
+- `ScrumTrace/Capture/SessionRecorder.swift`
 - `scripts/gate_inspect_lib.py`
 - `scripts/inspect_gate_minus0.py`
 - `scripts/inspect_gate0_log.py`
@@ -188,26 +235,37 @@ bash scripts/run_linux_tests.sh
 
 **Implementation**
 
-1. Add `--log-start-line N` to every log-reading inspector.
-2. Add a shared `read_jsonl_window(path, start_line)` helper.
+1. Generate one random, non-secret `run_id` when the app process launches.
+   Include it in every `AgentLog.event` row without changing individual call
+   sites.
+2. Add a process-safe current session context to `AgentLog`.
+   `SessionController` sets it immediately after the session ID is created and
+   clears it after stop/termination. Include `session` automatically in every
+   event while context is set. Explicit event fields win only when equal;
+   mismatches must be asserted in Debug and logged as a technical error.
+3. Never include titles, URLs, notes, transcripts, tokens, or keys in either
+   identifier.
+4. Add `--log-start-line N` to every log-reading inspector.
+5. Add a shared `read_jsonl_window(path, start_line)` helper.
    - Lines are one-based.
    - Reject negative values.
    - Exit `2` when the marker is beyond EOF.
-3. Add `bash scripts/mac_all_gates.sh --begin`.
+6. Add `bash scripts/mac_all_gates.sh --begin`.
    - Verify macOS.
    - Create `~/Library/Logs/ScrumTrace/gate-run.json`.
    - Store current log line count + 1, UTC time, current `git rev-parse HEAD`,
-     app CDHash, machine name, macOS version, and chip.
+     app CDHash, app `run_id` when available, machine name, macOS version, and
+     chip.
    - Do not truncate or rewrite `agent.jsonl`.
-4. Normal `mac_all_gates.sh` loads that marker and passes
+7. Normal `mac_all_gates.sh` loads that marker and passes
    `--log-start-line` to all log inspectors.
-5. `inspect_all_gates.py` must require `--log-start-line` whenever `--log` is
+8. `inspect_all_gates.py` must require `--log-start-line` whenever `--log` is
    supplied. Missing marker is exit `2`, not a whole-log fallback.
-6. Session-aware inspectors must additionally infer `session_id` from
+9. Session-aware inspectors must additionally infer `session_id` from
    `session.manifest.json` and require a matching log event where the event
    schema includes `session`.
-7. Gate 0 remains run-window scoped because it intentionally happens outside a
-   session.
+10. Require one `run_id` throughout a gate window. Gate 0 remains run-window
+    scoped because it intentionally happens outside a session.
 
 **Tests**
 
@@ -217,6 +275,9 @@ bash scripts/run_linux_tests.sh
 - Marker beyond EOF blocks.
 - Missing marker blocks.
 - A different session ID does not satisfy Gate −0 or Gate 5.
+- Every app event receives the same process `run_id`.
+- Session context appears after start and is absent after a clean stop.
+- A session mismatch cannot silently overwrite context.
 
 **Verify**
 
@@ -961,9 +1022,556 @@ Commit only factual Gate 3–6 evidence:
 
 ---
 
-## Phase D — Product-level smoke test
+## Phase D — Finish the v1 product experience
 
-### TASK D01 — Fresh-user functional walkthrough
+Do not begin new product surfaces until the core Gate 1 and Gates 3–6 have
+passed once on a Mac. These tasks improve the proven pipeline; they do not
+replace it. After Phase D, all gates must be rerun in Phase F.
+
+### TASK D01 — Add a capture preflight panel
+
+The user must be able to see whether a recording can work before opening the
+selection overlay.
+
+**Files**
+
+- `ScrumTrace/Capture/CapturePermissions.swift`
+- `ScrumTrace/Processing/SessionController.swift`
+- `ScrumTrace/UI/MenuBarController.swift`
+- `ScrumTrace/UI/SettingsView.swift`
+- new `ScrumTrace/UI/CapturePreflightView.swift`
+- new `ScrumTraceTests/CapturePreflightTests.swift`
+
+**Implementation**
+
+1. Create a pure `CapturePreflightSnapshot` value containing:
+   - current stable app identity/CDHash;
+   - Screen Recording state and relaunch requirement;
+   - microphone state when microphone capture is enabled;
+   - selected display/region availability;
+   - free bytes at the sessions volume;
+   - configured archive quality;
+   - whether a live recording already owns `recording.lock`.
+2. Create a pure evaluator returning `ready`, `warning`, or `blocked` plus
+   ordered reasons.
+3. Show the snapshot from Menu and Settings without starting capture.
+4. Provide explicit buttons for requesting Screen Recording, opening Screen
+   Settings, opening Microphone Settings, and Relaunch.
+5. Never request Screen Recording or open Settings from `startRecording()`.
+6. Record remains one click away when snapshot is ready.
+7. Use real copy; explain exactly what is missing and whether a relaunch is
+   required.
+8. Cover loading, ready, warning, and blocked states.
+
+**Tests**
+
+- Screen denied blocks.
+- Current launch granted but launch snapshot denied requires relaunch.
+- Disabled microphone does not require microphone permission.
+- Enabled microphone denied blocks.
+- Missing display blocks.
+- Low disk is a warning at the warning threshold and blocked at the hard
+  threshold.
+- Stale dead-PID lock does not block; live lock blocks.
+- `startRecording()` contains no permission request.
+
+**Verify**
+
+```bash
+bash scripts/mac_xcode_test.sh
+bash scripts/run_linux_tests.sh
+```
+
+**Done when:** a user can diagnose capture readiness without attempting Record.
+
+**Commit:** `feat: add recording preflight`
+
+---
+
+### TASK D02 — Add capture health to the HUD
+
+**Files**
+
+- `ScrumTrace/Capture/SessionRecorder.swift`
+- `ScrumTrace/Processing/SessionController.swift`
+- `ScrumTrace/UI/RecordingHUDWindow.swift`
+- `ScrumTrace/Storage/SessionModels.swift`
+- new `ScrumTraceTests/CaptureHealthTests.swift`
+
+**Implementation**
+
+1. Define a `CaptureHealthSnapshot` value with:
+   - last screen sample age;
+   - last system-audio sample age;
+   - last microphone sample age when enabled;
+   - writer state;
+   - bytes written for MP4/WAV;
+   - remaining disk bytes;
+   - latest non-sensitive technical warning.
+2. Update health from capture queues without blocking them.
+3. Coalesce UI publication to at most four updates per second.
+4. HUD states:
+   - healthy: quiet green indicator;
+   - warning: amber source name;
+   - fatal: red, capture stops safely, error remains visible.
+5. Never place sample content, application metadata, or file-system home paths
+   in health logs.
+6. Pause freezes expected source ages and must not produce false warnings.
+7. Disabled microphone must not appear unhealthy.
+
+**Tests**
+
+- Fresh samples are healthy.
+- Missing screen/system/mic sample crosses warning threshold.
+- Paused state suppresses age warnings.
+- Disabled mic is ignored.
+- Writer failure becomes fatal once.
+- Repeated warning updates are coalesced.
+- Health transition does not alter clock or pause math.
+
+**Verify**
+
+```bash
+bash scripts/mac_xcode_test.sh
+bash scripts/run_linux_tests.sh
+```
+
+**Done when:** a user knows during recording whether every enabled source is
+still being persisted.
+
+**Commit:** `feat: show capture health in the HUD`
+
+---
+
+### TASK D03 — Add payload preview and privacy redaction
+
+Consent must show the actual outbound payload, and the user must be able to
+remove sensitive items before any network request.
+
+**Files**
+
+- `ScrumTrace/Processing/SessionController.swift`
+- `ScrumTrace/Processing/SessionProcessor.swift`
+- `ScrumTrace/AI/AIProviderProtocol.swift`
+- `ScrumTrace/AI/ProviderWireMedia.swift`
+- `ScrumTrace/Export/ExportProjector.swift`
+- `ScrumTrace/Storage/SessionModels.swift`
+- new `ScrumTrace/UI/UploadReviewWindow.swift`
+- new `ScrumTraceTests/UploadReviewTests.swift`
+- new `ScrumTraceTests/ProviderRequestTests.swift`
+
+If protocol files have different names, locate the existing declarations with
+`rg 'AIProviderProtocol|ProviderWireMedia' ScrumTrace` and edit those files; do
+not create duplicate types.
+
+**Implementation**
+
+1. Build a deterministic `OutboundPayloadPlan` before consent:
+   - provider, endpoint origin, model;
+   - exact still paths and byte counts;
+   - exact clip paths, byte counts, audio/video inclusion;
+   - transcript excerpt character count;
+   - metadata field names;
+   - total planned bytes.
+2. Display thumbnails and filenames from `export/` only.
+3. Let the user exclude individual stills/clips, all clip audio/video, transcript
+   excerpts, window metadata, Shot notes, and product context.
+4. Add rectangular image redaction. Save a redacted export copy; never alter
+   archive originals.
+5. Re-run evidence validation after exclusions/redactions. Demote tasks whose
+   evidence was removed.
+6. Persist the approved payload fingerprint and inclusion flags in canonical
+   consent. Do not persist captured text in the fingerprint.
+7. Immediately before the provider call, rebuild the plan and require the
+   fingerprint to match. A mismatch requires new consent.
+8. Cancel always produces local export and zero provider requests.
+
+**Tests**
+
+- Every displayed item equals an actual planned request part.
+- Exclusion removes bytes from the request.
+- Redaction changes only the export derivative.
+- Removed evidence demotes confirmation.
+- Payload mutation after consent blocks the request.
+- Denial produces zero mocked network requests.
+- Endpoint, model, or capability change requires new consent.
+- No archive master path enters a request.
+
+Use `URLProtocol` or the existing injectable transport. Never hit a live
+provider in automated tests.
+
+**Verify**
+
+```bash
+bash scripts/mac_xcode_test.sh
+bash scripts/run_linux_tests.sh
+```
+
+**Done when:** the user can inspect and reduce the exact outbound payload before
+approval, and approval is bound to those exact bytes.
+
+**Commit:** `feat: add upload payload review`
+
+---
+
+### TASK D04 — Make processing crash-safe and resumable
+
+This task resumes post-recording processing. It does not claim seamless
+continuation of an interrupted ScreenCaptureKit recording.
+
+**Files**
+
+- `ScrumTrace/Processing/SessionProcessor.swift`
+- `ScrumTrace/Processing/SessionController.swift`
+- `ScrumTrace/Storage/SessionVault.swift`
+- `ScrumTrace/Storage/SessionModels.swift`
+- `ScrumTrace/UI/MenuBarController.swift`
+- new `ScrumTraceTests/ProcessingRecoveryTests.swift`
+
+**Implementation**
+
+1. Give every processing stage explicit states:
+   `pending`, `running`, `completed`, `failed`.
+2. Persist stage start, finish, attempt count, and sanitized technical error
+   atomically in the canonical manifest.
+3. On launch, convert stale `running` stages to `failed/retryable`.
+4. Compute stage input fingerprints from file identity, size, and modification
+   time—not captured text.
+5. Reuse a completed stage only when its outputs exist, are non-empty, are
+   contained, and its input fingerprint still matches.
+6. Retry from the first invalid/incomplete stage. Do not repeat provider calls
+   after an ambiguous crash unless a request idempotency key proves safety or
+   the user approves retry.
+7. Preserve the existing consent only when destination and payload fingerprint
+   still match.
+8. Surface Recover Session and Discard Session for unfinished processing.
+9. Never delete archive media when discarding generated processing output.
+
+**Tests**
+
+- Crash after each stage start resumes from that stage.
+- Missing output invalidates a completed stage.
+- Changed input invalidates dependent stages.
+- Completed transcription is reused.
+- Ambiguous provider call blocks for user decision.
+- Changed payload requires consent again.
+- Corrupt canonical manifest is preserved and surfaced, not overwritten.
+- Archive files survive discard/retry.
+
+**Verify**
+
+```bash
+bash scripts/mac_xcode_test.sh
+bash scripts/run_linux_tests.sh
+```
+
+**Done when:** killing the app during any post-recording stage cannot silently
+lose the session or duplicate a network side effect.
+
+**Commit:** `feat: resume interrupted session processing`
+
+---
+
+### TASK D05 — Add pre-export session review
+
+**Files**
+
+- `ScrumTrace/Processing/SessionController.swift`
+- `ScrumTrace/Processing/SessionProcessor.swift`
+- `ScrumTrace/Storage/SessionModels.swift`
+- `ScrumTrace/Slicing/ClipExporter.swift`
+- `ScrumTrace/Export/ExportProjector.swift`
+- new `ScrumTrace/UI/SessionReviewWindow.swift`
+- new `ScrumTraceTests/SessionReviewTests.swift`
+
+**Implementation**
+
+1. After local transcription/slicing and before consent/provider evaluation,
+   show one review window with:
+   - slice timeline;
+   - clip preview;
+   - still/Shot preview;
+   - transcript excerpt;
+   - task/review status;
+   - measured projected bytes.
+2. Permit:
+   - remove a slice from export;
+   - adjust slice start/end inside media bounds and ≤ 25 seconds;
+   - remove a still from export;
+   - edit typed Shot notes;
+   - mark a candidate `needs_review`;
+   - return to the payload review.
+3. Never edit master MP4/WAV/full transcript/raw events.
+4. Every edit invalidates only dependent generated stages.
+5. Re-export and remeasure after edits.
+6. Provide explicit Cancel Review (keep local archive) and Build Export.
+7. Support keyboard navigation, VoiceOver labels, and visible focus.
+
+**Tests**
+
+- Trim bounds and 25-second cap.
+- Removal keeps archive source.
+- Changed note is escaped in HTML/Markdown.
+- Evidence removal demotes confirmation.
+- Byte estimate refreshes after edit.
+- Cancel performs no upload.
+- Stage invalidation is minimal and deterministic.
+
+**Verify**
+
+```bash
+bash scripts/mac_xcode_test.sh
+bash scripts/run_linux_tests.sh
+```
+
+**Done when:** users control what enters the final handoff without touching the
+private archive.
+
+**Commit:** `feat: add pre-export session review`
+
+---
+
+### TASK D06 — Add export profiles
+
+Profiles change presentation and optional media inclusion, never archive
+privacy or the 35 MiB limit.
+
+**Files**
+
+- `ScrumTrace/App/AppSettings.swift`
+- `ScrumTrace/Storage/SessionModels.swift`
+- `ScrumTrace/Export/ExportProjector.swift`
+- `ScrumTrace/Export/SessionPackZipper.swift`
+- `ScrumTrace/Export/AgentContextRenderer.swift`
+- `ScrumTrace/UI/SessionReviewWindow.swift`
+- new `ScrumTraceTests/ExportProfileTests.swift`
+
+**Implementation**
+
+Define exactly three profiles:
+
+1. `coding_agent`: Markdown + manifest + evidence; clips included only when
+   referenced and within budget.
+2. `web_chat`: prompt + selected images + zip; copy explains that ZIP video
+   interpretation is not assumed.
+3. `human_review`: HTML brief + playable selected clips + evidence.
+
+All profiles:
+
+- project from the same canonical manifest;
+- use export-relative paths;
+- enforce the same allow-list and cap;
+- list omissions;
+- never include archive masters or raw events;
+- re-run evidence validation after projection.
+
+Do not add provider-specific prompt instructions that treat meeting speech as
+commands.
+
+**Tests**
+
+- Golden manifest projection for each profile.
+- No archive paths or files.
+- All referenced paths exist.
+- Cap and omission behavior are identical.
+- Untrusted-data wrapping and HTML escaping remain present.
+
+**Verify**
+
+```bash
+bash scripts/mac_xcode_test.sh
+bash scripts/run_linux_tests.sh
+```
+
+**Done when:** each target gets an honest, bounded handoff without duplicating
+the processing pipeline.
+
+**Commit:** `feat: add bounded export profiles`
+
+---
+
+### TASK D07 — Add searchable session history
+
+**Files**
+
+- `ScrumTrace/Storage/SessionVault.swift`
+- `ScrumTrace/Storage/SessionModels.swift`
+- `ScrumTrace/UI/MenuBarController.swift`
+- new `ScrumTrace/UI/SessionHistoryWindow.swift`
+- new `ScrumTraceTests/SessionHistoryTests.swift`
+
+**Implementation**
+
+1. Build the index locally from canonical manifests. Do not add a database.
+2. Index only:
+   - session ID;
+   - created date;
+   - product app name;
+   - pipeline status;
+   - duration;
+   - counts of shots/slices/tasks;
+   - export availability.
+3. Do not index transcript text, Shot notes, window titles, URLs, or provider
+   responses.
+4. Search by date, app name, session ID, and status.
+5. Filter incomplete, needs-review, completed, and failed sessions.
+6. Actions: Review, Retry/Recover, Reveal export, Reveal archive with explicit
+   privacy warning, Delete.
+7. Delete requires confirmation, rejects path escapes/symlinks, and updates the
+   view atomically.
+8. Corrupt manifests appear as recoverable rows rather than crashing history.
+
+**Tests**
+
+- Sorting and filters.
+- Allowed-field search.
+- Sensitive text is not searchable.
+- Corrupt manifest row.
+- Symlink/path-escape deletion refusal.
+- Delete confirmation and refresh.
+- Empty and loading states.
+
+**Verify**
+
+```bash
+bash scripts/mac_xcode_test.sh
+bash scripts/run_linux_tests.sh
+```
+
+**Done when:** users can find and recover local sessions without exposing
+captured content to a new index.
+
+**Commit:** `feat: add private session history`
+
+---
+
+## Phase E — Code review and product audit
+
+Phase E happens after all implementation tasks. Do not start the final test with
+unresolved review findings.
+
+### TASK E01 — Automated branch review
+
+Use the commit immediately before TASK A01 as the fixed comparison point.
+
+Run two independent reviews:
+
+1. **Standards review**
+   - `AGENTS.md`;
+   - workspace rules;
+   - privacy/logging rules;
+   - code smells and duplicated logic.
+2. **Spec review**
+   - `IMPLEMENTATION_PLAN.md`;
+   - this plan;
+   - `samples/GATE_LOG.md`;
+   - required states and negative paths.
+
+Also run a dedicated security review of:
+
+- export containment;
+- ZIP member validation;
+- provider side effects and consent;
+- HTML/Markdown injection;
+- diagnostics and logs;
+- file deletion and symlinks;
+- credentials and signing material.
+
+**Output**
+
+Create `FINAL_REVIEW.md` containing only:
+
+- comparison base and reviewed HEAD;
+- finding severity;
+- exact file/line;
+- reproduction or failing test;
+- disposition: accepted, rejected with reason, or blocked.
+
+Do not copy captured content or secrets into the review.
+
+---
+
+### TASK E02 — Fix accepted review findings
+
+For each accepted finding:
+
+1. Write or expose a failing regression test.
+2. Make one focused fix.
+3. Run focused tests.
+4. Commit separately.
+5. Update finding disposition with commit SHA.
+
+After all fixes, rerun the automated reviews against the new HEAD. Repeat until:
+
+- zero critical/high findings;
+- every medium finding is fixed or has a specific documented reason;
+- no blocked security finding remains.
+
+Do not suppress a finding by weakening an inspector or test.
+
+---
+
+### TASK E03 — Human review checkpoint
+
+Provide the human reviewer:
+
+- commit range;
+- `FINAL_REVIEW.md`;
+- changed architecture summary;
+- test inventory;
+- known limitations;
+- privacy data-flow summary;
+- screenshots of every new window/state;
+- current factual gate log.
+
+The human must explicitly approve:
+
+- v1 scope is complete;
+- consent copy matches actual payload;
+- archive/export boundary;
+- destructive actions;
+- accessibility and keyboard flow;
+- release candidate is ready for final testing.
+
+Record approval as a dated note in `FINAL_REVIEW.md`. This is not a gate PASS.
+
+---
+
+## Phase F — Clean release-candidate integrated test
+
+Run this only after all implementation and review fixes are committed and
+pushed. It qualifies the bits that Phase G signs. TASK G03 remains the final
+end test on the installed notarized artifact.
+
+### TASK F01 — Clean checkout and automated test matrix
+
+On Linux and a Mac, clone `develop` into new directories. Do not reuse build
+products, generated mock media, DerivedData, app installation, or TCC state.
+
+Run:
+
+```bash
+bash scripts/run_linux_tests.sh
+python3 scripts/inspect_all_gates.py --mock-only
+bash scripts/mac_xcode_test.sh
+```
+
+Then verify:
+
+- Debug build;
+- Release build;
+- zero compiler errors;
+- zero test failures;
+- no unexpected warnings introduced by this branch;
+- deterministic mock export regeneration;
+- clean `git status --short`.
+
+Save command output as review artifacts outside the repository unless it is
+short, sanitized, and intentionally committed.
+
+---
+
+### TASK F02 — Fresh-user functional walkthrough
 
 Use a separate macOS user account or a clean test machine.
 
@@ -988,6 +1596,13 @@ Walk every shipped surface:
 11. Quit while recording and recovery of the unfinished session.
 12. Empty, loading, permission-denied, invalid-key, interrupted, and pack
     omission states.
+13. Preflight ready, warning, blocked, and relaunch-required states.
+14. Capture-health healthy, warning, paused, and fatal states.
+15. Payload review exclusions and image redaction.
+16. Processing recovery after terminating each processing stage.
+17. Session review trim/remove/edit/cancel/build actions.
+18. Coding-agent, web-chat, and human-review export profiles.
+19. Session-history search, filters, recovery, reveal, and safe deletion.
 
 For every failure:
 
@@ -1001,7 +1616,7 @@ hand off a session without Xcode or Terminal after installation.
 
 ---
 
-### TASK D02 — Privacy and negative-path audit
+### TASK F03 — Privacy and negative-path audit
 
 Run:
 
@@ -1025,9 +1640,43 @@ If a security defect appears, fix it before distribution.
 
 ---
 
-## Phase E — Distribution
+### TASK F04 — Final gate rerun
 
-### TASK E01 — Release signing and notarization
+Create new artifacts after the last code-review fix. Do not reuse provisional
+Phase B/C PASS evidence.
+
+Run Gate −0, Gate 0, Gate 1, and Gates 3–6 in order. Exercise:
+
+- all three export profiles;
+- payload exclusion and image redaction;
+- processing crash/recovery at every stage;
+- session review edits;
+- session history recover/reveal/delete;
+- consent denied, invalid key, retired model, and valid provider;
+- 8-clip/20-shot stress pack.
+
+Update `samples/GATE_LOG.md` only with these final run results. Include commit
+SHA, machine, macOS, chip, signing identity/CDHash, measured durations/bytes,
+and manual-check notes.
+
+**Final acceptance**
+
+- Every required automated result is `pass`.
+- Every manual row is completed.
+- No blocked row remains.
+- No critical/high review finding remains.
+- Fresh-user walkthrough passes.
+- Privacy audit passes.
+- Working tree is clean and all commits are pushed.
+
+Any failure reopens implementation. After a fix, repeat Phase E and all of
+Phase F; do not rerun only the failed line.
+
+---
+
+## Phase G — Distribution
+
+### TASK G01 — Release signing and notarization
 
 **Prerequisites supplied by the human**
 
@@ -1057,9 +1706,9 @@ build.
 
 ---
 
-### TASK E02 — Updates and licensing
+### TASK G02 — Updates and licensing
 
-Do this only after the functional Release app passes E01.
+Do this only after the functional Release app passes G01.
 
 1. Validate GitHub update-check behavior using a real test release.
 2. If adding Sparkle:
@@ -1080,6 +1729,50 @@ Do this only after the functional Release app passes E01.
 
 ---
 
+### TASK G03 — Final installed-release acceptance test
+
+This is the final test at the end of the plan. Use the exact notarized and
+stapled artifact produced by G01, installed on a clean macOS user account. Do
+not rebuild between signing and this test.
+
+1. Record artifact SHA-256, version, build, Team ID, CDHash, notarization
+   result, machine, macOS, and chip.
+2. Complete onboarding and fresh TCC grants.
+3. Run Gate −0.
+4. Run the full-screen Keynote Gate 0 sequence.
+5. Run the 20-minute, three-pause Gate 1 sequence.
+6. Complete local Whisper, slicing, review, provider scenarios, and all three
+   export profiles.
+7. Exercise payload removal/redaction and verify exact consent binding.
+8. Terminate during each processing stage and recover.
+9. Verify session-history search/reveal/recover/delete.
+10. Build and inspect the 8-clip/20-shot stress pack.
+11. Install one signed update and confirm settings/session history remain.
+12. Repeat Record with missing, invalid, expired, and valid license states.
+13. Run the privacy audit against the final logs, exports, zips, diagnostics,
+    and mocked provider requests.
+
+**Final pass criteria**
+
+- All final Gate −0 through 6 rows pass with fresh artifacts.
+- Every Phase D feature works on the installed Release app.
+- No crash, hang, lost archive, duplicate provider call, or privacy leak.
+- Record works in every license state.
+- Update installs and relaunches successfully.
+- `codesign`, Gatekeeper assessment, notarization, and stapling remain valid
+  after installation.
+- `FINAL_REVIEW.md` has no unresolved critical/high issue.
+- Source tree is clean; tested commit is pushed to both `origin/develop` and
+  `github/develop`.
+
+If any item fails, the app is not complete. Fix it in one focused commit,
+repeat Phase E, rebuild/re-sign/notarize, repeat Phase F, then rerun all of G03.
+
+Record the final result in `samples/GATE_LOG.md` and the release notes without
+including secrets or captured content.
+
+---
+
 ## 3. Final verification command set
 
 Linux:
@@ -1096,7 +1789,8 @@ Mac:
 bash scripts/mac_xcode_test.sh
 bash scripts/mac_all_gates.sh --no-build --strict \
   --session /path/to/gate1-session \
-  --log ~/Library/Logs/ScrumTrace/agent.jsonl
+  --log ~/Library/Logs/ScrumTrace/agent.jsonl \
+  --log-start-line "$(python3 -c 'import json, pathlib; print(json.loads(pathlib.Path.home().joinpath(\"Library/Logs/ScrumTrace/gate-run.json\").read_text())[\"log_start_line\"])')"
 ```
 
 Release:
@@ -1118,7 +1812,9 @@ Before requesting another review, provide:
 - exact Mac model, macOS version, app commit, signing identity/CDHash;
 - Gate −0 through 6 results;
 - all blocked/manual rows;
-- Release signing/notarization output if Phase E was attempted;
+- `FINAL_REVIEW.md` with no unresolved critical/high finding;
+- final clean-checkout Phase F output;
+- Release signing/notarization output if Phase G was attempted;
 - confirmation that `git status --short` is clean;
 - confirmation that no secret or captured content was committed.
 
