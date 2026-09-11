@@ -2915,7 +2915,7 @@ def test_audit_leftovers_are_implemented() -> None:
     assert "eventTracking" not in picker
     assert "nextEvent" not in picker
     assert "func confirmSelection(from preferred" in picker
-    assert "preferred?.proposedArea()" in picker
+    assert "preferred?.proposedArea() ?? .entireDisplay" in picker
     assert "confirmSelection(from: window)" in picker
     assert 'self?.confirmSelection()' not in picker
     menu = (ROOT / "ScrumTrace" / "UI" / "MenuBarController.swift").read_text()

@@ -112,8 +112,8 @@ private final class CaptureAreaPickerController {
     }
 
     private func confirmSelection(from preferred: CaptureAreaPickerWindow? = nil) {
-        if let preferredArea = preferred?.proposedArea() {
-            finish(preferredArea)
+        if preferred != nil {
+            finish(preferred?.proposedArea() ?? .entireDisplay)
             return
         }
         if let edited = lastEditedWindow?.proposedArea(), !edited.isEntireDisplay {
