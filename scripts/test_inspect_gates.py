@@ -51,6 +51,8 @@ def test_inspect_gate0_fails_when_shot_steals_focus() -> None:
     log.write_text(
         json.dumps({"event": "hotkey_shot"})
         + "\n"
+        + json.dumps({"event": "hotkey_front", "action": "shot", "app_active": "1", "front": "com.str8minds.ScrumTrace"})
+        + "\n"
         + json.dumps({"event": "shot_window_key", "app_active": "1", "front": "com.apple.iWork.Keynote"})
         + "\n",
         encoding="utf-8",
@@ -64,6 +66,7 @@ def test_inspect_gate0_fails_when_shot_steals_focus() -> None:
     assert result.returncode == 1, result.stdout + result.stderr
     report = json.loads(result.stdout)
     assert report["shot_became_key_while_app_active"] == 1
+    assert report["hotkey_activated_app"] == 1
 
 
 def main() -> None:

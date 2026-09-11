@@ -36,6 +36,7 @@ def main() -> int:
         "shot_shown": 0,
         "shot_became_key": 0,
         "shot_became_key_while_app_active": 0,
+        "hotkey_activated_app": 0,
         "events": [],
     }
     if not path.is_file():
@@ -44,6 +45,7 @@ def main() -> int:
 
     events: list[dict[str, object]] = []
     shot_key_active = 0
+    hotkey_activated = 0
     hotkeys = 0
     shot_shown = 0
     shot_key = 0
@@ -56,6 +58,18 @@ def main() -> int:
             hotkeys += 1
         if name == "shot_window_shown":
             shot_shown += 1
+        if name == "hotkey_front":
+            active = str(row.get("app_active") or "") == "1"
+            if active:
+                hotkey_activated += 1
+            events.append(
+                {
+                    "event": name,
+                    "action": row.get("action"),
+                    "app_active": row.get("app_active"),
+                    "front": row.get("front"),
+                }
+            )
         if name == "shot_window_key":
             shot_key += 1
             active = str(row.get("app_active") or "") == "1"
@@ -72,9 +86,10 @@ def main() -> int:
     report["shot_shown"] = shot_shown
     report["shot_became_key"] = shot_key
     report["shot_became_key_while_app_active"] = shot_key_active
+    report["hotkey_activated_app"] = hotkey_activated
     report["events"] = events
     print(json.dumps(report, indent=2))
-    if shot_key_active:
+    if shot_key_active or hotkey_activated:
         return 1
     return 0
 

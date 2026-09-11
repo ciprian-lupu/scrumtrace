@@ -1188,7 +1188,13 @@ def test_pipeline_timing_stays_in_archive() -> None:
     assert (ROOT / "scripts" / "inspect_gate0_log.py").exists()
     inspect_g0 = (ROOT / "scripts" / "inspect_gate0_log.py").read_text()
     assert "shot_window_key" in inspect_g0
+    assert "hotkey_front" in inspect_g0
     assert "app_active" in inspect_g0
+    hotkey = (ROOT / "ScrumTrace" / "UI" / "HotkeyManager.swift").read_text()
+    assert "hotkey_front" in hotkey
+    shot = (ROOT / "ScrumTrace" / "UI" / "ShotNoteWindow.swift").read_text()
+    assert "class ShotNoteField" in shot
+    assert "makeFirstResponder(nil)" in shot.split("func show()")[1].split("override func becomeKey")[0]
     loop = (ROOT / "scripts" / "mac_agent_loop.sh").read_text()
     assert "recording.lock" in loop
     assert "mac_publish_agent_log.sh" in loop

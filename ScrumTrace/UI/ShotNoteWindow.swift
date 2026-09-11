@@ -308,7 +308,7 @@ final class ShotNoteWindow: NSPanel, NSTextFieldDelegate {
         target: nil,
         action: nil
     )
-    private let noteField = NSTextField()
+    private let noteField = ShotNoteField()
     private let talkButton = HoldTalkButton()
     private let saveButton = NSButton(title: "Save", target: nil, action: nil)
 
@@ -388,6 +388,8 @@ final class ShotNoteWindow: NSPanel, NSTextFieldDelegate {
     func show() {
         let screen = NSScreen.main?.visibleFrame ?? .zero
         setFrameOrigin(NSPoint(x: screen.midX - 370, y: screen.midY - 270))
+        noteField.refusesFirstResponder = true
+        makeFirstResponder(nil)
         orderFrontRegardless()
         AgentLog.event("shot_window_shown", [
             "app_active": NSApp.isActive ? "1" : "0",
@@ -446,6 +448,7 @@ final class ShotNoteWindow: NSPanel, NSTextFieldDelegate {
         noteField.placeholderString = "What should an agent notice here?"
         noteField.translatesAutoresizingMaskIntoConstraints = false
         noteField.delegate = self
+        noteField.refusesFirstResponder = true
         noteField.maximumNumberOfLines = 4
         noteField.lineBreakMode = .byWordWrapping
         noteField.cell?.wraps = true
@@ -551,6 +554,22 @@ final class ShotNoteWindow: NSPanel, NSTextFieldDelegate {
     @objc private func saveClicked() {
         talk.note = noteField.stringValue
         talk.persist()
+    }
+}
+
+private final class ShotNoteField: NSTextField {
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        refusesFirstResponder = true
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { nil }
+
+    override func mouseDown(with event: NSEvent) {
+        refusesFirstResponder = false
+        window?.makeFirstResponder(self)
+        super.mouseDown(with: event)
     }
 }
 

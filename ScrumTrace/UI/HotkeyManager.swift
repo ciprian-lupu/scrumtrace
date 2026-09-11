@@ -119,5 +119,21 @@ final class HotkeyManager {
         case .pause:
             controller?.togglePause()
         }
+        let name: String
+        switch action {
+        case .pin:
+            name = "pin"
+        case .shot:
+            name = "shot"
+        case .pause:
+            name = "pause"
+        }
+        #if os(macOS)
+        AgentLog.event("hotkey_front", [
+            "action": name,
+            "front": NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "",
+            "app_active": NSApp.isActive ? "1" : "0"
+        ])
+        #endif
     }
 }
