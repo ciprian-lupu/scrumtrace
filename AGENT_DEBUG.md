@@ -22,7 +22,7 @@ Live session: `recording.lock` (session id + pid).
 Useful events (technical fields only — no titles, URLs, notes, transcripts, or keys):
 
 - Launch: `launch`, `permission_probe`, `screen_request`, `relaunch_requested`, `terminate`
-- Start / stop: `start_control_state`, `start_*`, `start_blocked_sheet`, `stop_clicked`, `stop_requested`, `stop_capture_ok`, `stop_capture_fail`, `stop_manifest_missing`, `stop_ignored`, `halt`, `halt_stop_*`
+- Start / stop: `start_control_state`, `menu_start`, `capture_area_picker`, `start_*`, `start_blocked_sheet`, `stop_clicked`, `stop_requested`, `stop_capture_ok`, `stop_capture_fail`, `stop_manifest_missing`, `stop_ignored`, `halt`, `halt_stop_*`
 - Capture: `recorder_sckit_*`, `recorder_first_sample`, `mic_*`, `capture_write_fail`, `capture_stream_failed`, `wav_ahead_frames`
 - Pause / privacy: `hotkey_pause`, `pause_ok`, `resume_ok`, `resume_blocked`, `privacy_trip`, `privacy_clear`, `privacy_pause`, `privacy_resume`
 - Shot / pin / PTT: `hotkey_shot`, `hotkey_pin`, `shot_*`, `pin_*`, `talk_press`, `talk_release`, `talk_start_fail`, `talk_abort`, `talk_transcribe_*`

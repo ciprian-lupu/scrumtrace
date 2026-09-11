@@ -21,10 +21,15 @@ identity_present() {
 
 trust_cert() {
   local cert="$1"
-  if ! security add-trusted-cert -p codeSign -k "$KEYCHAIN" "$cert"; then
-    echo "trust the certificate in Keychain Access (Trust > Code Signing: Always Trust) and re-run" >&2
-    exit 1
+  if security add-trusted-cert -p codeSign -k "$KEYCHAIN" "$cert"; then
+    return 0
   fi
+  # Headless/no GUI password: admin trust prompt (-d) is the next best option.
+  if security add-trusted-cert -d -p codeSign -k "$KEYCHAIN" "$cert"; then
+    return 0
+  fi
+  echo "trust the certificate in Keychain Access (Trust > Code Signing: Always Trust) and re-run" >&2
+  exit 1
 }
 
 mkdir -p "$SUPPORT"

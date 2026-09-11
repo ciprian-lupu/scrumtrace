@@ -58,6 +58,7 @@ struct SettingsView: View {
                 LabeledContent("Resolution", value: "\(MediaBudget.archiveMaxWidth)×\(MediaBudget.archiveMaxHeight)")
                 LabeledContent("Frame rate", value: "\(MediaBudget.archiveExpectedFrameRate) fps")
                 LabeledContent("Video bitrate", value: "\(MediaBudget.archiveVideoBitrate / 1_000_000) Mbps H.264 High")
+                LabeledContent("Peak bitrate", value: "\(MediaBudget.archiveVideoMaxBitrate / 1_000_000) Mbps cap")
                 LabeledContent("Keyframe", value: "every \(MediaBudget.archiveKeyFrameInterval) frames")
                 LabeledContent("Export clips", value: "\(MediaBudget.clipWidth)×\(MediaBudget.clipHeight) @ \(MediaBudget.clipVideoBitrate / 1000) kbps")
                 Text("Archive is private (session.mp4). Export clips are the 720p handoff. These values are the shipped capture budget, not a live encoder slider.")

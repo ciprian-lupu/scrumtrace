@@ -48,7 +48,7 @@ Archive capture is **3840×2160 at 4 fps, 16 Mbps H.264 High** (keyframe every s
 
 Menu → Settings has **Speech**, **Capture**, **Logs**, **This process**, **AI**, and **General**. Capture shows the shipped 3840×2160 / 4 fps / 16 Mbps (24 Mbps cap) budget, plus pointer and microphone toggles. Start recording opens a selection overlay like macOS screen recording (lasting box, move, resize, then Record). Logs can export a diagnostic bundle (no `archive/`).
 
-Inspect a Gate 0 log (fails if Shot became key and activated the app) and a Gate 1 session folder (token and passphrase are the Part F.2 values). ASCII `strings` checks are required and still do not replace a manual media scrub:
+Inspect a Gate 0 log (fails if Shot became key and activated the app, or if Start requested capture without the overlay Record button) and a Gate 1 session folder (token and passphrase are the Part F.2 values). ASCII `strings` checks are required and still do not replace a manual media scrub:
 
 ```bash
 python3 scripts/inspect_gate0_log.py --log ~/Library/Logs/ScrumTrace/agent.jsonl

@@ -1177,6 +1177,11 @@ def test_pipeline_timing_stays_in_archive() -> None:
     identity = (ROOT / "scripts" / "ensure_debug_signing_identity.sh").read_text()
     assert "ScrumTrace Debug" in identity
     assert "codeSigning" in identity
+    assert "find-identity -v -p codesigning" in identity
+    assert "add-trusted-cert -p codeSign" in identity
+    assert "add-trusted-cert -d -p codeSign" in identity
+    assert "Keychain Access" in identity
+    assert "Code Signing: Always Trust" in identity
     agent_log = (ROOT / "ScrumTrace" / "Capture" / "AgentLog.swift").read_text()
     assert "agent.jsonl" in agent_log
     assert "recording.lock" in agent_log
@@ -1200,6 +1205,9 @@ def test_pipeline_timing_stays_in_archive() -> None:
     assert "shot_window_key" in inspect_g0
     assert "hotkey_front" in inspect_g0
     assert "app_active" in inspect_g0
+    assert "start_without_overlay" in inspect_g0
+    assert "capture_area_picker" in inspect_g0
+    assert "start_requested" in inspect_g0
     hotkey = (ROOT / "ScrumTrace" / "UI" / "HotkeyManager.swift").read_text()
     assert "hotkey_front" in hotkey
     shot = (ROOT / "ScrumTrace" / "UI" / "ShotNoteWindow.swift").read_text()
@@ -2925,6 +2933,8 @@ def test_audit_leftovers_are_implemented() -> None:
     assert "Show pointer in the archive" in settings_ui
     assert "includeMicrophone" in settings_ui
     assert "showCursor" in settings_ui
+    assert "Peak bitrate" in settings_ui
+    assert "MediaBudget.archiveVideoMaxBitrate" in settings_ui
     clock = (ROOT / "ScrumTrace" / "Capture" / "ClockSynchronizer.swift").read_text()
     inside = clock.split("func isInsidePause(hostTime")[1].split("func wallSecondsLocked")[0]
     assert "max(0, CMTimeGetSeconds" in inside

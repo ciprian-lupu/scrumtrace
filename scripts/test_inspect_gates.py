@@ -69,9 +69,59 @@ def test_inspect_gate0_fails_when_shot_steals_focus() -> None:
     assert report["hotkey_activated_app"] == 1
 
 
+def test_inspect_gate0_fails_when_start_skips_overlay() -> None:
+    script = ROOT / "scripts" / "inspect_gate0_log.py"
+    log = Path("/tmp/scrumtrace-inspect-gate0-overlay.jsonl")
+    log.write_text(
+        json.dumps({"event": "menu_start"})
+        + "\n"
+        + json.dumps({"event": "start_requested"})
+        + "\n",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [sys.executable, str(script), "--log", str(log)],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 1, result.stdout + result.stderr
+    report = json.loads(result.stdout)
+    assert report["start_without_overlay"] == 1
+
+
+def test_inspect_gate0_passes_when_record_follows_overlay() -> None:
+    script = ROOT / "scripts" / "inspect_gate0_log.py"
+    log = Path("/tmp/scrumtrace-inspect-gate0-overlay-ok.jsonl")
+    log.write_text(
+        json.dumps({"event": "menu_start"})
+        + "\n"
+        + json.dumps({"event": "capture_area_picker", "action": "open", "mode": "record"})
+        + "\n"
+        + json.dumps({"event": "capture_area_picker", "action": "confirm", "full": "0", "mode": "record"})
+        + "\n"
+        + json.dumps({"event": "start_requested"})
+        + "\n",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [sys.executable, str(script), "--log", str(log)],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    report = json.loads(result.stdout)
+    assert report["picker_open"] == 1
+    assert report["picker_confirm"] == 1
+    assert report["start_without_overlay"] == 0
+
+
 def main() -> None:
     test_inspect_gate1_fails_when_token_is_in_movie()
     test_inspect_gate0_fails_when_shot_steals_focus()
+    test_inspect_gate0_fails_when_start_skips_overlay()
+    test_inspect_gate0_passes_when_record_follows_overlay()
     print("inspect gate helpers ok")
 
 
