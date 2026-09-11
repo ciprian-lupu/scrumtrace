@@ -59,6 +59,7 @@ final class MetadataSampler: @unchecked Sendable {
             return isSuspended ? nil : NSWorkspaceFallback.frontmost()
         }
         let system = AXUIElementCreateSystemWide()
+        AXUIElementSetMessagingTimeout(system, 0.2)
         var focused: AnyObject?
         let focusedStatus = AXUIElementCopyAttributeValue(
             system,
@@ -72,6 +73,7 @@ final class MetadataSampler: @unchecked Sendable {
             return isSuspended ? nil : fallback
         }
         let appElement = unsafeBitCast(app, to: AXUIElement.self)
+        AXUIElementSetMessagingTimeout(appElement, 0.2)
         var titleRef: AnyObject?
         AXUIElementCopyAttributeValue(appElement, kAXTitleAttribute as CFString, &titleRef)
         var windowRef: AnyObject?

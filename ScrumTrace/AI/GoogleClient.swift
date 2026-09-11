@@ -7,14 +7,15 @@ struct GoogleClient: AIProvider {
     func evaluate(request: SliceEvaluationRequest) async throws -> CandidateEvaluationResponse {
         let key = configuration.apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !key.isEmpty else { throw AIProviderError.missingAPIKey }
-        let root = configuration.baseURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let root = try ProviderEndpoint.requireHTTPSOrLocal(configuration.baseURL)
+            .absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         let path = "\(root)/v1beta/models/\(configuration.model):generateContent"
         guard let url = URL(string: path) else {
             throw AIProviderError.invalidURL(configuration.baseURL)
         }
 
         var parts: [[String: Any]] = [
-            ["text": PromptTemplates.system + "\n\n" + PromptTemplates.evaluationUserPrompt(
+            ["text": PromptTemplates.evaluationUserPrompt(
                 product: request.product,
                 slice: request.slice,
                 transcript: request.transcriptExcerpt,
@@ -45,6 +46,9 @@ struct GoogleClient: AIProvider {
         }
 
         let body: [String: Any] = [
+            "systemInstruction": [
+                "parts": [["text": PromptTemplates.system]]
+            ],
             "contents": [["role": "user", "parts": parts]],
             "generationConfig": [
                 "temperature": 0.1,

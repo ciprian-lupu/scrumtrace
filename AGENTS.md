@@ -2,7 +2,7 @@
 
 Read this before changing product code, gates, remotes, or TCC/signing. The working spec is [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md). Mac debug loop: [AGENT_DEBUG.md](AGENT_DEBUG.md). Hardware results: [samples/GATE_LOG.md](samples/GATE_LOG.md) (empty until a Mac run).
 
-Snapshot date: **2026-09-11** (audit TASK-01–17 landed on `develop`; hardware still open). Update the snapshot when status in this file changes.
+Snapshot date: **2026-09-11** (audit TASK-01–17 plus Whisper 632 MB default, Settings/logs, consent/leak hardening; hardware still open). Update the snapshot when status in this file changes.
 
 ## What this is
 
@@ -101,7 +101,7 @@ open ~/Applications/ScrumTrace.app
 
 That copies a Debug build to `~/Applications/ScrumTrace.app` and signs it with a local **ScrumTrace Debug** identity. Open **that** copy. Enable Screen Recording and Microphone for it, then **Relaunch**. A grant never applies to the already-running process. Accessibility is optional.
 
-Xcode resolves WhisperKit **0.11.0** on first open (`Package.resolved` is not checked in). First WhisperKit launch downloads `large-v3_turbo`.
+Xcode resolves WhisperKit **0.11.0** on first open (`Package.resolved` is not checked in). First WhisperKit launch downloads `openai_whisper-large-v3-v20240930_turbo_632MB`. HUD: Loading Whisper model… then Transcribing.
 
 Gate 1 inspect (after a real session folder exists):
 

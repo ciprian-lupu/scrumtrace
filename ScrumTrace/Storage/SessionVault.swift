@@ -424,6 +424,28 @@ final class SessionVault: @unchecked Sendable {
         #endif
     }
 
+    func revealRootInFinder() {
+        #if os(macOS)
+        try? FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
+        NSWorkspace.shared.activateFileViewerSelecting([rootURL])
+        #endif
+    }
+
+    /// Completed sessions older than `days`. 0 means keep forever. Never
+    /// deletes a live recording or paused session.
+    func pruneCompletedOlderThan(days: Int) {
+        guard days > 0 else { return }
+        let cutoff = Date().addingTimeInterval(-Double(days) * 86_400)
+        for manifest in recentSessions(limit: 500) where manifest.createdAt < cutoff {
+            switch manifest.pipelineStatus {
+            case .recording, .paused:
+                continue
+            case .idle, .transcribing, .slicing, .evaluating, .synthesizing, .completed, .offlineFailed:
+                removeAbandonedSession(id: manifest.sessionId)
+            }
+        }
+    }
+
     /// Capture never started. Do not leave an empty folder in Recent / Retry.
     /// Refuses a session-folder symlink so this cannot delete a planted target.
     func removeAbandonedSession(id: String) {

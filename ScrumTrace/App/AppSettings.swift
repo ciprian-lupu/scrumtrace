@@ -87,6 +87,18 @@ final class AppSettings: ObservableObject {
         didSet { defaults.set(includeFullTranscriptInZip, forKey: Keys.includeTranscript) }
     }
 
+    @Published var allowGoogleClipUpload: Bool {
+        didSet { defaults.set(allowGoogleClipUpload, forKey: Keys.allowGoogleClip) }
+    }
+
+    @Published var retentionDays: Int {
+        didSet { defaults.set(retentionDays, forKey: Keys.retentionDays) }
+    }
+
+    @Published var meetingNoticeAccepted: Bool {
+        didSet { defaults.set(meetingNoticeAccepted, forKey: Keys.meetingNotice) }
+    }
+
     @Published var apiKeyDraft: String
 
     var productContext: ProductContext {
@@ -99,11 +111,15 @@ final class AppSettings: ObservableObject {
         self.provider = storedProvider ?? .openaiCompatible
         self.baseURL = defaults.string(forKey: Keys.baseURL) ?? AIProviderKind.openaiCompatible.defaultBaseURL
         self.model = defaults.string(forKey: Keys.model) ?? AIProviderKind.openaiCompatible.defaultModel
-        self.whisperModel = defaults.string(forKey: Keys.whisperModel) ?? "large-v3_turbo"
+        let storedWhisper = defaults.string(forKey: Keys.whisperModel) ?? WhisperTranscriber.defaultStoredModel
+        self.whisperModel = Self.migratedWhisperModel(storedWhisper)
         self.appName = defaults.string(forKey: Keys.appName) ?? ""
         self.repoURL = defaults.string(forKey: Keys.repoURL) ?? ""
         self.techStack = defaults.string(forKey: Keys.techStack) ?? ""
         self.includeFullTranscriptInZip = defaults.bool(forKey: Keys.includeTranscript)
+        self.allowGoogleClipUpload = defaults.object(forKey: Keys.allowGoogleClip) as? Bool ?? false
+        self.retentionDays = defaults.object(forKey: Keys.retentionDays) as? Int ?? 0
+        self.meetingNoticeAccepted = defaults.bool(forKey: Keys.meetingNotice)
         self.apiKeyDraft = KeychainStore.get(account: keyAccount) ?? ""
     }
 
@@ -121,16 +137,27 @@ final class AppSettings: ObservableObject {
             kind: provider,
             baseURL: baseURL,
             model: model,
-            apiKey: KeychainStore.get(account: keyAccount) ?? apiKeyDraft,
+            apiKey: KeychainStore.get(account: keyAccount) ?? "",
             acceptsText: true,
             acceptsImages: provider != .anthropic || !model.isEmpty,
-            acceptsVideo: ProviderWireMedia.adapterCanUploadVideo(provider)
+            acceptsVideo: ProviderWireMedia.adapterCanUploadVideo(provider) && allowGoogleClipUpload
         )
     }
 
     func applyProviderDefaults() {
         baseURL = provider.defaultBaseURL
         model = provider.defaultModel
+    }
+
+    static func migratedWhisperModel(_ stored: String) -> String {
+        let kit = WhisperTranscriber.whisperKitModelName(stored)
+        if kit == WhisperTranscriber.defaultKitModel {
+            return WhisperTranscriber.defaultStoredModel
+        }
+        if kit == WhisperTranscriber.uncompressedKitModel {
+            return "large-v3_turbo_uncompressed"
+        }
+        return stored
     }
 
     private enum Keys {
@@ -142,5 +169,8 @@ final class AppSettings: ObservableObject {
         static let repoURL = "scrumtrace.repoURL"
         static let techStack = "scrumtrace.techStack"
         static let includeTranscript = "scrumtrace.includeFullTranscript"
+        static let allowGoogleClip = "scrumtrace.allowGoogleClipUpload"
+        static let retentionDays = "scrumtrace.retentionDays"
+        static let meetingNotice = "scrumtrace.meetingNoticeAccepted"
     }
 }

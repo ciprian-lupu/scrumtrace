@@ -940,22 +940,26 @@ final class ContractTests: XCTestCase {
     func testWhisperKitModelNamePrefixesShortAlias() {
         XCTAssertEqual(
             WhisperTranscriber.whisperKitModelName("large-v3_turbo"),
-            "openai_whisper-large-v3_turbo"
+            "openai_whisper-large-v3-v20240930_turbo_632MB"
         )
         XCTAssertEqual(
             WhisperTranscriber.whisperKitModelName("openai_whisper-large-v3_turbo"),
-            "openai_whisper-large-v3_turbo"
+            "openai_whisper-large-v3-v20240930_turbo_632MB"
         )
         XCTAssertEqual(
             WhisperTranscriber.whisperKitModelName(""),
-            "openai_whisper-large-v3_turbo"
+            "openai_whisper-large-v3-v20240930_turbo_632MB"
         )
         XCTAssertEqual(
             WhisperTranscriber.whisperKitModelName("large-v3-turbo"),
-            "openai_whisper-large-v3_turbo"
+            "openai_whisper-large-v3-v20240930_turbo_632MB"
         )
         XCTAssertEqual(
             WhisperTranscriber.whisperKitModelName("openai_whisper-large-v3-turbo"),
+            "openai_whisper-large-v3-v20240930_turbo_632MB"
+        )
+        XCTAssertEqual(
+            WhisperTranscriber.whisperKitModelName("large-v3_turbo_uncompressed"),
             "openai_whisper-large-v3_turbo"
         )
     }

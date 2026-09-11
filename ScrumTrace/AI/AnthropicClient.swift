@@ -14,7 +14,8 @@ struct AnthropicClient: AIProvider {
         }
         let key = configuration.apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !key.isEmpty else { throw AIProviderError.missingAPIKey }
-        let root = configuration.baseURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let root = try ProviderEndpoint.requireHTTPSOrLocal(configuration.baseURL)
+            .absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         guard let url = URL(string: "\(root)/v1/messages") else {
             throw AIProviderError.invalidURL(configuration.baseURL)
         }

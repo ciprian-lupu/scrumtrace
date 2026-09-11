@@ -162,9 +162,23 @@ final class MenuBarController: NSObject {
         recent.submenu = recentMenu
         menu.addItem(recent)
         menu.addItem(.separator())
-        menu.addItem(actionItem("Log permission probe", #selector(probePermissions)))
-        menu.addItem(actionItem("Reveal agent log", #selector(revealLog)))
-        menu.addItem(actionItem("Settings…", #selector(settings)))
+        let settingsRoot = NSMenuItem(title: "Settings", action: nil, keyEquivalent: "")
+        let settingsMenu = NSMenu()
+        settingsMenu.addItem(actionItem("Settings Window…", #selector(settings)))
+        settingsMenu.addItem(actionItem("Agent Log…", #selector(settings)))
+        settingsMenu.addItem(.separator())
+        settingsMenu.addItem(actionItem("Log permission probe", #selector(probePermissions)))
+        settingsMenu.addItem(actionItem("Reveal agent log", #selector(revealLog)))
+        settingsMenu.addItem(actionItem("Export diagnostic bundle", #selector(exportDiagnostics)))
+        settingsMenu.addItem(actionItem("Reveal sessions folder", #selector(revealSessions)))
+        settingsMenu.addItem(.separator())
+        settingsMenu.addItem(actionItem("Ask for Screen Recording", #selector(askScreen)))
+        settingsMenu.addItem(actionItem("Open Screen Recording settings", #selector(openScreenSettings)))
+        settingsMenu.addItem(actionItem("Open Microphone settings", #selector(openMicSettings)))
+        settingsMenu.addItem(actionItem("Relaunch ScrumTrace", #selector(relaunch)))
+        settingsMenu.addItem(actionItem("Check for updates", #selector(checkUpdates)))
+        settingsRoot.submenu = settingsMenu
+        menu.addItem(settingsRoot)
         menu.addItem(actionItem("Quit ScrumTrace", #selector(quit)))
         for item in menu.items where item.action != nil && item.target == nil {
             item.target = self
@@ -180,10 +194,30 @@ final class MenuBarController: NSObject {
 
     @objc private func start() {
         let readiness = CapturePermissions.readiness()
+        if !controller.settings.meetingNoticeAccepted {
+            presentMeetingNotice()
+        }
         if !readiness.allowsStart {
+            if case .screenDenied = readiness {
+                Task.detached {
+                    _ = CapturePermissions.requestScreenAccess()
+                }
+            }
             presentStartBlocked(readiness)
         }
         controller.startRecording()
+    }
+
+    private func presentMeetingNotice() {
+        let alert = NSAlert()
+        alert.messageText = "This Mac will record the meeting"
+        alert.informativeText = "Screen, system audio, and microphone are captured locally. Tell other participants before you press Record. See docs/PARTICIPANT_NOTICE.md."
+        alert.addButton(withTitle: "I will tell participants")
+        alert.addButton(withTitle: "Cancel")
+        NSApp.activate(ignoringOtherApps: true)
+        if alert.runModal() == .alertFirstButtonReturn {
+            controller.settings.meetingNoticeAccepted = true
+        }
     }
 
     private func presentStartBlocked(_ readiness: CaptureReadiness) {
@@ -244,6 +278,34 @@ final class MenuBarController: NSObject {
     @objc private func settings() {
         NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+    @objc private func exportDiagnostics() {
+        do {
+            let url = try AgentLog.exportDiagnosticBundle()
+            NSWorkspace.shared.activateFileViewerSelecting([url])
+            controller.statusLine = "Diagnostic bundle written"
+        } catch {
+            controller.statusLine = error.localizedDescription
+        }
+    }
+    @objc private func revealSessions() {
+        controller.vault.revealRootInFinder()
+    }
+    @objc private func askScreen() {
+        Task.detached {
+            _ = CapturePermissions.requestScreenAccess()
+        }
+    }
+    @objc private func openScreenSettings() {
+        SystemPrivacySettings.openScreenRecording()
+    }
+    @objc private func openMicSettings() {
+        SystemPrivacySettings.openMicrophone()
+    }
+    @objc private func checkUpdates() {
+        if let url = URL(string: "https://github.com/ciprian-lupu/scrumtrace/releases") {
+            NSWorkspace.shared.open(url)
+        }
     }
     @objc private func relaunch() {
         controller.relaunchForPermissions()

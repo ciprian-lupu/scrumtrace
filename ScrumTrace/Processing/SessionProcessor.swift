@@ -55,11 +55,15 @@ final class SessionProcessor: @unchecked Sendable {
 
         var justFinishedTranscribing = false
         if !manifest.hasCompleted(.transcribing) {
-            await onStatus(.transcribing, "Transcribing locally with WhisperKit")
+            await onStatus(.transcribing, "Loading Whisper model…")
             manifest.pipelineStatus = .transcribing
             try vault.write(manifest: &manifest)
             let whisperStarted = Date()
-            var transcribed = await transcribe(sessionURL: sessionURL, model: whisperModel)
+            var transcribed = await transcribe(
+                sessionURL: sessionURL,
+                model: whisperModel,
+                onStatus: onStatus
+            )
             var transcript = transcribed.transcript
             transcript.sessionId = sessionId
             timing.whisperIncomplete = transcribed.incomplete
@@ -131,7 +135,8 @@ final class SessionProcessor: @unchecked Sendable {
 
         try requireUsableSession(sessionURL, id: sessionId)
         if !manifest.hasCompleted(.slicing) {
-            if manifest.hasCompleted(.transcribing) {
+            let hasHumanAnchors = !manifest.shots.isEmpty || !pinTimes.isEmpty
+            if manifest.hasCompleted(.transcribing) || hasHumanAnchors {
                 refreshShotsFromDisk(sessionId: sessionId, manifest: &manifest)
                 await onStatus(.slicing, "Cutting evidence windows to the media budget")
                 manifest.pipelineStatus = .slicing
@@ -243,18 +248,27 @@ final class SessionProcessor: @unchecked Sendable {
         }
 
         try requireUsableSession(sessionURL, id: sessionId)
-        guard manifest.hasCompleted(.transcribing) else {
-            // Do not stamp synthesizing/completed while Whisper never produced
-            // a usable pass. Retry Analysis transcribes first (D14).
+        if !manifest.hasCompleted(.transcribing) {
+            let hasHumanAnchors = !manifest.shots.isEmpty || !pinTimes.isEmpty
+                || manifest.hasCompleted(.slicing)
+            if !hasHumanAnchors {
+                // Do not stamp synthesizing/completed while Whisper never produced
+                // a usable pass and there are no shots. Retry Analysis transcribes first (D14).
+                await onStatus(
+                    .transcribing,
+                    "Transcription incomplete — Retry Analysis to transcribe again"
+                )
+                manifest.pipelineStatus = .transcribing
+                try vault.write(manifest: &manifest)
+                return manifest
+            }
             await onStatus(
-                .transcribing,
-                "Transcription incomplete — Retry Analysis to transcribe again"
+                .synthesizing,
+                "Transcript unavailable — writing export from shots. Retry Analysis to transcribe again."
             )
-            manifest.pipelineStatus = .transcribing
-            try vault.write(manifest: &manifest)
-            return manifest
+        } else {
+            await onStatus(.synthesizing, "Writing AGENT_CONTEXT.md and SESSION_BRIEF.html")
         }
-        await onStatus(.synthesizing, "Writing AGENT_CONTEXT.md and SESSION_BRIEF.html")
         manifest.pipelineStatus = .synthesizing
         let excerpts = excerptMap(manifest: manifest, transcript: transcript)
         let projector = ExportProjector()
@@ -449,11 +463,17 @@ final class SessionProcessor: @unchecked Sendable {
         try projector.writeProjectionManifest(projected, sessionURL: sessionURL)
     }
 
-    private func transcribe(sessionURL: URL, model: String) async -> (transcript: FullTranscript, incomplete: Bool) {
+    private func transcribe(
+        sessionURL: URL,
+        model: String,
+        onStatus: @escaping @MainActor (PipelineStatus, String) -> Void
+    ) async -> (transcript: FullTranscript, incomplete: Bool) {
+        let resolved = WhisperTranscriber.whisperKitModelName(model)
         do {
             if !transcriber.isReady {
-                try await transcriber.prepare(model: model)
+                try await waitForPrepare(model: model, resolved: resolved, onStatus: onStatus)
             }
+            await onStatus(.transcribing, "Transcribing locally with WhisperKit")
         } catch {
             AgentLog.event("whisper_pass_fail", ["source": "prepare", "error": error.localizedDescription])
             return (FullTranscript(sessionId: "", language: "en", segments: []), true)
@@ -494,6 +514,13 @@ final class SessionProcessor: @unchecked Sendable {
                 "error": "archive/session.mp4 is missing"
             ])
         } else if layout.shouldTranscribeMovie(wavExists: wavExists, movieExists: movieExists) {
+            if !Self.volumeHasRoom(sessionURL: sessionURL, neededBytes: Self.movieCopyBudget(sessionURL: sessionURL)) {
+                requiredFailed = true
+                AgentLog.event("whisper_pass_fail", [
+                    "source": "movie",
+                    "error": "Not enough free disk space to copy archive/session.mp4 for Whisper"
+                ])
+            } else {
             do {
                 let movieTranscript = try await transcriber.transcribeMovieAudio(at: movie, sessionURL: sessionURL)
                 passes.append(TranscriptQuery.SourcePass(speaker: "system", transcript: movieTranscript))
@@ -505,11 +532,72 @@ final class SessionProcessor: @unchecked Sendable {
                 requiredFailed = true
                 AgentLog.event("whisper_pass_fail", ["source": "movie", "error": error.localizedDescription])
             }
+            }
         }
         if passes.isEmpty {
             return (FullTranscript(sessionId: "", language: "en", segments: []), true)
         }
         return (TranscriptQuery.merge(passes, sessionId: ""), requiredFailed)
+    }
+
+    private func waitForPrepare(
+        model: String,
+        resolved: String,
+        onStatus: @escaping @MainActor (PipelineStatus, String) -> Void
+    ) async throws {
+        await onStatus(.transcribing, "Loading Whisper model (\(resolved))…")
+        let prepareTask = Task {
+            try await self.transcriber.prepare(model: model)
+        }
+        let ticker = Task { @MainActor in
+            var elapsed = 0
+            while !Task.isCancelled && !self.transcriber.isReady {
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                guard !Task.isCancelled else { return }
+                elapsed += 2
+                onStatus(
+                    .transcribing,
+                    "Loading Whisper model… \(elapsed)s (first run downloads ~632 MB)"
+                )
+            }
+        }
+        defer { ticker.cancel() }
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            group.addTask {
+                try await prepareTask.value
+            }
+            group.addTask {
+                try await Task.sleep(
+                    nanoseconds: UInt64(WhisperTranscriber.prepareTimeoutSeconds * 1_000_000_000)
+                )
+                throw NSError(
+                    domain: "ScrumTrace",
+                    code: 12,
+                    userInfo: [
+                        NSLocalizedDescriptionKey:
+                            "Whisper model load timed out after 12 minutes. Check the network or pick a smaller model in Settings."
+                    ]
+                )
+            }
+            try await group.next()
+            group.cancelAll()
+        }
+    }
+
+    private static func volumeHasRoom(sessionURL: URL, neededBytes: Int64) -> Bool {
+        let values = try? sessionURL.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
+        if let cap = values?.volumeAvailableCapacityForImportantUsage, cap > 0 {
+            return cap > neededBytes
+        }
+        return true
+    }
+
+    private static func movieCopyBudget(sessionURL: URL) -> Int64 {
+        let bytes = ExportRel.regularFileByteCount(
+            relative: ScrumTracePath.sessionMovie,
+            sessionURL: sessionURL
+        ) ?? 0
+        return max(Int64(bytes) * 3, 64 * 1024 * 1024)
     }
 
     private func loadTranscript(sessionURL: URL, sessionId: String) -> FullTranscript {

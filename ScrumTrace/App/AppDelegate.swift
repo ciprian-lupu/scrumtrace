@@ -27,7 +27,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         CapturePermissions.snapshotLaunchState()
-        AgentLog.eventSync("launch", ["ax_silent": MetadataSampler.requestTrust(prompt: false) ? "1" : "0"])
+        AgentLog.eventSync("launch", [
+            "ax_silent": MetadataSampler.requestTrust(prompt: false) ? "1" : "0",
+            "crash_ips": String(CapturePermissions.pendingCrashReportCount())
+        ])
         NSApp.setActivationPolicy(.accessory)
         let hud = RecordingHUDWindow(controller: controller)
         self.hud = hud
@@ -35,6 +38,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         hotkeys = HotkeyManager(controller: controller, captureFreeze: controller.captureFreeze)
         hotkeys?.register()
         MetadataSampler.requestTrust(prompt: false)
+        controller.vault.pruneCompletedOlderThan(days: controller.settings.retentionDays)
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -46,15 +50,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc func showSettingsWindow(_ sender: Any?) {
         if settingsWindow == nil {
-            let hosting = NSHostingController(rootView: SettingsView(settings: controller.settings))
+            let hosting = NSHostingController(
+                rootView: SettingsView(settings: controller.settings, controller: controller)
+            )
             let window = NSWindow(contentViewController: hosting)
             window.title = "ScrumTrace Settings"
-            window.setContentSize(NSSize(width: 540, height: 980))
-            window.styleMask = [.titled, .closable, .miniaturizable]
+            window.setContentSize(NSSize(width: 640, height: 640))
+            window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
             settingsWindow = window
         }
         settingsWindow?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    @objc func showAgentLogWindow(_ sender: Any?) {
+        showSettingsWindow(sender)
     }
 }
 #endif

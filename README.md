@@ -42,7 +42,9 @@ The script copies the Debug build to `~/Applications/ScrumTrace.app` and signs i
 
 Open **that** copy only. In System Settings, remove extra ScrumTrace rows, enable Screen Recording and Microphone for this app, then **Relaunch** from the menu. A grant never applies to the process that was already running. Accessibility is optional.
 
-Xcode resolves WhisperKit **0.11.0** on first open (`Package.resolved` is not checked in). First WhisperKit launch downloads `large-v3_turbo`.
+Xcode resolves WhisperKit **0.11.0** on first open (`Package.resolved` is not checked in). First WhisperKit launch downloads the compressed turbo model (`openai_whisper-large-v3-v20240930_turbo_632MB`, about 632 MB). The HUD shows **Loading Whisper model…** with elapsed seconds; it no longer sits on “Transcribing locally with WhisperKit” during the download.
+
+Menu → Settings has Speech, Logs (live `agent.jsonl`), This process, AI, and General. Export a diagnostic bundle from Logs (no `archive/`).
 
 Inspect a Gate 1 session folder (token and passphrase are the Part F.2 values):
 

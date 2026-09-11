@@ -585,16 +585,16 @@ final class SessionController: ObservableObject {
         let uploadsClip = ProviderWireMedia.willUploadClip(configuration: capabilities)
         let payload: String
         if uploadsClip {
-            payload = "Stills, transcript excerpts, and clip audio will leave this Mac."
+            payload = "Stills and transcript excerpts, and clip audio will leave this Mac, plus window titles, scrubbed URLs, Shot notes, product context, and the 720p clip video."
         } else {
-            payload = "Stills and transcript excerpts will leave this Mac. Clip video and the master movie are not uploaded."
+            payload = "Stills and transcript excerpts will leave this Mac, plus window titles, scrubbed URLs, Shot notes, and product context. Clip video and the master movie are not uploaded."
         }
         alert.informativeText = """
         Destination: \(settings.provider.title)
         \(settings.baseURL)
         Model: \(settings.model.isEmpty ? "(none)" : settings.model)
 
-        \(payload) The archive (session.mp4, full transcript, raw events) stays local. Keychain storage is not consent.
+        \(payload) The archive (session.mp4, full transcript, raw events) stays local. Keychain storage is not consent. This sheet runs at Stop before transcription.
         """
         alert.addButton(withTitle: "Approve upload")
         alert.addButton(withTitle: "Local export only")

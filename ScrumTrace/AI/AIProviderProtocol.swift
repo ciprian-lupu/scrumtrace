@@ -68,6 +68,28 @@ enum AIProviderError: LocalizedError {
     }
 }
 
+enum ProviderEndpoint {
+    /// Refuse cleartext remote endpoints. `http://localhost` stays for local models.
+    static func requireHTTPSOrLocal(_ raw: String) throws -> URL {
+        let trimmed = raw.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        guard let url = URL(string: trimmed), let scheme = url.scheme?.lowercased() else {
+            throw AIProviderError.invalidURL(raw)
+        }
+        switch scheme {
+        case "https":
+            return url
+        case "http":
+            let host = (url.host ?? "").lowercased()
+            if host == "localhost" || host == "127.0.0.1" || host == "::1" {
+                return url
+            }
+            throw AIProviderError.invalidURL(raw)
+        default:
+            throw AIProviderError.invalidURL(raw)
+        }
+    }
+}
+
 enum ProviderWireMedia {
     /// Gemini accepts inline MP4. Chat Completions and Anthropic Messages do not.
     static func adapterCanUploadVideo(_ kind: AIProviderKind) -> Bool {

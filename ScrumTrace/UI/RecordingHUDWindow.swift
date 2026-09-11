@@ -20,7 +20,7 @@ final class RecordingHUDWindow: NSPanel {
     init(controller: SessionController) {
         self.controller = controller
         super.init(
-            contentRect: NSRect(x: 0, y: 0, width: 580, height: 50),
+            contentRect: NSRect(x: 0, y: 0, width: 720, height: 50),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
@@ -149,7 +149,7 @@ final class RecordingHUDWindow: NSPanel {
     private func positionOnActiveScreen() {
         let screen = NSScreen.main ?? NSScreen.screens.first
         guard let frame = screen?.visibleFrame else { return }
-        let size = NSSize(width: 580, height: 52)
+        let size = NSSize(width: 720, height: 52)
         setFrame(
             NSRect(
                 x: frame.midX - size.width / 2,

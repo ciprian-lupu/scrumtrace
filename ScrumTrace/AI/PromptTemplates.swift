@@ -77,9 +77,14 @@ enum PromptTemplates {
                     .replacingOccurrences(of: "<untrusted_meeting_data>", with: "", options: .caseInsensitive)
             )
         }
-        let range = NSRange(body.startIndex..., in: body)
-        let stripped = regex.stringByReplacingMatches(in: body, options: [], range: range, withTemplate: "")
-        return neutralizeSentinels(stripped)
+        var current = body
+        var previous = ""
+        while current != previous {
+            previous = current
+            let range = NSRange(current.startIndex..., in: current)
+            current = regex.stringByReplacingMatches(in: current, options: [], range: range, withTemplate: "")
+        }
+        return neutralizeSentinels(current)
     }
 
     private static func neutralizeSentinels(_ body: String) -> String {

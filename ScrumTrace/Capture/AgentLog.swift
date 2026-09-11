@@ -55,6 +55,34 @@ enum AgentLog {
         }
     }
 
+    static func readTail(maxLines: Int = 250) -> String {
+        guard FileManager.default.fileExists(atPath: fileURL.path),
+              let data = try? Data(contentsOf: fileURL),
+              let text = String(data: data, encoding: .utf8)
+        else {
+            return ""
+        }
+        let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
+        return lines.suffix(maxLines).joined(separator: "\n")
+    }
+
+    static func exportDiagnosticBundle() throws -> URL {
+        try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
+        let dest = directoryURL.appendingPathComponent(
+            "scrumtrace-diagnostics-\(ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "-")).txt"
+        )
+        var parts: [String] = []
+        parts.append("ScrumTrace diagnostic bundle")
+        parts.append("paths are home-scrubbed. archive/ is never included.")
+        parts.append(contentsOf: CapturePermissions.logFields().map { "\($0.key)=\($0.value)" }.sorted())
+        parts.append("--- agent.jsonl ---")
+        parts.append(readTail(maxLines: 4000))
+        let ips = CapturePermissions.pendingCrashReportCount()
+        parts.append("--- crash_ips_count=\(ips) ---")
+        try parts.joined(separator: "\n").write(to: dest, atomically: true, encoding: .utf8)
+        return dest
+    }
+
     #if os(macOS)
     static func reveal() {
         try? FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)

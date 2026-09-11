@@ -44,7 +44,7 @@ enum CaptureReadiness: Equatable {
         case .ready:
             return "Ready"
         case .screenDenied:
-            return "This running process cannot capture. A ScrumTrace row that is already on in Settings is usually an older Debug copy — macOS treats each ad-hoc rebuild as a new app. Remove extra ScrumTrace rows, add this app, then Relaunch. Record will not show the system permission sheet again from this process."
+            return "This running process cannot capture. In System Settings → Privacy & Security → Screen Recording, click +, add ~/Applications/ScrumTrace.app, turn it on, then Relaunch. A ScrumTrace row that is already on is usually an older Debug copy — macOS treats each ad-hoc rebuild as a new app."
         case .screenGrantedNeedsRelaunch:
             return "Screen Recording is on, but this process started before the grant. macOS will not attach it until ScrumTrace quits. Use Relaunch, then press Record — do not press Record again in this process."
         case .microphoneDenied:
@@ -126,6 +126,32 @@ enum CapturePermissions {
         Bundle.main.bundlePath
     }
 
+    static func scrubHome(_ path: String) -> String {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        if path == home || path.hasPrefix(home + "/") {
+            return "~" + path.dropFirst(home.count)
+        }
+        return path
+    }
+
+    /// CoreGraphics, macOS 10.15+. Sheet at most once per TCC client.
+    /// Call from the menu or Settings — never from `startRecording()`.
+    @discardableResult
+    static func requestScreenAccess() -> Bool {
+        #if os(macOS)
+        return CGRequestScreenCaptureAccess()
+        #else
+        return false
+        #endif
+    }
+
+    static func pendingCrashReportCount() -> Int {
+        let dir = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Logs/DiagnosticReports", isDirectory: true)
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []
+        return names.filter { $0.hasPrefix("ScrumTrace-") && $0.hasSuffix(".ips") }.count
+    }
+
     private static var signingCache: [String: String]?
 
     /// Technical fields only — never titles, URLs, notes, or keys.
@@ -135,7 +161,7 @@ enum CapturePermissions {
             "screen_now": currentScreenGranted() ? "1" : "0",
             "mic": microphoneStatus(),
             "readiness": readinessLabel(),
-            "path": runningAppPath(),
+            "path": scrubHome(runningAppPath()),
             "macos": ProcessInfo.processInfo.operatingSystemVersionString,
         ]
         #if os(macOS)

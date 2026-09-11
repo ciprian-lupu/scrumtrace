@@ -251,7 +251,9 @@ struct ExportProjector {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         encoder.dateEncodingStrategy = .iso8601
-        let data = try encoder.encode(manifest)
+        var projected = manifest
+        projected.uploadConsent = .denied
+        let data = try encoder.encode(projected)
         guard let text = String(data: data, encoding: .utf8) else {
             throw SessionVaultError.writeFailed(ScrumTracePath.exportManifest)
         }

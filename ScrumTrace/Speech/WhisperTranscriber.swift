@@ -2,9 +2,15 @@ import AVFoundation
 import Foundation
 import WhisperKit
 
-/// Local WhisperKit CoreML / ANE transcriber. Model: large-v3_turbo
-/// (`openai_whisper-large-v3_turbo`).
+/// Local WhisperKit CoreML / ANE transcriber.
+/// Default: compressed turbo `openai_whisper-large-v3-v20240930_turbo_632MB`.
+/// Uncompressed `openai_whisper-large-v3_turbo` is opt-in (multi-GB first download).
 final class WhisperTranscriber: @unchecked Sendable {
+    static let defaultStoredModel = "large-v3-v20240930_turbo_632MB"
+    static let defaultKitModel = "openai_whisper-large-v3-v20240930_turbo_632MB"
+    static let uncompressedKitModel = "openai_whisper-large-v3_turbo"
+    static let prepareTimeoutSeconds: TimeInterval = 12 * 60
+
     private var kit: WhisperKit?
     private let lock = NSLock()
     private var preparing: Task<Void, Error>?
@@ -16,7 +22,7 @@ final class WhisperTranscriber: @unchecked Sendable {
         return ready
     }
 
-    func prepare(model: String = "large-v3_turbo") async throws {
+    func prepare(model: String = WhisperTranscriber.defaultStoredModel) async throws {
         let work: Task<Void, Error>
         lock.lock()
         if ready {
@@ -30,8 +36,10 @@ final class WhisperTranscriber: @unchecked Sendable {
             return
         }
         work = Task.detached {
+            let resolved = Self.whisperKitModelName(model)
+            AgentLog.event("whisper_prepare_begin", ["model": resolved])
             let config = WhisperKitConfig(
-                model: Self.whisperKitModelName(model),
+                model: resolved,
                 verbose: false,
                 logLevel: .error,
                 prewarm: true,
@@ -198,19 +206,28 @@ final class WhisperTranscriber: @unchecked Sendable {
         }
     }
 
-    /// Spec model is `large-v3_turbo`; WhisperKit downloads `openai_whisper-large-v3_turbo`.
+    /// Old defaults and the hyphen typo map to the 632 MB compressed turbo.
+    /// `large-v3_turbo_uncompressed` keeps `openai_whisper-large-v3_turbo`.
     static func whisperKitModelName(_ requested: String) -> String {
         let trimmed = requested.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty {
-            return "openai_whisper-large-v3_turbo"
+        switch trimmed {
+        case "",
+             "large-v3_turbo",
+             "large-v3-turbo",
+             "openai_whisper-large-v3-turbo",
+             "openai_whisper-large-v3_turbo",
+             "large-v3-v20240930_turbo",
+             "openai_whisper-large-v3-v20240930_turbo",
+             "large-v3-v20240930_turbo_632MB":
+            return defaultKitModel
+        case "large-v3_turbo_uncompressed", "uncompressed-large-v3_turbo":
+            return uncompressedKitModel
+        default:
+            if trimmed.hasPrefix("openai_whisper-") || trimmed.hasPrefix("distil-whisper_") {
+                return trimmed
+            }
+            return "openai_whisper-\(trimmed)"
         }
-        if trimmed == "large-v3-turbo" || trimmed == "openai_whisper-large-v3-turbo" {
-            return "openai_whisper-large-v3_turbo"
-        }
-        if trimmed.hasPrefix("openai_whisper-") || trimmed.hasPrefix("distil-whisper_") {
-            return trimmed
-        }
-        return "openai_whisper-\(trimmed)"
     }
 }
 

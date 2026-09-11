@@ -114,6 +114,7 @@ final class ShotTalkState: ObservableObject {
     @Published var canTalk = true
     @Published var source: ShotSource = .typed
     @Published var talkError: String?
+    @Published var isTranscribing = false
     let canvas = AnnotationCanvas()
     let screenshot: NSImage
     let transcriber: WhisperTranscriber
@@ -240,10 +241,15 @@ final class ShotTalkState: ObservableObject {
         // Pause after release is not a new capture. Still transcribe audio
         // recorded while the gate was open.
         guard live else { return }
+        isTranscribing = true
+        defer { isTranscribing = false }
         do {
             try await transcriber.prepare(model: whisperModel)
             let text = try await transcriber.transcribeVoiceNote(at: url)
-            guard !text.isEmpty else { return }
+            guard !text.isEmpty else {
+                talkError = "No speech detected"
+                return
+            }
             let hadText = !note.isEmpty
             note = hadText ? "\(note) \(text)" : text
             source = hadText ? .mixed : .voice
@@ -273,7 +279,7 @@ final class ShotNoteWindow: NSPanel, NSTextFieldDelegate {
     init(
         screenshot: NSImage,
         transcriber: WhisperTranscriber,
-        whisperModel: String = "large-v3_turbo",
+        whisperModel: String = WhisperTranscriber.defaultStoredModel,
         allowsNewCapture: @escaping () -> Bool = { true },
         onSave: @escaping (String, NSImage, ShotSource) -> Void
     ) {
@@ -475,8 +481,10 @@ final class ShotNoteWindow: NSPanel, NSTextFieldDelegate {
         case .arrow: tools.selectedSegment = 1
         case .pen: tools.selectedSegment = 2
         }
-        talkButton.isEnabled = talk.canTalk
-        if talk.holdingTalk {
+        talkButton.isEnabled = talk.canTalk && !talk.isTranscribing
+        if talk.isTranscribing {
+            talkButton.setLabel("Transcribing…")
+        } else if talk.holdingTalk {
             talkButton.setLabel("Release to transcribe")
         } else if let talkError = talk.talkError, !talkError.isEmpty {
             if talkError == "Could not start Hold-to-Talk." {

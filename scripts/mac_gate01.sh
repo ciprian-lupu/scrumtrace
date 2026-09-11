@@ -9,6 +9,11 @@ if [[ "$(uname -s)" != "Darwin" ]]; then
   exit 2
 fi
 
+if [[ "${1:-}" == *Release* || "${SCRUMTRACE_CONFIGURATION:-Debug}" == "Release" ]]; then
+  echo "mac_gate01.sh is Debug-only. Never sign a Release/Developer ID build with ScrumTrace Debug." >&2
+  exit 2
+fi
+
 echo "machine=$(scutil --get ComputerName 2>/dev/null || uname -n)"
 echo "macos=$(sw_vers -productVersion)"
 echo "chip=$(sysctl -n machdep.cpu.brand_string)"

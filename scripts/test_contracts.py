@@ -960,6 +960,8 @@ def test_dual_transcript_merge_wired() -> None:
     assert "wordTimestamps: true" in speech
     assert "whisperKitModelName" in speech
     assert "openai_whisper-large-v3_turbo" in speech
+    assert "openai_whisper-large-v3-v20240930_turbo_632MB" in speech
+    assert "whisper_prepare_begin" in speech
     assert "Refusing to transcribe a symbolic link" in speech
     assert "parentIsSymbolicLink" in speech
     assert "isReadableSessionFile" in speech
@@ -1136,15 +1138,19 @@ def test_pipeline_timing_stays_in_archive() -> None:
     assert "screenGrantedAtLaunch" in perms
     assert "snapshotLaunchState" in perms
     assert "screenGrantedNeedsRelaunch" in perms
-    assert "CGRequestScreenCaptureAccess" not in perms
+    assert "CGRequestScreenCaptureAccess" in perms
+    assert "func requestScreenAccess" in perms
     assert "func signingFields" in perms
     assert "cdhash" in perms
     assert "func probeAndLog" in perms
+    assert "func scrubHome" in perms
+    assert "func requestScreenAccess" in perms
     gate01 = (ROOT / "scripts" / "mac_gate01.sh").read_text()
     assert "Applications/ScrumTrace.app" in gate01
     assert "com.str8minds.ScrumTrace" in gate01
     assert "ensure_debug_signing_identity.sh" in gate01
     assert "ENABLE_DEBUG_DYLIB=NO" in gate01
+    assert "Debug-only" in gate01
     assert 'deep_flag[@]' not in gate01
     assert "--deep" in gate01
     assert "Contents/Frameworks" in gate01
@@ -1172,6 +1178,7 @@ def test_pipeline_timing_stays_in_archive() -> None:
     assert (ROOT / "AGENT_DEBUG.md").is_file()
     sampler = (ROOT / "ScrumTrace" / "Capture" / "MetadataSampler.swift").read_text()
     assert "ResumeOnce" in sampler
+    assert "AXUIElementSetMessagingTimeout" in sampler
     assert "requestTrust" in sampler
     assert "requestTrust(prompt: false)" in sampler.split("func readFrontmost")[1]
     assert "private var suspended = false" in sampler
@@ -1325,7 +1332,8 @@ def test_pause_privacy_and_metadata_gate() -> None:
     app = (ROOT / "ScrumTrace" / "App" / "AppDelegate.swift").read_text()
     assert "haltCaptureForTermination" in app
     assert "captureFreeze: controller.captureFreeze" in app
-    assert "height: 980" in app
+    assert "height: 640" in app
+    assert "SettingsView(settings:" in app
     assert "snapshotLaunchState" in app
     menu = (ROOT / "ScrumTrace" / "UI" / "MenuBarController.swift").read_text()
     quit_fn = menu.split("func quit()")[1].split("func openRecent")[0]
@@ -1577,6 +1585,7 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "sanitizeUntrusted(task.agentInstructions)" in brief.split("func taskCard")[1].split("func transcriptHTML")[0]
     assert "HTMLEscaper.escape(task.agentInstructions)" not in brief
     settings = (ROOT / "ScrumTrace" / "UI" / "SettingsView.swift").read_text()
+    assert "AgentLogPane" in settings
     assert "requestTrust(prompt: true)" in settings
     assert "Enable browser URL metadata (Accessibility)" in settings
     assert "Open Screen Recording settings" in settings
@@ -2221,6 +2230,7 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "willUploadClip(configuration: configuration)" in processor
     assert "includeFullTranscript: projection.manifest.includeFullTranscriptInZip" in processor
     google = (ROOT / "ScrumTrace" / "AI" / "GoogleClient.swift").read_text()
+    assert "systemInstruction" in google
     assert "x-goog-api-key" in google
     assert "?key=" not in google
     assert "AgentInstructionTemplate.render(kind: .unknown, product: product)" in processor
