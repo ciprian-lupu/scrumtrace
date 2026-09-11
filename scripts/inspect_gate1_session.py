@@ -5,7 +5,8 @@ Usage:
   python3 scripts/inspect_gate1_session.py \\
     --session ~/Movies/ScrumTrace/sessions/<id> \\
     --token ST-G1-PAUSE-TOKEN-9F3C \\
-    --passphrase 'orchid lantern seven'
+    --passphrase 'orchid lantern seven' \\
+    --shot-before-pause "$BEFORE"
 """
 
 from __future__ import annotations
@@ -13,9 +14,16 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import subprocess
 import sys
+import tempfile
+import zipfile
 from pathlib import Path
+
+MEDIA_SCRUB_NOTE = (
+    "media rows require a manual scrub at each pause t_media (Part F.2)"
+)
 
 
 def read_text(path: Path) -> str:
@@ -38,7 +46,22 @@ def strings_blob(path: Path) -> str:
         )
         return out.stdout
     except OSError:
-        return path.read_bytes()[: 2_000_000].decode("utf-8", errors="replace")
+        return path.read_bytes()[:2_000_000].decode("utf-8", errors="replace")
+
+
+def strings_bytes(data: bytes) -> str:
+    if not data:
+        return ""
+    try:
+        with tempfile.NamedTemporaryFile(delete=False) as tmp:
+            tmp.write(data)
+            path = Path(tmp.name)
+        try:
+            return strings_blob(path)
+        finally:
+            path.unlink(missing_ok=True)
+    except OSError:
+        return data[:2_000_000].decode("utf-8", errors="replace")
 
 
 def contains(hay: str, needle: str) -> bool:
@@ -47,10 +70,117 @@ def contains(hay: str, needle: str) -> bool:
     return needle.lower() in hay.lower()
 
 
-def list_pngs(folder: Path) -> list[str]:
+def list_shot_pngs(folder: Path) -> tuple[list[str], list[str]]:
     if not folder.is_dir():
-        return []
-    return sorted(p.name for p in folder.iterdir() if p.suffix.lower() == ".png")
+        return [], []
+    raw: list[str] = []
+    annotated: list[str] = []
+    for entry in folder.iterdir():
+        if entry.suffix.lower() != ".png":
+            continue
+        if entry.name.endswith(".annotated.png"):
+            annotated.append(entry.name)
+        else:
+            raw.append(entry.name)
+    return sorted(raw), sorted(annotated)
+
+
+def ffprobe_duration(path: Path, ffprobe: str) -> float | None:
+    if not path.is_file():
+        return None
+    try:
+        out = subprocess.run(
+            [
+                ffprobe,
+                "-v",
+                "error",
+                "-show_entries",
+                "format=duration",
+                "-of",
+                "csv=p=0",
+                str(path),
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        line = out.stdout.strip()
+        if line:
+            return float(line)
+    except (OSError, ValueError):
+        pass
+    return None
+
+
+def read_manifest(path: Path) -> dict[str, object] | None:
+    if not path.is_file():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def manifest_media_matches(mp4_duration: float | None, manifest: dict[str, object] | None) -> bool:
+    if mp4_duration is None or manifest is None:
+        return False
+    duration = manifest.get("duration")
+    if not isinstance(duration, dict):
+        return False
+    media_seconds = duration.get("media_seconds")
+    if not isinstance(media_seconds, (int, float)):
+        return False
+    return abs(float(media_seconds) - mp4_duration) <= 0.5
+
+
+def manifest_pauses_closed(manifest: dict[str, object] | None) -> bool:
+    if manifest is None:
+        return False
+    pauses = manifest.get("pauses")
+    if not isinstance(pauses, list):
+        return False
+    return all(
+        isinstance(pause, dict) and pause.get("resume_wall") is not None for pause in pauses
+    )
+
+
+def zip_member_text(zip_path: Path) -> str:
+    text = ""
+    try:
+        with zipfile.ZipFile(zip_path, "r") as zf:
+            for info in zf.infolist():
+                if info.is_dir():
+                    continue
+                suffix = Path(info.filename).suffix.lower()
+                try:
+                    payload = zf.read(info)
+                except (KeyError, RuntimeError, zipfile.BadZipFile):
+                    continue
+                if suffix in {".md", ".txt", ".html", ".json"}:
+                    text += "\n" + payload.decode("utf-8", errors="replace")
+                elif suffix in {".mp4", ".wav"}:
+                    text += "\n" + strings_bytes(payload)
+    except (OSError, zipfile.BadZipFile):
+        return text
+    return text
+
+
+def collect_export_text(export: Path) -> str:
+    export_text = ""
+    if not export.is_dir():
+        return export_text
+    for walk_root, _, files in os.walk(export):
+        for name in files:
+            path = Path(walk_root) / name
+            suffix = path.suffix.lower()
+            if suffix in {".md", ".txt", ".html", ".json"}:
+                export_text += "\n" + read_text(path)
+            elif suffix == ".zip":
+                export_text += "\n" + zip_member_text(path)
+            elif suffix in {".mp4", ".wav"}:
+                export_text += "\n" + strings_blob(path)
+    return export_text
 
 
 def main() -> int:
@@ -58,7 +188,11 @@ def main() -> int:
     parser.add_argument("--session", required=True, type=Path)
     parser.add_argument("--token", required=True)
     parser.add_argument("--passphrase", required=True)
-    parser.add_argument("--shot-before-pause", default="", help="PNG names that existed before the pause test")
+    parser.add_argument(
+        "--shot-before-pause",
+        default="",
+        help="Comma-separated PNG names that existed before the pause test (empty means none)",
+    )
     args = parser.parse_args()
 
     session: Path = args.session.expanduser().resolve()
@@ -66,6 +200,7 @@ def main() -> int:
     phrase = args.passphrase.strip()
     archive = session / "archive"
     export = session / "export"
+    manifest_path = session / "session.manifest.json"
 
     report: dict[str, object] = {
         "session": str(session),
@@ -91,52 +226,92 @@ def main() -> int:
     wav_text = strings_blob(wav) if wav.is_file() else ""
     transcript_text = read_text(transcript)
     events_text = read_text(events)
-    export_text = ""
-    for walk_root, _, files in os.walk(export):
-        for name in files:
-            path = Path(walk_root) / name
-            if path.suffix.lower() in {".md", ".txt", ".html", ".json"}:
-                export_text += "\n" + read_text(path)
-            elif path.suffix.lower() in {".zip", ".mp4", ".wav"}:
-                export_text += "\n" + strings_blob(path)
+    export_text = collect_export_text(export)
 
-    pngs = list_pngs(shots)
-    before = {n for n in args.shot_before_pause.split(",") if n}
-    new_pngs = [n for n in pngs if n not in before] if before else []
+    pngs, annotated_pngs = list_shot_pngs(shots)
+    before = {name for name in args.shot_before_pause.split(",") if name}
+    new_pngs = [name for name in pngs if name not in before]
 
-    checks = {
+    ffprobe = shutil.which("ffprobe")
+    mp4_duration: float | None = None
+    wav_duration: float | None = None
+    session_mp4_has_duration: bool | None
+    wav_within_half_second_of_mp4: bool | None
+    manifest_media_matches_durations: bool | None
+
+    if ffprobe is None:
+        print("warning: ffprobe not found; skipping media duration checks", file=sys.stderr)
+        session_mp4_has_duration = None
+        wav_within_half_second_of_mp4 = None
+        manifest_media_matches_durations = None
+    else:
+        mp4_duration = ffprobe_duration(mp4, ffprobe)
+        wav_duration = ffprobe_duration(wav, ffprobe)
+        session_mp4_has_duration = mp4_duration is not None and mp4_duration > 0
+        if mp4_duration is None or wav_duration is None:
+            wav_within_half_second_of_mp4 = False
+        else:
+            wav_within_half_second_of_mp4 = abs(wav_duration - mp4_duration) <= 0.5
+        manifest = read_manifest(manifest_path)
+        manifest_media_matches_durations = manifest_media_matches(mp4_duration, manifest)
+
+    manifest = read_manifest(manifest_path)
+
+    checks: dict[str, object] = {
         "session_mp4_exists": mp4.is_file(),
-        "session_mp4_missing_token": (not contains(mp4_text, token)) if mp4.is_file() else False,
+        "session_mp4_no_ascii_token": (not contains(mp4_text, token)) if mp4.is_file() else False,
         "audio_wav_exists": wav.is_file(),
-        "audio_wav_missing_token": (not contains(wav_text, token)) if wav.is_file() else False,
-        "audio_wav_missing_passphrase": (not contains(wav_text, phrase)) if wav.is_file() else False,
+        "audio_wav_no_ascii_token": (not contains(wav_text, token)) if wav.is_file() else False,
+        "audio_wav_no_ascii_passphrase": (not contains(wav_text, phrase)) if wav.is_file() else False,
+        "transcript_exists": transcript.is_file(),
         "transcript_missing_token": not contains(transcript_text, token),
         "transcript_missing_passphrase": not contains(transcript_text, phrase),
+        "events_exists": events.is_file(),
         "events_missing_token": not contains(events_text, token),
-        "no_new_shot_png_during_pause": (new_pngs == []) if before else None,
+        "no_new_shot_png_during_pause": new_pngs == [],
         "export_missing_token": not contains(export_text, token),
         "export_missing_passphrase": not contains(export_text, phrase),
         "shot_pngs": pngs,
+        "annotated_pngs": annotated_pngs,
         "new_pngs_after_marker": new_pngs,
         "zip_exists": zip_path.is_file(),
         "zip_bytes": zip_path.stat().st_size if zip_path.is_file() else 0,
+        "media_durations": {
+            "session_mp4": mp4_duration,
+            "audio_wav": wav_duration,
+        },
+        "session_mp4_has_duration": session_mp4_has_duration,
+        "wav_within_half_second_of_mp4": wav_within_half_second_of_mp4,
+        "manifest_media_matches_durations": manifest_media_matches_durations,
+        "manifest_pauses_closed": manifest_pauses_closed(manifest),
     }
     report["checks"] = checks
     print(json.dumps(report, indent=2))
+    print(MEDIA_SCRUB_NOTE, file=sys.stderr)
 
     required = [
-        "session_mp4_missing_token",
-        "audio_wav_missing_token",
-        "audio_wav_missing_passphrase",
+        "session_mp4_exists",
+        "audio_wav_exists",
+        "transcript_exists",
+        "events_exists",
         "transcript_missing_token",
         "transcript_missing_passphrase",
         "events_missing_token",
         "export_missing_token",
         "export_missing_passphrase",
+        "no_new_shot_png_during_pause",
+        "manifest_pauses_closed",
     ]
+    if ffprobe is not None:
+        required.extend(
+            [
+                "session_mp4_has_duration",
+                "wav_within_half_second_of_mp4",
+                "manifest_media_matches_durations",
+            ]
+        )
+
     failed = [key for key in required if checks.get(key) is not True]
-    if before and checks.get("no_new_shot_png_during_pause") is not True:
-        failed.append("no_new_shot_png_during_pause")
     return 1 if failed else 0
 
 

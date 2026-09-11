@@ -101,14 +101,15 @@ open ~/Applications/ScrumTrace.app
 
 That copies a Debug build to `~/Applications/ScrumTrace.app` and signs it with a local **ScrumTrace Debug** identity. Open **that** copy. Enable Screen Recording and Microphone for it, then **Relaunch**. A grant never applies to the already-running process. Accessibility is optional.
 
-Xcode resolves WhisperKit **0.11.0** on first open (`Package.resolved` is not checked in). First WhisperKit launch downloads `large-v3-turbo`.
+Xcode resolves WhisperKit **0.11.0** on first open (`Package.resolved` is not checked in). First WhisperKit launch downloads `large-v3_turbo`.
 
 Gate 1 inspect (after a real session folder exists):
 
 ```bash
-python3 scripts/inspect_gate1_session.py /path/to/session \
+python3 scripts/inspect_gate1_session.py --session /path/to/session \
   --token 'ST-G1-PAUSE-TOKEN-9F3C' \
-  --passphrase 'orchid lantern seven'
+  --passphrase 'orchid lantern seven' \
+  --shot-before-pause "$BEFORE"
 ```
 
 ## TCC and Record (Mac)
