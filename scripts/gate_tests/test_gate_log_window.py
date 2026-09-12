@@ -111,7 +111,9 @@ class Gate2WindowIntegrationTests(unittest.TestCase):
                 + "\n"
                 + json.dumps({"event": "resume_ok"})
                 + "\n"
-                + json.dumps({"event": "pause_ok"})
+                + json.dumps({"event": "shot_save", "t_media": 1.0})
+                + "\n"
+                + json.dumps({"event": "pause_ok", "t_media": 5.0})
                 + "\n"
                 + json.dumps({"event": "shot_ignored", "reason": "paused"})
                 + "\n"
@@ -124,6 +126,7 @@ class Gate2WindowIntegrationTests(unittest.TestCase):
                 encoding="utf-8",
             )
             # Start at line 4 so the earlier shot_save during pause is ignored.
+            # Line 4 is the outside-pause shot_save that proves Shot still works.
             result = subprocess.run(
                 [
                     sys.executable,
