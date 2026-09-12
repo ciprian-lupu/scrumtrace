@@ -18,14 +18,17 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from gate_inspect_lib import (
+    LogWindowError,
     die_missing,
     emit,
+    filter_rows_for_session,
+    first_run_id,
+    first_sample_types,
     ffprobe_bin,
     ffprobe_duration,
-    first_sample_types,
     is_json_number,
     read_json_object,
-    read_jsonl,
+    read_jsonl_window,
 )
 
 
@@ -33,6 +36,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--session", required=True, type=Path)
     parser.add_argument("--log", type=Path, default=None)
+    parser.add_argument("--log-start-line", type=int, default=None)
     args = parser.parse_args()
     session: Path = args.session.expanduser().resolve()
     archive = session / "archive"
@@ -56,8 +60,27 @@ def main() -> int:
     samples: set[str] = set()
     if args.log is not None:
         log_path = args.log.expanduser()
-        samples = first_sample_types(read_jsonl(log_path))
         report["log"] = str(log_path)
+        report["log_start_line"] = args.log_start_line
+        try:
+            rows = read_jsonl_window(log_path, args.log_start_line)
+        except LogWindowError as exc:
+            report["checks"] = {"log_window": False}
+            return emit(
+                report,
+                [],
+                status="blocked",
+                blocked=True,
+                blocked_reasons=[exc.reason],
+            )
+        manifest = read_json_object(session / "session.manifest.json") or {}
+        session_id = str(manifest.get("session_id") or session.name)
+        rows = filter_rows_for_session(rows, session_id)
+        run_id = first_run_id(rows)
+        report["session_id"] = session_id
+        report["run_id"] = run_id
+        samples = first_sample_types(rows)
+
 
     checks: dict[str, object] = {
         "archive_dir": archive.is_dir(),

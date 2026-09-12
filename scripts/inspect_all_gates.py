@@ -54,6 +54,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--session", type=Path, default=None)
     parser.add_argument("--log", type=Path, default=None)
+    parser.add_argument("--log-start-line", type=int, default=None)
     parser.add_argument("--token", default="")
     parser.add_argument("--passphrase", default="")
     parser.add_argument("--shot-before-pause", default="")
@@ -64,6 +65,17 @@ def main() -> int:
         help="Treat blocked gates as failure (use after a complete Mac run).",
     )
     args = parser.parse_args()
+
+    if args.log is not None and args.log_start_line is None:
+        print(
+            '{"status":"blocked","blocked_reasons":["log_requires_log_start_line"],"failed":[],"manual_checks":[]}'
+        )
+        return 2
+    if args.log_start_line is not None and args.log_start_line < 1:
+        print(
+            '{"status":"blocked","blocked_reasons":["log_start_line_must_be_positive"],"failed":[],"manual_checks":[]}'
+        )
+        return 2
 
     gates: dict[str, dict[str, object]] = {}
     gates["minus1"] = run_script("inspect_gate_minus1.py", [])
@@ -90,6 +102,8 @@ def main() -> int:
     log = args.log.expanduser() if args.log else None
     session_args = ["--session", str(session)] if session else None
     log_args = ["--log", str(log)] if log else None
+    if log_args is not None and args.log_start_line is not None:
+        log_args.extend(["--log-start-line", str(args.log_start_line)])
 
     if session_args:
         minus0 = ["--session", str(session)]

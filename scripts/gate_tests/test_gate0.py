@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import tempfile
+
 import json
 import subprocess
 import sys
@@ -14,7 +16,7 @@ from support import ROOT
 
 def test_inspect_gate0_fails_when_shot_steals_focus() -> None:
     script = ROOT / "scripts" / "inspect_gate0_log.py"
-    log = Path("/tmp/scrumtrace-inspect-gate0.jsonl")
+    log = (Path(tempfile.mkdtemp(prefix="scrumtrace-")) / "inspect-gate0.jsonl")
     log.write_text(
         json.dumps({"event": "hotkey_shot"})
         + "\n"
@@ -38,7 +40,7 @@ def test_inspect_gate0_fails_when_shot_steals_focus() -> None:
 
 def test_inspect_gate0_fails_when_start_skips_overlay() -> None:
     script = ROOT / "scripts" / "inspect_gate0_log.py"
-    log = Path("/tmp/scrumtrace-inspect-gate0-overlay.jsonl")
+    log = (Path(tempfile.mkdtemp(prefix="scrumtrace-")) / "inspect-gate0-overlay.jsonl")
     log.write_text(
         json.dumps({"event": "menu_start"})
         + "\n"
@@ -59,7 +61,7 @@ def test_inspect_gate0_fails_when_start_skips_overlay() -> None:
 
 def test_inspect_gate0_fails_when_open_omits_record_mode() -> None:
     script = ROOT / "scripts" / "inspect_gate0_log.py"
-    log = Path("/tmp/scrumtrace-inspect-gate0-open-mode.jsonl")
+    log = (Path(tempfile.mkdtemp(prefix="scrumtrace-")) / "inspect-gate0-open-mode.jsonl")
     log.write_text(
         json.dumps({"event": "menu_start"})
         + "\n"
@@ -84,7 +86,7 @@ def test_inspect_gate0_fails_when_open_omits_record_mode() -> None:
 
 def test_inspect_gate0_fails_when_start_uses_choose_mode() -> None:
     script = ROOT / "scripts" / "inspect_gate0_log.py"
-    log = Path("/tmp/scrumtrace-inspect-gate0-choose.jsonl")
+    log = (Path(tempfile.mkdtemp(prefix="scrumtrace-")) / "inspect-gate0-choose.jsonl")
     log.write_text(
         json.dumps({"event": "menu_start"})
         + "\n"
@@ -109,7 +111,7 @@ def test_inspect_gate0_fails_when_start_uses_choose_mode() -> None:
 
 def test_inspect_gate0_passes_when_overlay_cancelled() -> None:
     script = ROOT / "scripts" / "inspect_gate0_log.py"
-    log = Path("/tmp/scrumtrace-inspect-gate0-cancel.jsonl")
+    log = (Path(tempfile.mkdtemp(prefix="scrumtrace-")) / "inspect-gate0-cancel.jsonl")
     log.write_text(
         json.dumps({"event": "menu_start"})
         + "\n"
@@ -134,7 +136,7 @@ def test_inspect_gate0_passes_when_overlay_cancelled() -> None:
 
 def test_inspect_gate0_passes_when_record_follows_overlay() -> None:
     script = ROOT / "scripts" / "inspect_gate0_log.py"
-    log = Path("/tmp/scrumtrace-inspect-gate0-overlay-ok.jsonl")
+    log = (Path(tempfile.mkdtemp(prefix="scrumtrace-")) / "inspect-gate0-overlay-ok.jsonl")
     log.write_text(
         json.dumps({"event": "menu_start"})
         + "\n"

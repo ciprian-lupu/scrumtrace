@@ -19,13 +19,16 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from gate_inspect_lib import (
+    LogWindowError,
+    filter_rows_for_session,
+    first_run_id,
+    read_jsonl_window,
     die_missing,
     emit,
     event_name,
     export_file_exists,
     is_retired_anthropic,
     read_json_object,
-    read_jsonl,
 )
 
 
@@ -65,6 +68,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--session", required=True, type=Path)
     parser.add_argument("--log", type=Path, default=None)
+    parser.add_argument("--log-start-line", type=int, default=None)
     args = parser.parse_args()
     session: Path = args.session.expanduser().resolve()
     manifest = read_json_object(session / "session.manifest.json")
@@ -84,7 +88,25 @@ def main() -> int:
         report["checks"] = {"consent_asked": False}
         return emit(report, [], blocked=True)
 
-    rows = read_jsonl(args.log.expanduser()) if args.log is not None else []
+    rows: list[dict[str, object]] = []
+    if args.log is not None:
+        report["log"] = str(args.log.expanduser())
+        report["log_start_line"] = args.log_start_line
+        try:
+            rows = read_jsonl_window(args.log.expanduser(), args.log_start_line)
+        except LogWindowError as exc:
+            report["checks"] = {"log_window": False}
+            return emit(
+                report,
+                [],
+                status="blocked",
+                blocked=True,
+                blocked_reasons=[exc.reason],
+            )
+        session_id = str((manifest or {}).get("session_id") or session.name)
+        rows = filter_rows_for_session(rows, session_id)
+        report["session_id"] = session_id
+        report["run_id"] = first_run_id(rows)
     consent_events = [row for row in rows if event_name(row) == "consent_result"]
     eval_after_deny = 0
     denied = False

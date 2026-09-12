@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import tempfile
+
 import json
 import subprocess
 import sys
@@ -13,7 +15,7 @@ if str(_GATE_DIR) not in sys.path:
 from support import ROOT, _run
 
 def test_inspect_minus0_fails_without_movie() -> None:
-    session = Path("/tmp/scrumtrace-minus0-empty")
+    session = Path(tempfile.mkdtemp(prefix="scrumtrace-minus0-empty-"))
     (session / "archive").mkdir(parents=True, exist_ok=True)
     (session / "export").mkdir(parents=True, exist_ok=True)
     result = _run("inspect_gate_minus0.py", ["--session", str(session)])
@@ -23,7 +25,7 @@ def test_inspect_minus0_fails_without_movie() -> None:
 
 
 def test_inspect_minus0_requires_first_samples_when_log_given() -> None:
-    session = Path("/tmp/scrumtrace-minus0-samples")
+    session = Path(tempfile.mkdtemp(prefix="scrumtrace-minus0-samples-"))
     archive = session / "archive"
     archive.mkdir(parents=True, exist_ok=True)
     (session / "export").mkdir(parents=True, exist_ok=True)
@@ -33,7 +35,7 @@ def test_inspect_minus0_requires_first_samples_when_log_given() -> None:
         json.dumps({"wav_start_media_seconds": 0.0}),
         encoding="utf-8",
     )
-    log = Path("/tmp/scrumtrace-minus0.jsonl")
+    log = (Path(tempfile.mkdtemp(prefix="scrumtrace-")) / "minus0.jsonl")
     log.write_text(json.dumps({"event": "launch"}) + "\n", encoding="utf-8")
     result = _run(
         "inspect_gate_minus0.py",

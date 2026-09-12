@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import tempfile
+
 import json
 import subprocess
 import sys
@@ -13,7 +15,7 @@ if str(_GATE_DIR) not in sys.path:
 from support import ROOT, _run
 
 def test_inspect_gate2_fails_when_shot_saves_during_pause() -> None:
-    log = Path("/tmp/scrumtrace-gate2-shot.jsonl")
+    log = (Path(tempfile.mkdtemp(prefix="scrumtrace-")) / "gate2-shot.jsonl")
     log.write_text(
         json.dumps({"event": "pause_ok"})
         + "\n"
@@ -30,7 +32,7 @@ def test_inspect_gate2_fails_when_shot_saves_during_pause() -> None:
 
 
 def test_inspect_gate2_passes_when_shot_refused() -> None:
-    log = Path("/tmp/scrumtrace-gate2-ok.jsonl")
+    log = (Path(tempfile.mkdtemp(prefix="scrumtrace-")) / "gate2-ok.jsonl")
     log.write_text(
         json.dumps({"event": "pause_ok"})
         + "\n"
@@ -51,7 +53,7 @@ def test_inspect_gate2_passes_when_shot_refused() -> None:
 
 
 def test_inspect_gate2_blocked_without_pause() -> None:
-    log = Path("/tmp/scrumtrace-gate2-nopause.jsonl")
+    log = (Path(tempfile.mkdtemp(prefix="scrumtrace-")) / "gate2-nopause.jsonl")
     log.write_text(json.dumps({"event": "launch"}) + "\n", encoding="utf-8")
     result = _run("inspect_gate2_shot.py", ["--log", str(log)])
     assert result.returncode == 2

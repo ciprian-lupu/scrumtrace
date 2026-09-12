@@ -18,29 +18,42 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from gate_inspect_lib import (
+    LogWindowError,
+    read_jsonl_window,
     die_missing,
     emit,
     event_name,
     in_pause_window,
     pause_windows,
-    read_jsonl,
 )
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--log", required=True, type=Path)
+    parser.add_argument("--log-start-line", type=int, default=None)
     args = parser.parse_args()
     path: Path = args.log.expanduser()
-    rows = read_jsonl(path)
     report: dict[str, object] = {
         "gate": "2",
         "log": str(path),
         "exists": path.is_file(),
         "checks": {},
+        "log_start_line": args.log_start_line,
     }
     if not path.is_file():
         return die_missing(report)
+    try:
+        rows = read_jsonl_window(path, args.log_start_line)
+    except LogWindowError as exc:
+        report["checks"] = {"log_window": False}
+        return emit(
+            report,
+            [],
+            status="blocked",
+            blocked=True,
+            blocked_reasons=[exc.reason],
+        )
 
     windows = pause_windows(rows)
     shot_ok = 0

@@ -39,6 +39,66 @@ def read_jsonl(path: Path) -> list[dict[str, object]]:
     return rows
 
 
+class LogWindowError(Exception):
+    """Raised when a gate-run log window cannot be applied."""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
+
+
+def read_jsonl_window(path: Path, start_line: int | None) -> list[dict[str, object]]:
+    """Read JSONL rows from a one-based inclusive start line.
+
+    ``start_line is None`` preserves whole-file behavior for direct child CLIs.
+    A marker past EOF raises ``LogWindowError`` so callers can exit 2.
+    """
+    if start_line is None:
+        return read_jsonl(path)
+    if start_line < 1:
+        raise LogWindowError("log_start_line_must_be_positive")
+    if not path.is_file():
+        return []
+    raw_lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    if start_line > len(raw_lines) + 1:
+        # start_line == len+1 means "empty window at EOF" (valid empty run).
+        # Anything larger is beyond EOF.
+        raise LogWindowError("log_start_line_beyond_eof")
+    if start_line == len(raw_lines) + 1:
+        return []
+    rows: list[dict[str, object]] = []
+    for raw in raw_lines[start_line - 1 :]:
+        row = parse_json_line(raw)
+        if row is not None:
+            rows.append(row)
+    return rows
+
+
+def filter_rows_for_session(
+    rows: list[dict[str, object]], session_id: str
+) -> list[dict[str, object]]:
+    """Keep rows that omit session or match session_id."""
+    matched: list[dict[str, object]] = []
+    for row in rows:
+        value = row.get("session") or row.get("session_id")
+        if value is None or value == "":
+            matched.append(row)
+            continue
+        if str(value) == session_id:
+            matched.append(row)
+    return matched
+
+
+def first_run_id(rows: list[dict[str, object]]) -> str | None:
+    for row in rows:
+        name = event_name(row)
+        if name in {"launch", "app_launch", "session_start"}:
+            run = row.get("run_id") or row.get("run")
+            if run:
+                return str(run)
+    return None
+
+
 def read_json_object(path: Path) -> dict[str, object] | None:
     if not path.is_file():
         return None

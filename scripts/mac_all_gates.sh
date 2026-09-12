@@ -13,6 +13,8 @@ NO_BUILD=0
 LATEST=0
 STRICT=0
 MOCK_ONLY=0
+BEGIN=0
+GATE_RUN_JSON="${SCRUMTRACE_GATE_RUN_JSON:-$HOME/Library/Logs/ScrumTrace/gate-run.json}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -52,9 +54,13 @@ while [[ $# -gt 0 ]]; do
       MOCK_ONLY=1
       shift
       ;;
+    --begin)
+      BEGIN=1
+      shift
+      ;;
     *)
       echo "unknown argument: $1" >&2
-      echo "usage: bash scripts/mac_all_gates.sh [--no-build] [--latest] [--session PATH] [--log PATH] [--strict] [--mock-only]" >&2
+      echo "usage: bash scripts/mac_all_gates.sh [--begin] [--no-build] [--latest] [--session PATH] [--log PATH] [--strict] [--mock-only]" >&2
       exit 2
       ;;
   esac
@@ -63,6 +69,67 @@ done
 if [[ "$MOCK_ONLY" -eq 1 ]]; then
   python3 scripts/inspect_all_gates.py --mock-only
   exit $?
+fi
+
+if [[ "$BEGIN" -eq 1 ]]; then
+  if [[ "$(uname -s)" != "Darwin" ]]; then
+    echo "mac_all_gates.sh --begin requires macOS" >&2
+    exit 2
+  fi
+  mkdir -p "$(dirname "$GATE_RUN_JSON")"
+  if [[ ! -f "$LOG" ]]; then
+    lines=0
+  else
+    lines="$(wc -l < "$LOG" | tr -d ' ')"
+  fi
+  start_line=$((lines + 1))
+  GATE_RUN_JSON="$GATE_RUN_JSON" LOG="$LOG" START_LINE="$start_line" python3 - <<'PY'
+import json
+import os
+import platform
+import subprocess
+from datetime import datetime, timezone
+from pathlib import Path
+
+out = Path(os.environ["GATE_RUN_JSON"])
+log = Path(os.environ["LOG"])
+start_line = int(os.environ["START_LINE"])
+head = subprocess.run(
+    ["git", "rev-parse", "HEAD"], capture_output=True, text=True
+).stdout.strip()
+machine = subprocess.run(
+    ["scutil", "--get", "ComputerName"], capture_output=True, text=True
+).stdout.strip() or platform.node()
+macos = subprocess.run(
+    ["sw_vers", "-productVersion"], capture_output=True, text=True
+).stdout.strip()
+chip = subprocess.run(
+    ["sysctl", "-n", "machdep.cpu.brand_string"], capture_output=True, text=True
+).stdout.strip()
+cdhash = ""
+app = Path.home() / "Applications/ScrumTrace.app"
+if app.exists():
+    codesign = subprocess.run(
+        ["codesign", "-dvvv", str(app)], capture_output=True, text=True
+    )
+    for line in (codesign.stderr + codesign.stdout).splitlines():
+        if "CDHash=" in line:
+            cdhash = line.split("CDHash=", 1)[1].strip()
+            break
+payload = {
+    "log_path": str(log),
+    "log_start_line": start_line,
+    "created_at": datetime.now(timezone.utc).isoformat(),
+    "git_head": head,
+    "app_cdhash": cdhash,
+    "machine": machine,
+    "macos": macos,
+    "chip": chip,
+}
+out.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+print(json.dumps({"ok": True, "gate_run": str(out), "log_start_line": start_line}))
+PY
+  exit 0
 fi
 
 if [[ "$(uname -s)" != "Darwin" ]]; then
@@ -84,12 +151,23 @@ if [[ "$LATEST" -eq 1 && -z "$SESSION" ]]; then
   SESSION="$(ls -1dt "$HOME/Movies/ScrumTrace/sessions"/* 2>/dev/null | head -1 || true)"
 fi
 
+LOG_START_LINE=""
+if [[ -f "$GATE_RUN_JSON" ]]; then
+  LOG_START_LINE="$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['log_start_line'])" "$GATE_RUN_JSON")"
+fi
+
 ARGS=(python3 scripts/inspect_all_gates.py)
 if [[ -n "$SESSION" ]]; then
   ARGS+=(--session "$SESSION")
 fi
 if [[ -f "$LOG" ]]; then
   ARGS+=(--log "$LOG")
+  if [[ -n "$LOG_START_LINE" ]]; then
+    ARGS+=(--log-start-line "$LOG_START_LINE")
+  else
+    echo "missing gate-run marker; run: bash scripts/mac_all_gates.sh --begin" >&2
+    exit 2
+  fi
 fi
 if [[ -n "$TOKEN" && -n "$PASSPHRASE" ]]; then
   ARGS+=(--token "$TOKEN" --passphrase "$PASSPHRASE")

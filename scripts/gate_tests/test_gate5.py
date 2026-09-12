@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import tempfile
+
 import json
 import subprocess
 import sys
@@ -13,7 +15,7 @@ if str(_GATE_DIR) not in sys.path:
 from support import ROOT, _run
 
 def test_inspect_gate5_fails_when_confirmed_lacks_files() -> None:
-    session = Path("/tmp/scrumtrace-gate5-evidence")
+    session = Path(tempfile.mkdtemp(prefix="scrumtrace-gate5-evidence-"))
     session.mkdir(parents=True, exist_ok=True)
     (session / "export").mkdir(exist_ok=True)
     (session / "session.manifest.json").write_text(
@@ -50,7 +52,7 @@ def test_inspect_gate5_fails_when_confirmed_lacks_files() -> None:
 
 
 def test_inspect_gate5_fails_when_eval_follows_denied_consent() -> None:
-    session = Path("/tmp/scrumtrace-gate5-deny")
+    session = Path(tempfile.mkdtemp(prefix="scrumtrace-gate5-deny-"))
     session.mkdir(parents=True, exist_ok=True)
     (session / "export").mkdir(exist_ok=True)
     (session / "session.manifest.json").write_text(
@@ -71,7 +73,7 @@ def test_inspect_gate5_fails_when_eval_follows_denied_consent() -> None:
         ),
         encoding="utf-8",
     )
-    log = Path("/tmp/scrumtrace-gate5-deny.jsonl")
+    log = (Path(tempfile.mkdtemp(prefix="scrumtrace-")) / "gate5-deny.jsonl")
     log.write_text(
         json.dumps({"event": "consent_result", "approved": "0", "provider": "openai_compatible"})
         + "\n"

@@ -18,6 +18,11 @@ import json
 import sys
 from pathlib import Path
 
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "scripts"))
+
+from gate_inspect_lib import LogWindowError, read_jsonl_window
+
 
 def record_overlay_step(mode: str, awaiting_start: bool) -> bool:
     if not awaiting_start:
@@ -36,10 +41,12 @@ def parse_line(raw: str) -> dict[str, object] | None:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--log", required=True, type=Path)
+    parser.add_argument("--log-start-line", type=int, default=None)
     args = parser.parse_args()
     path: Path = args.log.expanduser()
     report: dict[str, object] = {
         "log": str(path),
+        "log_start_line": args.log_start_line,
         "exists": path.is_file(),
         "hotkeys": 0,
         "shot_shown": 0,
@@ -58,6 +65,14 @@ def main() -> int:
         print(json.dumps(report, indent=2))
         return 2
 
+    try:
+        window_rows = read_jsonl_window(path, args.log_start_line)
+    except LogWindowError as exc:
+        report["blocked_reasons"] = [exc.reason]
+        report["status"] = "blocked"
+        print(json.dumps(report, indent=2))
+        return 2
+
     events: list[dict[str, object]] = []
     shot_key_active = 0
     hotkey_activated = 0
@@ -73,10 +88,7 @@ def main() -> int:
     awaiting_overlay = False
     saw_open = False
     saw_confirm = False
-    for raw in path.read_text(encoding="utf-8", errors="replace").splitlines():
-        row = parse_line(raw)
-        if row is None:
-            continue
+    for row in window_rows:
         name = str(row.get("event") or row.get("name") or "")
         action = str(row.get("action") or "")
         picker_mode = str(row.get("mode") or "")
