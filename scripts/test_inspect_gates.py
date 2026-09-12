@@ -13,6 +13,7 @@ GATE_TESTS = ROOT / "scripts" / "gate_tests"
 
 # Fixed sorted module list (lexicographic). Must match AST discovery.
 FIXED_MODULES = [
+    "test_agent_log_privacy",
     "test_all_gates",
     "test_gate0",
     "test_gate1",

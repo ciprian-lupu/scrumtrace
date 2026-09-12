@@ -1239,11 +1239,34 @@ def test_pipeline_timing_stays_in_archive() -> None:
     assert "Do not invent GATE_LOG.md cells" in all_gates
     assert "GATE_LOG.md" in all_gates
     assert "open(" not in all_gates or "GATE_LOG.md" not in all_gates.split("open(")[-1][:80]
+    assert "--artifact-map" in all_gates
+    assert "--guided" in all_gates
+    assert "shot-before-pause" not in all_gates
+    assert "blocked_reasons" in all_gates
+    assert "manual_checks" in all_gates
+    assert "strict_requires_artifact_map" in all_gates
+    assert "blocked_until_gate1_pass" in all_gates
+    assert "skipped_after_minus0_failure" in all_gates
+    assert '"1/2"' in all_gates or "'1/2'" in all_gates
+    assert "invalid_key" in all_gates and "retired_model" in all_gates
+    privacy = ROOT / "scripts" / "inspect_agent_log_privacy.py"
+    assert privacy.is_file()
+    privacy_text = privacy.read_text()
+    assert "has_url" in privacy_text
+    assert "forbidden_key" in privacy_text
+    assert "forbidden_value" in privacy_text
+    assert 'print(value)' not in privacy_text
     mac_all = (ROOT / "scripts" / "mac_all_gates.sh").read_text()
     assert "Do not invent PASS cells" in mac_all
     assert "does not write GATE_LOG.md" in mac_all
     assert "inspect_all_gates.py" in mac_all
     assert "mac_gate01.sh" in mac_all
+    assert "--artifact-map" in mac_all
+    assert "--guided" in mac_all
+    assert "shot-before-pause" not in mac_all
+    assert "manual-video-scrub-ok" in mac_all
+    runner = (ROOT / "scripts" / "test_inspect_gates.py").read_text()
+    assert "test_agent_log_privacy" in runner
     minus0 = (ROOT / "scripts" / "inspect_gate_minus0.py").read_text()
     assert "recorder_first_sample" in minus0 or "first_sample_screen" in minus0
     assert "first_sample_audio" in minus0

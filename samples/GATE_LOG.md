@@ -6,15 +6,24 @@ Do not treat a passing `bash scripts/run_linux_tests.sh` as Gate 0–6.
 Do not invent PASS cells. Inspectors print JSON; this file is filled by a human.
 
 ```bash
-# Mac: build Debug, then inspect whatever session/log exists
-bash scripts/mac_all_gates.sh --latest
+# Mac: mark the log window, build Debug, then inspect
+bash scripts/mac_all_gates.sh --begin
+bash scripts/mac_all_gates.sh --latest \
+  --manual-video-scrub-ok --manual-audio-scrub-ok \
+  --av-offset-ms 12 --ptt-temp-deleted-ok \
+  --chrome-playback-ok
 
-# After a named session
+# Strict all-gate acceptance (separate Gate 5 scenario sessions required)
+python3 scripts/inspect_all_gates.py --artifact-map path/to/final-gate-artifacts.json --strict
+
+# After a named session (debug wiring; not strict acceptance)
 python3 scripts/inspect_all_gates.py \
   --session ~/Movies/ScrumTrace/sessions/<id> \
-  --log ~/Library/Logs/ScrumTrace/agent.jsonl \
+  --log ~/Library/Logs/ScrumTrace/agent.jsonl --log-start-line N \
   --token 'ST-G1-PAUSE-TOKEN-9F3C' \
-  --passphrase 'orchid lantern seven'
+  --passphrase 'orchid lantern seven' \
+  --manual-video-scrub-ok --manual-audio-scrub-ok \
+  --av-offset-ms 12 --ptt-temp-deleted-ok
 ```
 
 Order stays −0 → 0 → 1 → 3–6. Phase 2 Shot/pause is `inspect_gate2_shot.py` (log half of Gate 1). Phase −1 is `inspect_gate_minus1.py` (Linux-safe mock pack).

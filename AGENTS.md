@@ -107,13 +107,16 @@ All-gate inspect (after a real session folder exists). Gate 1 still needs the Pa
 
 ```bash
 python3 scripts/inspect_all_gates.py --session /path/to/session \
-  --log ~/Library/Logs/ScrumTrace/agent.jsonl \
+  --log ~/Library/Logs/ScrumTrace/agent.jsonl --log-start-line N \
   --token 'ST-G1-PAUSE-TOKEN-9F3C' \
   --passphrase 'orchid lantern seven' \
-  --shot-before-pause "$BEFORE"
+  --manual-video-scrub-ok --manual-audio-scrub-ok \
+  --av-offset-ms 12 --ptt-temp-deleted-ok
+# Strict all-gate acceptance:
+# python3 scripts/inspect_all_gates.py --artifact-map path/to/map.json --strict
 ```
 
-On a Mac, `bash scripts/mac_all_gates.sh --latest` builds Debug (unless `--no-build`) and runs that inspector against the newest session folder. It never writes GATE_LOG.md.
+On a Mac, `bash scripts/mac_all_gates.sh --begin` then `bash scripts/mac_all_gates.sh --latest` builds Debug (unless `--no-build`) and runs that inspector against the newest session folder with `--guided`. Strict acceptance needs `--artifact-map`. It never writes GATE_LOG.md.
 
 ## TCC and Record (Mac)
 
