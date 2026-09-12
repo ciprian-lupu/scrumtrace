@@ -557,7 +557,9 @@ final class SessionController: ObservableObject {
         NotificationCenter.default.post(name: .scrumTraceSessionEnding, object: nil)
         phase = .transcribing
         do {
-            try await recorder?.stop()
+            if let recorder {
+                try await Self.stopWithTimeout(recorder)
+            }
             AgentLog.event("stop_capture_ok", ["session": manifest?.sessionId ?? ""])
         } catch {
             lastError = error.localizedDescription
@@ -603,6 +605,42 @@ final class SessionController: ObservableObject {
         AgentLog.setRecording(false, sessionId: nil)
     }
 
+    static let stopCaptureTimeoutSeconds: TimeInterval = 30
+
+    /// `SCStream.stopCapture` / `finishWriting` have no deadline of their own. A
+    /// hung teardown must not leave the HUD on "Stopping capture" with Start and
+    /// Retry disabled forever; processing continues on whatever reached disk.
+    private static func stopWithTimeout(_ recorder: SessionRecorder) async throws {
+        // Not a task group: `stop()` ends in a non-cancellable finishWriting
+        // continuation, and a group would keep waiting on it after cancelAll().
+        let outcome: Result<Void, Error> = await withCheckedContinuation { continuation in
+            let once = StopResumeOnce()
+            Task.detached {
+                do {
+                    try await recorder.stop()
+                    once.resume(continuation, .success(()))
+                } catch {
+                    once.resume(continuation, .failure(error))
+                }
+            }
+            Task.detached {
+                try? await Task.sleep(nanoseconds: UInt64(stopCaptureTimeoutSeconds * 1_000_000_000))
+                let fired = once.resume(continuation, .failure(NSError(
+                    domain: "ScrumTrace",
+                    code: 13,
+                    userInfo: [
+                        NSLocalizedDescriptionKey:
+                            "Capture teardown timed out after \(Int(stopCaptureTimeoutSeconds))s; processing what was written."
+                    ]
+                )))
+                if fired {
+                    AgentLog.event("stop_capture_timeout", ["seconds": String(Int(stopCaptureTimeoutSeconds))])
+                }
+            }
+        }
+        try outcome.get()
+    }
+
     private func runProcessor(sessionId: String) async {
         isBusy = true
         defer {
@@ -621,7 +659,12 @@ final class SessionController: ObservableObject {
             if var local {
                 local.includeFullTranscriptInZip = settings.includeFullTranscriptInZip
                 let capabilities = settings.providerConfiguration()
-                if local.uploadConsent.needsReprompt(
+                let hasAPIKey = !capabilities.apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                // No key means nothing can leave this Mac; asking a first-time
+                // local-only user to approve an upload would only confuse them.
+                if !hasAPIKey {
+                    AgentLog.event("consent_skipped", ["reason": "key_missing"])
+                } else if local.uploadConsent.needsReprompt(
                     provider: settings.provider.rawValue,
                     endpoint: settings.baseURL,
                     model: settings.model,
@@ -750,6 +793,7 @@ final class SessionController: ObservableObject {
         let media = clock.currentMediaSeconds()
         guard let image = ScreenSnap.capture(area: settings.captureArea) else {
             lastError = "Could not capture the display."
+            statusLine = "Shot failed: could not capture the display."
             AgentLog.event("shot_fail", ["reason": "display"])
             return
         }
@@ -1179,6 +1223,25 @@ enum SystemPrivacySettings {
     }
 }
 #endif
+
+/// Stop's teardown-vs-timeout race must resume its continuation exactly once.
+private final class StopResumeOnce: @unchecked Sendable {
+    private let lock = NSLock()
+    private var resumed = false
+
+    @discardableResult
+    func resume(
+        _ continuation: CheckedContinuation<Result<Void, Error>, Never>,
+        _ value: Result<Void, Error>
+    ) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !resumed else { return false }
+        resumed = true
+        continuation.resume(returning: value)
+        return true
+    }
+}
 
 enum ScreenSnap {
     static func capture(area: CaptureArea = .entireDisplay) -> NSImage? {

@@ -11,6 +11,15 @@ final class WhisperTranscriber: @unchecked Sendable {
     static let uncompressedKitModel = "openai_whisper-large-v3_turbo"
     static let prepareTimeoutSeconds: TimeInterval = 12 * 60
 
+    /// WhisperKit's default download base is `~/Documents/huggingface`, which
+    /// raises a Documents-folder TCC prompt seconds into the first recording
+    /// (and syncs the model into iCloud Drive). Keep models in Application Support.
+    static var modelDownloadBase: URL {
+        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support")
+        return support.appendingPathComponent("ScrumTrace/whisperkit", isDirectory: true)
+    }
+
     private var kit: WhisperKit?
     private let lock = NSLock()
     private var preparing: Task<Void, Error>?
@@ -84,8 +93,11 @@ final class WhisperTranscriber: @unchecked Sendable {
             }
             let work = Task.detached {
                 AgentLog.event("whisper_prepare_begin", ["model": resolved])
+                let downloadBase = Self.modelDownloadBase
+                try? FileManager.default.createDirectory(at: downloadBase, withIntermediateDirectories: true)
                 let config = WhisperKitConfig(
                     model: resolved,
+                    downloadBase: downloadBase,
                     verbose: false,
                     logLevel: .error,
                     prewarm: true,

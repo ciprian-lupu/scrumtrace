@@ -120,7 +120,29 @@ final class PrivacyGuard: @unchecked Sendable {
             || lowered.contains("passwords")
     }
 
-    /// Overlays that never become frontmost (Quick Access, menu extras).
+    /// Smallest on-screen window that can show a credential. Menu-bar status
+    /// items are ~24pt tall, so a password manager that is merely running with
+    /// its menu-bar icon must not keep the whole recording auto-paused.
+    static let overlayMinWidth: CGFloat = 120
+    static let overlayMinHeight: CGFloat = 60
+
+    static func matchesCredentialOwner(_ owner: String) -> Bool {
+        let lowered = owner.lowercased()
+        return lowered.contains("1password") || lowered.contains("bitwarden") || lowered.contains("lastpass")
+            || lowered.contains("keepass") || lowered.contains("nordpass") || lowered.contains("enpass")
+            || lowered.contains("proton pass") || lowered.contains("dashlane")
+            || lowered == "passwords"
+    }
+
+    /// Size and visibility only. Window layer is deliberately ignored: some
+    /// menu-bar managers open their credential popup at status-bar level too.
+    static func isCredentialOverlayCandidate(alpha: Double, bounds: CGRect) -> Bool {
+        guard alpha > 0 else { return false }
+        return bounds.width >= overlayMinWidth && bounds.height >= overlayMinHeight
+    }
+
+    /// Overlays that never become frontmost (Quick Access, popovers, the
+    /// manager's main window left open beside the meeting).
     private func overlayCredentialOwner() -> String? {
         #if os(macOS)
         guard let info = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else {
@@ -128,11 +150,17 @@ final class PrivacyGuard: @unchecked Sendable {
         }
         for row in info {
             let owner = (row[kCGWindowOwnerName as String] as? String) ?? ""
-            let lowered = owner.lowercased()
-            if lowered.contains("1password") || lowered.contains("bitwarden") || lowered.contains("lastpass")
-                || lowered.contains("keepass") || lowered.contains("nordpass") || lowered.contains("enpass")
-                || lowered.contains("proton pass") || lowered.contains("dashlane")
-                || lowered == "passwords" {
+            guard Self.matchesCredentialOwner(owner) else { continue }
+            let alpha = (row[kCGWindowAlpha as String] as? Double) ?? 1
+            var bounds = CGRect.zero
+            if let dict = row[kCGWindowBounds as String] as? NSDictionary,
+               let rect = CGRect(dictionaryRepresentation: dict as CFDictionary) {
+                bounds = rect
+            } else {
+                // Unknown geometry: keep the conservative trip.
+                bounds = CGRect(x: 0, y: 0, width: Self.overlayMinWidth, height: Self.overlayMinHeight)
+            }
+            if Self.isCredentialOverlayCandidate(alpha: alpha, bounds: bounds) {
                 return owner
             }
         }

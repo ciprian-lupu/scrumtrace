@@ -75,9 +75,9 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
             Section("Hotkeys") {
-                LabeledContent("Shot", value: "⌥⌘S")
-                LabeledContent("Pin", value: "⌥⌘Space")
-                LabeledContent("Pause", value: "⌥⌘P")
+                LabeledContent("Shot", value: HotkeyManager.shotLabel)
+                LabeledContent("Pin", value: HotkeyManager.pinLabel)
+                LabeledContent("Pause", value: HotkeyManager.pauseLabel)
                 Text("HUD shows t_media. Pause discards screen frames, system audio, microphone PCM, metadata, Shot, and Hold-to-Talk.")
                     .font(.caption)
                     .foregroundStyle(.secondary)

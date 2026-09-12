@@ -75,7 +75,7 @@ Gate 1 only: `python3 scripts/inspect_gate1_session.py --session /path/to/sessio
 | Action | Key | While paused |
 |---|---|---|
 | Shot | ⌥⌘S | Disabled (no new frame) |
-| Pin | ⌥⌘Space | Ignored |
+| Pin | ⌥⌘↩ (Return) | Ignored |
 | Pause | ⌥⌘P | Toggles. No new bytes from any capture source. In-flight Hold-to-Talk is aborted. |
 
 ## Handoff

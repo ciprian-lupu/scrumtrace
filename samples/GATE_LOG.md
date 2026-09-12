@@ -54,7 +54,7 @@ Hotkeys from **full-screen Keynote** must not steal focus.
 | Check | Pass? | Notes |
 |---|---|---|
 | ⌥⌘S Shot does not bring ScrumTrace to the front |  | |
-| ⌥⌘Space Pin does not steal Keynote focus |  | |
+| ⌥⌘↩ Pin does not steal Keynote focus |  | |
 | ⌥⌘P Pause toggles HUD amber without activating the app |  | |
 | Menu bar extra exists (`com.str8minds.ScrumTrace`) |  | |
 | App Sandbox is **off** |  | |

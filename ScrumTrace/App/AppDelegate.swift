@@ -65,6 +65,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             window.title = "ScrumTrace Settings"
             window.setContentSize(NSSize(width: 640, height: 640))
             window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
+            // NSWindow defaults to release-on-close; the cached reference would
+            // dangle and the second "Settings…" click would crash.
+            window.isReleasedWhenClosed = false
             settingsWindow = window
         }
         settingsWindow?.makeKeyAndOrderFront(nil)

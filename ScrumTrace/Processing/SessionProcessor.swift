@@ -223,7 +223,9 @@ final class SessionProcessor: @unchecked Sendable {
                 try vault.write(manifest: &manifest)
             } else if configuration.apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 await onStatus(.evaluating, "API key missing — local export only")
-                abandonEvaluate(manifest: &manifest, failedStatus: .offlineFailed, markOffline: true)
+                // Local-only is a valid outcome, not a failed session. Retry
+                // re-evaluates skipped slices once a key is saved.
+                abandonEvaluate(manifest: &manifest, failedStatus: .skipped, markOffline: false)
                 AgentLog.event("eval_done", [
                     "session": sessionId,
                     "clips": String(manifest.slices.count),

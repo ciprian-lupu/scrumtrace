@@ -39,10 +39,16 @@ final class HotkeyManager {
             pointer,
             &handler
         )
-        register(key: UInt32(kVK_Space), id: Action.pin.rawValue)
+        // ⌥⌘Space is macOS's default "Show Finder search window" shortcut and
+        // the window server consumes it before Carbon hotkeys, so Pin uses Return.
+        register(key: UInt32(kVK_Return), id: Action.pin.rawValue)
         register(key: UInt32(kVK_ANSI_S), id: Action.shot.rawValue)
         register(key: UInt32(kVK_ANSI_P), id: Action.pause.rawValue)
     }
+
+    static let pinLabel = "⌥⌘↩"
+    static let shotLabel = "⌥⌘S"
+    static let pauseLabel = "⌥⌘P"
 
     func unregister() {
         for ref in refs {
@@ -70,6 +76,8 @@ final class HotkeyManager {
         )
         if status == noErr {
             refs.append(hotKeyRef)
+        } else {
+            AgentLog.event("hotkey_register_fail", ["id": String(id), "status": String(status)])
         }
     }
 

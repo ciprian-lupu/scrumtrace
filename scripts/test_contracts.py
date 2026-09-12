@@ -2409,7 +2409,9 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "freezeWriters" in stop_fn
     assert "reclaimLiveCaptureIfRewritten" in stop_fn
     assert "try? recorder?.reclaim" not in stop_fn
-    assert stop_fn.index("try await recorder?.stop()") < stop_fn.index("reclaimLiveCaptureIfRewritten")
+    assert stop_fn.index("try await Self.stopWithTimeout(recorder)") < stop_fn.index("reclaimLiveCaptureIfRewritten")
+    assert "StopResumeOnce" in controller
+    assert "stop_capture_timeout" in controller
     assert "markRecordingStopped" in recorder
     assert "func freezeWriters" in recorder
     clock = (ROOT / "ScrumTrace" / "Capture" / "ClockSynchronizer.swift").read_text()

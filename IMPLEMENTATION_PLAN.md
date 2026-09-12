@@ -420,7 +420,7 @@ Phase 5: One MVP provider + evidence validator ──► Phase 6: export/ pack
 
 ### Phase 0 — APPROVE
 - Menu-bar app `com.str8minds.ScrumTrace`, sandbox OFF.
-- Hotkeys: `Opt+Cmd+Space` Pin, `Opt+Cmd+S` Shot, `Opt+Cmd+P` Pause.
+- Hotkeys: `Opt+Cmd+Return` Pin, `Opt+Cmd+S` Shot, `Opt+Cmd+P` Pause. (`Opt+Cmd+Space` is macOS's default "Show Finder search window" shortcut; the window server consumes it before Carbon hotkeys, so Pin cannot use it.)
 - Create `archive/` and `export/` on session start.
 - Gate 0: hotkeys from full-screen Keynote do not steal focus.
 

@@ -3095,4 +3095,20 @@ final class ContractTests: XCTestCase {
             PromptTemplates.wrapUntrustedInline("plain draft")
         )
     }
+
+    func testPrivacyOverlayIgnoresMenuBarItemsButTripsOnRealWindows() {
+        let menuBarItem = CGRect(x: 1200, y: 0, width: 28, height: 24)
+        XCTAssertFalse(PrivacyGuard.isCredentialOverlayCandidate(alpha: 1, bounds: menuBarItem))
+        let notchMenuBarItem = CGRect(x: 1200, y: 0, width: 40, height: 37)
+        XCTAssertFalse(PrivacyGuard.isCredentialOverlayCandidate(alpha: 1, bounds: notchMenuBarItem))
+
+        let quickAccess = CGRect(x: 300, y: 200, width: 640, height: 420)
+        XCTAssertTrue(PrivacyGuard.isCredentialOverlayCandidate(alpha: 1, bounds: quickAccess))
+        XCTAssertFalse(PrivacyGuard.isCredentialOverlayCandidate(alpha: 0, bounds: quickAccess))
+        XCTAssertFalse(PrivacyGuard.isCredentialOverlayCandidate(alpha: 1, bounds: .zero))
+
+        XCTAssertTrue(PrivacyGuard.matchesCredentialOwner("1Password"))
+        XCTAssertTrue(PrivacyGuard.matchesCredentialOwner("Passwords"))
+        XCTAssertFalse(PrivacyGuard.matchesCredentialOwner("Keynote"))
+    }
 }

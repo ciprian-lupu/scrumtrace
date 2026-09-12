@@ -578,10 +578,22 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
     }
 
     func stream(_ stream: SCStream, didStopWithError error: Error) {
+        // Record the failure so a stream that dies while Start is still awaiting
+        // is caught by `audioWriteFailure`, not shown as a live "Recording".
+        let message = "Screen capture stopped: \(error.localizedDescription)"
+        let firstFailure: Bool = syncWriter {
+            guard !self.captureWriteFailed else { return false }
+            self.captureWriteFailed = true
+            self.captureWriteMessage = message
+            return true
+        }
         freezeWriters()
+        if firstFailure {
+            AgentLog.event("capture_stream_stopped", ["error": AgentLog.sanitize(error.localizedDescription)])
+        }
         NotificationCenter.default.post(
             name: .scrumTraceCaptureFailed,
-            object: error.localizedDescription
+            object: message
         )
     }
 

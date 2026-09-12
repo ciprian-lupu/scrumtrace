@@ -89,10 +89,10 @@ final class MenuBarController: NSObject {
                 pauseItem.isEnabled = controller.canResumeFromPause
             }
             menu.addItem(pauseItem)
-            let shotItem = actionItem("Shot  ⌥⌘S", #selector(shot))
+            let shotItem = actionItem("Shot  \(HotkeyManager.shotLabel)", #selector(shot))
             shotItem.isEnabled = controller.captureState.allowsNewCapture
             menu.addItem(shotItem)
-            let pinItem = actionItem("Pin  ⌥⌘Space", #selector(pin))
+            let pinItem = actionItem("Pin  \(HotkeyManager.pinLabel)", #selector(pin))
             pinItem.isEnabled = controller.captureState.allowsNewCapture
             menu.addItem(pinItem)
             menu.addItem(actionItem("Stop & process", #selector(stop)))
@@ -277,6 +277,9 @@ final class MenuBarController: NSObject {
         case .ready:
             return
         case .screenDenied:
+            // A fresh install is not listed under Screen Recording until the app
+            // has asked once; "Open" alone shows a list without ScrumTrace.
+            alert.addButton(withTitle: "Ask now")
             alert.addButton(withTitle: "Open Screen Recording")
             alert.addButton(withTitle: "Relaunch ScrumTrace")
             alert.addButton(withTitle: "Cancel")
@@ -295,8 +298,10 @@ final class MenuBarController: NSObject {
             return
         case .screenDenied:
             if response == .alertFirstButtonReturn {
-                SystemPrivacySettings.openScreenRecording()
+                askScreen()
             } else if response == .alertSecondButtonReturn {
+                SystemPrivacySettings.openScreenRecording()
+            } else if response == .alertThirdButtonReturn {
                 controller.relaunchForPermissions()
             }
         case .screenGrantedNeedsRelaunch:
