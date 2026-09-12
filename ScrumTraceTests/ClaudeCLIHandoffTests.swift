@@ -80,27 +80,44 @@ final class ClaudeCLIHandoffTests: XCTestCase {
         }
     }
 
-    func testInvocationUsesTerminalOsascriptAndNeverArchiveOrPrintMode() throws {
+    func testInvocationReexecsThisBinaryAndNeverCdsByPath() throws {
+        let executable = URL(fileURLWithPath: "/Applications/ScrumTrace.app/Contents/MacOS/ScrumTrace")
+        let claude = URL(fileURLWithPath: "/usr/local/bin/claude")
+        let sessionId = "20260101-abcdef"
+        let plan = ClaudeCLIHandoff.invocation(executable: executable, sessionId: sessionId, claude: claude)
+        XCTAssertEqual(plan.executable.path, "/usr/bin/osascript")
+        XCTAssertEqual(plan.arguments.first, "-e")
+        XCTAssertTrue(plan.arguments.contains("--"))
+        XCTAssertTrue(ClaudeCLIHandoff.appleScriptSource.contains("quoted form of"))
+        XCTAssertTrue(ClaudeCLIHandoff.appleScriptSource.contains("tell application \"Terminal\""))
+        XCTAssertTrue(ClaudeCLIHandoff.appleScriptSource.contains(ClaudeCLIHandoff.execFlag))
+        XCTAssertFalse(ClaudeCLIHandoff.appleScriptSource.contains("cd "))
+        XCTAssertFalse(ClaudeCLIHandoff.appleScriptSource.contains(" -p"))
+        XCTAssertFalse(ClaudeCLIHandoff.appleScriptSource.contains("--print"))
+        XCTAssertFalse(ClaudeCLIHandoff.appleScriptSource.contains("archive"))
+        guard let dash = plan.arguments.firstIndex(of: "--") else {
+            return XCTFail("osascript argv must be passed after --")
+        }
+        let forwarded = Array(plan.arguments[(dash + 1)...])
+        XCTAssertEqual(forwarded, [executable.path, ClaudeCLIHandoff.execFlag, sessionId, claude.path])
+        XCTAssertFalse(forwarded.contains(where: { $0.contains("/export") }))
+        XCTAssertFalse(forwarded.contains(where: { $0.split(separator: "/").contains("archive") }))
+    }
+
+    func testOpenValidatedExportFdFailsAfterExportIsSwappedForArchiveLink() throws {
         try withSession { session in
             try writeHandoff(at: session)
-            let export = try XCTUnwrap(ClaudeCLIHandoff.exportDirectory(sessionURL: session))
-            let claude = URL(fileURLWithPath: "/usr/local/bin/claude")
-            let plan = ClaudeCLIHandoff.invocation(exportDir: export, claude: claude)
-            XCTAssertEqual(plan.executable.path, "/usr/bin/osascript")
-            XCTAssertEqual(plan.arguments.first, "-e")
-            XCTAssertTrue(plan.arguments.contains("--"))
-            XCTAssertTrue(ClaudeCLIHandoff.appleScriptSource.contains("quoted form of"))
-            XCTAssertTrue(ClaudeCLIHandoff.appleScriptSource.contains("tell application \"Terminal\""))
-            XCTAssertTrue(ClaudeCLIHandoff.appleScriptSource.contains("exec "))
-            XCTAssertFalse(ClaudeCLIHandoff.appleScriptSource.contains(" -p"))
-            XCTAssertFalse(ClaudeCLIHandoff.appleScriptSource.contains("--print"))
-            XCTAssertFalse(ClaudeCLIHandoff.appleScriptSource.contains("archive"))
-            guard let dash = plan.arguments.firstIndex(of: "--") else {
-                return XCTFail("osascript argv must be passed after --")
-            }
-            let forwarded = Array(plan.arguments[(dash + 1)...])
-            XCTAssertEqual(forwarded, [export.path, claude.path])
-            XCTAssertFalse(forwarded.contains(where: { $0.split(separator: "/").contains("archive") }))
+            let first = ClaudeCLIHandoff.openValidatedExportFd(sessionURL: session)
+            XCTAssertNotNil(first)
+            if let first { ExportRel.closeDescriptor(first) }
+            let export = session.appendingPathComponent("export")
+            let archive = session.appendingPathComponent("archive", isDirectory: true)
+            try FileManager.default.createDirectory(at: archive, withIntermediateDirectories: true)
+            try Data("secret".utf8).write(to: archive.appendingPathComponent("session.mp4"))
+            try FileManager.default.removeItem(at: export)
+            try FileManager.default.createSymbolicLink(at: export, withDestinationURL: archive)
+            XCTAssertNil(ClaudeCLIHandoff.openValidatedExportFd(sessionURL: session))
+            XCTAssertNil(ClaudeCLIHandoff.exportDirectory(sessionURL: session))
         }
     }
 

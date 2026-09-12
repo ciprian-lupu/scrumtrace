@@ -27,6 +27,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return presenter
     }
 
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil {
+            return
+        }
+        ClaudeCLIHandoff.tryExecFromArguments(ProcessInfo.processInfo.arguments)
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Hosted XCTest sets this; skip prune/hotkeys/launch rows (TASK-16).
         if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil {

@@ -3118,15 +3118,20 @@ def test_audit_leftovers_are_implemented() -> None:
 def test_claude_cli_handoff() -> None:
     handoff = (ROOT / "ScrumTrace" / "Export" / "ClaudeCLIHandoff.swift").read_text()
     assert "enum ClaudeCLIHandoff" in handoff
-    assert "unfollowedDirectoryURL" in handoff
+    assert "pathOfDirectoryFd" in handoff
+    assert "F_GETPATH" in handoff
     assert "exportStillContainsSymlink" in handoff
-    assert "isReadableSessionFile" in handoff
+    assert "AGENT_CONTEXT.md" in handoff
+    assert "SESSION_BRIEF.html" in handoff
+    assert "session.mp4" in handoff
     assert "quoted form of" in handoff
     assert "tell application \"Terminal\"" in handoff
-    assert " && exec " in handoff
+    assert "--claude-cli-exec" in handoff
+    assert "fchdir" in handoff
+    assert "openUnfollowedDirectory" in handoff
+    assert "waitUntilExit" in handoff
     assert "/usr/bin/osascript" in handoff
-    assert "ScrumTracePath.agentContext" in handoff
-    assert "ScrumTracePath.sessionBrief" in handoff
+    assert "cd " not in handoff.split("static let appleScriptSource")[1].split("static func exportDirectory")[0]
     script = handoff.split("static let appleScriptSource")[1].split("static func exportDirectory")[0]
     assert " -p" not in script
     assert "--print" not in script
@@ -3150,7 +3155,11 @@ def test_claude_cli_handoff() -> None:
     vault = (ROOT / "ScrumTrace" / "Storage" / "SessionVault.swift").read_text()
     assert "func openExportInClaude" in vault
     assert "ClaudeCLIHandoff.open" in vault
+    assert "sessionId: sessionId" in vault.split("func openExportInClaude")[1].split("func revealRootInFinder")[0]
     assert "openExportInCursor" not in vault
+    app = (ROOT / "ScrumTrace" / "App" / "AppDelegate.swift").read_text()
+    assert "applicationWillFinishLaunching" in app
+    assert "tryExecFromArguments" in app
     readme = (ROOT / "README.md").read_text()
     assert "Open last session in Claude" in readme
     assert "claude -p" in readme

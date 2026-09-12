@@ -437,7 +437,7 @@ final class SessionVault: @unchecked Sendable {
         if (try? session.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
             throw ClaudeCLIHandoffError.sessionUnusable
         }
-        try ClaudeCLIHandoff.open(sessionURL: session)
+        try ClaudeCLIHandoff.open(sessionURL: session, sessionId: sessionId)
     }
 
     func revealRootInFinder() {
