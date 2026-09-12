@@ -4,6 +4,7 @@ import AppKit
 /// First-run three-row permission window. Screen Recording is requested only
 /// from the row button (`CapturePermissions.requestScreenAccess`), never from
 /// `startRecording()`.
+@MainActor
 enum OnboardingWindow {
     private static let seenKey = "scrumtrace.onboarding.seen"
     private static var retained: OnboardingPanelController?
