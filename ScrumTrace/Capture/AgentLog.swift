@@ -28,7 +28,7 @@ enum AgentLog {
         if let testFileURL {
             return testFileURL
         }
-        directoryURL.appendingPathComponent("agent.jsonl")
+        return directoryURL.appendingPathComponent("agent.jsonl")
     }
 
     static var recordingLockURL: URL {
