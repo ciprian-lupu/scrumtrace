@@ -1107,7 +1107,11 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             AVVideoHeightKey: h,
             AVVideoCompressionPropertiesKey: [
                 AVVideoAverageBitRateKey: MediaBudget.archiveVideoBitrate,
-                AVVideoMaxBitRateKey: MediaBudget.archiveVideoMaxBitrate,
+                // AVVideoDataRateLimitsKey uses bytes/second + duration.
+                AVVideoDataRateLimitsKey: [
+                    MediaBudget.archiveVideoMaxBitrate / 8,
+                    1
+                ],
                 AVVideoMaxKeyFrameIntervalKey: MediaBudget.archiveKeyFrameInterval,
                 AVVideoExpectedSourceFrameRateKey: MediaBudget.archiveExpectedFrameRate,
                 AVVideoProfileLevelKey: AVVideoProfileLevelH264HighAutoLevel,
