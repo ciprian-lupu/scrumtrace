@@ -81,6 +81,9 @@ def test_json_schema_uses_standard_types() -> None:
     client = (ROOT / "ScrumTrace" / "AI" / "OpenAICompatibleClient.swift").read_text()
     assert "json_schema" in client
     assert "EvaluationJSONSchema.openaiStructured" in client
+    assert "isDeepSeekEndpoint" in client
+    assert '"type": "json_object"' in client
+    assert '["type": "disabled"]' in client
     openai_schema = schema.split("static let openaiStructured")[1].split("private static let quote")[0]
     assert "$schema" not in openai_schema
     canonical = schema.split("static let canonical")[1].split("static let openaiStructured")[0]

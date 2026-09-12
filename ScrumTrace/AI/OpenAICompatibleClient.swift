@@ -39,22 +39,29 @@ struct OpenAICompatibleClient: AIProvider {
             }
         }
 
-        let body: [String: Any] = [
+        // DeepSeek Chat Completions accepts json_object, not OpenAI json_schema.
+        // Thinking is on by default and can leave message.content empty.
+        var body: [String: Any] = [
             "model": configuration.model,
             "temperature": 0.1,
-            "response_format": [
+            "messages": [
+                ["role": "system", "content": PromptTemplates.system],
+                ["role": "user", "content": content]
+            ]
+        ]
+        if Self.isDeepSeekEndpoint(configuration.baseURL) {
+            body["response_format"] = ["type": "json_object"]
+            body["thinking"] = ["type": "disabled"]
+        } else {
+            body["response_format"] = [
                 "type": "json_schema",
                 "json_schema": [
                     "name": "scrumtrace_candidates",
                     "strict": true,
                     "schema": EvaluationJSONSchema.openaiStructured
                 ]
-            ],
-            "messages": [
-                ["role": "system", "content": PromptTemplates.system],
-                ["role": "user", "content": content]
             ]
-        ]
+        }
 
         var requestHTTP = URLRequest(url: url)
         requestHTTP.httpMethod = "POST"
@@ -70,6 +77,14 @@ struct OpenAICompatibleClient: AIProvider {
             throw AIProviderError.emptyResponse
         }
         return try JSONExtractor.decodeCandidates(from: text)
+    }
+
+    static func isDeepSeekEndpoint(_ baseURL: String) -> Bool {
+        let lowered = baseURL.lowercased()
+        if let host = URL(string: baseURL)?.host?.lowercased() {
+            return host == "api.deepseek.com" || host.hasSuffix(".deepseek.com")
+        }
+        return lowered.contains("api.deepseek.com")
     }
 }
 

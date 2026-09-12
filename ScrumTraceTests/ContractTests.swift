@@ -2794,6 +2794,13 @@ final class ContractTests: XCTestCase {
         }
     }
 
+    func testDeepSeekEndpointDetection() {
+        XCTAssertTrue(OpenAICompatibleClient.isDeepSeekEndpoint("https://api.deepseek.com"))
+        XCTAssertTrue(OpenAICompatibleClient.isDeepSeekEndpoint("https://api.deepseek.com/v1"))
+        XCTAssertFalse(OpenAICompatibleClient.isDeepSeekEndpoint("https://api.openai.com"))
+        XCTAssertFalse(OpenAICompatibleClient.isDeepSeekEndpoint("https://generativelanguage.googleapis.com"))
+    }
+
     func testProjectClearsStaleExportArtifacts() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("scrumtrace-export-reset-\(UUID().uuidString)")
         let archive = root.appendingPathComponent("archive")
