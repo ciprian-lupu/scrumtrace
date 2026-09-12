@@ -364,7 +364,7 @@ struct SettingsView: View {
                     Text(connectionLine)
                         .font(.caption)
                         .textSelection(.enabled)
-                        .foregroundStyle(connectionLine.hasPrefix("Key accepted") ? .secondary : .red)
+                        .foregroundStyle(connectionLine.hasPrefix("Key accepted") ? Color.secondary : Color.red)
                 }
             }
             Section("Provider capabilities") {
