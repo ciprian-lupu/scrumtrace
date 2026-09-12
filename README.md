@@ -106,6 +106,8 @@ In **AI**, each provider retains its own endpoint and model. API keys are saved 
 
 Give the agent **`export/`** only. Never drop the session root or `archive/` (master `session.mp4`, `audio.wav`, full transcript, raw events). Paths inside the pack are relative to that folder (`shots/…`, `media/…`).
 
+**Open last session in Claude** (also Recent → **Open in Claude**) starts an interactive Claude Code CLI in Terminal with the working directory set to that session’s `export/`. It uses your local `claude` login (including Claude Max). It does not send the archive, does not call `claude -p`, and does not use a ScrumTrace API key. Install Claude Code and confirm `claude` runs in Terminal first. If the CLI is missing, the status line says so.
+
 Phase -1 mock pack (open in a browser or drop into Cursor):
 
 ```bash

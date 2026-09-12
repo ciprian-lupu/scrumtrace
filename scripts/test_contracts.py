@@ -3115,6 +3115,48 @@ def test_audit_leftovers_are_implemented() -> None:
     assert "Thread.isMainThread" in persist_talk
 
 
+def test_claude_cli_handoff() -> None:
+    handoff = (ROOT / "ScrumTrace" / "Export" / "ClaudeCLIHandoff.swift").read_text()
+    assert "enum ClaudeCLIHandoff" in handoff
+    assert "unfollowedDirectoryURL" in handoff
+    assert "exportStillContainsSymlink" in handoff
+    assert "isReadableSessionFile" in handoff
+    assert "quoted form of" in handoff
+    assert "tell application \"Terminal\"" in handoff
+    assert " && exec " in handoff
+    assert "/usr/bin/osascript" in handoff
+    assert "ScrumTracePath.agentContext" in handoff
+    assert "ScrumTracePath.sessionBrief" in handoff
+    script = handoff.split("static let appleScriptSource")[1].split("static func exportDirectory")[0]
+    assert " -p" not in script
+    assert "--print" not in script
+    assert "cursor -r" not in handoff
+    assert "Open last session in Cursor" not in handoff
+    assert "/archive/" not in handoff or "pathComponents.contains(\"archive\")" in handoff
+    menu = (ROOT / "ScrumTrace" / "UI" / "MenuBarController.swift").read_text()
+    assert "Open last session in Claude" in menu
+    assert "Open in Claude" in menu
+    assert "openLastInClaude" in menu
+    assert "openRecentInClaude" in menu
+    assert "menu_claude" in menu
+    assert "Open last session in Cursor" not in menu
+    assert "openInCursor" not in menu
+    controller = (ROOT / "ScrumTrace" / "Processing" / "SessionController.swift").read_text()
+    assert "func openInClaude" in controller
+    assert "claude_handoff" in controller
+    assert "claude_handoff_fail" in controller
+    assert "AgentLog.sanitize" in controller.split("func openInClaude")[1].split("func applyHotkeyPause")[0]
+    assert "cursor_handoff" not in controller
+    vault = (ROOT / "ScrumTrace" / "Storage" / "SessionVault.swift").read_text()
+    assert "func openExportInClaude" in vault
+    assert "ClaudeCLIHandoff.open" in vault
+    assert "openExportInCursor" not in vault
+    readme = (ROOT / "README.md").read_text()
+    assert "Open last session in Claude" in readme
+    assert "claude -p" in readme
+    assert not (ROOT / "ScrumTrace" / "Export" / "CursorHandoff.swift").exists()
+
+
 def test_sanitize_untrusted_strips_whitespace_breakout() -> None:
     prompts = (ROOT / "ScrumTrace" / "AI" / "PromptTemplates.swift").read_text()
     sanitize_fn = prompts.split("func sanitizeUntrusted")[1].split("func evaluationUserPrompt")[0]
@@ -3158,6 +3200,7 @@ def main() -> None:
     test_phase45_clip_consent_and_budget()
     test_write_contained_data_refuses_directory_symlinks()
     test_audit_leftovers_are_implemented()
+    test_claude_cli_handoff()
     test_sanitize_untrusted_strips_whitespace_breakout()
     print("contract tests ok")
 

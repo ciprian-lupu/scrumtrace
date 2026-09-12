@@ -141,7 +141,7 @@ Until Record stays up, do not start the 20-minute Gate 1 run.
 
 The app writes `~/Library/Logs/ScrumTrace/agent.jsonl` (technical fields only: no titles, URLs, notes, transcripts, or keys). Live session: `recording.lock` (ignored if its pid is dead).
 
-Useful events: `launch`, `permission_probe`, `start_control_state`, `menu_start`, `capture_area_picker`, `start_*`, `recorder_sckit_*`, `mic_*`, `stop_requested`, `halt`, `terminate`.
+Useful events: `launch`, `permission_probe`, `start_control_state`, `menu_start`, `capture_area_picker`, `start_*`, `recorder_sckit_*`, `mic_*`, `stop_requested`, `halt`, `terminate`, `claude_handoff`, `claude_handoff_fail`.
 
 Cloud read:
 

@@ -423,6 +423,23 @@ final class SessionVault: @unchecked Sendable {
         #endif
     }
 
+    func openExportInClaude(sessionId: String) throws {
+        guard Self.isValidSessionId(sessionId) else {
+            throw ClaudeCLIHandoffError.sessionUnusable
+        }
+        guard ExportRel.isUsableSessionRoot(rootURL) else {
+            throw ClaudeCLIHandoffError.sessionUnusable
+        }
+        let session = sessionURL(id: sessionId)
+        guard ExportRel.isUsableSessionRoot(session) else {
+            throw ClaudeCLIHandoffError.sessionUnusable
+        }
+        if (try? session.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+            throw ClaudeCLIHandoffError.sessionUnusable
+        }
+        try ClaudeCLIHandoff.open(sessionURL: session)
+    }
+
     func revealRootInFinder() {
         #if os(macOS)
         try? FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)

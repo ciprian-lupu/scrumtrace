@@ -164,6 +164,9 @@ final class MenuBarController: NSObject {
         let reveal = actionItem("Reveal last session", #selector(reveal))
         reveal.isEnabled = controller.lastSessionId != nil
         menu.addItem(reveal)
+        let claude = actionItem("Open last session in Claude", #selector(openLastInClaude))
+        claude.isEnabled = controller.lastSessionId != nil
+        menu.addItem(claude)
         let recent = NSMenuItem(title: "Recent", action: nil, keyEquivalent: "")
         let recentMenu = NSMenu()
         recentMenu.autoenablesItems = false
@@ -196,7 +199,15 @@ final class MenuBarController: NSObject {
                 retryItem.representedObject = session.sessionId
                 retryItem.target = self
                 retryItem.isEnabled = controller.canChangeCaptureSettings
+                let claudeItem = NSMenuItem(
+                    title: "Open in Claude",
+                    action: #selector(openRecentInClaude(_:)),
+                    keyEquivalent: ""
+                )
+                claudeItem.representedObject = session.sessionId
+                claudeItem.target = self
                 sub.addItem(revealItem)
+                sub.addItem(claudeItem)
                 sub.addItem(retryItem)
                 item.submenu = sub
                 recentMenu.addItem(item)
@@ -388,6 +399,10 @@ final class MenuBarController: NSObject {
         AgentLog.event("menu_reveal", [:])
         controller.revealLast()
     }
+    @objc private func openLastInClaude() {
+        AgentLog.event("menu_claude", [:])
+        controller.openInClaude()
+    }
     @objc private func revealLog() {
         AgentLog.event("menu_reveal_log", [:])
         AgentLog.reveal()
@@ -487,6 +502,12 @@ final class MenuBarController: NSObject {
         guard let id = sender.representedObject as? String else { return }
         AgentLog.event("menu_retry", ["session": id])
         controller.retryAnalysis(sessionId: id)
+    }
+
+    @objc private func openRecentInClaude(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? String else { return }
+        AgentLog.event("menu_claude", ["session": id])
+        controller.openInClaude(sessionId: id)
     }
 }
 

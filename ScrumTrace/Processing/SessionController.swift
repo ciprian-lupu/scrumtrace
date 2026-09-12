@@ -290,6 +290,24 @@ final class SessionController: ObservableObject {
         }
     }
 
+    func openInClaude(sessionId: String? = nil) {
+        guard let id = sessionId ?? lastSessionId ?? manifest?.sessionId else {
+            statusLine = "No session to open in Claude."
+            return
+        }
+        do {
+            try vault.openExportInClaude(sessionId: id)
+            statusLine = "Opened export in Claude"
+            AgentLog.event("claude_handoff", ["session": id])
+        } catch {
+            statusLine = error.localizedDescription
+            AgentLog.event("claude_handoff_fail", [
+                "session": id,
+                "error": AgentLog.sanitize(error.localizedDescription)
+            ])
+        }
+    }
+
     /// Opt+⌘P already froze writers on the Carbon thread. Do not treat that
     /// freeze as Resume (`captureState` follows `recorder.isPaused`).
     func applyHotkeyPause(didFreezeWriters: Bool) {
