@@ -8,6 +8,9 @@ struct AgentContextRenderer {
         lines.append("Drop **this export folder** into a coding-agent workspace. Read this file first, then open the linked evidence. Do not guess facts that exist only in a screenshot or clip. Never open the private capture folder.")
         lines.append("")
         lines.append("## Product")
+        if let name = manifest.productContext.contextName {
+            lines.append("- Context: \(PromptTemplates.wrapUntrustedInline(name))")
+        }
         lines.append("- App: \(PromptTemplates.wrapUntrustedInline(manifest.productContext.appName))")
         lines.append("- Repo: \(PromptTemplates.wrapUntrustedInline(manifest.productContext.repoURL))")
         lines.append("- Stack: \(PromptTemplates.wrapUntrustedInline(manifest.productContext.techStack))")

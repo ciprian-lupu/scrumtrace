@@ -3058,7 +3058,7 @@ def test_audit_leftovers_are_implemented() -> None:
     start_menu = menu.split("func start()")[1].split("func presentMeetingNotice")[0]
     assert "CaptureAreaPicker.present" in start_menu
     assert "mode: .record" in start_menu
-    assert start_menu.index("CaptureAreaPicker.present") < start_menu.index("startRecording()")
+    assert start_menu.index("CaptureAreaPicker.present") < start_menu.index("startRecording(product: product)")
     assert "presentStartBlocked" in start_menu
     assert "requestScreenAccess" not in start_menu
     assert "presentMeetingNotice()" in start_menu

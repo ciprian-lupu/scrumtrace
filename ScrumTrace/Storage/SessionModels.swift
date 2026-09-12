@@ -2163,11 +2163,15 @@ struct ProductContext: Codable, Sendable, Hashable {
     var appName: String
     var repoURL: String
     var techStack: String
+    var contextID: String? = nil
+    var contextName: String? = nil
 
     enum CodingKeys: String, CodingKey {
         case appName = "app_name"
         case repoURL = "repo_url"
         case techStack = "tech_stack"
+        case contextID = "context_id"
+        case contextName = "context_name"
     }
 
     static let empty = ProductContext(appName: "", repoURL: "", techStack: "")

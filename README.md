@@ -71,7 +71,14 @@ python3 scripts/inspect_all_gates.py --session /path/to/session \
 Gate 0 only: `python3 scripts/inspect_gate0_log.py --log ~/Library/Logs/ScrumTrace/agent.jsonl`  
 Gate 1 only: `python3 scripts/inspect_gate1_session.py --session /path/to/session --token 'ST-G1-PAUSE-TOKEN-9F3C' --passphrase 'orchid lantern seven'`
 
-## Settings and speaker review
+## Contexts, Settings and speaker review
+
+In **Settings → General → Product contexts**, create a saved context for each product or type of call. Contexts have a name plus optional product name, repository and tech stack. You can edit, duplicate or delete them. The old single product setting is imported once into this library.
+
+**New Recording…** (⌘N) or **Start recording** first asks you to confirm the context, then opens the capture-area picker. The previous selection is offered again; you can switch from ScrumTrace to GIB or choose **No context**. You can also create or edit a context directly from this step. Cancelling either step starts no recording.
+
+Each session saves a copy of the confirmed context, including its name and ID. Later profile changes, deletion, or switching products do not alter that session or its subsequent analysis/export. When the optional product name is blank, the context name supplies it. Context selection is manual in v1; automatic selection is deferred to v2.
+
 
 In **Settings → Speech**, choose the meeting language and preload the selected Whisper model before recording. Romanian is available explicitly. Existing transcripts keep their recorded language until analysis is run again.
 

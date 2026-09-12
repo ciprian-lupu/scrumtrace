@@ -18,6 +18,8 @@ final class MenuBarController: NSObject {
     private var statusMenuItem: NSMenuItem?
     private var hudObserver: NSObjectProtocol?
     private var lastStartEnabled: Bool?
+    private let contextPresenter = RecordingContextPresenter()
+    private var isPreparingRecording = false
 
     init(
         controller: SessionController,
@@ -81,6 +83,7 @@ final class MenuBarController: NSObject {
             controller.isBusy ? "1" : "0",
             controller.startInFlight ? "1" : "0",
             checkingUpdates ? "updates" : "idle",
+            isPreparingRecording ? "context" : "idle",
             controller.captureState.rawValue,
             controller.privacy.isCurrentlyTripped ? "priv" : "ok",
             readiness.menuLabel,
@@ -118,7 +121,7 @@ final class MenuBarController: NSObject {
                 "Start recording — \(controller.settings.captureArea.summary)",
                 #selector(start)
             )
-            start.isEnabled = !controller.isBusy && !controller.startInFlight
+            start.isEnabled = !controller.isBusy && !controller.startInFlight && !isPreparingRecording
             if lastStartEnabled != start.isEnabled {
                 lastStartEnabled = start.isEnabled
                 AgentLog.event("start_control_state", ["enabled": start.isEnabled ? "1" : "0"])
@@ -253,8 +256,10 @@ final class MenuBarController: NSObject {
         rebuild()
     }
 
+    func requestStart() { start() }
+
     @objc private func start() {
-        guard controller.canChangeCaptureSettings else { return }
+        guard controller.canChangeCaptureSettings, !isPreparingRecording else { return }
         AgentLog.event("menu_start", [:])
         if !controller.settings.meetingNoticeAccepted {
             if !presentMeetingNotice() {
@@ -266,18 +271,31 @@ final class MenuBarController: NSObject {
             presentStartBlocked(readiness)
             return
         }
-        CaptureAreaPicker.present(current: controller.settings.captureArea, mode: .record) { [weak self] outcome in
-            guard let self, self.controller.canChangeCaptureSettings else { return }
-            switch outcome {
-            case .cancelled:
+        isPreparingRecording = true
+        rebuild()
+        contextPresenter.present(controller: controller) { [weak self] product in
+            guard let self else { return }
+            guard let product, self.controller.canChangeCaptureSettings else {
+                self.isPreparingRecording = false
+                self.rebuild()
                 return
-            case .selected(let area):
-                self.controller.settings.captureArea = area
+            }
+            CaptureAreaPicker.present(current: self.controller.settings.captureArea, mode: .record) { [weak self] outcome in
+                guard let self else { return }
+                self.isPreparingRecording = false
                 self.rebuild()
-            case .record(let area):
-                self.controller.settings.captureArea = area
-                self.rebuild()
-                self.controller.startRecording()
+                guard self.controller.canChangeCaptureSettings else { return }
+                switch outcome {
+                case .cancelled:
+                    return
+                case .selected(let area):
+                    self.controller.settings.captureArea = area
+                    self.rebuild()
+                case .record(let area):
+                    self.controller.settings.captureArea = area
+                    self.rebuild()
+                    self.controller.startRecording(product: product)
+                }
             }
         }
     }

@@ -216,6 +216,7 @@ Zip is built from an **explicit allow-list** of paths under `export/`, never by 
 
 ### 1. Menu bar & floating HUD
 - Menu bar: Start / Stop / Recent / Settings / Quit.
+- User-approved context workflow (2026-09-12): reusable product contexts in General, with explicit selection before each recording (also New Recording / Command-N). The selected name, ID and product fields are copied into the session before asynchronous capture starts; editing or deleting a profile cannot change past sessions. Migrate the old single context once and support No context. Automatic context selection is deferred to v2.
 - HUD: $t_{\text{media}}$, Shot, Pin, Pause, Stop.
 - Red pulse = recording. Amber = paused. While paused, Shot/Pin/Hold-to-Talk controls are disabled and do nothing.
 

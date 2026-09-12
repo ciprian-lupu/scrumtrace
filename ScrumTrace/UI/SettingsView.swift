@@ -33,7 +33,7 @@ struct SettingsView: View {
             generalTab.tabItem { Label("General", systemImage: "gearshape") }.tag(SettingsTab.general)
         }
         Text(controller.canChangeCaptureSettings
-             ? "Preferences save automatically. Keys and licenses use their Save button."
+             ? "Preferences save automatically. Contexts, keys and licenses use their Save button."
              : "Recording or analysis is active. Configuration can be changed when it finishes.")
             .font(.caption).foregroundStyle(.secondary)
         }
@@ -368,14 +368,7 @@ struct SettingsView: View {
 
     private var generalTab: some View {
         Form {
-            Section("Product context") {
-                TextField("App name", text: $settings.appName)
-                TextField("Repo URL", text: $settings.repoURL)
-                TextField("Tech stack", text: $settings.techStack)
-                Text("Optional context for the next session: the product name, repository, and technologies help the generated brief describe useful tasks.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-            .disabled(!controller.canChangeCaptureSettings)
+            ProductContextsSettingsView(settings: settings, controller: controller)
             Section("Retention") {
                 Picker("Keep sessions", selection: $settings.retentionDays) {
                     Text("Forever").tag(0)

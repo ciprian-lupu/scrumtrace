@@ -92,6 +92,10 @@ final class SessionController: ObservableObject {
     }
 
     func startRecording() {
+        startRecording(product: settings.productContext)
+    }
+
+    func startRecording(product: ProductContext) {
         guard !isRecording, !isBusy, !startInFlight else {
             AgentLog.event("start_ignored", [
                 "recording": isRecording ? "1" : "0",
@@ -116,7 +120,7 @@ final class SessionController: ObservableObject {
         captureFreeze.markStartInFlight(true)
         statusLine = "Starting capture…"
         AgentLog.event("start_requested", [:])
-        Task { await startRecordingAsync() }
+        Task { await startRecordingAsync(product: product) }
     }
 
     func stopRecording() {
@@ -395,7 +399,7 @@ final class SessionController: ObservableObject {
         log(.stop, ["reason": "quit"])
     }
 
-    private func startRecordingAsync() async {
+    private func startRecordingAsync(product: ProductContext) async {
         defer { startInFlight = false }
         defer { captureFreeze.markStartInFlight(false) }
         guard !isRecording, !isBusy else {
@@ -408,7 +412,7 @@ final class SessionController: ObservableObject {
         lastError = nil
         var abandonedId: String?
         do {
-            let created = try vault.createSession(product: settings.productContext)
+            let created = try vault.createSession(product: product)
             abandonedId = created.manifest.sessionId
             guard AgentLog.setSessionContext(created.manifest.sessionId) else {
                 throw SessionRecorderError.writerFailed(

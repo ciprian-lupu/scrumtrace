@@ -66,6 +66,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    @objc func startRecording(_ sender: Any?) {
+        menuBar?.requestStart()
+    }
+
     @objc func showSettingsWindow(_ sender: Any?) {
         AgentLog.event("settings_open", [:])
         settingsPresenter.show()

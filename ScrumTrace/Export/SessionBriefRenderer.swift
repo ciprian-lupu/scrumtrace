@@ -91,6 +91,7 @@ struct SessionBriefRenderer {
             "{{MEDIA_DURATION}}": Self.clock(manifest.duration.mediaSeconds),
             "{{WALL_DURATION}}": Self.clock(manifest.duration.wallSeconds),
             "{{PAUSE_COUNT}}": manifest.pauses.count == 1 ? "1 pause" : "\(manifest.pauses.count) pauses",
+            "{{CONTEXT_BADGE}}": manifest.productContext.contextName.map { "<span>Context: \(HTMLEscaper.escape($0))</span>" } ?? "",
             "{{PRODUCT_NAME}}": HTMLEscaper.escape(manifest.productContext.appName),
             "{{REPO_URL}}": HTMLEscaper.escape(manifest.productContext.repoURL),
             "{{REPO_HREF}}": HTMLEscaper.httpHref(manifest.productContext.repoURL),
@@ -339,6 +340,7 @@ struct SessionBriefRenderer {
             <span>{{REVIEW_COUNT}} review</span>
           </div>
           <div class="meta">
+            {{CONTEXT_BADGE}}
             <span>{{PRODUCT_NAME}}</span>
             <span>{{TECH_STACK}}</span>
             <a href="{{REPO_HREF}}">{{REPO_URL}}</a>

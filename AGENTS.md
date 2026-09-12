@@ -169,7 +169,7 @@ C4 wire truth today: Google may upload a size-capped inline MP4. OpenAI-compatib
 
 ## Next work (priority)
 
-The user-approved 2026-09-12 speaker/Settings/menu work is an exception to the product-surface deferral. Keep other new surfaces deferred. Prefer work that can be verified in this environment.
+The user-approved 2026-09-12 speaker/Settings/menu work and saved product contexts with selection before recording are exceptions to the product-surface deferral. Keep other new surfaces deferred. Prefer work that can be verified in this environment.
 
 ### On a Mac (blocks “done”)
 
@@ -182,6 +182,8 @@ The user-approved 2026-09-12 speaker/Settings/menu work is an exception to the p
 ### In Swift (Linux-testable; do not call them “gated”)
 
 Code leftovers from `SCRUMTRACE_AUDIT.md` that can be done without a Mac or Apple secrets are implemented. Still open only because they need hardware or secrets: Gate −0 through 6, Developer ID team + notary Apple ID, first Whisper download, Sparkle EdDSA keys, a paid license private key. Do not invent `GATE_LOG.md` cells.
+
+Product contexts are a saved library in General. Start/⌘N confirms one (or No context) before capture-area selection. Copy the confirmed value into the session; never look up a current profile when retrying old sessions. The previous single context migrates once. Automatic selection is deferred to v2.
 
 Settings is a six-tab window (Speech, Capture, Logs, Permissions, AI, General). Start recording opens a macOS-style overlay (dashed rectangle, move/resize, Record / Entire Display / Cancel; Return confirms the key display) and does not request Screen Recording from that click. Capture can turn the pointer and microphone off for the next session.
 

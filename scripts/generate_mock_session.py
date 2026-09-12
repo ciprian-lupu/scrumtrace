@@ -122,6 +122,7 @@ def fill_brief(tasks_html: str, shots_html: str, timeline_html: str) -> str:
         "{{MEDIA_DURATION}}": "27:00",
         "{{WALL_DURATION}}": "27:15",
         "{{PAUSE_COUNT}}": "1 pause",
+        "{{CONTEXT_BADGE}}": "",
         "{{PRODUCT_NAME}}": "AthleteTracker",
         "{{REPO_URL}}": "https://github.com/acme/athlete-app",
         "{{REPO_HREF}}": "https://github.com/acme/athlete-app",

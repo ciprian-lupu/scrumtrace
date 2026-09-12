@@ -16,6 +16,10 @@ struct ScrumTraceApp: App {
         }
         #if os(macOS)
         .commands {
+            CommandGroup(replacing: .newItem) {
+                Button("New Recording…") { appDelegate.startRecording(nil) }
+                    .keyboardShortcut("n", modifiers: .command)
+            }
             CommandGroup(replacing: .appSettings) {
                 Button("Settings…") { appDelegate.showSettingsWindow(nil) }
                     .keyboardShortcut(",", modifiers: .command)

@@ -105,17 +105,8 @@ final class AppSettings: ObservableObject {
         didSet { defaults.set(speechLanguage.rawValue, forKey: Keys.speechLanguage) }
     }
 
-    @Published var appName: String {
-        didSet { defaults.set(appName, forKey: Keys.appName) }
-    }
-
-    @Published var repoURL: String {
-        didSet { defaults.set(repoURL, forKey: Keys.repoURL) }
-    }
-
-    @Published var techStack: String {
-        didSet { defaults.set(techStack, forKey: Keys.techStack) }
-    }
+    @Published private(set) var contextLibrary: ProductContextLibrary
+    let contextLibraryIssue: String?
 
     @Published var includeFullTranscriptInZip: Bool {
         didSet { defaults.set(includeFullTranscriptInZip, forKey: Keys.includeTranscript) }
@@ -148,7 +139,7 @@ final class AppSettings: ObservableObject {
     @Published var apiKeyDraft: String
 
     var productContext: ProductContext {
-        ProductContext(appName: appName, repoURL: repoURL, techStack: techStack)
+        contextLibrary.selected?.snapshot ?? .empty
     }
 
     init(defaults: UserDefaults = .standard, keyStore: SettingsKeyStore = .live) {
@@ -169,9 +160,9 @@ final class AppSettings: ObservableObject {
         self.whisperModel = Self.migratedWhisperModel(storedWhisper)
         self.identifySpeakers = defaults.object(forKey: Keys.identifySpeakers) as? Bool ?? true
         self.speechLanguage = defaults.string(forKey: Keys.speechLanguage).flatMap(SpeechLanguage.init(rawValue:)) ?? .automatic
-        self.appName = defaults.string(forKey: Keys.appName) ?? ""
-        self.repoURL = defaults.string(forKey: Keys.repoURL) ?? ""
-        self.techStack = defaults.string(forKey: Keys.techStack) ?? ""
+        let contexts = ProductContextLibrary.load(from: defaults)
+        self.contextLibrary = contexts.library
+        self.contextLibraryIssue = contexts.issue
         self.includeFullTranscriptInZip = defaults.bool(forKey: Keys.includeTranscript)
         self.allowGoogleClipUpload = defaults.object(forKey: Keys.allowGoogleClip) as? Bool ?? false
         self.retentionDays = defaults.object(forKey: Keys.retentionDays) as? Int ?? 0
@@ -189,6 +180,62 @@ final class AppSettings: ObservableObject {
         defaults.set(selectedModel, forKey: Keys.profile(selectedProvider, "model"))
         defaults.set(legacyCredentialScope, forKey: Keys.legacyCredentialScope)
         refreshKeyStatus()
+    }
+
+    func saveProductContext(_ profile: SavedProductContext, isNew: Bool) throws {
+        var profile = profile
+        profile.name = profile.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !profile.name.isEmpty, profile.name.count <= 80 else {
+            throw SettingsValidationError("Enter a context name of up to 80 characters.")
+        }
+        guard !contextLibrary.profiles.contains(where: {
+            $0.id != profile.id && $0.name.compare(profile.name, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame
+        }) else { throw SettingsValidationError("A context with this name already exists. Choose a different name.") }
+        profile.product.appName = profile.product.appName.trimmingCharacters(in: .whitespacesAndNewlines)
+        profile.product.repoURL = profile.product.repoURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        profile.product.techStack = profile.product.techStack.trimmingCharacters(in: .whitespacesAndNewlines)
+        profile.product.contextID = nil
+        profile.product.contextName = nil
+        var library = contextLibrary
+        if isNew {
+            guard !profile.id.isEmpty, !library.profiles.contains(where: { $0.id == profile.id }) else {
+                throw SettingsValidationError("This context already exists. Reopen the editor.")
+            }
+            library.profiles.append(profile)
+        } else {
+            guard let index = library.profiles.firstIndex(where: { $0.id == profile.id }) else {
+                throw SettingsValidationError("This context was deleted. Close the editor and add a new context.")
+            }
+            library.profiles[index] = profile
+        }
+        try persistContexts(library)
+    }
+
+    func deleteProductContext(id: String) throws {
+        var library = contextLibrary
+        library.profiles.removeAll { $0.id == id }
+        if library.selectedID == id { library.selectedID = nil }
+        try persistContexts(library)
+    }
+
+    /// Explicit nil means "No context"; never substitute another saved profile.
+    @discardableResult
+    func selectProductContext(id: String?) throws -> ProductContext {
+        if contextLibraryIssue != nil, id == nil { return .empty }
+        guard id == nil || contextLibrary.profiles.contains(where: { $0.id == id }) else {
+            throw SettingsValidationError("The selected context is no longer available. Choose another context.")
+        }
+        var library = contextLibrary
+        library.selectedID = id
+        try persistContexts(library)
+        return library.selected?.snapshot ?? .empty
+    }
+
+    private func persistContexts(_ library: ProductContextLibrary) throws {
+        if let contextLibraryIssue { throw SettingsValidationError(contextLibraryIssue) }
+        let data = try JSONEncoder().encode(library)
+        defaults.set(data, forKey: ProductContextLibrary.defaultsKey)
+        contextLibrary = library
     }
 
     private func persistCaptureArea() {
@@ -285,9 +332,6 @@ final class AppSettings: ObservableObject {
         static func profile(_ provider: AIProviderKind, _ field: String) -> String {
             "scrumtrace.ai.\(provider.rawValue).\(field)"
         }
-        static let appName = "scrumtrace.appName"
-        static let repoURL = "scrumtrace.repoURL"
-        static let techStack = "scrumtrace.techStack"
         static let includeTranscript = "scrumtrace.includeFullTranscript"
         static let allowGoogleClip = "scrumtrace.allowGoogleClipUpload"
         static let retentionDays = "scrumtrace.retentionDays"
