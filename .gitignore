@@ -15,3 +15,4 @@ secrets*
 agent-tools/
 scripts/__pycache__/
 .scrumtrace-autopilot/
+scripts/gate_tests/__pycache__/
