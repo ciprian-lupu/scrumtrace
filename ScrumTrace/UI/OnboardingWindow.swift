@@ -23,7 +23,10 @@ enum OnboardingWindow {
     }
 
     static func present() {
-        if retained != nil { return }
+        if let retained {
+            retained.focus()
+            return
+        }
         let controller = OnboardingPanelController()
         retained = controller
         controller.show()
@@ -44,6 +47,8 @@ enum OnboardingWindow {
 private final class OnboardingPanelController: NSObject {
     private var window: NSWindow?
     private var screenLabel: NSTextField?
+    private var screenButton: NSButton?
+    private var screenDetail: NSTextField?
     private var micLabel: NSTextField?
     private var axLabel: NSTextField?
     private var licenseLabel: NSTextField?
@@ -51,7 +56,7 @@ private final class OnboardingPanelController: NSObject {
 
     func show() {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 560, height: 420),
+            contentRect: NSRect(x: 0, y: 0, width: 560, height: 500),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
@@ -61,38 +66,40 @@ private final class OnboardingPanelController: NSObject {
         window.center()
         self.window = window
 
-        let root = NSView(frame: NSRect(x: 0, y: 0, width: 560, height: 420))
-        var y = 370.0
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: 560, height: 500))
+        var y = 450.0
         let intro = makeText(
-            "Grant these on this binary, then Relaunch. Record stays off until Screen Recording and Microphone are allowed for this process.",
+            "Review recording permissions for this app. After changing Screen Recording access, relaunch ScrumTrace. Microphone is needed when enabled in Settings → Capture.",
             frame: NSRect(x: 24, y: y, width: 512, height: 44)
         )
         root.addSubview(intro)
-        y -= 70
+        y -= 84
 
-        let (screenRow, screenStatus) = makeRow(
+        let (screenRow, screenStatus, screenNote, screenAction) = makeRow(
             title: "Screen Recording",
-            detail: "Required. System Settings → Privacy & Security → Screen Recording → + → this app.",
+            detail: "Required for display capture. Use Ask now, then allow ScrumTrace in System Settings.",
             y: y,
             action: #selector(askScreen),
             buttonTitle: "Ask now"
         )
         screenLabel = screenStatus
+        screenDetail = screenNote
+        screenButton = screenAction
         root.addSubview(screenRow)
-        y -= 78
+        y -= 100
 
-        let (micRow, micStatus) = makeRow(
+        let (micRow, micStatus, _, _) = makeRow(
             title: "Microphone",
-            detail: "Required for the room-mic WAV. The first Record can show the system sheet when status is not determined.",
+            detail: "Needed when Record microphone is enabled in Settings → Capture.",
             y: y,
             action: #selector(openMic),
             buttonTitle: "Open Settings"
         )
         micLabel = micStatus
         root.addSubview(micRow)
-        y -= 78
+        y -= 100
 
-        let (axRow, axStatus) = makeRow(
+        let (axRow, axStatus, _, _) = makeRow(
             title: "Accessibility",
             detail: "Optional. Adds window titles and scrubbed browser URLs. Not required to Record.",
             y: y,
@@ -101,7 +108,7 @@ private final class OnboardingPanelController: NSObject {
         )
         axLabel = axStatus
         root.addSubview(axRow)
-        y -= 56
+        y -= 72
 
         let license = makeText(LicenseStore.status().settingsLine, frame: NSRect(x: 24, y: y, width: 512, height: 36))
         licenseLabel = license
@@ -117,14 +124,18 @@ private final class OnboardingPanelController: NSObject {
 
         window.contentView = root
         window.delegate = self
-        window.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
+        focus()
         refresh()
         timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 self?.refresh()
             }
         }
+    }
+
+    func focus() {
+        NSApp.activate(ignoringOtherApps: true)
+        window?.makeKeyAndOrderFront(nil)
     }
 
     func close() {
@@ -135,7 +146,13 @@ private final class OnboardingPanelController: NSObject {
     }
 
     private func refresh() {
-        let readiness = CapturePermissions.readiness()
+        let readiness = CapturePermissions.readiness(requireMicrophone: AppSettings.shared.includeMicrophone)
+        let screenGranted = CapturePermissions.currentScreenGranted()
+        screenButton?.isEnabled = !screenGranted
+        screenButton?.title = screenGranted ? "Allowed" : "Ask now"
+        screenDetail?.stringValue = screenGranted
+            ? (readiness == .screenGrantedNeedsRelaunch ? "Relaunch ScrumTrace from Settings → Permissions to apply the grant." : "Required for display capture. Access is already allowed for this copy.")
+            : "Required for display capture. Use Ask now, then allow ScrumTrace in System Settings."
         switch readiness {
         case .ready:
             screenLabel?.stringValue = "Allowed for this process"
@@ -157,14 +174,14 @@ private final class OnboardingPanelController: NSObject {
         y: CGFloat,
         action: Selector,
         buttonTitle: String
-    ) -> (NSView, NSTextField) {
-        let box = NSView(frame: NSRect(x: 24, y: y, width: 512, height: 70))
-        let heading = makeText(title, frame: NSRect(x: 0, y: 44, width: 360, height: 20))
+    ) -> (NSView, NSTextField, NSTextField, NSButton) {
+        let box = NSView(frame: NSRect(x: 24, y: y, width: 512, height: 84))
+        let heading = makeText(title, frame: NSRect(x: 0, y: 64, width: 360, height: 20))
         heading.font = NSFont.boldSystemFont(ofSize: 13)
-        let status = makeText("…", frame: NSRect(x: 0, y: 26, width: 360, height: 18))
-        let note = makeText(detail, frame: NSRect(x: 0, y: 2, width: 360, height: 24))
+        let status = makeText("…", frame: NSRect(x: 0, y: 46, width: 360, height: 18))
+        let note = makeText(detail, frame: NSRect(x: 0, y: 2, width: 360, height: 44))
         note.textColor = .secondaryLabelColor
-        let button = NSButton(frame: NSRect(x: 376, y: 22, width: 128, height: 28))
+        let button = NSButton(frame: NSRect(x: 376, y: 35, width: 128, height: 28))
         button.title = buttonTitle
         button.bezelStyle = .rounded
         button.target = self
@@ -173,7 +190,7 @@ private final class OnboardingPanelController: NSObject {
         box.addSubview(status)
         box.addSubview(note)
         box.addSubview(button)
-        return (box, status)
+        return (box, status, note, button)
     }
 
     private func makeText(_ string: String, frame: NSRect) -> NSTextField {

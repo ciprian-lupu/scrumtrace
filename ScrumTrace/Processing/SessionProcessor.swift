@@ -28,6 +28,7 @@ final class SessionProcessor: @unchecked Sendable {
         pinTimes: [TimeInterval],
         configuration: AIProviderConfiguration,
         whisperModel: String,
+        identifySpeakers: Bool = false,
         onStatus: @escaping @MainActor (PipelineStatus, String) -> Void
     ) async throws -> SessionManifest {
         let sessionURL = vault.sessionURL(id: sessionId)
@@ -58,6 +59,12 @@ final class SessionProcessor: @unchecked Sendable {
         }
 
         var timing = PipelineTiming.load(sessionURL: sessionURL) ?? PipelineTiming()
+        if manifest.hasCompleted(.transcribing),
+           let archived = SpeakerTimeline.load(sessionURL: sessionURL), archived.needsTranscriptionRetry {
+            manifest.completedStages.removeAll { $0 == .transcribing || $0 == .slicing || $0 == .evaluating || $0 == .synthesizing || $0 == .completed }
+            manifest.pipelineStatus = .transcribing
+            try vault.write(manifest: &manifest)
+        }
 
         var justFinishedTranscribing = false
         if !manifest.hasCompleted(.transcribing) {
@@ -72,6 +79,16 @@ final class SessionProcessor: @unchecked Sendable {
             )
             var transcript = transcribed.transcript
             transcript.sessionId = sessionId
+            if transcribed.incomplete, let previous = SpeakerTimeline.load(sessionURL: sessionURL), previous.hasUsableText {
+                let analysis = transcript.transcriptionAnalysis
+                transcript = previous
+                transcript.transcriptionAnalysis = analysis
+                AgentLog.event("whisper_previous_retained", ["session": sessionId])
+            }
+            if identifySpeakers, !transcribed.incomplete {
+                await onStatus(.transcribing, "Identifying speakers locally (first use downloads models)…")
+                transcript = await SpeakerDiarizer.shared.analyze(transcript, sessionURL: sessionURL)
+            }
             timing.whisperIncomplete = transcribed.incomplete
             try requireUsableSession(sessionURL, id: sessionId)
             let persistablePass = !(transcript.sources ?? []).isEmpty || !transcript.segments.isEmpty
@@ -106,6 +123,13 @@ final class SessionProcessor: @unchecked Sendable {
             try vault.write(manifest: &manifest)
         }
 
+        if identifySpeakers, manifest.hasCompleted(.transcribing),
+           let archived = SpeakerTimeline.load(sessionURL: sessionURL), archived.speakerAnalysis == nil {
+            await onStatus(.transcribing, "Identifying speakers locally (first use downloads models)…")
+            let analyzed = await SpeakerDiarizer.shared.analyze(archived, sessionURL: sessionURL)
+            try SpeakerTimeline.save(analyzed, sessionURL: sessionURL)
+            writtenTranscript = analyzed
+        }
         let transcript = loadTranscript(sessionURL: sessionURL, sessionId: sessionId)
         var recoveredReadableTranscript = false
         if manifest.hasCompleted(.transcribing), transcriptArchiveUnreadable(sessionURL: sessionURL) {
@@ -316,6 +340,53 @@ final class SessionProcessor: @unchecked Sendable {
             await onStatus(.synthesizing, "Writing AGENT_CONTEXT.md and SESSION_BRIEF.html")
         }
         manifest.pipelineStatus = .synthesizing
+        return try await finishExport(sessionId: sessionId, sessionURL: sessionURL, manifest: &manifest,
+                                      transcript: transcript, timing: &timing, onStatus: onStatus)
+    }
+
+    /// Local-only edits never call a provider or rerun task synthesis. Names
+    /// apply to this recording only. Reanalysis is explicitly selected in UI.
+    func updateSpeakers(sessionId: String, names: [String: String]?, assignments: [Int: String] = [:], reanalyze: Bool,
+                        onStatus: @escaping @MainActor (PipelineStatus, String) -> Void) async throws -> FullTranscript {
+        let sessionURL = vault.sessionURL(id: sessionId)
+        try requireUsableSession(sessionURL, id: sessionId)
+        var manifest = try vault.loadManifest(id: sessionId)
+        guard manifest.hasCompleted(.transcribing), var transcript = SpeakerTimeline.load(sessionURL: sessionURL) else {
+            throw SettingsValidationError("Finish transcription with Retry Analysis before reviewing speakers.")
+        }
+        if reanalyze {
+            await onStatus(.transcribing, "Identifying speakers locally (first use downloads models)…")
+            transcript = await SpeakerDiarizer.shared.analyze(transcript, sessionURL: sessionURL)
+        }
+        if let names { transcript = SpeakerTimeline.names(names, appliedTo: transcript) }
+        transcript = try SpeakerTimeline.correcting(assignments, in: transcript)
+        try SpeakerTimeline.save(transcript, sessionURL: sessionURL)
+        writtenTranscript = transcript
+        for index in manifest.tasks.indices {
+            manifest.tasks[index].quotes = manifest.tasks[index].quotes.map { quote in
+                var updated = quote
+                updated.speaker = SpeakerTimeline.quoteSpeaker(quote, transcript: transcript)
+                return updated
+            }
+        }
+        // Old packs may contain system-only audio. An explicit local speaker
+        // analysis also refreshes those clips with microphone + call audio.
+        if reanalyze {
+            await onStatus(.slicing, "Updating clips with room and call audio…")
+            for index in manifest.slices.indices where manifest.slices[index].clipPath != nil {
+                manifest.slices[index] = try await exporter.export(sessionURL: sessionURL, slice: manifest.slices[index], mediaDuration: manifest.duration.mediaSeconds)
+            }
+        }
+        try vault.write(manifest: &manifest)
+        var timing = PipelineTiming.load(sessionURL: sessionURL) ?? PipelineTiming()
+        _ = try await finishExport(sessionId: sessionId, sessionURL: sessionURL, manifest: &manifest,
+                                   transcript: transcript, timing: &timing, onStatus: onStatus)
+        return transcript
+    }
+
+    private func finishExport(sessionId: String, sessionURL: URL, manifest: inout SessionManifest,
+                              transcript: FullTranscript, timing: inout PipelineTiming,
+                              onStatus: @escaping @MainActor (PipelineStatus, String) -> Void) async throws -> SessionManifest {
         let excerpts = excerptMap(manifest: manifest, transcript: transcript)
         let projector = ExportProjector()
         var projection = try projector.project(
@@ -323,6 +394,9 @@ final class SessionProcessor: @unchecked Sendable {
             manifest: manifest,
             includeFullTranscript: manifest.includeFullTranscriptInZip
         )
+        projection.manifest.markCompleted(.synthesizing)
+        projection.manifest.pipelineStatus = manifest.slices.contains(where: { $0.analysisStatus == .offlineFailed }) ? .offlineFailed : .completed
+        projection.manifest.markCompleted(.completed)
         projection.manifest.tasks = EvidenceValidator.applyExportEvidence(
             tasks: projection.manifest.tasks,
             sessionURL: sessionURL,
@@ -555,9 +629,9 @@ final class SessionProcessor: @unchecked Sendable {
         }
         let markdown = agentRenderer.render(manifest: projected, sessionURL: sessionURL)
         let prompt = agentRenderer.prompt(manifest: projected, sessionURL: sessionURL)
-        let html = briefRenderer.render(manifest: projected, excerpts: excerpts, sessionURL: sessionURL)
         try ExportRel.writeExportText(markdown, relative: ScrumTracePath.agentContext, sessionURL: sessionURL)
         try ExportRel.writeExportText(prompt, relative: ScrumTracePath.agentPrompt, sessionURL: sessionURL)
+        let html = briefRenderer.render(manifest: projected, excerpts: excerpts, sessionURL: sessionURL)
         try ExportRel.writeExportText(html, relative: ScrumTracePath.sessionBrief, sessionURL: sessionURL)
         try projector.writeProjectionManifest(projected, sessionURL: sessionURL)
     }
@@ -569,7 +643,7 @@ final class SessionProcessor: @unchecked Sendable {
     ) async -> (transcript: FullTranscript, incomplete: Bool) {
         let resolved = WhisperTranscriber.whisperKitModelName(model)
         do {
-            if !transcriber.isReady {
+            if !transcriber.isReady(for: model) {
                 try await waitForPrepare(model: model, resolved: resolved, onStatus: onStatus)
             }
             await onStatus(.transcribing, "Transcribing locally with WhisperKit")
@@ -591,6 +665,7 @@ final class SessionProcessor: @unchecked Sendable {
             do {
                 let speaker = layout.microphoneWav ? "room" : "system"
                 let wavTranscript = try await transcriber.transcribeFile(at: wav, sessionURL: sessionURL)
+                requiredFailed = requiredFailed || wavTranscript.needsTranscriptionRetry
                 passes.append(
                     TranscriptQuery.SourcePass(
                         speaker: speaker,
@@ -628,6 +703,7 @@ final class SessionProcessor: @unchecked Sendable {
             } else {
             do {
                 let movieTranscript = try await transcriber.transcribeMovieAudio(at: movie, sessionURL: sessionURL)
+                requiredFailed = requiredFailed || movieTranscript.needsTranscriptionRetry
                 passes.append(TranscriptQuery.SourcePass(speaker: "system", transcript: movieTranscript))
                 AgentLog.event("whisper_pass_ok", [
                     "source": "movie",
@@ -645,7 +721,15 @@ final class SessionProcessor: @unchecked Sendable {
         if passes.isEmpty {
             return (FullTranscript(sessionId: "", language: "en", segments: []), true)
         }
-        return (TranscriptQuery.merge(passes, sessionId: ""), requiredFailed)
+        var merged = TranscriptQuery.merge(passes, sessionId: "")
+        let completedSources = Set(passes.map(\.speaker))
+        var expectedSources: Set<String> = []
+        if wavExists { expectedSources.insert(layout.microphoneWav ? "room" : "system") }
+        if wantsMoviePass { expectedSources.insert("system") }
+        for source in expectedSources.subtracting(completedSources) {
+            merged.transcriptionAnalysis?.append(TranscriptionAnalysis(source: source, status: "failed"))
+        }
+        return (merged, requiredFailed)
     }
 
     private func waitForPrepare(
@@ -659,7 +743,7 @@ final class SessionProcessor: @unchecked Sendable {
         }
         let ticker = Task { @MainActor in
             var elapsed = 0
-            while !Task.isCancelled && !self.transcriber.isReady {
+            while !Task.isCancelled && !self.transcriber.isReady(for: model) {
                 try? await Task.sleep(nanoseconds: 2_000_000_000)
                 guard !Task.isCancelled else { return }
                 elapsed += 2
@@ -1030,7 +1114,11 @@ final class SessionProcessor: @unchecked Sendable {
                     stated: candidate.stated,
                     inferred: candidate.inferred,
                     agentInstructions: instructions,
-                    quotes: candidate.quotes,
+                    quotes: candidate.quotes.map { quote in
+                        var copy = quote
+                        copy.speaker = SpeakerTimeline.quoteSpeaker(quote, transcript: transcript)
+                        return copy
+                    },
                     evidenceMedia: uniqueEvidence,
                     confidence: candidate.confidence
                 )
@@ -1088,6 +1176,12 @@ final class SessionProcessor: @unchecked Sendable {
         }
     }
 
+    static func reviewTitle(_ note: String, fallback: String) -> String {
+        let text = note.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
+        guard !text.isEmpty else { return fallback }
+        return text.count > 100 ? String(text.prefix(99)) + "…" : text
+    }
+
     private func fallbackTask(
         shot: ShotRecord,
         slice: SliceRecord,
@@ -1122,7 +1216,7 @@ final class SessionProcessor: @unchecked Sendable {
             sourceSliceId: slice.sliceId,
             kind: .bug,
             status: .needsReview,
-            title: shot.note.isEmpty ? "Human shot requires review" : shot.note,
+            title: Self.reviewTitle(shot.note, fallback: "Captured note requires review"),
             observed: "Human-captured frame at t_media \(shot.tMedia)s.",
             stated: shot.note,
             inferred: error.map { "Analysis unavailable: \($0.localizedDescription)" } ?? "Requires manual review.",
@@ -1321,7 +1415,7 @@ final class SessionProcessor: @unchecked Sendable {
     }
 
     private func localReviewTasks(manifest: SessionManifest) -> [TaskRecord] {
-        let prefix = "[Requires Manual Review - API Offline] "
+        let prefix = "[Requires Manual Review] "
         let sessionURL = vault.sessionURL(id: manifest.sessionId)
         var coveredIds = Set<String>()
         var tasks: [TaskRecord] = []
@@ -1334,13 +1428,13 @@ final class SessionProcessor: @unchecked Sendable {
                 TaskRecord(
                     taskId: String(format: "TASK-%02d", tasks.count + 1),
                     sourceSliceId: slice?.sliceId ?? "slice-\(shot.id)",
-                    kind: .bug,
+                    kind: .unknown,
                     status: .needsReview,
-                    title: shot.note.isEmpty ? "Human shot requires review" : shot.note,
+                    title: Self.reviewTitle(shot.note, fallback: "Captured note requires review"),
                     observed: "Human-captured frame at t_media \(shot.tMedia)s.",
                     stated: shot.note,
-                    inferred: "Provider evaluation skipped.",
-                    agentInstructions: prefix + AgentInstructionTemplate.render(kind: .bug, product: manifest.productContext),
+                    inferred: "AI analysis has not completed for this evidence.",
+                    agentInstructions: prefix + AgentInstructionTemplate.render(kind: .unknown, product: manifest.productContext),
                     quotes: [],
                     evidenceMedia: uniquedPaths(
                         {
@@ -1389,10 +1483,10 @@ final class SessionProcessor: @unchecked Sendable {
                     sourceSliceId: slice.sliceId,
                     kind: .unknown,
                     status: .needsReview,
-                    title: "Unanalyzed slice \(slice.sliceId)",
-                    observed: "Slice \(slice.startMedia)s–\(slice.endMedia)s was not evaluated.",
+                    title: "Marked moment · \(Int(slice.startMedia))–\(Int(slice.endMedia))s",
+                    observed: "Selected recording from \(Int(slice.startMedia))s to \(Int(slice.endMedia))s.",
                     stated: "",
-                    inferred: "Triggered by \(slice.trigger.rawValue). Provider evaluation skipped.",
+                    inferred: "Triggered by \(slice.trigger.rawValue). AI analysis has not completed for this evidence.",
                     agentInstructions: prefix + AgentInstructionTemplate.render(kind: .unknown, product: manifest.productContext),
                     quotes: [],
                     evidenceMedia: uniquedPaths(
@@ -1424,8 +1518,8 @@ final class SessionProcessor: @unchecked Sendable {
                     sourceSliceId: manifest.slices.first?.sliceId ?? "slice-00",
                     kind: .unknown,
                     status: .needsReview,
-                    title: "Requires Manual Review - API Offline",
-                    observed: "No provider upload was approved for this session.",
+                    title: "Session requires review",
+                    observed: "No analyzed findings are available for this session.",
                     stated: "",
                     inferred: "Evaluation did not run. Local stills and clips stay on this Mac. Inspect this export folder after synthesis.",
                     agentInstructions: prefix + AgentInstructionTemplate.render(kind: .unknown, product: manifest.productContext),

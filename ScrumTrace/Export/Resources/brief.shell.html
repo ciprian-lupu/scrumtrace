@@ -22,18 +22,27 @@
         <span>{{REVIEW_COUNT}} review</span>
       </div>
       <div class="meta">
+        {{CONTEXT_BADGE}}
         <span>{{PRODUCT_NAME}}</span>
         <span>{{TECH_STACK}}</span>
         <a href="{{REPO_HREF}}">{{REPO_URL}}</a>
         <span>{{CREATED_AT}}</span>
       </div>
     </header>
+    <nav class="brief-nav" aria-label="Brief sections">
+      <a href="#summary">Summary</a><a href="#decisions">Decisions</a><a href="#actions">Actions</a>
+      <a href="#questions">Questions</a><a href="#evidence">Evidence</a><a href="#transcript">Transcript</a><a href="#exports">Export</a>
+    </nav>
+    {{STATUS_HTML}}
+    {{SUMMARY_HTML}}
+    {{SPEAKERS_HTML}}
     {{TIMELINE_HTML}}
-    <section>
+    <section id="evidence">
+      <h2>Confirmed evidence</h2>
       {{TASKS_HTML}}
     </section>
     <section class="review">
-      <details>
+      <details {{REVIEW_OPEN}}>
         <summary>Needs review</summary>
         {{NEEDS_REVIEW_HTML}}
       </details>
@@ -43,12 +52,11 @@
       <h2>Contact sheet</h2>
       <div class="contact">{{SHOTS_HTML}}</div>
     </section>
-    <section class="review">
-      <details>
-        <summary>Transcript excerpts</summary>
-        {{TRANSCRIPT_HTML}}
-      </details>
+    <section id="transcript" class="brief-panel">
+      <h2>Transcript excerpts</h2>
+      {{TRANSCRIPT_HTML}}
     </section>
+    {{DOWNLOADS_HTML}}
   </div>
   <script>{{JS}}</script>
 </body>

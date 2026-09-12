@@ -1919,7 +1919,8 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "var evidence = slice.stills" not in fallback
     local = processor.split("func localReviewTasks")[1].split("func refreshShotsFromDisk")[0]
     assert "selectForPack" in local
-    assert "[Requires Manual Review - API Offline]" in local
+    assert "[Requires Manual Review]" in local
+    assert "API Offline" not in local, "Skipped analysis must not imply a provider outage"
     assert "slice.stills" in local
     assert "clipPath" in local
     assert "uniquedPaths" in local
@@ -3058,7 +3059,7 @@ def test_audit_leftovers_are_implemented() -> None:
     start_menu = menu.split("func start()")[1].split("func presentMeetingNotice")[0]
     assert "CaptureAreaPicker.present" in start_menu
     assert "mode: .record" in start_menu
-    assert start_menu.index("CaptureAreaPicker.present") < start_menu.index("startRecording()")
+    assert start_menu.index("CaptureAreaPicker.present") < start_menu.index("startRecording(product: product)")
     assert "presentStartBlocked" in start_menu
     assert "requestScreenAccess" not in start_menu
     assert "presentMeetingNotice()" in start_menu

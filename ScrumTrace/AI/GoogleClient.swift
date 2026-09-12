@@ -5,6 +5,7 @@ struct GoogleClient: AIProvider {
     var kind: AIProviderKind { .google }
 
     func evaluate(request: SliceEvaluationRequest) async throws -> CandidateEvaluationResponse {
+        try configuration.validate()
         let key = configuration.apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !key.isEmpty else { throw AIProviderError.missingAPIKey }
         let root = try ProviderEndpoint.requireHTTPSOrLocal(configuration.baseURL)

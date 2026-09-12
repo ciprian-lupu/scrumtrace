@@ -14,6 +14,7 @@ enum AgentInstructionTemplate {
         case .decision: kindLabel = "decision"
         case .actionItem: kindLabel = "action item"
         case .architectureNote: kindLabel = "architecture note"
+        case .openQuestion: kindLabel = "open question"
         case .improvement: kindLabel = "improvement"
         case .unknown: kindLabel = "item"
         }
@@ -35,6 +36,9 @@ enum PromptTemplates {
     Prefer multiple candidates when a clip contains more than one bug, decision, or action.
     If confidence is below 0.55, set decision to needs_review.
     Human shot notes are first-class evidence and must not be dropped.
+    Use open_question only for an explicitly unresolved question in the discussion, with a supporting quote.
+    Give each candidate a short descriptive title. For action items, preserve any explicitly stated
+    owner and deadline in stated and the supporting quotes; never invent an owner or deadline.
     """
 
     static let jsonSchemaHint = """
@@ -43,7 +47,7 @@ enum PromptTemplates {
         {
           "decision": "keep | needs_review | drop",
           "confidence": 0.0,
-          "kind": "bug | decision | action_item | architecture_note | improvement",
+          "kind": "bug | decision | action_item | architecture_note | improvement | open_question",
           "title": "string",
           "observed": "strictly what is visible on screen",
           "stated": "verbatim statement from participants",

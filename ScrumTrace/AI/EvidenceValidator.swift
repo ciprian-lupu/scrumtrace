@@ -12,10 +12,19 @@ enum EvidenceValidator {
     static func quoteMatchesTranscript(_ quote: QuoteRecord, transcript: FullTranscript) -> Bool {
         let needle = normalize(quote.text)
         guard !needle.isEmpty else { return false }
-        return transcript.segments.contains { segment in
+        if transcript.segments.contains(where: { segment in
             segment.end >= quote.tMediaStart
                 && segment.start <= quote.tMediaEnd
                 && normalize(segment.text).contains(needle)
+        }) { return true }
+        // Diarization can split one valid quote across consecutive speaker
+        // turns. Join only turns from the same capture source and quote window.
+        let turns = transcript.segments.filter {
+            $0.speakerAttribution != nil && $0.end > quote.tMediaStart && $0.start < quote.tMediaEnd
+        }
+        let sources = Dictionary(grouping: turns, by: { SpeakerTimeline.source(of: $0) ?? "unknown" })
+        return sources.values.contains { segments in
+            normalize(segments.sorted { $0.start < $1.start }.map(\.text).joined(separator: " ")).contains(needle)
         }
     }
 
@@ -175,7 +184,11 @@ enum EvidenceValidator {
         let allowedResolved = Set(existingPaths(allowed, sessionURL: sessionURL))
         let allowedContained = Set(allowed.compactMap { ExportRel.existingSessionFile($0, sessionURL: sessionURL) })
         return frames.contains { frame in
-            allowedResolved.contains(frame) || allowedContained.contains(frame)
+            if allowedResolved.contains(frame) || allowedContained.contains(frame) { return true }
+            // Brief paths are relative to export/, whereas contained paths
+            // include that prefix. Compare the same existing file on both sides.
+            guard let contained = ExportRel.existingSessionFile(ExportRel.sessionPath(frame), sessionURL: sessionURL) else { return false }
+            return allowedResolved.contains(contained) || allowedContained.contains(contained)
         }
     }
 

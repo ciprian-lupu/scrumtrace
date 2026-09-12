@@ -19,7 +19,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var menuBar: MenuBarController?
     private var hud: RecordingHUDWindow?
     private var hotkeys: HotkeyManager?
-    private var settingsWindow: NSWindow?
+    private var settingsPresenterStorage: SettingsWindowPresenter?
+    var settingsPresenter: SettingsWindowPresenter {
+        if let settingsPresenterStorage { return settingsPresenterStorage }
+        let presenter = SettingsWindowPresenter(controller: controller)
+        settingsPresenterStorage = presenter
+        return presenter
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Hosted XCTest sets this; skip prune/hotkeys/launch rows (TASK-16).
@@ -35,7 +41,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.accessory)
         let hud = RecordingHUDWindow(controller: controller)
         self.hud = hud
-        menuBar = MenuBarController(controller: controller, hud: hud)
+        menuBar = MenuBarController(
+            controller: controller,
+            hud: hud,
+            openSettings: { [weak self] in self?.showSettingsWindow(nil) },
+            openLogs: { [weak self] in self?.showAgentLogWindow(nil) }
+        )
         hotkeys = HotkeyManager(controller: controller, captureFreeze: controller.captureFreeze)
         hotkeys?.register()
         MetadataSampler.requestTrust(prompt: false)
@@ -55,27 +66,55 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    @objc func startRecording(_ sender: Any?) {
+        menuBar?.requestStart()
+    }
+
     @objc func showSettingsWindow(_ sender: Any?) {
         AgentLog.event("settings_open", [:])
-        if settingsWindow == nil {
-            let hosting = NSHostingController(
-                rootView: SettingsView(settings: controller.settings, controller: controller)
-            )
-            let window = NSWindow(contentViewController: hosting)
-            window.title = "ScrumTrace Settings"
-            window.setContentSize(NSSize(width: 640, height: 640))
-            window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
-            // NSWindow defaults to release-on-close; the cached reference would
-            // dangle and the second "Settings…" click would crash.
-            window.isReleasedWhenClosed = false
-            settingsWindow = window
-        }
-        settingsWindow?.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
+        settingsPresenter.show()
     }
 
     @objc func showAgentLogWindow(_ sender: Any?) {
-        showSettingsWindow(sender)
+        AgentLog.event("settings_open", ["tab": "logs"])
+        settingsPresenter.show(tab: .logs)
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        showSettingsWindow(nil)
+        return true
+    }
+}
+
+/// Own one retained window for menu actions, Command-comma and app reopening.
+@MainActor
+final class SettingsWindowPresenter {
+    let navigation = SettingsNavigation()
+    private let controller: SessionController
+    private(set) var window: NSWindow?
+
+    init(controller: SessionController) {
+        self.controller = controller
+    }
+
+    func show(tab: SettingsTab? = nil) {
+        if let tab { navigation.selectedTab = tab }
+        if window == nil {
+            let hosting = NSHostingController(
+                rootView: SettingsView(settings: controller.settings, controller: controller, navigation: navigation)
+            )
+            let created = NSWindow(contentViewController: hosting)
+            created.title = "ScrumTrace Settings"
+            created.styleMask = [.titled, .closable, .miniaturizable, .resizable]
+            created.setContentSize(NSSize(width: 720, height: 640))
+            created.contentMinSize = NSSize(width: 652, height: 592)
+            created.isReleasedWhenClosed = false
+            created.center()
+            window = created
+        }
+        if window?.isMiniaturized == true { window?.deminiaturize(nil) }
+        NSApp.activate(ignoringOtherApps: true)
+        window?.makeKeyAndOrderFront(nil)
     }
 }
 #endif

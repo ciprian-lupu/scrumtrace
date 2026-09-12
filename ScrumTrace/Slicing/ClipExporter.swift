@@ -238,7 +238,9 @@ struct ClipExporter {
     ) async throws {
         let range = try clipTimeRange(slice: slice, mediaDuration: mediaDuration)
         let temp = try ExportRel.makePrivateTemporaryURL(prefix: "scrumtrace-clip", ext: "mp4")
-        let asset = AVURLAsset(url: source)
+        let media = try await SessionPlaybackMedia.prepare(sessionURL: sessionURL, privateMovie: source)
+        defer { media.cleanup() }
+        let asset = media.asset
         do {
             try await writeMainProfileClip(asset: asset, destination: temp, timeRange: range)
         } catch {
@@ -282,7 +284,7 @@ struct ClipExporter {
     /// Spec encode target: H.264 Main, 720p, 1.2 Mbps + 96 kbps AAC.
     /// `tracks(withMediaType:)` is empty until loaded on macOS 14 — always `loadTracks`.
     private func writeMainProfileClip(
-        asset: AVURLAsset,
+        asset: AVAsset,
         destination: URL,
         timeRange: CMTimeRange
     ) async throws {
@@ -327,6 +329,8 @@ struct ClipExporter {
             if writer.canAdd(input) {
                 writer.add(input)
                 audioInput = input
+            } else {
+                throw SessionRecorderError.writerFailed("Clip writer rejected audio.")
             }
         }
 
@@ -363,22 +367,26 @@ struct ClipExporter {
         }
         reader.add(videoOutput)
 
-        var audioOutput: AVAssetReaderTrackOutput?
-        if let audioTrack = audioTracks.first, audioInput != nil {
-            let output = AVAssetReaderTrackOutput(
-                track: audioTrack,
-                outputSettings: [
+        var audioOutput: AVAssetReaderAudioMixOutput?
+        if !audioTracks.isEmpty, audioInput != nil {
+            let output = AVAssetReaderAudioMixOutput(
+                audioTracks: audioTracks,
+                audioSettings: [
                     AVFormatIDKey: kAudioFormatLinearPCM,
+                    AVSampleRateKey: 48_000,
+                    AVNumberOfChannelsKey: 2,
                     AVLinearPCMIsNonInterleaved: false,
                     AVLinearPCMBitDepthKey: 16,
                     AVLinearPCMIsFloatKey: false,
                     AVLinearPCMIsBigEndianKey: false
                 ]
             )
-            if reader.canAdd(output) {
-                reader.add(output)
-                audioOutput = output
+            output.audioMix = SessionPlaybackMedia.audioMix(tracks: audioTracks)
+            guard reader.canAdd(output) else {
+                throw SessionRecorderError.writerFailed("Clip reader rejected the audio mix.")
             }
+            reader.add(output)
+            audioOutput = output
         }
 
         guard writer.startWriting() else {
@@ -474,7 +482,7 @@ struct ClipExporter {
         }
     }
 
-    private func exportPresetClip(asset: AVURLAsset, destination: URL, timeRange: CMTimeRange) async throws {
+    private func exportPresetClip(asset: AVAsset, destination: URL, timeRange: CMTimeRange) async throws {
         ExportRel.unlinkLastComponentUnfollowed(destination)
         guard let session = AVAssetExportSession(asset: asset, presetName: AVAssetExportPreset1280x720) else {
             throw SessionRecorderError.writerFailed("AVAssetExportSession unavailable.")
@@ -483,6 +491,7 @@ struct ClipExporter {
         session.outputFileType = .mp4
         session.shouldOptimizeForNetworkUse = true
         session.timeRange = timeRange
+        session.audioMix = SessionPlaybackMedia.audioMix(tracks: try await asset.loadTracks(withMediaType: .audio))
         let seconds = max(CMTimeGetSeconds(timeRange.duration), 1)
         let bytesPerSecond = Double(MediaBudget.clipVideoBitrate + MediaBudget.clipAudioBitrate) / 8.0
         session.fileLengthLimit = Int64(bytesPerSecond * seconds * 1.25)

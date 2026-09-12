@@ -8,17 +8,34 @@ import SwiftUI
 final class MenuBarController: NSObject {
     private let controller: SessionController
     private let item: NSStatusItem
+    let menu = NSMenu()
+    private let openSettings: () -> Void
+    private let openLogs: () -> Void
+    private var isMenuOpen = false
+    private var checkingUpdates = false
     private var hud: RecordingHUDWindow?
     private var lastMenuSignature = ""
     private var statusMenuItem: NSMenuItem?
     private var hudObserver: NSObjectProtocol?
     private var lastStartEnabled: Bool?
+    private let contextPresenter = RecordingContextPresenter()
+    private var isPreparingRecording = false
 
-    init(controller: SessionController, hud: RecordingHUDWindow) {
+    init(
+        controller: SessionController,
+        hud: RecordingHUDWindow? = nil,
+        openSettings: @escaping () -> Void,
+        openLogs: @escaping () -> Void
+    ) {
         self.controller = controller
         self.hud = hud
+        self.openSettings = openSettings
+        self.openLogs = openLogs
         item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         super.init()
+        menu.autoenablesItems = false
+        menu.delegate = self
+        item.menu = menu
         if let button = item.button {
             button.image = NSImage(systemSymbolName: "record.circle", accessibilityDescription: "ScrumTrace")
             button.image?.isTemplate = true
@@ -64,13 +81,16 @@ final class MenuBarController: NSObject {
             controller.isRecording ? "1" : "0",
             controller.lastSessionId ?? "",
             controller.isBusy ? "1" : "0",
+            controller.startInFlight ? "1" : "0",
+            checkingUpdates ? "updates" : "idle",
+            isPreparingRecording ? "context" : "idle",
             controller.captureState.rawValue,
             controller.privacy.isCurrentlyTripped ? "priv" : "ok",
             readiness.menuLabel,
             controller.lastError == nil ? "ok" : "err",
             controller.settings.captureArea.summary
         ].joined(separator: "|")
-        if signature != lastMenuSignature {
+        if signature != lastMenuSignature && !isMenuOpen {
             lastMenuSignature = signature
             rebuild()
         }
@@ -79,7 +99,7 @@ final class MenuBarController: NSObject {
     }
 
     private func rebuild() {
-        let menu = NSMenu()
+        menu.removeAllItems()
         if controller.isRecording {
             let pauseItem = actionItem(
                 controller.captureState == .paused ? "Resume" : "Pause",
@@ -101,7 +121,7 @@ final class MenuBarController: NSObject {
                 "Start recording — \(controller.settings.captureArea.summary)",
                 #selector(start)
             )
-            start.isEnabled = !controller.isBusy
+            start.isEnabled = !controller.isBusy && !controller.startInFlight && !isPreparingRecording
             if lastStartEnabled != start.isEnabled {
                 lastStartEnabled = start.isEnabled
                 AgentLog.event("start_control_state", ["enabled": start.isEnabled ? "1" : "0"])
@@ -113,11 +133,12 @@ final class MenuBarController: NSObject {
                 keyEquivalent: ""
             )
             let areaMenu = NSMenu()
+            areaMenu.autoenablesItems = false
             let change = actionItem("Select area on screen…", #selector(selectCaptureArea))
-            change.isEnabled = !controller.isBusy
+            change.isEnabled = controller.canChangeCaptureSettings
             areaMenu.addItem(change)
             let full = actionItem("Use entire display", #selector(useEntireDisplay))
-            full.isEnabled = !controller.isBusy && !controller.settings.captureArea.isEntireDisplay
+            full.isEnabled = controller.canChangeCaptureSettings && !controller.settings.captureArea.isEntireDisplay
             areaMenu.addItem(full)
             areaRoot.submenu = areaMenu
             menu.addItem(areaRoot)
@@ -133,21 +154,24 @@ final class MenuBarController: NSObject {
         menu.addItem(perm)
         if !readiness.allowsStart {
             let relaunch = actionItem("Relaunch ScrumTrace", #selector(relaunch))
-            relaunch.isEnabled = !controller.isRecording && !controller.isBusy
+            relaunch.isEnabled = controller.canChangeCaptureSettings
             menu.addItem(relaunch)
         }
         menu.addItem(.separator())
         let retry = actionItem("Retry analysis", #selector(retry))
-        retry.isEnabled = controller.lastSessionId != nil && !controller.isBusy && !controller.isRecording
+        retry.isEnabled = controller.lastSessionId != nil && controller.canChangeCaptureSettings
         menu.addItem(retry)
         let reveal = actionItem("Reveal last session", #selector(reveal))
         reveal.isEnabled = controller.lastSessionId != nil
         menu.addItem(reveal)
         let recent = NSMenuItem(title: "Recent", action: nil, keyEquivalent: "")
         let recentMenu = NSMenu()
+        recentMenu.autoenablesItems = false
         let sessions = controller.vault.recentSessions()
         if sessions.isEmpty {
-            recentMenu.addItem(NSMenuItem(title: "No sessions yet", action: nil, keyEquivalent: ""))
+            let empty = NSMenuItem(title: "No sessions yet", action: nil, keyEquivalent: "")
+            empty.isEnabled = false
+            recentMenu.addItem(empty)
         } else {
             for session in sessions {
                 let item = NSMenuItem(
@@ -156,6 +180,7 @@ final class MenuBarController: NSObject {
                     keyEquivalent: ""
                 )
                 let sub = NSMenu()
+                sub.autoenablesItems = false
                 let revealItem = NSMenuItem(
                     title: "Reveal export/",
                     action: #selector(openRecent(_:)),
@@ -170,7 +195,7 @@ final class MenuBarController: NSObject {
                 )
                 retryItem.representedObject = session.sessionId
                 retryItem.target = self
-                retryItem.isEnabled = !controller.isBusy && !controller.isRecording
+                retryItem.isEnabled = controller.canChangeCaptureSettings
                 sub.addItem(revealItem)
                 sub.addItem(retryItem)
                 item.submenu = sub
@@ -182,8 +207,9 @@ final class MenuBarController: NSObject {
         menu.addItem(.separator())
         let settingsRoot = NSMenuItem(title: "Settings", action: nil, keyEquivalent: "")
         let settingsMenu = NSMenu()
+        settingsMenu.autoenablesItems = false
         settingsMenu.addItem(actionItem("Settings Window…", #selector(settings)))
-        settingsMenu.addItem(actionItem("Agent Log…", #selector(settings)))
+        settingsMenu.addItem(actionItem("Agent Log…", #selector(agentLog)))
         settingsMenu.addItem(.separator())
         settingsMenu.addItem(actionItem("Log permission probe", #selector(probePermissions)))
         settingsMenu.addItem(actionItem("Reveal agent log", #selector(revealLog)))
@@ -193,15 +219,18 @@ final class MenuBarController: NSObject {
         settingsMenu.addItem(actionItem("Ask for Screen Recording", #selector(askScreen)))
         settingsMenu.addItem(actionItem("Open Screen Recording settings", #selector(openScreenSettings)))
         settingsMenu.addItem(actionItem("Open Microphone settings", #selector(openMicSettings)))
-        settingsMenu.addItem(actionItem("Relaunch ScrumTrace", #selector(relaunch)))
-        settingsMenu.addItem(actionItem("Check for updates", #selector(checkUpdates)))
+        let settingsRelaunch = actionItem("Relaunch ScrumTrace", #selector(relaunch))
+        settingsRelaunch.isEnabled = controller.canChangeCaptureSettings
+        settingsMenu.addItem(settingsRelaunch)
+        let updates = actionItem(checkingUpdates ? "Checking for updates…" : "Check for updates", #selector(checkUpdates))
+        updates.isEnabled = !checkingUpdates
+        settingsMenu.addItem(updates)
         settingsRoot.submenu = settingsMenu
         menu.addItem(settingsRoot)
         menu.addItem(actionItem("Quit ScrumTrace", #selector(quit)))
         for item in menu.items where item.action != nil && item.target == nil {
             item.target = self
         }
-        self.item.menu = menu
     }
 
     private func actionItem(_ title: String, _ selector: Selector) -> NSMenuItem {
@@ -211,20 +240,26 @@ final class MenuBarController: NSObject {
     }
 
     @objc private func selectCaptureArea() {
+        guard controller.canChangeCaptureSettings else { return }
         AgentLog.event("menu_select_area", [:])
         CaptureAreaPicker.present(current: controller.settings.captureArea) { [weak self] area in
-            self?.controller.settings.captureArea = area
-            self?.rebuild()
+            guard let self, self.controller.canChangeCaptureSettings else { return }
+            self.controller.settings.captureArea = area
+            self.rebuild()
         }
     }
 
     @objc private func useEntireDisplay() {
+        guard controller.canChangeCaptureSettings else { return }
         AgentLog.event("menu_area_full", [:])
         controller.settings.captureArea = .entireDisplay
         rebuild()
     }
 
+    func requestStart() { start() }
+
     @objc private func start() {
+        guard controller.canChangeCaptureSettings, !isPreparingRecording else { return }
         AgentLog.event("menu_start", [:])
         if !controller.settings.meetingNoticeAccepted {
             if !presentMeetingNotice() {
@@ -236,18 +271,31 @@ final class MenuBarController: NSObject {
             presentStartBlocked(readiness)
             return
         }
-        CaptureAreaPicker.present(current: controller.settings.captureArea, mode: .record) { [weak self] outcome in
+        isPreparingRecording = true
+        rebuild()
+        contextPresenter.present(controller: controller) { [weak self] product in
             guard let self else { return }
-            switch outcome {
-            case .cancelled:
+            guard let product, self.controller.canChangeCaptureSettings else {
+                self.isPreparingRecording = false
+                self.rebuild()
                 return
-            case .selected(let area):
-                self.controller.settings.captureArea = area
+            }
+            CaptureAreaPicker.present(current: self.controller.settings.captureArea, mode: .record) { [weak self] outcome in
+                guard let self else { return }
+                self.isPreparingRecording = false
                 self.rebuild()
-            case .record(let area):
-                self.controller.settings.captureArea = area
-                self.rebuild()
-                self.controller.startRecording()
+                guard self.controller.canChangeCaptureSettings else { return }
+                switch outcome {
+                case .cancelled:
+                    return
+                case .selected(let area):
+                    self.controller.settings.captureArea = area
+                    self.rebuild()
+                case .record(let area):
+                    self.controller.settings.captureArea = area
+                    self.rebuild()
+                    self.controller.startRecording(product: product)
+                }
             }
         }
     }
@@ -351,8 +399,11 @@ final class MenuBarController: NSObject {
     }
     @objc private func settings() {
         AgentLog.event("menu_settings", [:])
-        NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
-        NSApp.activate(ignoringOtherApps: true)
+        openSettings()
+    }
+    @objc private func agentLog() {
+        AgentLog.event("menu_agent_log", [:])
+        openLogs()
     }
     @objc private func exportDiagnostics() {
         AgentLog.event("menu_diagnostics", [:])
@@ -383,12 +434,17 @@ final class MenuBarController: NSObject {
         SystemPrivacySettings.openMicrophone()
     }
     @objc private func checkUpdates() {
+        guard !checkingUpdates else { return }
+        checkingUpdates = true
         AgentLog.event("menu_updates", [:])
         Task {
+            defer { checkingUpdates = false }
             let result = await UpdateChecker.check()
             AgentLog.event("update_check", [
                 "result": {
                     switch result {
+                    case .noPublishedReleases:
+                        return "no_releases"
                     case .upToDate:
                         return "up_to_date"
                     case .newerAvailable:
@@ -404,6 +460,7 @@ final class MenuBarController: NSObject {
                 alert.informativeText = result.settingsLine
                 alert.addButton(withTitle: "Open releases")
                 alert.addButton(withTitle: "Close")
+                NSApp.activate(ignoringOtherApps: true)
                 if alert.runModal() == .alertFirstButtonReturn {
                     NSWorkspace.shared.open(UpdateChecker.releasesURL)
                 }
@@ -430,6 +487,19 @@ final class MenuBarController: NSObject {
         guard let id = sender.representedObject as? String else { return }
         AgentLog.event("menu_retry", ["session": id])
         controller.retryAnalysis(sessionId: id)
+    }
+}
+
+extension MenuBarController: NSMenuDelegate {
+    func menuWillOpen(_ menu: NSMenu) {
+        // Refresh in the same menu before tracking begins. Replacing the status
+        // item's menu while it is open dismisses nested Settings/Recent menus.
+        rebuild()
+        isMenuOpen = true
+    }
+
+    func menuDidClose(_ menu: NSMenu) {
+        isMenuOpen = false
     }
 }
 #endif

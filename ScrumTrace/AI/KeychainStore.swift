@@ -1,5 +1,6 @@
 import Foundation
 import Security
+import LocalAuthentication
 
 enum KeychainStore {
     static let service = "com.str8minds.ScrumTrace"
@@ -73,11 +74,30 @@ enum KeychainStore {
         return String(data: data, encoding: .utf8)
     }
 
-    static func delete(account: String) {
-        _ = withKeychain { dataProtection in
+    /// Attribute-only query: Settings never loads a saved secret into its text field.
+    static func contains(account: String) -> Bool {
+        let status = withKeychain { dataProtection in
+            var query = baseQuery(account: account, dataProtection: dataProtection)
+            query[kSecMatchLimit as String] = kSecMatchLimitOne
+            let context = LAContext()
+            context.interactionNotAllowed = true
+            query[kSecUseAuthenticationContext as String] = context
+            return SecItemCopyMatching(query as CFDictionary, nil)
+        }
+        return status == errSecSuccess || status == errSecInteractionNotAllowed
+    }
+
+    static func remove(account: String) throws {
+        let status = withKeychain { dataProtection in
             SecItemDelete(baseQuery(account: account, dataProtection: dataProtection) as CFDictionary)
         }
+        guard status == errSecSuccess || status == errSecItemNotFound else {
+            throw NSError(domain: NSOSStatusErrorDomain, code: Int(status))
+        }
         // A key saved by a team-signed build must not linger in the other store.
-        SecItemDelete(baseQuery(account: account, dataProtection: false) as CFDictionary)
+        let legacy = SecItemDelete(baseQuery(account: account, dataProtection: false) as CFDictionary)
+        guard legacy == errSecSuccess || legacy == errSecItemNotFound else {
+            throw NSError(domain: NSOSStatusErrorDomain, code: Int(legacy))
+        }
     }
 }

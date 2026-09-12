@@ -540,7 +540,7 @@ enum ExportRel {
             throw SessionVaultError.writeFailed("sessions folder")
         }
         let parent = sessionURL.deletingLastPathComponent().standardizedFileURL
-        guard parent == sessionsRoot.standardizedFileURL else {
+        guard parent.path == sessionsRoot.standardizedFileURL.path else {
             throw SessionVaultError.writeFailed("session folder")
         }
         let name = sessionURL.lastPathComponent
@@ -1970,6 +1970,7 @@ enum TaskKind: String, Codable, Sendable {
     case decision
     case actionItem = "action_item"
     case architectureNote = "architecture_note"
+    case openQuestion = "open_question"
     case improvement
     case unknown
 
@@ -2163,11 +2164,15 @@ struct ProductContext: Codable, Sendable, Hashable {
     var appName: String
     var repoURL: String
     var techStack: String
+    var contextID: String? = nil
+    var contextName: String? = nil
 
     enum CodingKeys: String, CodingKey {
         case appName = "app_name"
         case repoURL = "repo_url"
         case techStack = "tech_stack"
+        case contextID = "context_id"
+        case contextName = "context_name"
     }
 
     static let empty = ProductContext(appName: "", repoURL: "", techStack: "")
@@ -2491,20 +2496,48 @@ struct TranscriptSegment: Codable, Sendable, Hashable {
     var text: String
     var speaker: String?
     var words: [TranscriptWord]
+    var source: String? = nil
+    var speakerAttribution: SpeakerAttribution? = nil
+    var speakerCandidates: [String]? = nil
+}
+
+struct TranscriptionAnalysis: Codable, Sendable, Hashable {
+    var source: String
+    /// transcribed, recovered, no_speech, unrecognized, or failed.
+    var status: String
 }
 
 struct FullTranscript: Codable, Sendable {
     var sessionId: String
     var language: String
     var segments: [TranscriptSegment]
-    /// Hypotheses: `room` (microphone WAV) and/or `system` (movie audio).
+    var speakers: [SessionSpeaker]? = nil
+    var speakerAnalysis: [SpeakerAnalysis]? = nil
+    var transcriptionAnalysis: [TranscriptionAnalysis]? = nil
+    /// Capture sources, not individual people: `room` and/or `system`.
     var sources: [String]? = nil
+
+    var hasUsableText: Bool {
+        segments.contains { !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    }
+
+    /// Empty legacy transcripts were previously marked complete, even when
+    /// speakers were detected. Retry must run ASR again, not reuse that empty file.
+    var needsTranscriptionRetry: Bool {
+        if let analysis = transcriptionAnalysis, !analysis.isEmpty {
+            return analysis.contains { $0.status == "unrecognized" || $0.status == "failed" }
+        }
+        return !hasUsableText
+    }
 
     enum CodingKeys: String, CodingKey {
         case sessionId = "session_id"
         case language
         case segments
         case sources
+        case speakers
+        case speakerAnalysis = "speaker_analysis"
+        case transcriptionAnalysis = "transcription_analysis"
     }
 }
 

@@ -216,6 +216,7 @@ Zip is built from an **explicit allow-list** of paths under `export/`, never by 
 
 ### 1. Menu bar & floating HUD
 - Menu bar: Start / Stop / Recent / Settings / Quit.
+- User-approved context workflow (2026-09-12): reusable product contexts in General, with explicit selection before each recording (also New Recording / Command-N). The selected name, ID and product fields are copied into the session before asynchronous capture starts; editing or deleting a profile cannot change past sessions. Migrate the old single context once and support No context. Automatic context selection is deferred to v2.
 - HUD: $t_{\text{media}}$, Shot, Pin, Pause, Stop.
 - Red pulse = recording. Amber = paused. While paused, Shot/Pin/Hold-to-Talk controls are disabled and do nothing.
 
@@ -243,7 +244,7 @@ Zip is built from an **explicit allow-list** of paths under `export/`, never by 
 - Model: compressed turbo `large-v3-v20240930_turbo_632MB` (upstream `openai_whisper-large-v3-v20240930_turbo_632MB`). Old `large-v3_turbo` / `openai_whisper-large-v3_turbo` UserDefaults values remap to that folder. Uncompressed `openai_whisper-large-v3_turbo` is opt-in.
 - Writes `archive/full_transcript.json` with word-level timestamps.
 - **Target (measure, do not guarantee):** 5 minutes of 16 kHz mono on Apple Silicon, model already on disk, wall time recorded in the Gate 3 log. No reference Mac is claimed here.
-- Diarization deferred; speaker labels are hypotheses.
+- User-approved extension (2026-09-12): local FluidAudio 0.15.7 offline speaker diarization on macOS 15+, separately for room and system audio. Word-level estimates, uncertain/overlapping speech, session-local names and manual turn corrections; synchronized private playback and selected-window export. Models download on first use; audio and voice embeddings are not uploaded, and embeddings are not saved. Multi-person meeting accuracy and long-run drift remain unverified hardware checks.
 
 ---
 
@@ -469,3 +470,10 @@ Implement ScrumTrace from IMPLEMENTATION_PLAN.md.
 
 Bundle id: com.str8minds.ScrumTrace. App Sandbox: OFF.
 ```
+
+
+### Session brief usability — approved 2026-09-12
+
+The brief reports transcription, speaker analysis and provider evaluation separately. Review-only output is expanded, and absent results have an explanation. Highlights, decisions, actions and open questions come from confirmed evidence; optional task kind open_question uses the same candidate/evidence validation contract. No additional provider request is introduced. Owner/deadline wording is preserved only when explicitly stated in evidence.
+
+Selected transcript passages sit next to their clips. Full-transcript reading is available only when the full JSON was explicitly included in export and survived the measured pack budget. Export links never point into archive. Empty legacy transcripts can retry transcription; digitally silent sources are distinguished from audio with no recognized text. Local model accuracy and hardware gates remain separate from brief usability.

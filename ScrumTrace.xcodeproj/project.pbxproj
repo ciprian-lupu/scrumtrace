@@ -95,6 +95,7 @@
 			name = ScrumTrace;
 			packageProductDependencies = (
 				AA0000000000000000000012 /* WhisperKit */,
+				AA0000000000000000000032 /* FluidAudio */,
 			);
 			productName = ScrumTrace;
 			productReference = AA0000000000000000000003 /* ScrumTrace.app */;
@@ -151,6 +152,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				AA0000000000000000000011 /* XCRemoteSwiftPackageReference "WhisperKit" */,
+				AA0000000000000000000031 /* XCRemoteSwiftPackageReference "FluidAudio" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = AA0000000000000000000005 /* Products */;
@@ -377,6 +379,11 @@
 				version = 0.11.0;
 			};
 		};
+		AA0000000000000000000031 /* XCRemoteSwiftPackageReference "FluidAudio" */ = {
+            isa = XCRemoteSwiftPackageReference;
+            repositoryURL = "https://github.com/FluidInference/FluidAudio";
+            requirement = { kind = exactVersion; version = 0.15.7; };
+        };
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -385,6 +392,11 @@
 			package = AA0000000000000000000011 /* XCRemoteSwiftPackageReference "WhisperKit" */;
 			productName = WhisperKit;
 		};
+        AA0000000000000000000032 /* FluidAudio */ = {
+            isa = XCSwiftPackageProductDependency;
+            package = AA0000000000000000000031 /* XCRemoteSwiftPackageReference "FluidAudio" */;
+            productName = FluidAudio;
+        };
 /* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = AA0000000000000000000001 /* Project object */;

@@ -53,35 +53,60 @@ struct AIProviderConfiguration: Sendable {
 final class AppSettings: ObservableObject {
     static let shared = AppSettings()
     private let defaults: UserDefaults
-    private let keyAccount = "ai.apiKey"
+    private let keyStore: SettingsKeyStore
+    private let legacyCredentialScope: String
+
+    /// The legacy key belongs only to the provider/endpoint selected on upgrade.
+    /// New saves are scoped so switching a backend cannot reuse another service's key.
+    private var credentialScope: String { Self.credentialScope(provider: provider, endpoint: baseURL) }
+    private var keyAccount: String { "ai.apiKey.\(credentialScope)" }
+    @Published private(set) var hasSavedAPIKey = false
 
     @Published var provider: AIProviderKind {
-        didSet { defaults.set(provider.rawValue, forKey: Keys.provider) }
+        didSet {
+            guard provider != oldValue else { return }
+            defaults.set(provider.rawValue, forKey: Keys.provider)
+            let endpoint = defaults.string(forKey: Keys.profile(provider, "baseURL")) ?? provider.defaultBaseURL
+            let selectedModel = defaults.string(forKey: Keys.profile(provider, "model")) ?? provider.defaultModel
+            baseURL = endpoint
+            model = selectedModel
+            apiKeyDraft = ""
+            refreshKeyStatus()
+        }
     }
 
     @Published var baseURL: String {
-        didSet { defaults.set(baseURL, forKey: Keys.baseURL) }
+        didSet {
+            defaults.set(baseURL, forKey: Keys.baseURL)
+            defaults.set(baseURL, forKey: Keys.profile(provider, "baseURL"))
+            if Self.credentialScope(provider: provider, endpoint: oldValue) != credentialScope {
+                apiKeyDraft = ""
+                refreshKeyStatus()
+            }
+        }
     }
 
     @Published var model: String {
-        didSet { defaults.set(model, forKey: Keys.model) }
+        didSet {
+            defaults.set(model, forKey: Keys.model)
+            defaults.set(model, forKey: Keys.profile(provider, "model"))
+        }
     }
 
     @Published var whisperModel: String {
         didSet { defaults.set(whisperModel, forKey: Keys.whisperModel) }
     }
 
-    @Published var appName: String {
-        didSet { defaults.set(appName, forKey: Keys.appName) }
+    @Published var identifySpeakers: Bool {
+        didSet { defaults.set(identifySpeakers, forKey: Keys.identifySpeakers) }
     }
 
-    @Published var repoURL: String {
-        didSet { defaults.set(repoURL, forKey: Keys.repoURL) }
+    @Published var speechLanguage: SpeechLanguage {
+        didSet { defaults.set(speechLanguage.rawValue, forKey: Keys.speechLanguage) }
     }
 
-    @Published var techStack: String {
-        didSet { defaults.set(techStack, forKey: Keys.techStack) }
-    }
+    @Published private(set) var contextLibrary: ProductContextLibrary
+    let contextLibraryIssue: String?
 
     @Published var includeFullTranscriptInZip: Bool {
         didSet { defaults.set(includeFullTranscriptInZip, forKey: Keys.includeTranscript) }
@@ -114,20 +139,30 @@ final class AppSettings: ObservableObject {
     @Published var apiKeyDraft: String
 
     var productContext: ProductContext {
-        ProductContext(appName: appName, repoURL: repoURL, techStack: techStack)
+        contextLibrary.selected?.snapshot ?? .empty
     }
 
-    init(defaults: UserDefaults = .standard) {
+    init(defaults: UserDefaults = .standard, keyStore: SettingsKeyStore = .live) {
         self.defaults = defaults
+        self.keyStore = keyStore
         let storedProvider = defaults.string(forKey: Keys.provider).flatMap(AIProviderKind.init(rawValue:))
-        self.provider = storedProvider ?? .openaiCompatible
-        self.baseURL = defaults.string(forKey: Keys.baseURL) ?? AIProviderKind.openaiCompatible.defaultBaseURL
-        self.model = defaults.string(forKey: Keys.model) ?? AIProviderKind.openaiCompatible.defaultModel
+        let selectedProvider = storedProvider ?? .openaiCompatible
+        let endpoint = defaults.string(forKey: Keys.profile(selectedProvider, "baseURL"))
+            ?? defaults.string(forKey: Keys.baseURL) ?? selectedProvider.defaultBaseURL
+        let selectedModel = defaults.string(forKey: Keys.profile(selectedProvider, "model"))
+            ?? defaults.string(forKey: Keys.model) ?? selectedProvider.defaultModel
+        self.provider = selectedProvider
+        self.baseURL = endpoint
+        self.model = selectedModel
+        self.legacyCredentialScope = defaults.string(forKey: Keys.legacyCredentialScope)
+            ?? Self.credentialScope(provider: selectedProvider, endpoint: endpoint)
         let storedWhisper = defaults.string(forKey: Keys.whisperModel) ?? WhisperTranscriber.defaultStoredModel
         self.whisperModel = Self.migratedWhisperModel(storedWhisper)
-        self.appName = defaults.string(forKey: Keys.appName) ?? ""
-        self.repoURL = defaults.string(forKey: Keys.repoURL) ?? ""
-        self.techStack = defaults.string(forKey: Keys.techStack) ?? ""
+        self.identifySpeakers = defaults.object(forKey: Keys.identifySpeakers) as? Bool ?? true
+        self.speechLanguage = defaults.string(forKey: Keys.speechLanguage).flatMap(SpeechLanguage.init(rawValue:)) ?? .automatic
+        let contexts = ProductContextLibrary.load(from: defaults)
+        self.contextLibrary = contexts.library
+        self.contextLibraryIssue = contexts.issue
         self.includeFullTranscriptInZip = defaults.bool(forKey: Keys.includeTranscript)
         self.allowGoogleClipUpload = defaults.object(forKey: Keys.allowGoogleClip) as? Bool ?? false
         self.retentionDays = defaults.object(forKey: Keys.retentionDays) as? Int ?? 0
@@ -140,7 +175,67 @@ final class AppSettings: ObservableObject {
         }
         self.showCursor = defaults.object(forKey: Keys.showCursor) as? Bool ?? true
         self.includeMicrophone = defaults.object(forKey: Keys.includeMicrophone) as? Bool ?? true
-        self.apiKeyDraft = KeychainStore.get(account: keyAccount) ?? ""
+        self.apiKeyDraft = ""
+        defaults.set(endpoint, forKey: Keys.profile(selectedProvider, "baseURL"))
+        defaults.set(selectedModel, forKey: Keys.profile(selectedProvider, "model"))
+        defaults.set(legacyCredentialScope, forKey: Keys.legacyCredentialScope)
+        refreshKeyStatus()
+    }
+
+    func saveProductContext(_ profile: SavedProductContext, isNew: Bool) throws {
+        var profile = profile
+        profile.name = profile.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !profile.name.isEmpty, profile.name.count <= 80 else {
+            throw SettingsValidationError("Enter a context name of up to 80 characters.")
+        }
+        guard !contextLibrary.profiles.contains(where: {
+            $0.id != profile.id && $0.name.compare(profile.name, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame
+        }) else { throw SettingsValidationError("A context with this name already exists. Choose a different name.") }
+        profile.product.appName = profile.product.appName.trimmingCharacters(in: .whitespacesAndNewlines)
+        profile.product.repoURL = profile.product.repoURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        profile.product.techStack = profile.product.techStack.trimmingCharacters(in: .whitespacesAndNewlines)
+        profile.product.contextID = nil
+        profile.product.contextName = nil
+        var library = contextLibrary
+        if isNew {
+            guard !profile.id.isEmpty, !library.profiles.contains(where: { $0.id == profile.id }) else {
+                throw SettingsValidationError("This context already exists. Reopen the editor.")
+            }
+            library.profiles.append(profile)
+        } else {
+            guard let index = library.profiles.firstIndex(where: { $0.id == profile.id }) else {
+                throw SettingsValidationError("This context was deleted. Close the editor and add a new context.")
+            }
+            library.profiles[index] = profile
+        }
+        try persistContexts(library)
+    }
+
+    func deleteProductContext(id: String) throws {
+        var library = contextLibrary
+        library.profiles.removeAll { $0.id == id }
+        if library.selectedID == id { library.selectedID = nil }
+        try persistContexts(library)
+    }
+
+    /// Explicit nil means "No context"; never substitute another saved profile.
+    @discardableResult
+    func selectProductContext(id: String?) throws -> ProductContext {
+        if contextLibraryIssue != nil, id == nil { return .empty }
+        guard id == nil || contextLibrary.profiles.contains(where: { $0.id == id }) else {
+            throw SettingsValidationError("The selected context is no longer available. Choose another context.")
+        }
+        var library = contextLibrary
+        library.selectedID = id
+        try persistContexts(library)
+        return library.selected?.snapshot ?? .empty
+    }
+
+    private func persistContexts(_ library: ProductContextLibrary) throws {
+        if let contextLibraryIssue { throw SettingsValidationError(contextLibraryIssue) }
+        let data = try JSONEncoder().encode(library)
+        defaults.set(data, forKey: ProductContextLibrary.defaultsKey)
+        contextLibrary = library
     }
 
     private func persistCaptureArea() {
@@ -151,28 +246,68 @@ final class AppSettings: ObservableObject {
 
     func saveAPIKey() throws {
         let trimmed = apiKeyDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty {
-            KeychainStore.delete(account: keyAccount)
-        } else {
-            try KeychainStore.set(trimmed, account: keyAccount)
-        }
+        guard !trimmed.isEmpty else { throw SettingsValidationError("Enter a key to save. Use Remove saved key to delete it.") }
+        _ = try ProviderEndpoint.requireHTTPSOrLocal(baseURL)
+        try keyStore.set(trimmed, keyAccount)
+        apiKeyDraft = ""
+        refreshKeyStatus()
     }
 
-    func providerConfiguration() -> AIProviderConfiguration {
-        AIProviderConfiguration(
+    func removeSavedAPIKey() throws {
+        try keyStore.remove(keyAccount)
+        if credentialScope == legacyCredentialScope { try keyStore.remove("ai.apiKey") }
+        apiKeyDraft = ""
+        refreshKeyStatus()
+    }
+
+    func refreshKeyStatus() {
+        hasSavedAPIKey = keyStore.contains(keyAccount)
+            || (credentialScope == legacyCredentialScope && keyStore.contains("ai.apiKey"))
+    }
+
+    func providerConfiguration(includeKey: Bool = true) -> AIProviderConfiguration {
+        var key = ""
+        if includeKey, (try? ProviderEndpoint.requireHTTPSOrLocal(baseURL)) != nil {
+            key = keyStore.get(keyAccount)
+                ?? (credentialScope == legacyCredentialScope ? keyStore.get("ai.apiKey") : nil) ?? ""
+        }
+        return AIProviderConfiguration(
             kind: provider,
-            baseURL: baseURL,
-            model: model,
-            apiKey: KeychainStore.get(account: keyAccount) ?? "",
+            baseURL: baseURL.trimmingCharacters(in: .whitespacesAndNewlines),
+            model: model.trimmingCharacters(in: .whitespacesAndNewlines),
+            apiKey: key,
             acceptsText: true,
             acceptsImages: provider != .anthropic || !model.isEmpty,
             acceptsVideo: ProviderWireMedia.adapterCanUploadVideo(provider) && allowGoogleClipUpload
         )
     }
 
+    var configurationIssue: String? {
+        do {
+            try providerConfiguration(includeKey: false).validate()
+            return nil
+        } catch { return error.localizedDescription }
+    }
+
+    var configurationSummary: String {
+        if let configurationIssue { return configurationIssue }
+        return hasSavedAPIKey
+            ? "Configured locally. Key validity and model availability have not been checked online."
+            : "No saved key for this endpoint. Recording and local export remain available."
+    }
+
     func applyProviderDefaults() {
         baseURL = provider.defaultBaseURL
         model = provider.defaultModel
+    }
+
+    static func credentialScope(provider: AIProviderKind, endpoint: String) -> String {
+        guard let url = try? ProviderEndpoint.requireHTTPSOrLocal(endpoint),
+              let host = url.host?.lowercased(), let scheme = url.scheme?.lowercased() else {
+            return "\(provider.rawValue).invalid"
+        }
+        let port = url.port ?? (scheme == "https" ? 443 : 80)
+        return "\(provider.rawValue).\(scheme)://\(host):\(port)"
     }
 
     static func migratedWhisperModel(_ stored: String) -> String {
@@ -191,9 +326,12 @@ final class AppSettings: ObservableObject {
         static let baseURL = "scrumtrace.baseURL"
         static let model = "scrumtrace.model"
         static let whisperModel = "scrumtrace.whisperModel"
-        static let appName = "scrumtrace.appName"
-        static let repoURL = "scrumtrace.repoURL"
-        static let techStack = "scrumtrace.techStack"
+        static let identifySpeakers = "scrumtrace.identifySpeakers"
+        static let speechLanguage = "scrumtrace.speechLanguage"
+        static let legacyCredentialScope = "scrumtrace.legacyCredentialScope"
+        static func profile(_ provider: AIProviderKind, _ field: String) -> String {
+            "scrumtrace.ai.\(provider.rawValue).\(field)"
+        }
         static let includeTranscript = "scrumtrace.includeFullTranscript"
         static let allowGoogleClip = "scrumtrace.allowGoogleClipUpload"
         static let retentionDays = "scrumtrace.retentionDays"
@@ -201,5 +339,43 @@ final class AppSettings: ObservableObject {
         static let captureArea = "scrumtrace.captureArea"
         static let showCursor = "scrumtrace.showCursor"
         static let includeMicrophone = "scrumtrace.includeMicrophone"
+    }
+}
+
+/// Injectable storage keeps preference tests away from the user's Keychain.
+struct SettingsKeyStore {
+    var get: (String) -> String?
+    var contains: (String) -> Bool
+    var set: (String, String) throws -> Void
+    var remove: (String) throws -> Void
+
+    static let live = SettingsKeyStore(
+        get: { KeychainStore.get(account: $0) },
+        contains: { KeychainStore.contains(account: $0) },
+        set: { try KeychainStore.set($0, account: $1) },
+        remove: { try KeychainStore.remove(account: $0) }
+    )
+    static let empty = SettingsKeyStore(get: { _ in nil }, contains: { _ in false }, set: { _, _ in }, remove: { _ in })
+}
+
+struct SettingsValidationError: LocalizedError {
+    let message: String
+    init(_ message: String) { self.message = message }
+    var errorDescription: String? { message }
+}
+
+extension AIProviderConfiguration {
+    func validate() throws {
+        _ = try ProviderEndpoint.requireHTTPSOrLocal(baseURL)
+        guard !model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw SettingsValidationError("Enter the model ID supplied by your provider.")
+        }
+        if kind == .anthropic && Self.isRetiredAnthropic(model) {
+            throw SettingsValidationError("This Anthropic model is retired. Choose a supported model ID.")
+        }
+        let path = URL(string: baseURL)?.path.trimmingCharacters(in: CharacterSet(charactersIn: "/")) ?? ""
+        if path.hasSuffix("chat/completions") || path.hasSuffix("messages") {
+            throw SettingsValidationError("Enter the API root, without /chat/completions or /messages.")
+        }
     }
 }
