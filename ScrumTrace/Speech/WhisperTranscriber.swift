@@ -52,6 +52,10 @@ final class WhisperTranscriber: @unchecked Sendable {
     static func decodingOptions(language: SpeechLanguage) -> DecodingOptions {
         DecodingOptions(
             language: language.code,
+            // WhisperKit 0.11's multilingual prefill cache can return empty
+            // 30-second windows with the compressed turbo model. Build the
+            // prompt for each decode; verified against the same recorded audio.
+            usePrefillCache: false,
             detectLanguage: language == .automatic,
             skipSpecialTokens: true,
             wordTimestamps: true
@@ -175,7 +179,8 @@ final class WhisperTranscriber: @unchecked Sendable {
             defer { ExportRel.removePrivateTemporaryURL(work) }
             if (try? SpeechSignal.isDigitalSilence(work)) == true {
                 AgentLog.event("whisper_silence_skipped", ["via": via])
-                return FullTranscript(sessionId: "", language: withStateLock { language.code ?? "und" }, segments: [])
+                return FullTranscript(sessionId: "", language: withStateLock { language.code ?? "und" }, segments: [],
+                                      transcriptionAnalysis: [TranscriptionAnalysis(source: "unknown", status: "no_speech")])
             }
             let local = lockKit()
             guard let local else {
@@ -190,6 +195,9 @@ final class WhisperTranscriber: @unchecked Sendable {
             var segments: [TranscriptSegment] = []
             for result in results {
                 for segment in result.segments {
+                    let text = segment.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !text.isEmpty, segment.start.isFinite, segment.end.isFinite,
+                          segment.start >= 0, segment.end > segment.start else { continue }
                     let words = (segment.words ?? []).map { word in
                         TranscriptWord(start: TimeInterval(word.start), end: TimeInterval(word.end), text: word.word)
                     }
@@ -197,7 +205,7 @@ final class WhisperTranscriber: @unchecked Sendable {
                         TranscriptSegment(
                             start: TimeInterval(segment.start),
                             end: TimeInterval(segment.end),
-                            text: segment.text.trimmingCharacters(in: .whitespacesAndNewlines),
+                            text: text,
                             speaker: nil,
                             words: words
                         )
@@ -206,12 +214,15 @@ final class WhisperTranscriber: @unchecked Sendable {
             }
             let transcript = FullTranscript(
                 sessionId: "",
-                language: results.first?.language ?? "en",
-                segments: segments
+                language: results.first?.language ?? "und",
+                segments: segments,
+                transcriptionAnalysis: [TranscriptionAnalysis(source: "unknown", status: segments.isEmpty ? "unrecognized" : "transcribed")]
             )
             AgentLog.event("whisper_file_ok", [
                 "via": via,
                 "segments": String(transcript.segments.count),
+                "raw_segments": String(results.reduce(0) { $0 + $1.segments.count }),
+                "text_characters": String(transcript.segments.reduce(0) { $0 + $1.text.count }),
                 "ms": String(Int(Date().timeIntervalSince(started) * 1000))
             ])
             return transcript
@@ -369,12 +380,20 @@ enum TranscriptQuery {
     /// segments (mic bleed of the same system speech) collapse; distinct speech is kept.
     static func merge(_ passes: [SourcePass], sessionId: String) -> FullTranscript {
         var labeled: [TranscriptSegment] = []
-        var language = "en"
+        var language = "und"
+        var languageWeight = 0
+        var analysis: [TranscriptionAnalysis] = []
         var sources: [String] = []
         for pass in passes {
-            if !pass.transcript.language.isEmpty {
-                language = pass.transcript.language
+            let code = pass.transcript.language
+            let weight = pass.transcript.segments.reduce(0) { $0 + $1.text.count }
+            if !code.isEmpty, code != "und", weight > languageWeight {
+                language = code
+                languageWeight = weight
             }
+            let status = pass.transcript.transcriptionAnalysis?.first?.status
+                ?? (pass.transcript.hasUsableText ? "transcribed" : "unrecognized")
+            analysis.append(TranscriptionAnalysis(source: pass.speaker, status: status))
             if !pass.speaker.isEmpty {
                 sources.append(pass.speaker)
             }
@@ -407,6 +426,7 @@ enum TranscriptQuery {
             sessionId: sessionId,
             language: language,
             segments: collapseDuplicates(labeled),
+            transcriptionAnalysis: analysis,
             sources: uniqueSources
         )
     }

@@ -169,7 +169,7 @@ C4 wire truth today: Google may upload a size-capped inline MP4. OpenAI-compatib
 
 ## Next work (priority)
 
-The user-approved 2026-09-12 speaker/Settings/menu work and saved product contexts with selection before recording are exceptions to the product-surface deferral. Keep other new surfaces deferred. Prefer work that can be verified in this environment.
+The user-approved 2026-09-12 speaker/Settings/menu work, saved product contexts with selection before recording, and usable session briefs with transcript recovery are exceptions to the product-surface deferral. Keep other new surfaces deferred. Prefer work that can be verified in this environment.
 
 ### On a Mac (blocks “done”)
 
@@ -190,6 +190,8 @@ Settings is a six-tab window (Speech, Capture, Logs, Permissions, AI, General). 
 ### Plan-deferred (leave alone)
 
 60-minute drift. Redesigning C1–C5. Sparkle SPM (v1 uses GitHub Releases). Gating Record on a license.
+
+Briefs include per-stage processing status, evidence-backed highlights/decisions/actions/open questions, visible review-only results, timed passages next to clips and export links. Full transcript text may enter HTML only through the explicitly included export/full_transcript.json; omission removes it from both HTML and the pack. Local-only review rows must not say API Offline. Decoder prefill caching stays off (WhisperKit 0.11 empty-window regression); non-silent empty transcripts stay retryable.
 
 ## What “done” is not
 

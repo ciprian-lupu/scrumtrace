@@ -470,3 +470,10 @@ Implement ScrumTrace from IMPLEMENTATION_PLAN.md.
 
 Bundle id: com.str8minds.ScrumTrace. App Sandbox: OFF.
 ```
+
+
+### Session brief usability — approved 2026-09-12
+
+The brief reports transcription, speaker analysis and provider evaluation separately. Review-only output is expanded, and absent results have an explanation. Highlights, decisions, actions and open questions come from confirmed evidence; optional task kind open_question uses the same candidate/evidence validation contract. No additional provider request is introduced. Owner/deadline wording is preserved only when explicitly stated in evidence.
+
+Selected transcript passages sit next to their clips. Full-transcript reading is available only when the full JSON was explicitly included in export and survived the measured pack budget. Export links never point into archive. Empty legacy transcripts can retry transcription; digitally silent sources are distinguished from audio with no recognized text. Local model accuracy and hardware gates remain separate from brief usability.

@@ -137,6 +137,7 @@ final class SettingsUsabilityTests: XCTestCase {
         let automatic = WhisperTranscriber.decodingOptions(language: .automatic)
         XCTAssertTrue(automatic.detectLanguage)
         XCTAssertNil(automatic.language)
+        XCTAssertFalse(automatic.usePrefillCache)
         XCTAssertTrue(automatic.skipSpecialTokens)
         XCTAssertTrue(automatic.wordTimestamps)
         let romanian = WhisperTranscriber.decodingOptions(language: .romanian)

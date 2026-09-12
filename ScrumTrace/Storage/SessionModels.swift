@@ -1970,6 +1970,7 @@ enum TaskKind: String, Codable, Sendable {
     case decision
     case actionItem = "action_item"
     case architectureNote = "architecture_note"
+    case openQuestion = "open_question"
     case improvement
     case unknown
 
@@ -2500,14 +2501,34 @@ struct TranscriptSegment: Codable, Sendable, Hashable {
     var speakerCandidates: [String]? = nil
 }
 
+struct TranscriptionAnalysis: Codable, Sendable, Hashable {
+    var source: String
+    /// transcribed, recovered, no_speech, unrecognized, or failed.
+    var status: String
+}
+
 struct FullTranscript: Codable, Sendable {
     var sessionId: String
     var language: String
     var segments: [TranscriptSegment]
     var speakers: [SessionSpeaker]? = nil
     var speakerAnalysis: [SpeakerAnalysis]? = nil
+    var transcriptionAnalysis: [TranscriptionAnalysis]? = nil
     /// Capture sources, not individual people: `room` and/or `system`.
     var sources: [String]? = nil
+
+    var hasUsableText: Bool {
+        segments.contains { !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    }
+
+    /// Empty legacy transcripts were previously marked complete, even when
+    /// speakers were detected. Retry must run ASR again, not reuse that empty file.
+    var needsTranscriptionRetry: Bool {
+        if let analysis = transcriptionAnalysis, !analysis.isEmpty {
+            return analysis.contains { $0.status == "unrecognized" || $0.status == "failed" }
+        }
+        return !hasUsableText
+    }
 
     enum CodingKeys: String, CodingKey {
         case sessionId = "session_id"
@@ -2516,6 +2537,7 @@ struct FullTranscript: Codable, Sendable {
         case sources
         case speakers
         case speakerAnalysis = "speaker_analysis"
+        case transcriptionAnalysis = "transcription_analysis"
     }
 }
 

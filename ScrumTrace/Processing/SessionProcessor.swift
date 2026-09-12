@@ -59,6 +59,12 @@ final class SessionProcessor: @unchecked Sendable {
         }
 
         var timing = PipelineTiming.load(sessionURL: sessionURL) ?? PipelineTiming()
+        if manifest.hasCompleted(.transcribing),
+           let archived = SpeakerTimeline.load(sessionURL: sessionURL), archived.needsTranscriptionRetry {
+            manifest.completedStages.removeAll { $0 == .transcribing || $0 == .slicing || $0 == .evaluating || $0 == .synthesizing || $0 == .completed }
+            manifest.pipelineStatus = .transcribing
+            try vault.write(manifest: &manifest)
+        }
 
         var justFinishedTranscribing = false
         if !manifest.hasCompleted(.transcribing) {
@@ -73,6 +79,12 @@ final class SessionProcessor: @unchecked Sendable {
             )
             var transcript = transcribed.transcript
             transcript.sessionId = sessionId
+            if transcribed.incomplete, let previous = SpeakerTimeline.load(sessionURL: sessionURL), previous.hasUsableText {
+                let analysis = transcript.transcriptionAnalysis
+                transcript = previous
+                transcript.transcriptionAnalysis = analysis
+                AgentLog.event("whisper_previous_retained", ["session": sessionId])
+            }
             if identifySpeakers, !transcribed.incomplete {
                 await onStatus(.transcribing, "Identifying speakers locally (first use downloads models)…")
                 transcript = await SpeakerDiarizer.shared.analyze(transcript, sessionURL: sessionURL)
@@ -617,9 +629,9 @@ final class SessionProcessor: @unchecked Sendable {
         }
         let markdown = agentRenderer.render(manifest: projected, sessionURL: sessionURL)
         let prompt = agentRenderer.prompt(manifest: projected, sessionURL: sessionURL)
-        let html = briefRenderer.render(manifest: projected, excerpts: excerpts, sessionURL: sessionURL)
         try ExportRel.writeExportText(markdown, relative: ScrumTracePath.agentContext, sessionURL: sessionURL)
         try ExportRel.writeExportText(prompt, relative: ScrumTracePath.agentPrompt, sessionURL: sessionURL)
+        let html = briefRenderer.render(manifest: projected, excerpts: excerpts, sessionURL: sessionURL)
         try ExportRel.writeExportText(html, relative: ScrumTracePath.sessionBrief, sessionURL: sessionURL)
         try projector.writeProjectionManifest(projected, sessionURL: sessionURL)
     }
@@ -653,6 +665,7 @@ final class SessionProcessor: @unchecked Sendable {
             do {
                 let speaker = layout.microphoneWav ? "room" : "system"
                 let wavTranscript = try await transcriber.transcribeFile(at: wav, sessionURL: sessionURL)
+                requiredFailed = requiredFailed || wavTranscript.needsTranscriptionRetry
                 passes.append(
                     TranscriptQuery.SourcePass(
                         speaker: speaker,
@@ -690,6 +703,7 @@ final class SessionProcessor: @unchecked Sendable {
             } else {
             do {
                 let movieTranscript = try await transcriber.transcribeMovieAudio(at: movie, sessionURL: sessionURL)
+                requiredFailed = requiredFailed || movieTranscript.needsTranscriptionRetry
                 passes.append(TranscriptQuery.SourcePass(speaker: "system", transcript: movieTranscript))
                 AgentLog.event("whisper_pass_ok", [
                     "source": "movie",
@@ -707,7 +721,15 @@ final class SessionProcessor: @unchecked Sendable {
         if passes.isEmpty {
             return (FullTranscript(sessionId: "", language: "en", segments: []), true)
         }
-        return (TranscriptQuery.merge(passes, sessionId: ""), requiredFailed)
+        var merged = TranscriptQuery.merge(passes, sessionId: "")
+        let completedSources = Set(passes.map(\.speaker))
+        var expectedSources: Set<String> = []
+        if wavExists { expectedSources.insert(layout.microphoneWav ? "room" : "system") }
+        if wantsMoviePass { expectedSources.insert("system") }
+        for source in expectedSources.subtracting(completedSources) {
+            merged.transcriptionAnalysis?.append(TranscriptionAnalysis(source: source, status: "failed"))
+        }
+        return (merged, requiredFailed)
     }
 
     private func waitForPrepare(
@@ -1154,6 +1176,12 @@ final class SessionProcessor: @unchecked Sendable {
         }
     }
 
+    static func reviewTitle(_ note: String, fallback: String) -> String {
+        let text = note.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
+        guard !text.isEmpty else { return fallback }
+        return text.count > 100 ? String(text.prefix(99)) + "…" : text
+    }
+
     private func fallbackTask(
         shot: ShotRecord,
         slice: SliceRecord,
@@ -1188,7 +1216,7 @@ final class SessionProcessor: @unchecked Sendable {
             sourceSliceId: slice.sliceId,
             kind: .bug,
             status: .needsReview,
-            title: shot.note.isEmpty ? "Human shot requires review" : shot.note,
+            title: Self.reviewTitle(shot.note, fallback: "Captured note requires review"),
             observed: "Human-captured frame at t_media \(shot.tMedia)s.",
             stated: shot.note,
             inferred: error.map { "Analysis unavailable: \($0.localizedDescription)" } ?? "Requires manual review.",
@@ -1387,7 +1415,7 @@ final class SessionProcessor: @unchecked Sendable {
     }
 
     private func localReviewTasks(manifest: SessionManifest) -> [TaskRecord] {
-        let prefix = "[Requires Manual Review - API Offline] "
+        let prefix = "[Requires Manual Review] "
         let sessionURL = vault.sessionURL(id: manifest.sessionId)
         var coveredIds = Set<String>()
         var tasks: [TaskRecord] = []
@@ -1400,13 +1428,13 @@ final class SessionProcessor: @unchecked Sendable {
                 TaskRecord(
                     taskId: String(format: "TASK-%02d", tasks.count + 1),
                     sourceSliceId: slice?.sliceId ?? "slice-\(shot.id)",
-                    kind: .bug,
+                    kind: .unknown,
                     status: .needsReview,
-                    title: shot.note.isEmpty ? "Human shot requires review" : shot.note,
+                    title: Self.reviewTitle(shot.note, fallback: "Captured note requires review"),
                     observed: "Human-captured frame at t_media \(shot.tMedia)s.",
                     stated: shot.note,
-                    inferred: "Provider evaluation skipped.",
-                    agentInstructions: prefix + AgentInstructionTemplate.render(kind: .bug, product: manifest.productContext),
+                    inferred: "AI analysis has not completed for this evidence.",
+                    agentInstructions: prefix + AgentInstructionTemplate.render(kind: .unknown, product: manifest.productContext),
                     quotes: [],
                     evidenceMedia: uniquedPaths(
                         {
@@ -1455,10 +1483,10 @@ final class SessionProcessor: @unchecked Sendable {
                     sourceSliceId: slice.sliceId,
                     kind: .unknown,
                     status: .needsReview,
-                    title: "Unanalyzed slice \(slice.sliceId)",
-                    observed: "Slice \(slice.startMedia)s–\(slice.endMedia)s was not evaluated.",
+                    title: "Marked moment · \(Int(slice.startMedia))–\(Int(slice.endMedia))s",
+                    observed: "Selected recording from \(Int(slice.startMedia))s to \(Int(slice.endMedia))s.",
                     stated: "",
-                    inferred: "Triggered by \(slice.trigger.rawValue). Provider evaluation skipped.",
+                    inferred: "Triggered by \(slice.trigger.rawValue). AI analysis has not completed for this evidence.",
                     agentInstructions: prefix + AgentInstructionTemplate.render(kind: .unknown, product: manifest.productContext),
                     quotes: [],
                     evidenceMedia: uniquedPaths(
@@ -1490,8 +1518,8 @@ final class SessionProcessor: @unchecked Sendable {
                     sourceSliceId: manifest.slices.first?.sliceId ?? "slice-00",
                     kind: .unknown,
                     status: .needsReview,
-                    title: "Requires Manual Review - API Offline",
-                    observed: "No provider upload was approved for this session.",
+                    title: "Session requires review",
+                    observed: "No analyzed findings are available for this session.",
                     stated: "",
                     inferred: "Evaluation did not run. Local stills and clips stay on this Mac. Inspect this export folder after synthesis.",
                     agentInstructions: prefix + AgentInstructionTemplate.render(kind: .unknown, product: manifest.productContext),

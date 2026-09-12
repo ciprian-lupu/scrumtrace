@@ -23,7 +23,7 @@ struct AgentContextRenderer {
             lines.append("_No confirmed tasks. Check Needs review._")
         } else {
             for task in confirmed {
-                lines.append(contentsOf: taskBlock(task, sessionURL: sessionURL, omitted: manifest.omitted))
+                lines.append(contentsOf: taskBlock(task, sessionURL: sessionURL, omitted: manifest.omitted, analysisStatus: manifest.slices.first { $0.sliceId == task.sourceSliceId }?.analysisStatus))
             }
         }
         lines.append("")
@@ -32,7 +32,7 @@ struct AgentContextRenderer {
             lines.append("_None._")
         } else {
             for task in review {
-                lines.append(contentsOf: taskBlock(task, sessionURL: sessionURL, omitted: manifest.omitted))
+                lines.append(contentsOf: taskBlock(task, sessionURL: sessionURL, omitted: manifest.omitted, analysisStatus: manifest.slices.first { $0.sliceId == task.sourceSliceId }?.analysisStatus))
             }
         }
         lines.append("")
@@ -89,14 +89,17 @@ struct AgentContextRenderer {
         return lines.joined(separator: "\n")
     }
 
-    private func taskBlock(_ task: TaskRecord, sessionURL: URL, omitted: [OmittedAsset]) -> [String] {
+    private func taskBlock(_ task: TaskRecord, sessionURL: URL, omitted: [OmittedAsset], analysisStatus: SliceAnalysisStatus?) -> [String] {
+        let instructions = analysisStatus == .skipped
+            ? task.agentInstructions.replacingOccurrences(of: "[Requires Manual Review - API Offline]", with: "[Requires Manual Review]")
+            : task.agentInstructions
         var lines = [""]
         lines.append("### \(task.taskId) — \(PromptTemplates.wrapUntrustedInline(task.title))")
         lines.append("- Kind: `\(task.kind.rawValue)` · status: `\(task.status.rawValue)` · confidence: \(String(format: "%.2f", task.confidence))")
         lines.append("- Observed: \(PromptTemplates.wrapUntrustedInline(task.observed))")
         lines.append("- Stated: \(PromptTemplates.wrapUntrustedInline(task.stated))")
         lines.append("- Inferred: \(PromptTemplates.wrapUntrustedInline(task.inferred))")
-        lines.append("- Agent instructions: \(Self.handoffAgentInstructions(task.agentInstructions))")
+        lines.append("- Agent instructions: \(Self.handoffAgentInstructions(instructions))")
         if !task.quotes.isEmpty {
             lines.append("- Quotes:")
             for quote in task.quotes {

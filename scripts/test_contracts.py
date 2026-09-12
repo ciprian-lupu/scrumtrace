@@ -1919,7 +1919,8 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "var evidence = slice.stills" not in fallback
     local = processor.split("func localReviewTasks")[1].split("func refreshShotsFromDisk")[0]
     assert "selectForPack" in local
-    assert "[Requires Manual Review - API Offline]" in local
+    assert "[Requires Manual Review]" in local
+    assert "API Offline" not in local, "Skipped analysis must not imply a provider outage"
     assert "slice.stills" in local
     assert "clipPath" in local
     assert "uniquedPaths" in local
