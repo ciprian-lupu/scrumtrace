@@ -29,8 +29,8 @@ from gate_inspect_lib import (
     emit,
     event_name,
     export_file_exists,
+    filter_rows_for_first_run,
     filter_rows_for_session,
-    first_run_id,
     is_json_number,
     is_retired_anthropic,
     read_json_object,
@@ -170,6 +170,17 @@ def require_log_window(args: argparse.Namespace, report: dict[str, object]) -> t
             blocked_reasons=[reason],
         )
     assert rows is not None
+    try:
+        rows, run_id = filter_rows_for_first_run(rows)
+    except LogWindowError as exc:
+        return None, emit(
+            report,
+            [],
+            status="blocked",
+            blocked=True,
+            blocked_reasons=[exc.reason],
+        )
+    report["run_id"] = run_id
     return rows, 0
 
 
@@ -181,7 +192,6 @@ def scenario_denied(session: Path, manifest: dict[str, object], args: argparse.N
     session_id = str(manifest.get("session_id") or session.name)
     rows = filter_rows_for_session(rows, session_id)
     report["session_id"] = session_id
-    report["run_id"] = first_run_id(rows)
 
     consent = consent_dict(manifest)
     approved = consent.get("approved")

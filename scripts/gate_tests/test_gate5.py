@@ -50,7 +50,20 @@ def _write_session(
 
 def _write_log(rows: list[dict[str, object]]) -> Path:
     path = Path(tempfile.mkdtemp(prefix="scrumtrace-gate5-log-")) / "agent.jsonl"
-    path.write_text("\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8")
+    run_id = "gate5-run"
+    scoped = [{"event": "launch", "run_id": run_id}]
+    scoped.extend(
+        {
+            **row,
+            "run_id": row.get("run_id", run_id),
+            "session": row.get("session", "s"),
+        }
+        for row in rows
+    )
+    path.write_text(
+        "\n".join(json.dumps(row) for row in scoped) + "\n",
+        encoding="utf-8",
+    )
     return path
 
 

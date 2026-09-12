@@ -37,6 +37,32 @@ def test_forbidden_key_fails_without_echoing_secret() -> None:
         assert any(item["key"] == "note" for item in report["findings"])
 
 
+def test_forbidden_key_variants_fail() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        log = Path(tmp) / "agent.jsonl"
+        log.write_text(
+            json.dumps(
+                {
+                    "event": "x",
+                    "windowTitle": "private",
+                    "access_token": "private",
+                    "transcript_excerpt": "private",
+                    "has_url": "1",
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        result = _run(log)
+        assert result.returncode == 1
+        report = json.loads(result.stdout)
+        keys = {item["key"] for item in report["findings"]}
+        assert "windowTitle" in keys
+        assert "access_token" in keys
+        assert "transcript_excerpt" in keys
+        assert "has_url" not in keys
+
+
 def test_forbidden_value_fails_without_echoing() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         log = Path(tmp) / "agent.jsonl"
@@ -78,6 +104,7 @@ def test_missing_log_blocks() -> None:
 
 def main() -> None:
     test_forbidden_key_fails_without_echoing_secret()
+    test_forbidden_key_variants_fail()
     test_forbidden_value_fails_without_echoing()
     test_has_url_is_allowed()
     test_missing_log_blocks()

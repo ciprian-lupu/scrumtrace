@@ -2757,6 +2757,17 @@ final class ContractTests: XCTestCase {
         )
         XCTAssertTrue(AIProviderError.isAuthFailure(AIProviderError.httpStatus(401, "")))
         XCTAssertFalse(AIProviderError.isAuthFailure(AIProviderError.emptyResponse))
+        let privateEndpoint = "https://provider.example/?token=private"
+        XCTAssertFalse(
+            AIProviderError.invalidURL(privateEndpoint)
+                .localizedDescription.contains(privateEndpoint)
+        )
+        XCTAssertEqual(
+            AIProviderError.diagnosticCode(
+                AIProviderError.httpStatus(500, "private response")
+            ),
+            "http_status_500"
+        )
     }
 
     func testHTTPStatusDoesNotExposeProviderResponseBody() throws {

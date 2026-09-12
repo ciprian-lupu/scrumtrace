@@ -913,7 +913,7 @@ final class SessionProcessor: @unchecked Sendable {
             AgentLog.event("eval_slice", [
                 "slice": slice.sliceId,
                 "status": slice.analysisStatus.rawValue,
-                "error": AgentLog.sanitize(error.localizedDescription)
+                "error": AIProviderError.diagnosticCode(error)
             ])
             return (slice, reviewTasks(
                 shots: linked,

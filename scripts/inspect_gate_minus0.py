@@ -23,8 +23,8 @@ from gate_inspect_lib import (
     die_missing,
     emit,
     event_name,
+    filter_rows_for_first_run,
     filter_rows_for_session,
-    first_run_id,
     first_sample_types,
     ffprobe_bin,
     ffprobe_duration,
@@ -98,6 +98,7 @@ def main() -> int:
 
     try:
         rows = read_jsonl_window(args.log.expanduser(), args.log_start_line)
+        rows, run_id = filter_rows_for_first_run(rows)
     except LogWindowError as exc:
         return emit(
             report,
@@ -109,7 +110,6 @@ def main() -> int:
 
     session_id = str((manifest or {}).get("session_id") or session.name)
     rows = filter_rows_for_session(rows, session_id)
-    run_id = first_run_id(rows)
     report["session_id"] = session_id
     report["run_id"] = run_id
 

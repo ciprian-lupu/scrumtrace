@@ -170,7 +170,10 @@ final class SessionController: ObservableObject {
             sampler.isSuspended = true
             phase = .paused
             statusLine = "Paused — nothing is written"
-            AgentLog.event("pause_ok", ["source": "toggle"])
+            AgentLog.event("pause_ok", [
+                "source": "toggle",
+                "t_media": String(clock.currentMediaSeconds())
+            ])
             log(.pause, [:])
             persistLivePipelineStatus()
             NotificationCenter.default.post(name: .scrumTraceCaptureGate, object: CaptureSessionState.paused)
@@ -241,6 +244,12 @@ final class SessionController: ObservableObject {
             ])
             return
         }
+        guard AgentLog.setSessionContext(sessionId) else {
+            statusLine = "Could not bind retry diagnostics to this session"
+            AgentLog.event("retry_ignored", ["reason": "session_context"])
+            return
+        }
+        isBusy = true
         AgentLog.event("retry_begin", ["session": sessionId])
         lastSessionId = sessionId
         Task { await runProcessor(sessionId: sessionId) }
@@ -258,7 +267,10 @@ final class SessionController: ObservableObject {
         if startInFlight && !isRecording {
             captureFreeze.holdPauseThroughStart()
             sampler.isSuspended = true
-            AgentLog.event("pause_ok", ["source": "hotkey_hold_start"])
+            AgentLog.event("pause_ok", [
+                "source": "hotkey_hold_start",
+                "t_media": String(clock.currentMediaSeconds())
+            ])
             return
         }
         guard isRecording else { return }
@@ -267,7 +279,10 @@ final class SessionController: ObservableObject {
             sampler.isSuspended = true
             phase = .paused
             statusLine = "Paused — nothing is written"
-            AgentLog.event("pause_ok", ["source": "hotkey"])
+            AgentLog.event("pause_ok", [
+                "source": "hotkey",
+                "t_media": String(clock.currentMediaSeconds())
+            ])
             log(.pause, ["source": "hotkey"])
             persistLivePipelineStatus()
             return
@@ -332,6 +347,9 @@ final class SessionController: ObservableObject {
         } else {
             AgentLog.event("halt_stop_ok", [:])
         }
+        if let sessionId = manifest?.sessionId {
+            AgentLog.clearSessionContext(matching: sessionId)
+        }
         AgentLog.setRecording(false, sessionId: nil)
     }
 
@@ -367,6 +385,11 @@ final class SessionController: ObservableObject {
         do {
             let created = try vault.createSession(product: settings.productContext)
             abandonedId = created.manifest.sessionId
+            guard AgentLog.setSessionContext(created.manifest.sessionId) else {
+                throw SessionRecorderError.writerFailed(
+                    "Could not bind diagnostics to the new session."
+                )
+            }
             sessionURL = created.url
             var createdManifest = created.manifest
             createdManifest.includeFullTranscriptInZip = settings.includeFullTranscriptInZip
@@ -506,6 +529,7 @@ final class SessionController: ObservableObject {
                     sessionURL = nil
                 }
                 vault.removeAbandonedSession(id: id)
+                AgentLog.clearSessionContext(matching: id)
             }
             lastError = error.localizedDescription
             statusLine = error.localizedDescription
@@ -570,6 +594,9 @@ final class SessionController: ObservableObject {
             phase = .offlineFailed
             statusLine = "Session manifest missing after stop"
             AgentLog.event("stop_manifest_missing", [:])
+            if let sessionId = lastSessionId ?? sessionURL?.lastPathComponent {
+                AgentLog.clearSessionContext(matching: sessionId)
+            }
         }
         recorder = nil
         captureFreeze.attach(nil)
@@ -578,6 +605,9 @@ final class SessionController: ObservableObject {
 
     private func runProcessor(sessionId: String) async {
         isBusy = true
+        defer {
+            AgentLog.clearSessionContext(matching: sessionId)
+        }
         AgentLog.event("processor_begin", ["session": sessionId])
         do {
             var local = try? vault.loadManifest(id: sessionId)

@@ -22,7 +22,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from gate_inspect_lib import LogWindowError, emit, read_jsonl_window
+from gate_inspect_lib import (
+    LogWindowError,
+    emit,
+    filter_rows_for_first_run,
+    read_jsonl_window,
+)
 
 KEYNOTE = "com.apple.iWork.Keynote"
 
@@ -89,6 +94,17 @@ def main() -> int:
             blocked=True,
             blocked_reasons=["empty_log_window"],
         )
+    try:
+        rows, run_id = filter_rows_for_first_run(rows)
+    except LogWindowError as exc:
+        return emit(
+            report,
+            [],
+            status="blocked",
+            blocked=True,
+            blocked_reasons=[exc.reason],
+        )
+    report["run_id"] = run_id
 
     hotkey_shot = 0
     hotkey_pin = 0

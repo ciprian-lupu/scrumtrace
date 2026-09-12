@@ -77,12 +77,13 @@ def read_jsonl_window(path: Path, start_line: int | None) -> list[dict[str, obje
 def filter_rows_for_session(
     rows: list[dict[str, object]], session_id: str
 ) -> list[dict[str, object]]:
-    """Keep rows that omit session or match session_id."""
+    """Keep the process launch plus rows explicitly bound to session_id."""
     matched: list[dict[str, object]] = []
     for row in rows:
         value = row.get("session") or row.get("session_id")
         if value is None or value == "":
-            matched.append(row)
+            if event_name(row) in {"launch", "app_launch"}:
+                matched.append(row)
             continue
         if str(value) == session_id:
             matched.append(row)
@@ -92,11 +93,37 @@ def filter_rows_for_session(
 def first_run_id(rows: list[dict[str, object]]) -> str | None:
     for row in rows:
         name = event_name(row)
-        if name in {"launch", "app_launch", "session_start"}:
+        if name in {"launch", "app_launch"}:
             run = row.get("run_id") or row.get("run")
             if run:
                 return str(run)
     return None
+
+
+def filter_rows_for_first_run(
+    rows: list[dict[str, object]],
+) -> tuple[list[dict[str, object]], str]:
+    """Require exactly one process run in the marked log window.
+
+    A marker created after relaunch starts after the launch row, so the first
+    scoped event may establish the run identity when no launch is in-window.
+    """
+    if not rows:
+        raise LogWindowError("missing_run_id")
+    value = rows[0].get("run_id") or rows[0].get("run")
+    if value is None or value == "":
+        raise LogWindowError("missing_run_id")
+    run_id = str(value)
+
+    matched: list[dict[str, object]] = []
+    for row in rows:
+        value = row.get("run_id") or row.get("run")
+        if value is None or value == "":
+            raise LogWindowError("unscoped_run_row")
+        if str(value) != run_id:
+            raise LogWindowError("multiple_run_ids")
+        matched.append(row)
+    return matched, run_id
 
 
 def read_json_object(path: Path) -> dict[str, object] | None:

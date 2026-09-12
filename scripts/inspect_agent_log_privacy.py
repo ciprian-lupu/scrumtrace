@@ -20,16 +20,20 @@ from pathlib import Path
 
 FORBIDDEN_KEYS = {
     "title",
-    "window_title",
+    "windowtitle",
     "url",
     "note",
     "transcript",
-    "api_key",
+    "apikey",
+    "key",
     "token",
+    "accesstoken",
     "passphrase",
+    "password",
     "secret",
+    "content",
 }
-ALLOWED_TECHNICAL_KEYS = {"has_url"}
+ALLOWED_TECHNICAL_KEYS = {"hasurl"}
 
 
 def walk(obj: object, prefix: str = "") -> list[tuple[str, object]]:
@@ -47,11 +51,27 @@ def walk(obj: object, prefix: str = "") -> list[tuple[str, object]]:
 
 
 def leaf_key(path: str) -> str:
-    if "[" in path:
-        path = path.split("[", 1)[0]
-    if "." in path:
-        return path.rsplit(".", 1)[-1]
-    return path
+    leaf = path.rsplit(".", 1)[-1]
+    return leaf.split("[", 1)[0]
+
+
+def canonical_key(key: str) -> str:
+    return "".join(char for char in key.lower() if char.isalpha())
+
+
+def is_forbidden_key(key: str) -> bool:
+    canonical = canonical_key(key)
+    if canonical in ALLOWED_TECHNICAL_KEYS:
+        return False
+    if canonical in FORBIDDEN_KEYS:
+        return True
+    return any(
+        term in canonical
+        for term in (
+            "title", "url", "note", "transcript", "token", "key",
+            "passphrase", "password", "secret", "content",
+        )
+    )
 
 
 def main() -> int:
@@ -107,9 +127,7 @@ def main() -> int:
             continue
         for path, value in walk(row):
             key = leaf_key(path)
-            if key in ALLOWED_TECHNICAL_KEYS:
-                continue
-            if key in FORBIDDEN_KEYS:
+            if is_forbidden_key(key):
                 findings.append(
                     {
                         "line": line_no,

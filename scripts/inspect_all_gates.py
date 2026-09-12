@@ -682,6 +682,8 @@ def main() -> int:
                         str(two_log),
                         "--log-start-line",
                         str(int(one_two["log_start_line"])),
+                        "--session",
+                        str(path_from(one_two, "session")),
                     ],
                 )
         else:
@@ -705,17 +707,30 @@ def main() -> int:
                         "Provide --artifact-map 1/2 or --session --token --passphrase"
                     ),
                 )
-            if log is not None and args.log_start_line is not None:
+            if (
+                log is not None
+                and args.log_start_line is not None
+                and session is not None
+            ):
+                gate2_args = [
+                    "--log",
+                    str(log),
+                    "--log-start-line",
+                    str(args.log_start_line),
+                ]
+                gate2_args.extend(["--session", str(session)])
                 gates["2"] = run_script(
                     "inspect_gate2_shot.py",
-                    ["--log", str(log), "--log-start-line", str(args.log_start_line)],
+                    gate2_args,
                 )
             else:
+                missing = "missing_session" if session is None else "missing_log"
                 gates["2"] = blocked_row(
                     "inspect_gate2_shot.py",
-                    "missing_log",
+                    missing,
                     next_action=(
-                        "Provide --artifact-map 1/2.log or --log --log-start-line"
+                        "Provide --artifact-map 1/2 or "
+                        "--session --log --log-start-line"
                     ),
                 )
 

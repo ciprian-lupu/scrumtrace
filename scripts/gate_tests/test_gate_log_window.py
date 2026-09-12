@@ -15,6 +15,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 from gate_inspect_lib import (  # noqa: E402
     LogWindowError,
+    filter_rows_for_first_run,
     filter_rows_for_session,
     first_run_id,
     read_jsonl_window,
@@ -69,13 +70,47 @@ class LogWindowHelperTests(unittest.TestCase):
 
     def test_session_filter_rejects_other_session(self) -> None:
         rows = [
-            {"event": "launch", "session": "sess-a", "run_id": "r1"},
+            {"event": "launch", "run_id": "r1"},
             {"event": "eval_slice", "session": "sess-b"},
             {"event": "shot_save"},
         ]
         filtered = filter_rows_for_session(rows, "sess-a")
-        self.assertEqual(len(filtered), 2)
+        self.assertEqual(len(filtered), 1)
         self.assertEqual(first_run_id(filtered), "r1")
+
+    def test_run_filter_accepts_current_run_and_rejects_later_process(self) -> None:
+        with self.assertRaises(LogWindowError):
+            filter_rows_for_first_run([{"event": "shot_save"}])
+
+        filtered, run_id = filter_rows_for_first_run([
+            {"event": "shot_save", "run_id": "r1"}
+        ])
+        self.assertEqual(run_id, "r1")
+        self.assertEqual(len(filtered), 1)
+
+        rows = [
+            {"event": "launch", "run_id": "r1"},
+            {"event": "shot_save", "run_id": "r1"},
+            {"event": "launch", "run_id": "r2"},
+            {"event": "shot_save", "run_id": "r2"},
+        ]
+        with self.assertRaises(LogWindowError) as error:
+            filter_rows_for_first_run(rows)
+        self.assertEqual(error.exception.reason, "multiple_run_ids")
+
+        with self.assertRaises(LogWindowError) as error:
+            filter_rows_for_first_run([
+                {"event": "shot_save", "run_id": "r1"},
+                {"event": "launch", "run_id": "r2"},
+            ])
+        self.assertEqual(error.exception.reason, "multiple_run_ids")
+
+        with self.assertRaises(LogWindowError) as error:
+            filter_rows_for_first_run([
+                {"event": "launch", "run_id": "r1"},
+                {"event": "shot_save"},
+            ])
+        self.assertEqual(error.exception.reason, "unscoped_run_row")
 
 
 class AggregateRequiresMarkerTests(unittest.TestCase):
@@ -104,33 +139,64 @@ class Gate2WindowIntegrationTests(unittest.TestCase):
     def test_pre_marker_violation_ignored(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             log = Path(tmp) / "agent.jsonl"
-            log.write_text(
-                json.dumps({"event": "pause_ok"})
-                + "\n"
-                + json.dumps({"event": "shot_save"})
-                + "\n"
-                + json.dumps({"event": "resume_ok"})
-                + "\n"
-                + json.dumps({"event": "shot_save", "t_media": 1.0})
-                + "\n"
-                + json.dumps({"event": "pause_ok", "t_media": 5.0})
-                + "\n"
-                + json.dumps({"event": "shot_ignored", "reason": "paused"})
-                + "\n"
-                + json.dumps({"event": "talk_start_fail", "reason": "paused"})
-                + "\n"
-                + json.dumps({"event": "pin_ignored", "reason": "paused"})
-                + "\n"
-                + json.dumps({"event": "resume_ok"})
-                + "\n",
+            session = Path(tmp) / "gate2-session"
+            session.mkdir()
+            (session / "session.manifest.json").write_text(
+                json.dumps({"session_id": "gate2-session"}),
                 encoding="utf-8",
             )
-            # Start at line 4 so the earlier shot_save during pause is ignored.
-            # Line 4 is the outside-pause shot_save that proves Shot still works.
+            rows = [
+                {"event": "pause_ok"},
+                {"event": "shot_save"},
+                {"event": "resume_ok"},
+                {"event": "launch", "run_id": "new-run"},
+                {
+                    "event": "shot_save",
+                    "t_media": 1.0,
+                    "run_id": "new-run",
+                    "session": "gate2-session",
+                },
+                {
+                    "event": "pause_ok",
+                    "t_media": 5.0,
+                    "run_id": "new-run",
+                    "session": "gate2-session",
+                },
+                {
+                    "event": "shot_ignored",
+                    "reason": "paused",
+                    "run_id": "new-run",
+                    "session": "gate2-session",
+                },
+                {
+                    "event": "talk_start_fail",
+                    "reason": "paused",
+                    "run_id": "new-run",
+                    "session": "gate2-session",
+                },
+                {
+                    "event": "pin_ignored",
+                    "reason": "paused",
+                    "run_id": "new-run",
+                    "session": "gate2-session",
+                },
+                {
+                    "event": "resume_ok",
+                    "run_id": "new-run",
+                    "session": "gate2-session",
+                },
+            ]
+            log.write_text(
+                "\n".join(json.dumps(row) for row in rows) + "\n",
+                encoding="utf-8",
+            )
+            # Start at the new launch so the old paused save is ignored.
             result = subprocess.run(
                 [
                     sys.executable,
                     str(ROOT / "scripts" / "inspect_gate2_shot.py"),
+                    "--session",
+                    str(session),
                     "--log",
                     str(log),
                     "--log-start-line",

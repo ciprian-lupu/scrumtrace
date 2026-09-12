@@ -14,10 +14,18 @@ SCRIPT = ROOT / "scripts" / "inspect_gate2_shot.py"
 
 
 def _run(log: Path, start_line: int = 1) -> subprocess.CompletedProcess[str]:
+    session = log.parent / "gate2-session"
+    session.mkdir(exist_ok=True)
+    (session / "session.manifest.json").write_text(
+        json.dumps({"session_id": "gate2-session"}),
+        encoding="utf-8",
+    )
     return subprocess.run(
         [
             sys.executable,
             str(SCRIPT),
+            "--session",
+            str(session),
             "--log",
             str(log),
             "--log-start-line",
@@ -31,8 +39,18 @@ def _run(log: Path, start_line: int = 1) -> subprocess.CompletedProcess[str]:
 
 def _write(rows: list[dict[str, object]]) -> Path:
     path = Path(tempfile.mkdtemp(prefix="scrumtrace-gate2-")) / "agent.jsonl"
+    run_id = "gate2-run"
+    scoped = [{"event": "launch", "run_id": run_id}]
+    scoped.extend(
+        {
+            **row,
+            "run_id": row.get("run_id", run_id),
+            "session": row.get("session", "gate2-session"),
+        }
+        for row in rows
+    )
     path.write_text(
-        "\n".join(json.dumps(row) for row in rows) + "\n",
+        "\n".join(json.dumps(row) for row in scoped) + "\n",
         encoding="utf-8",
     )
     return path

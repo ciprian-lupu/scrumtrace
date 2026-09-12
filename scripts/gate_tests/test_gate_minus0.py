@@ -57,7 +57,12 @@ GOOD_LOG = [
 
 
 def _write_log(path: Path, rows: list[dict[str, object]]) -> None:
-    path.write_text("\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8")
+    run_id = "run-1"
+    scoped = [{**row, "run_id": row.get("run_id", run_id)} for row in rows]
+    path.write_text(
+        "\n".join(json.dumps(row) for row in scoped) + "\n",
+        encoding="utf-8",
+    )
 
 
 def _run(

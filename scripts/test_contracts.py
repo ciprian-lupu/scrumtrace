@@ -1189,6 +1189,15 @@ def test_pipeline_timing_stays_in_archive() -> None:
     assert "agent.jsonl" in agent_log
     assert "recording.lock" in agent_log
     assert "windowTitle" not in agent_log
+    assert "run_id" in agent_log
+    assert "setSessionContext" in agent_log
+    assert "clearSessionContext" in agent_log
+    assert "session_mismatch" in agent_log
+    assert (ROOT / "ScrumTraceTests" / "AgentLogTests.swift").is_file()
+    controller = (ROOT / "ScrumTrace" / "Processing" / "SessionController.swift").read_text()
+    assert controller.count('"t_media": String(clock.currentMediaSeconds())') >= 3
+    shot_save = controller.split('AgentLog.event("shot_save"')[1].split("])", 1)[0]
+    assert '"t_media": String(stored.tMedia)' in shot_save
     assert "apiKey" not in agent_log
     assert "NSLog" in agent_log
     assert "static func sanitize" in agent_log

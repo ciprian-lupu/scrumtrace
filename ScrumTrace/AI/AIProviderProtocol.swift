@@ -36,8 +36,8 @@ enum AIProviderError: LocalizedError {
         switch self {
         case .missingAPIKey:
             return "API key is missing. Add it in Settings."
-        case .invalidURL(let value):
-            return "Invalid provider URL: \(value)"
+        case .invalidURL:
+            return "Invalid provider URL."
         case .httpStatus(let code, let body):
             return "Provider HTTP \(code): \(body)"
         case .emptyResponse:
@@ -65,6 +65,28 @@ enum AIProviderError: LocalizedError {
 
     static func isAuthFailure(_ error: Error) -> Bool {
         (error as? AIProviderError)?.isAuthFailure == true
+    }
+
+    static func diagnosticCode(_ error: Error) -> String {
+        guard let providerError = error as? AIProviderError else {
+            return "provider_error"
+        }
+        switch providerError {
+        case .missingAPIKey:
+            return "missing_api_key"
+        case .invalidURL:
+            return "invalid_url"
+        case .httpStatus(let code, _):
+            return "http_status_\(code)"
+        case .emptyResponse:
+            return "empty_response"
+        case .decoding:
+            return "decoding_error"
+        case .skippedNoSendableMedia:
+            return "no_sendable_media"
+        case .noKeepableCandidate:
+            return "no_keepable_candidate"
+        }
     }
 }
 

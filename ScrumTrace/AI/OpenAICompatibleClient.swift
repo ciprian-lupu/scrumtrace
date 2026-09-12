@@ -80,7 +80,7 @@ private struct ChatEnvelope: Decodable {
 }
 
 enum HTTPStatus {
-    static func throwIfNeeded(_ response: URLResponse, data: Data) throws {
+    static func throwIfNeeded(_ response: URLResponse, data _: Data) throws {
         guard let http = response as? HTTPURLResponse else { return }
         guard (200..<300).contains(http.statusCode) else {
             // Provider bodies are untrusted and can echo request content. Keep

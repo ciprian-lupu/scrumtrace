@@ -9,6 +9,15 @@ enum AgentLog {
     static let directoryName = "ScrumTrace"
     private static let queue = DispatchQueue(label: "com.str8minds.ScrumTrace.agentlog")
     private static let maxBytes = 2_000_000
+    private static let runID = UUID().uuidString.lowercased()
+    private static var activeSessionID: String?
+    private static var testFileURL: URL?
+    private static let forbiddenCanonicalKeys: Set<String> = [
+        "title", "windowtitle", "url", "note", "transcript",
+        "apikey", "key", "token", "accesstoken", "passphrase",
+        "password", "secret", "content"
+    ]
+    private static let permittedCanonicalKeys: Set<String> = ["hasurl"]
 
     static var directoryURL: URL {
         FileManager.default.homeDirectoryForCurrentUser
@@ -16,6 +25,9 @@ enum AgentLog {
     }
 
     static var fileURL: URL {
+        if let testFileURL {
+            return testFileURL
+        }
         directoryURL.appendingPathComponent("agent.jsonl")
     }
 
@@ -32,23 +44,82 @@ enum AgentLog {
         return out
     }
 
-    static func fields(_ extra: [String: String] = [:]) -> [String: String] {
+    private static func fields(_ extra: [String: String] = [:]) -> [String: String]? {
+        let explicitSession = extra["session"] ?? extra["session_id"]
+        if let activeSessionID,
+           let explicitSession,
+           !explicitSession.isEmpty,
+           explicitSession != activeSessionID {
+            return nil
+        }
         var merged = CapturePermissions.logFields()
         for (key, value) in extra {
+            if key == "run_id" || key == "session_id" {
+                continue
+            }
+            if isForbiddenContentKey(key) {
+                continue
+            }
             merged[key] = sanitize(value)
+        }
+        merged["run_id"] = runID
+        if let activeSessionID {
+            merged["session"] = activeSessionID
+        } else if let explicitSession, !explicitSession.isEmpty {
+            merged["session"] = sanitize(explicitSession)
         }
         return merged
     }
 
     static func event(_ name: String, _ extra: [String: String] = [:]) {
         queue.async {
-            writeLocked(name: name, fields: fields(extra))
+            writeEventLocked(name: name, extra: extra)
         }
     }
 
     static func eventSync(_ name: String, _ extra: [String: String] = [:]) {
         queue.sync {
-            writeLocked(name: name, fields: fields(extra))
+            writeEventLocked(name: name, extra: extra)
+        }
+    }
+
+    @discardableResult
+    static func setSessionContext(_ sessionID: String) -> Bool {
+        queue.sync {
+            guard !sessionID.isEmpty else { return false }
+            if let activeSessionID, activeSessionID != sessionID {
+                writeSessionMismatchLocked()
+                return false
+            }
+            activeSessionID = sessionID
+            return true
+        }
+    }
+
+    @discardableResult
+    static func clearSessionContext(matching sessionID: String) -> Bool {
+        queue.sync {
+            guard let activeSessionID else { return true }
+            guard activeSessionID == sessionID else {
+                writeSessionMismatchLocked()
+                return false
+            }
+            AgentLog.activeSessionID = nil
+            return true
+        }
+    }
+
+    static func snapshotFieldsForTesting(
+        _ extra: [String: String] = [:]
+    ) -> [String: String]? {
+        queue.sync {
+            fields(extra)
+        }
+    }
+
+    static func setFileURLForTesting(_ url: URL?) {
+        queue.sync {
+            testFileURL = url
         }
     }
 
@@ -104,7 +175,10 @@ enum AgentLog {
     #endif
 
     private static func writeLocked(name: String, fields: [String: String]) {
-        try? FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
+        try? FileManager.default.createDirectory(
+            at: fileURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
         var row = fields
         row["ts"] = ISO8601DateFormatter().string(from: Date())
         row["event"] = name
@@ -128,6 +202,34 @@ enum AgentLog {
         } catch {
             return
         }
+    }
+
+    private static func writeEventLocked(name: String, extra: [String: String]) {
+        guard let fields = fields(extra) else {
+            writeSessionMismatchLocked()
+            return
+        }
+        writeLocked(name: name, fields: fields)
+    }
+
+    private static func writeSessionMismatchLocked() {
+        guard var mismatch = fields() else { return }
+        mismatch["reason"] = "explicit_session_mismatch"
+        writeLocked(name: "session_mismatch", fields: mismatch)
+    }
+
+    private static func isForbiddenContentKey(_ key: String) -> Bool {
+        let canonical = key.lowercased().filter { $0.isLetter }
+        if permittedCanonicalKeys.contains(canonical) {
+            return false
+        }
+        if forbiddenCanonicalKeys.contains(canonical) {
+            return true
+        }
+        return [
+            "title", "url", "note", "transcript", "token", "key",
+            "passphrase", "password", "secret", "content"
+        ].contains { canonical.contains($0) }
     }
 
     private static func rotateIfNeeded() {

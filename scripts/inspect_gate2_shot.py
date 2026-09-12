@@ -9,8 +9,8 @@ actions that started during the pause.
 A pass here is not a GATE_LOG.md PASS.
 
 Usage:
-  python3 scripts/inspect_gate2_shot.py --log ~/Library/Logs/ScrumTrace/agent.jsonl \\
-    --log-start-line N
+  python3 scripts/inspect_gate2_shot.py --session /path/to/session \\
+    --log ~/Library/Logs/ScrumTrace/agent.jsonl --log-start-line N
 """
 
 from __future__ import annotations
@@ -28,8 +28,11 @@ from gate_inspect_lib import (
     die_missing,
     emit,
     event_name,
+    filter_rows_for_first_run,
+    filter_rows_for_session,
     in_pause_window,
     pause_windows,
+    read_json_object,
     read_jsonl_window,
 )
 
@@ -50,6 +53,7 @@ def parse_t_media(row: dict[str, object]) -> float | None:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--log", required=True, type=Path)
+    parser.add_argument("--session", required=True, type=Path)
     parser.add_argument(
         "--log-start-line",
         required=True,
@@ -95,6 +99,38 @@ def main() -> int:
             blocked=True,
             blocked_reasons=["empty_log_window"],
         )
+    try:
+        rows, run_id = filter_rows_for_first_run(rows)
+    except LogWindowError as exc:
+        return emit(
+            report,
+            [],
+            status="blocked",
+            blocked=True,
+            blocked_reasons=[exc.reason],
+        )
+    report["run_id"] = run_id
+    session = args.session.expanduser().resolve()
+    manifest = read_json_object(session / "session.manifest.json")
+    if manifest is None:
+        return emit(
+            report,
+            [],
+            status="blocked",
+            blocked=True,
+            blocked_reasons=["missing_session_manifest"],
+        )
+    session_id = str(manifest.get("session_id") or "")
+    if not session_id:
+        return emit(
+            report,
+            [],
+            status="blocked",
+            blocked=True,
+            blocked_reasons=["missing_session_id"],
+        )
+    rows = filter_rows_for_session(rows, session_id)
+    report["session_id"] = session_id
 
     windows = pause_windows(rows)
     if not windows:

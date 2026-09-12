@@ -31,7 +31,13 @@ def _run(log: Path, start_line: int = 1) -> subprocess.CompletedProcess[str]:
 
 def _write(rows: list[dict[str, object]]) -> Path:
     path = Path(tempfile.mkdtemp(prefix="scrumtrace-gate0-")) / "agent.jsonl"
-    path.write_text("\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8")
+    run_id = "gate0-run"
+    scoped = [{"event": "launch", "run_id": run_id}]
+    scoped.extend({**row, "run_id": row.get("run_id", run_id)} for row in rows)
+    path.write_text(
+        "\n".join(json.dumps(row) for row in scoped) + "\n",
+        encoding="utf-8",
+    )
     return path
 
 
