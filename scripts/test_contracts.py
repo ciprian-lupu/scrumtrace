@@ -2989,6 +2989,18 @@ def test_audit_leftovers_are_implemented() -> None:
     assert "stillMaxWidth" in snap_fn
     assert "CGDisplayCreateImage" in snap_fn
     assert "func downscale" in snap_fn
+    budget = (ROOT / "ScrumTrace" / "Storage" / "SessionModels.swift").read_text()
+    assert "static let stillMaxWidth = 2560" in budget
+    assert "static let stillUploadMaxWidth = 1440" in budget
+    assert "static let stillJPEGQuality: CGFloat = 0.92" in budget
+    jpeg = (ROOT / "ScrumTrace" / "AI" / "AIProviderProtocol.swift").read_text()
+    jpeg_fn = jpeg.split("static func jpegData")[1].split("static func jpegPayload")[0]
+    assert "cgImage(forProposedRect" in jpeg_fn
+    assert "image.size.width" not in jpeg_fn.split("if let cg")[0]
+    css = (ROOT / "ScrumTrace" / "Export" / "Resources" / "brief.css").read_text()
+    assert "max-width: 100%" in css
+    assert ".still img, figure img { width: 100%;" not in css
+    assert "2560px" in css
     start = snap.split("func startRecording()")[1].split("func stopRecording()")[0]
     assert "LicenseStore" not in start
     assert "CGRequestScreenCaptureAccess" not in start

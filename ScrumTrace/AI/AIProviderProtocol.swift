@@ -214,10 +214,20 @@ enum JSONExtractor {
 enum ImageBase64 {
     #if os(macOS)
     static func jpegData(from image: NSImage, maxEdge: CGFloat, quality: CGFloat) -> Data? {
-        let size = image.size
-        let scale = min(1, maxEdge / max(size.width, size.height, 1))
-        let width = max(1, Int((size.width * scale).rounded()))
-        let height = max(1, Int((size.height * scale).rounded()))
+        // NSImage.size is points. A 2x PNG loaded from disk can report half
+        // the pixel size; using that as the JPEG canvas throws away the Shot.
+        let pixelWidth: CGFloat
+        let pixelHeight: CGFloat
+        if let cg = image.cgImage(forProposedRect: nil, context: nil, hints: nil) {
+            pixelWidth = CGFloat(cg.width)
+            pixelHeight = CGFloat(cg.height)
+        } else {
+            pixelWidth = max(image.size.width, 1)
+            pixelHeight = max(image.size.height, 1)
+        }
+        let scale = min(1, maxEdge / max(pixelWidth, pixelHeight, 1))
+        let width = max(1, Int((pixelWidth * scale).rounded()))
+        let height = max(1, Int((pixelHeight * scale).rounded()))
         guard let rep = NSBitmapImageRep(
             bitmapDataPlanes: nil,
             pixelsWide: width,
@@ -235,7 +245,7 @@ enum ImageBase64 {
         NSGraphicsContext.current?.imageInterpolation = .high
         image.draw(
             in: NSRect(x: 0, y: 0, width: CGFloat(width), height: CGFloat(height)),
-            from: NSRect(origin: .zero, size: size),
+            from: NSRect(origin: .zero, size: image.size),
             operation: .copy,
             fraction: 1
         )
@@ -244,7 +254,7 @@ enum ImageBase64 {
     }
     #endif
 
-    static func jpegPayload(url: URL, sessionRoot: URL, maxEdge: CGFloat = 1440) -> (mime: String, base64: String)? {
+    static func jpegPayload(url: URL, sessionRoot: URL, maxEdge: CGFloat = CGFloat(MediaBudget.stillUploadMaxWidth)) -> (mime: String, base64: String)? {
         if (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
             return nil
         }

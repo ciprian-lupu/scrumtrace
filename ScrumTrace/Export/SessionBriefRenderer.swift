@@ -469,11 +469,11 @@ struct SessionBriefRenderer {
     .kind { font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; }
     .conf { font-family: ui-monospace, monospace; font-size: 11px; opacity: 0.7; }
     .clip { width: 100%; border-radius: 12px; background: #000; }
-    .still img, figure img { width: 100%; border-radius: 12px; display: block; }
+    .still img, figure img { width: auto; max-width: 100%; height: auto; border-radius: 12px; display: block; }
     .contact { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 14px; }
     .lightbox { position: fixed; inset: 0; background: rgba(6,5,4,.92); display: none; place-items: center; z-index: 20; padding: 24px; cursor: zoom-out; }
     .lightbox.open { display: grid; }
-    .lightbox img { max-width: min(92vw, 1400px); max-height: 92vh; cursor: default; }
+    .lightbox img { max-width: min(96vw, 2560px); max-height: 92vh; cursor: default; }
     .spk { display: block; font-size: 11px; color: #f0a35e; }
     .when { display: block; font-size: 10px; opacity: 0.6; margin-bottom: 6px; }
     @media (max-width: 860px) {

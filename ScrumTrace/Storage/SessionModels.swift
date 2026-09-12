@@ -1905,8 +1905,14 @@ enum MediaBudget {
     static let clipMinDuration: TimeInterval = 15
     static let clipMaxDuration: TimeInterval = 25
     static let clipMeanDuration: TimeInterval = 20
-    static let stillMaxWidth = 1440
-    static let stillJPEGQuality: CGFloat = 0.82
+    /// Archive / export stills. 1440 made Retina desktop shots unreadable in
+    /// the HTML brief (Settings text, two-window layouts). 2560 keeps a 13"
+    /// Air native width; zip still drops extras under the 35 MB cap.
+    static let stillMaxWidth = 2560
+    /// Provider uploads stay smaller; models resize anyway and DeepSeek caps
+    /// each image at 384 tokens.
+    static let stillUploadMaxWidth = 1440
+    static let stillJPEGQuality: CGFloat = 0.92
     static let keepConfidenceFloor = 0.55
     static let metadataSampleTimeoutMs: UInt64 = 200
     /// Archive movie cap. 3840×2160 at 4 fps. High bitrate so stills stay sharp
