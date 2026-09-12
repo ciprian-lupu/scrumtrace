@@ -15,6 +15,7 @@ enum CaptureAreaPicker {
         case record(CaptureArea)
     }
 
+    @MainActor
     static func present(current: CaptureArea, completion: @escaping (CaptureArea) -> Void) {
         present(current: current, mode: .choose) { outcome in
             switch outcome {
@@ -26,6 +27,7 @@ enum CaptureAreaPicker {
         }
     }
 
+    @MainActor
     static func present(
         current: CaptureArea,
         mode: Mode,
