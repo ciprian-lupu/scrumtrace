@@ -211,6 +211,48 @@ figcaption { font-family: var(--mono); font-size: 11px; color: var(--muted); mar
 .lightbox.open { display: grid; }
 .lightbox img { max-width: min(96vw, 2560px); max-height: 92vh; cursor: default; }
 
+.still-size {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+  cursor: pointer;
+  user-select: none;
+}
+.still-size input {
+  accent-color: var(--amber);
+  width: 12px;
+  height: 12px;
+  margin: 0;
+}
+.still-size:has(input:checked) {
+  color: var(--paper);
+  border-color: var(--amber);
+}
+body.stills-full .still,
+body.stills-full figure,
+body.stills-full .evidence,
+body.stills-full .contact,
+body.stills-full .lightbox.open {
+  overflow: auto;
+}
+body.stills-full .still img,
+body.stills-full figure img,
+body.stills-full .lightbox img {
+  max-width: none;
+  max-height: none;
+  width: auto;
+  height: auto;
+}
+
 @media (max-width: 860px) {
   .shell { margin-left: 0; padding: 18px 18px 64px; }
   .sprocket { display: none; }

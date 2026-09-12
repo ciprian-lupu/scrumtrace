@@ -65,3 +65,27 @@
     });
   });
 })();
+(() => {
+  const label = document.createElement("label");
+  label.className = "still-size";
+  const input = document.createElement("input");
+  input.type = "checkbox";
+  input.setAttribute("role", "switch");
+  input.setAttribute("aria-label", "Show screenshots at full size");
+  label.appendChild(input);
+  label.appendChild(document.createTextNode(" Full size"));
+  const nav = document.querySelector(".brief-nav");
+  if (nav) {
+    nav.appendChild(label);
+  } else {
+    const shell = document.querySelector(".shell");
+    if (shell) {
+      shell.insertBefore(label, shell.firstChild);
+    }
+  }
+  const apply = () => {
+    document.body.classList.toggle("stills-full", input.checked);
+  };
+  input.addEventListener("change", apply);
+  apply();
+})();

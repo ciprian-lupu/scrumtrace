@@ -474,6 +474,9 @@ struct SessionBriefRenderer {
     .lightbox { position: fixed; inset: 0; background: rgba(6,5,4,.92); display: none; place-items: center; z-index: 20; padding: 24px; cursor: zoom-out; }
     .lightbox.open { display: grid; }
     .lightbox img { max-width: min(96vw, 2560px); max-height: 92vh; cursor: default; }
+    .still-size { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; padding: 6px 10px; border: 1px solid var(--line); border-radius: 999px; font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); cursor: pointer; }
+    body.stills-full .still img, body.stills-full figure img, body.stills-full .lightbox img { max-width: none; max-height: none; width: auto; height: auto; }
+    body.stills-full .still, body.stills-full figure, body.stills-full .evidence, body.stills-full .contact, body.stills-full .lightbox.open { overflow: auto; }
     .spk { display: block; font-size: 11px; color: #f0a35e; }
     .when { display: block; font-size: 10px; opacity: 0.6; margin-bottom: 6px; }
     @media (max-width: 860px) {
@@ -546,6 +549,25 @@ struct SessionBriefRenderer {
           box.focus();
         });
       });
+    })();
+    (() => {
+      const label = document.createElement("label");
+      label.className = "still-size";
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      input.setAttribute("role", "switch");
+      input.setAttribute("aria-label", "Show screenshots at full size");
+      label.appendChild(input);
+      label.appendChild(document.createTextNode(" Full size"));
+      const nav = document.querySelector(".brief-nav");
+      if (nav) { nav.appendChild(label); }
+      else {
+        const shell = document.querySelector(".shell");
+        if (shell) { shell.insertBefore(label, shell.firstChild); }
+      }
+      const apply = () => { document.body.classList.toggle("stills-full", input.checked); };
+      input.addEventListener("change", apply);
+      apply();
     })();
     """
 }

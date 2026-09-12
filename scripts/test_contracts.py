@@ -2249,9 +2249,14 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "box.focus()" in js
     assert "event.target === box" in js
     assert "lastOpener" in js
+    assert "still-size" in js
+    assert "stills-full" in js
+    assert "Show screenshots at full size" in js
     fallback_js = brief.split("let fallbackJS")[1]
     assert "event.target === box" in fallback_js
     assert "lastOpener" in fallback_js
+    assert "still-size" in fallback_js
+    assert "stills-full" in fallback_js
     assert "isPackMediaHref" in js
     assert 'parts[0] === "shots"' in js
     assert 'parts[0] === "media"' in js
@@ -2284,6 +2289,8 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "@import" not in brief_html
     assert "IBM Plex" not in brief_html
     fallback_css = brief.split("let fallbackCSS")[1].split("let fallbackJS")[0]
+    assert "still-size" in fallback_css
+    assert "stills-full" in fallback_css
     assert "fonts.googleapis" not in fallback_css
     assert "@import" not in fallback_css
     assert ".conf" in fallback_css
@@ -3001,6 +3008,8 @@ def test_audit_leftovers_are_implemented() -> None:
     assert "max-width: 100%" in css
     assert ".still img, figure img { width: 100%;" not in css
     assert "2560px" in css
+    assert ".still-size" in css
+    assert "body.stills-full" in css
     start = snap.split("func startRecording()")[1].split("func stopRecording()")[0]
     assert "LicenseStore" not in start
     assert "CGRequestScreenCaptureAccess" not in start
