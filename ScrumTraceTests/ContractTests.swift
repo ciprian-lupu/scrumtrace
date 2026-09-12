@@ -864,6 +864,38 @@ final class ContractTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: session.path))
     }
 
+    func testRetentionPrunesOnlyCompletedSessions() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "st-retention-\(UUID().uuidString)"
+        )
+        defer { try? FileManager.default.removeItem(at: root) }
+        let vault = SessionVault(rootURL: root)
+
+        let completed = try vault.createSession(product: .empty)
+        var completedManifest = completed.manifest
+        completedManifest.createdAt = Date().addingTimeInterval(-3 * 86_400)
+        completedManifest.pipelineStatus = .completed
+        try vault.write(manifest: &completedManifest)
+
+        let retryable = try vault.createSession(product: .empty)
+        var retryableManifest = retryable.manifest
+        retryableManifest.createdAt = Date().addingTimeInterval(-3 * 86_400)
+        retryableManifest.pipelineStatus = .offlineFailed
+        try vault.write(manifest: &retryableManifest)
+
+        let unfinished = try vault.createSession(product: .empty)
+        var unfinishedManifest = unfinished.manifest
+        unfinishedManifest.createdAt = Date().addingTimeInterval(-3 * 86_400)
+        unfinishedManifest.pipelineStatus = .transcribing
+        try vault.write(manifest: &unfinishedManifest)
+
+        vault.pruneCompletedOlderThan(days: 1)
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: completed.url.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: retryable.url.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: unfinished.url.path))
+    }
+
     func testPruneAbandonedStartsIgnoresPlantedShotsDirectorySymlink() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(
             "st-prune-shots-link-\(UUID().uuidString)"
@@ -2725,6 +2757,22 @@ final class ContractTests: XCTestCase {
         )
         XCTAssertTrue(AIProviderError.isAuthFailure(AIProviderError.httpStatus(401, "")))
         XCTAssertFalse(AIProviderError.isAuthFailure(AIProviderError.emptyResponse))
+    }
+
+    func testHTTPStatusDoesNotExposeProviderResponseBody() throws {
+        let response = HTTPURLResponse(
+            url: URL(string: "https://provider.example/evaluate")!,
+            statusCode: 500,
+            httpVersion: nil,
+            headerFields: nil
+        )!
+        let marker = "captured-transcript-secret"
+        XCTAssertThrowsError(
+            try HTTPStatus.throwIfNeeded(response, data: Data(marker.utf8))
+        ) { error in
+            XCTAssertFalse(error.localizedDescription.contains(marker))
+            XCTAssertTrue(error.localizedDescription.contains("500"))
+        }
     }
 
     func testProjectClearsStaleExportArtifacts() throws {

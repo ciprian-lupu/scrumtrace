@@ -430,17 +430,17 @@ final class SessionVault: @unchecked Sendable {
         #endif
     }
 
-    /// Completed sessions older than `days`. 0 means keep forever. Never
-    /// deletes a live recording or paused session.
+    /// Completed sessions older than `days`. 0 means keep forever. Retryable
+    /// and unfinished sessions are retained regardless of age.
     func pruneCompletedOlderThan(days: Int) {
         guard days > 0 else { return }
         let cutoff = Date().addingTimeInterval(-Double(days) * 86_400)
         for manifest in recentSessions(limit: 500) where manifest.createdAt < cutoff {
             switch manifest.pipelineStatus {
-            case .recording, .paused:
-                continue
-            case .idle, .transcribing, .slicing, .evaluating, .synthesizing, .completed, .offlineFailed:
+            case .completed:
                 removeAbandonedSession(id: manifest.sessionId)
+            case .idle, .recording, .paused, .transcribing, .slicing, .evaluating, .synthesizing, .offlineFailed:
+                continue
             }
         }
     }

@@ -127,6 +127,16 @@ def test_app_active_fails() -> None:
     assert report["checks"]["no_hotkey_activated_app"] is False
 
 
+def test_missing_shot_window_key_fails() -> None:
+    rows = [
+        row for row in _good_rows() if row.get("event") != "shot_window_key"
+    ]
+    result = _run(_write(rows))
+    assert result.returncode == 1
+    report = json.loads(result.stdout)
+    assert report["checks"]["shot_window_key_keynote_inactive"] is False
+
+
 def test_start_without_record_overlay_fails() -> None:
     rows = [
         {"event": "menu_start"},
@@ -173,6 +183,7 @@ def main() -> None:
     test_missing_pin_fails()
     test_wrong_frontmost_fails()
     test_app_active_fails()
+    test_missing_shot_window_key_fails()
     test_start_without_record_overlay_fails()
     test_requires_log_start_line()
     print("test_gate0 ok")

@@ -173,7 +173,7 @@ def main() -> int:
         "hotkey_pause": hotkey_pause == 1,
         "shot_front_keynote_inactive": shot_front_ok >= 1 and shot_front_bad == 0,
         "pin_front_keynote_inactive": pin_front_ok >= 1 and pin_front_bad == 0,
-        "shot_window_key_keynote_inactive": shot_key_bad == 0,
+        "shot_window_key_keynote_inactive": shot_key_ok >= 1 and shot_key_bad == 0,
         "pause_lifecycle": pause_ok >= 1,
         "pin_ok_while_recording": pin_ok >= 1,
         "no_hotkey_activated_app": hotkey_activated_app == 0,

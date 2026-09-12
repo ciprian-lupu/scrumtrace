@@ -860,7 +860,8 @@ final class SessionController: ObservableObject {
         AgentLog.event("shot_save", [
             "id": stored.id,
             "source": source.rawValue,
-            "note_chars": String(note.count)
+            "note_chars": String(note.count),
+            "t_media": String(stored.tMedia)
         ])
         log(.shot, ["id": stored.id, "note": note])
         shotWindow = nil

@@ -83,8 +83,10 @@ enum HTTPStatus {
     static func throwIfNeeded(_ response: URLResponse, data: Data) throws {
         guard let http = response as? HTTPURLResponse else { return }
         guard (200..<300).contains(http.statusCode) else {
-            let body = String(data: data, encoding: .utf8) ?? ""
-            throw AIProviderError.httpStatus(http.statusCode, String(body.prefix(400)))
+            // Provider bodies are untrusted and can echo request content. Keep
+            // them out of errors because those errors feed diagnostics and
+            // offline-review copy.
+            throw AIProviderError.httpStatus(http.statusCode, "Request rejected.")
         }
     }
 }
