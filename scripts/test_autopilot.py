@@ -431,24 +431,84 @@ class OperatorAndReleaseTests(unittest.TestCase):
     def tearDown(self) -> None:
         shutil.rmtree(self.tmp, ignore_errors=True)
 
-    def test_operator_requires_same_sha_artifact(self) -> None:
-        artifact = self.tmp / "artifact.bin"
-        artifact.write_bytes(b"abc")
-        results = {
+    def operator_results(self, artifact: Path) -> dict[str, Any]:
+        return {
             "command_digest": "d" * 64,
             "exit_code": 0,
-            "source_sha": "0" * 40,
+            "source_sha": self.head,
             "artifact_path": str(artifact),
             "artifact_sha256": self.ap.sha256_file(artifact),
-            "artifact_bytes": 3,
+            "artifact_bytes": artifact.stat().st_size,
             "machine": "test",
             "environment": "linux",
             "manual_state": "pass",
         }
+
+    def test_operator_requires_same_sha_artifact(self) -> None:
+        artifact = self.tmp / "artifact.bin"
+        artifact.write_bytes(b"abc")
+        results = self.operator_results(artifact)
+        results["source_sha"] = "0" * 40
         path = self.tmp / "op.json"
         path.write_text(json.dumps(results), encoding="utf-8")
         with self.assertRaises(SystemExit):
             self.ap.main(["record-operator", "F01-linux", "--results", str(path)])
+
+    def test_operator_rejects_failed_command_and_manual_state(self) -> None:
+        artifact = self.tmp / "artifact.bin"
+        artifact.write_bytes(b"abc")
+        path = self.tmp / "op.json"
+
+        failed = self.operator_results(artifact)
+        failed["exit_code"] = 1
+        path.write_text(json.dumps(failed), encoding="utf-8")
+        with self.assertRaises(SystemExit):
+            self.ap.main(["record-operator", "F01-linux", "--results", str(path)])
+
+        manual = self.operator_results(artifact)
+        manual["manual_state"] = "blocked"
+        path.write_text(json.dumps(manual), encoding="utf-8")
+        with self.assertRaises(SystemExit):
+            self.ap.main(["record-operator", "F01-linux", "--results", str(path)])
+
+    def test_release_evidence_is_task_specific_and_fail_closed(self) -> None:
+        self.assertTrue(
+            self.ap.release_evidence_errors("F04", {}, self.head)
+        )
+        self.assertEqual(
+            self.ap.release_evidence_errors(
+                "F04",
+                {
+                    "gate_log_source_sha": self.head,
+                    "artifact_map_sha256": "a" * 64,
+                    "blocked_rows": 0,
+                    "manual_rows": 0,
+                },
+                self.head,
+            ),
+            [],
+        )
+        self.assertTrue(
+            self.ap.release_evidence_errors("G01", {}, self.head)
+        )
+        self.assertEqual(
+            self.ap.release_evidence_errors(
+                "G01",
+                {
+                    "codesign_verified": True,
+                    "notarization_verified": True,
+                    "stapler_verified": True,
+                },
+                self.head,
+            ),
+            [],
+        )
+        self.assertTrue(
+            self.ap.release_evidence_errors("G02", {}, self.head)
+        )
+        self.assertTrue(
+            self.ap.release_evidence_errors("G03", {}, self.head)
+        )
 
     def test_release_mode_requires_fg_artifacts(self) -> None:
         # Even with fake integrated automatable work, release still fails.

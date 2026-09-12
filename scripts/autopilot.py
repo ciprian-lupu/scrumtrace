@@ -51,6 +51,7 @@ SPAWN_REGEX = {
     "B01a-NNN": re.compile(r"^B01a-\d+$"),
     "E02-NNN": re.compile(r"^E02-\d+$"),
 }
+SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
 class AutopilotError(Exception):
@@ -127,6 +128,45 @@ def redact_argv(argv: list[str]) -> list[str]:
             continue
         out.append(item)
     return out
+
+
+def release_evidence_errors(
+    task_id: str, evidence: object, source_sha: str
+) -> list[str]:
+    """Validate release-only proof required before APP_DONE can be true."""
+    if task_id not in {"F04", "G01", "G02", "G03"}:
+        return []
+    if not isinstance(evidence, dict):
+        return [f"{task_id} release_evidence must be an object"]
+
+    errors: list[str] = []
+    if task_id == "F04":
+        if evidence.get("gate_log_source_sha") != source_sha:
+            errors.append("F04 Gate-log source SHA must equal HEAD")
+        artifact_map_sha = evidence.get("artifact_map_sha256")
+        if not isinstance(artifact_map_sha, str) or not SHA256_RE.fullmatch(
+            artifact_map_sha
+        ):
+            errors.append("F04 artifact-map digest missing or invalid")
+        if evidence.get("blocked_rows") != 0:
+            errors.append("F04 blocked_rows must be zero")
+        if evidence.get("manual_rows") != 0:
+            errors.append("F04 manual_rows must be zero")
+    elif task_id == "G01":
+        for field in (
+            "codesign_verified",
+            "notarization_verified",
+            "stapler_verified",
+        ):
+            if evidence.get(field) is not True:
+                errors.append(f"G01 {field} must be true")
+    elif task_id == "G02":
+        if evidence.get("published_update_verified") is not True:
+            errors.append("G02 published_update_verified must be true")
+    elif task_id == "G03":
+        if evidence.get("installed_release_verified") is not True:
+            errors.append("G03 installed_release_verified must be true")
+    return errors
 
 
 def git(*args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -795,6 +835,24 @@ def cmd_record_operator(args: argparse.Namespace) -> int:
             die(f"operator results missing {field}")
     if results["source_sha"] != git_head():
         die("operator result source_sha must equal HEAD")
+    if not isinstance(results["exit_code"], int) or isinstance(
+        results["exit_code"], bool
+    ):
+        die("operator exit_code must be an integer")
+    if results["exit_code"] != 0:
+        die("operator command did not succeed")
+    if results["manual_state"] != "pass":
+        die("operator manual_state must be pass")
+    if not isinstance(results["command_digest"], str) or not SHA256_RE.fullmatch(
+        results["command_digest"]
+    ):
+        die("operator command_digest must be a SHA-256 digest")
+    release_evidence = results.get("release_evidence")
+    evidence_errors = release_evidence_errors(
+        tid, release_evidence, results["source_sha"]
+    )
+    if evidence_errors:
+        die("; ".join(evidence_errors))
     artifact = Path(str(results["artifact_path"]))
     if not artifact.is_absolute():
         artifact = (ROOT / artifact).resolve()
@@ -815,6 +873,7 @@ def cmd_record_operator(args: argparse.Namespace) -> int:
         "results_sha256": sha256_file(results_path),
         "artifact_sha256": digest,
         "artifact_bytes": int(results["artifact_bytes"]),
+        "artifact_path": str(artifact),
         "command_digest": results["command_digest"],
         "exit_code": int(results["exit_code"]),
         "source_sha": results["source_sha"],
@@ -822,6 +881,8 @@ def cmd_record_operator(args: argparse.Namespace) -> int:
         "environment": results["environment"],
         "manual_state": results["manual_state"],
     }
+    if release_evidence is not None:
+        operator["release_evidence"] = release_evidence
     entry.update(
         {
             "status": "integrated",
@@ -1055,6 +1116,27 @@ def release_verify(
         op = entry.get("operator") or {}
         if op.get("source_sha") != head:
             errors.append(f"release task {tid} artifact sha stale")
+        if op.get("exit_code") != 0:
+            errors.append(f"release task {tid} command did not succeed")
+        if op.get("manual_state") != "pass":
+            errors.append(f"release task {tid} manual state is not pass")
+        artifact_path = op.get("artifact_path")
+        if not isinstance(artifact_path, str):
+            errors.append(f"release task {tid} artifact path missing")
+        else:
+            artifact = Path(artifact_path)
+            if not artifact.is_absolute():
+                artifact = (ROOT / artifact).resolve()
+            if not artifact.is_file():
+                errors.append(f"release task {tid} artifact missing")
+            else:
+                if sha256_file(artifact) != op.get("artifact_sha256"):
+                    errors.append(f"release task {tid} artifact digest changed")
+                if artifact.stat().st_size != op.get("artifact_bytes"):
+                    errors.append(f"release task {tid} artifact size changed")
+        errors.extend(
+            release_evidence_errors(tid, op.get("release_evidence"), head)
+        )
     for tid in all_task_ids(graph, state):
         status = task_entry(state, tid).get("status")
         if status in {"needs_mac_worker", "human_required", "failed"}:
