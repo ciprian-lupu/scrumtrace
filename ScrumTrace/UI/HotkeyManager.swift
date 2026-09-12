@@ -104,21 +104,16 @@ final class HotkeyManager {
         }
         Task { @MainActor [weak self] in
             guard let self else { return }
+            // Capture frontmost state before Shot/Pin so Gate 0 can prove Keynote
+            // stayed frontmost (and ScrumTrace stayed inactive) at press time.
+            self.logFront(before: action)
             self.perform(action)
         }
         return noErr
     }
 
     @MainActor
-    private func perform(_ action: Action) {
-        switch action {
-        case .pin:
-            controller?.pin()
-        case .shot:
-            controller?.openShot()
-        case .pause:
-            controller?.togglePause()
-        }
+    private func logFront(before action: Action) {
         let name: String
         switch action {
         case .pin:
@@ -132,8 +127,29 @@ final class HotkeyManager {
         AgentLog.event("hotkey_front", [
             "action": name,
             "front": NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "",
-            "app_active": NSApp.isActive ? "1" : "0"
+            "app_active": NSApp.isActive ? "1" : "0",
         ])
         #endif
+    }
+
+    @MainActor
+    private func perform(_ action: Action) {
+        switch action {
+        case .pin:
+            controller?.pin()
+        case .shot:
+            controller?.openShot()
+        case .pause:
+            controller?.togglePause()
+        }
+        if action == .shot {
+            #if os(macOS)
+            // Shot may briefly become key; still require Keynote frontmost + inactive app.
+            AgentLog.event("shot_window_key", [
+                "front": NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "",
+                "app_active": NSApp.isActive ? "1" : "0",
+            ])
+            #endif
+        }
     }
 }
