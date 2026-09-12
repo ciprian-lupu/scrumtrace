@@ -168,7 +168,7 @@ def main() -> int:
         "timing_sources_match_transcript": sources_match,
         "room_present_when_microphone_wav": room_ok,
         "system_present_when_system_audio": system_ok,
-        "both_sources_when_both_captured": both_ok,
+        "dual_pass_when_both_captured": both_ok,
         "timing_absent_from_export_and_zip": timing_absent_from_export,
         "target_named": target_named,
         "target_media_ge_300": target_media_ok if target_named else None,
@@ -183,7 +183,7 @@ def main() -> int:
         "timing_sources_match_transcript",
         "room_present_when_microphone_wav",
         "system_present_when_system_audio",
-        "both_sources_when_both_captured",
+        "dual_pass_when_both_captured",
         "timing_absent_from_export_and_zip",
     ]
     report["checks"] = checks

@@ -91,7 +91,7 @@ def test_missing_expected_source_fails() -> None:
     result = _run(session, ["--target-media-seconds", "300", "--target-wall-seconds", "12"])
     assert result.returncode == 1
     report = json.loads(result.stdout)
-    assert "both_sources_when_both_captured" in report["failed"]
+    assert "dual_pass_when_both_captured" in report["failed"]
 
 
 def test_timing_transcript_source_mismatch_fails() -> None:
