@@ -186,25 +186,92 @@ def ffprobe_video_stream(path: Path, ffprobe: str) -> dict[str, object] | None:
     return stream if isinstance(stream, dict) else None
 
 
-def zip_names(path: Path) -> list[str]:
+class ZipInventory:
+    """Typed ZIP inventory for Gate 6 (and helpers).
+
+    ``state`` is one of ``missing``, ``valid``, or ``corrupt``.
+    """
+
+    def __init__(
+        self,
+        *,
+        state: str,
+        names: list[str] | None = None,
+        size: int = 0,
+        symlink_members: list[str] | None = None,
+        reason: str | None = None,
+    ) -> None:
+        if state not in {"missing", "valid", "corrupt"}:
+            raise ValueError(f"invalid zip inventory state: {state!r}")
+        self.state = state
+        self.names = list(names or [])
+        self.size = size
+        self.symlink_members = list(symlink_members or [])
+        self.reason = reason
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "state": self.state,
+            "names": list(self.names),
+            "size": self.size,
+            "symlink_members": list(self.symlink_members),
+            "reason": self.reason,
+        }
+
+
+def zip_inventory(path: Path) -> ZipInventory:
+    """Return a typed inventory distinguishing missing / valid / corrupt ZIPs."""
     if not path.is_file():
-        return []
+        return ZipInventory(state="missing", reason="missing")
     try:
-        out = subprocess.run(
-            ["unzip", "-Z", "-1", str(path)],
-            check=False,
-            capture_output=True,
-            text=True,
-        )
-        if out.returncode == 0:
-            return [line.strip() for line in out.stdout.splitlines() if line.strip()]
-    except OSError:
-        pass
+        size = path.stat().st_size
+    except OSError as exc:
+        return ZipInventory(state="corrupt", reason=f"stat_failed:{exc}")
     try:
         with zipfile.ZipFile(path, "r") as zf:
-            return [info.filename for info in zf.infolist() if not info.is_dir()]
-    except (OSError, zipfile.BadZipFile):
+            bad = zf.testzip()
+            if bad is not None:
+                return ZipInventory(
+                    state="corrupt",
+                    size=size,
+                    reason=f"crc_failed:{bad}",
+                )
+            names: list[str] = []
+            symlinks: list[str] = []
+            for info in zf.infolist():
+                if info.is_dir():
+                    continue
+                names.append(info.filename)
+                # ZIP symlink: external_attr high bits look like a Unix symlink,
+                # or create_system=3 with mode S_IFLNK. Also treat linkname payloads.
+                is_symlink = False
+                if info.external_attr >> 16:
+                    mode = info.external_attr >> 16
+                    if (mode & 0o170000) == 0o120000:
+                        is_symlink = True
+                if is_symlink:
+                    symlinks.append(info.filename)
+            return ZipInventory(
+                state="valid",
+                names=names,
+                size=size,
+                symlink_members=symlinks,
+            )
+    except zipfile.BadZipFile:
+        return ZipInventory(state="corrupt", size=size, reason="bad_zip")
+    except OSError as exc:
+        return ZipInventory(state="corrupt", size=size, reason=f"unreadable:{exc}")
+
+
+def zip_names(path: Path) -> list[str]:
+    """Return member names for a readable ZIP; missing/corrupt → [].
+
+    Implemented through ``zip_inventory`` without changing the public return type.
+    """
+    inventory = zip_inventory(path)
+    if inventory.state != "valid":
         return []
+    return list(inventory.names)
 
 
 def first_sample_types(rows: list[dict[str, object]]) -> set[str]:
