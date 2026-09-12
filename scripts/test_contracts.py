@@ -2859,11 +2859,10 @@ def test_write_contained_data_refuses_directory_symlinks() -> None:
     assert "ScrumTracePath.manifest" in under
     assert "func isUsableSessionRoot" in models
     usable = models.split("static func isUsableSessionRoot")[1].split("static func containedRelative")[0]
-    assert "isSymbolicLink" in usable
-    assert "isDir.boolValue" in usable
-    assert "fileExists(atPath: sessionURL.path, isDirectory:" in usable
-    assert "O_NOFOLLOW" in usable
-    assert "O_DIRECTORY" in usable
+    assert "Darwin.lstat" in usable
+    assert "S_IFLNK" in usable
+    assert "S_IFDIR" in usable
+    assert "ENOENT" in usable
     assert "deletingLastPathComponent" in usable
     assert 'lastPathComponent == "sessions"' in usable
     prepare = models.split("static func prepareContainedWrite")[1].split("static func ensureSessionsDirectory")[0]

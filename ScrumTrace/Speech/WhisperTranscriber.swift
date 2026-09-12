@@ -17,28 +17,22 @@ final class WhisperTranscriber: @unchecked Sendable {
     private var ready = false
 
     var isReady: Bool {
-        lock.lock()
-        defer { lock.unlock() }
-        return ready
+        withStateLock { ready }
     }
 
     func prepare(model: String = WhisperTranscriber.defaultStoredModel) async throws {
         let started = Date()
         let resolved = Self.whisperKitModelName(model)
-        let work: Task<Void, Error>
-        lock.lock()
-        if ready {
-            lock.unlock()
+        let action = preparationAction(resolved: resolved)
+        switch action {
+        case .ready:
             AgentLog.event("whisper_prepare_ok", [
                 "model": resolved,
                 "reuse": "1",
                 "elapsed_ms": "0"
             ])
             return
-        }
-        if let preparing {
-            work = preparing
-            lock.unlock()
+        case .wait(let work):
             AgentLog.event("whisper_prepare_wait", ["model": resolved])
             do {
                 try await work.value
@@ -55,44 +49,72 @@ final class WhisperTranscriber: @unchecked Sendable {
                 ])
                 throw error
             }
+        case .start(let work):
+            do {
+                try await work.value
+                AgentLog.event("whisper_prepare_ok", [
+                    "model": resolved,
+                    "reuse": "0",
+                    "elapsed_ms": String(Int(Date().timeIntervalSince(started) * 1000))
+                ])
+            } catch {
+                clearFailedPreparation()
+                AgentLog.event("whisper_prepare_fail", [
+                    "model": resolved,
+                    "error": AgentLog.sanitize(error.localizedDescription)
+                ])
+                throw error
+            }
         }
-        work = Task.detached {
-            AgentLog.event("whisper_prepare_begin", ["model": resolved])
-            let config = WhisperKitConfig(
-                model: resolved,
-                verbose: false,
-                logLevel: .error,
-                prewarm: true,
-                load: true,
-                download: true
-            )
-            let loaded = try await WhisperKit(config)
-            self.lock.lock()
-            self.kit = loaded
-            self.ready = true
-            self.lock.unlock()
+    }
+
+    private enum PreparationAction {
+        case ready
+        case wait(Task<Void, Error>)
+        case start(Task<Void, Error>)
+    }
+
+    private func preparationAction(resolved: String) -> PreparationAction {
+        withStateLock {
+            if ready {
+                return .ready
+            }
+            if let preparing {
+                return .wait(preparing)
+            }
+            let work = Task.detached {
+                AgentLog.event("whisper_prepare_begin", ["model": resolved])
+                let config = WhisperKitConfig(
+                    model: resolved,
+                    verbose: false,
+                    logLevel: .error,
+                    prewarm: true,
+                    load: true,
+                    download: true
+                )
+                let loaded = try await WhisperKit(config)
+                self.withStateLock {
+                    self.kit = loaded
+                    self.ready = true
+                }
+            }
+            preparing = work
+            return .start(work)
         }
-        preparing = work
-        lock.unlock()
-        do {
-            try await work.value
-            AgentLog.event("whisper_prepare_ok", [
-                "model": resolved,
-                "reuse": "0",
-                "elapsed_ms": String(Int(Date().timeIntervalSince(started) * 1000))
-            ])
-        } catch {
-            lock.lock()
-            if !self.ready {
+    }
+
+    private func clearFailedPreparation() {
+        withStateLock {
+            if !ready {
                 preparing = nil
             }
-            lock.unlock()
-            AgentLog.event("whisper_prepare_fail", [
-                "model": resolved,
-                "error": AgentLog.sanitize(error.localizedDescription)
-            ])
-            throw error
         }
+    }
+
+    private func withStateLock<T>(_ body: () -> T) -> T {
+        lock.lock()
+        defer { lock.unlock() }
+        return body()
     }
 
     func transcribeFile(at url: URL, sessionURL: URL? = nil) async throws -> FullTranscript {

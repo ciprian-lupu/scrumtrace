@@ -65,7 +65,7 @@ final class SessionProcessor: @unchecked Sendable {
             manifest.pipelineStatus = .transcribing
             try vault.write(manifest: &manifest)
             let whisperStarted = Date()
-            var transcribed = await transcribe(
+            let transcribed = await transcribe(
                 sessionURL: sessionURL,
                 model: whisperModel,
                 onStatus: onStatus

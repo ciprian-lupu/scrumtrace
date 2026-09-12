@@ -181,36 +181,31 @@ enum ExportRel {
     /// `fileExists` cannot bless a directory symlink planted after the
     /// `isSymbolicLink` check.
     static func isUsableSessionRoot(_ sessionURL: URL) -> Bool {
-        if (try? sessionURL.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
-            return false
-        }
         // `open(2)` follows intermediate parents. A planted `sessions` →
         // `/tmp` link would otherwise bless `sessions/<id>` as a real directory
         // inside the target. Only this parent name is checked so a user who
         // aliases `Movies/ScrumTrace` onto another volume still works, and so
         // `ensureRoot` can create `…/sessions` when that folder is still missing.
         let parent = sessionURL.deletingLastPathComponent()
-        if parent.path != sessionURL.path,
-           parent.lastPathComponent == "sessions",
-           (try? parent.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
-            return false
+        if parent.path != sessionURL.path, parent.lastPathComponent == "sessions" {
+            var parentInfo = stat()
+            let parentStatus = parent.withUnsafeFileSystemRepresentation { ptr in
+                guard let ptr else { return -1 }
+                return Darwin.lstat(ptr, &parentInfo)
+            }
+            if parentStatus == 0, (parentInfo.st_mode & S_IFMT) == S_IFLNK {
+                return false
+            }
         }
-        let fd = sessionURL.withUnsafeFileSystemRepresentation { ptr -> Int32 in
+        var info = stat()
+        let status = sessionURL.withUnsafeFileSystemRepresentation { ptr -> Int32 in
             guard let ptr else { return -1 }
-            return Darwin.open(ptr, O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW)
+            return Darwin.lstat(ptr, &info)
         }
-        if fd >= 0 {
-            Darwin.close(fd)
-            return true
+        if status == 0 {
+            return (info.st_mode & S_IFMT) == S_IFDIR
         }
-        var isDir: ObjCBool = false
-        if FileManager.default.fileExists(atPath: sessionURL.path, isDirectory: &isDir) {
-            // Exists but O_NOFOLLOW directory open failed (symlink, file, or
-            // unreadable dir). `isDir.boolValue` is true for a followed
-            // symlink — still refuse.
-            return isDir.boolValue && fd >= 0
-        }
-        return true
+        return Darwin.errno == ENOENT
     }
 
     /// Normalized session-relative path that still lives under the session folder.
@@ -974,17 +969,16 @@ enum ExportRel {
         }
         guard let dirFd = openatDirectory(parts: parentParts, root: sessionRoot) else { return }
         defer { Darwin.close(dirFd) }
-        let probe = name.withCString { ptr in
-            Darwin.openat(dirFd, ptr, O_RDONLY | O_CLOEXEC | O_NOFOLLOW)
+        var info = stat()
+        let status = name.withCString { ptr in
+            scrumtraceFstatat(dirFd, ptr, &info, scrumtraceATSymlinkNofollow)
         }
-        if probe >= 0 {
-            defer { Darwin.close(probe) }
-            var info = stat()
-            guard Darwin.fstat(probe, &info) == 0, (info.st_mode & S_IFMT) == S_IFREG else { return }
-        } else {
-            // Trailing symlink: `O_NOFOLLOW` fails with ELOOP. Unlink the link.
-            guard Darwin.errno == ELOOP else { return }
+        if status != 0 {
+            guard Darwin.errno == ENOENT else { return }
+            return
         }
+        let mode = info.st_mode & S_IFMT
+        guard mode == S_IFREG || mode == S_IFLNK else { return }
         var rc: Int32 = -1
         repeat {
             rc = name.withCString { ptr in
@@ -1056,18 +1050,37 @@ enum ExportRel {
         }
         defer { Darwin.close(sessionFd) }
         let name = "export"
+        var entryInfo = stat()
+        let entryStatus = name.withCString { ptr in
+            scrumtraceFstatat(
+                sessionFd,
+                ptr,
+                &entryInfo,
+                scrumtraceATSymlinkNofollow
+            )
+        }
+        if entryStatus != 0 {
+            if Darwin.errno == ENOENT {
+                return
+            }
+            throw SessionVaultError.writeFailed(relative)
+        }
+        let entryMode = entryInfo.st_mode & S_IFMT
+        if entryMode == S_IFLNK || entryMode == S_IFREG {
+            try unlinkatName(name, dirFd: sessionFd, flag: 0, relative: relative)
+            return
+        }
+        guard entryMode == S_IFDIR else {
+            throw SessionVaultError.writeFailed(relative)
+        }
         let probe = name.withCString { ptr in
-            Darwin.openat(sessionFd, ptr, O_RDONLY | O_CLOEXEC | O_NOFOLLOW)
+            Darwin.openat(
+                sessionFd,
+                ptr,
+                O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW
+            )
         }
         if probe < 0 {
-            let err = Darwin.errno
-            if err == ENOENT {
-                return
-            }
-            if err == ELOOP {
-                try unlinkatName(name, dirFd: sessionFd, flag: 0, relative: relative)
-                return
-            }
             throw SessionVaultError.writeFailed(relative)
         }
         var info = stat()

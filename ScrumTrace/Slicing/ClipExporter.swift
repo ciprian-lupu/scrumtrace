@@ -1,7 +1,7 @@
 #if os(macOS)
 import AppKit
 #endif
-import AVFoundation
+@preconcurrency import AVFoundation
 import CoreMedia
 import CoreVideo
 import Foundation
@@ -97,25 +97,11 @@ struct ClipExporter {
         if (try? media.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
             return
         }
-        guard let enumerator = FileManager.default.enumerator(
-            at: media,
-            includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey],
-            options: [.skipsHiddenFiles]
-        ) else { return }
-        var files: [URL] = []
-        for case let url as URL in enumerator {
-            if (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
-                enumerator.skipDescendants()
-                continue
-            }
-            guard url.pathExtension.lowercased() == "mp4" else { continue }
-            guard let rel = ExportRel.unfollowedRelative(url, sessionRoot: sessionURL),
-                  !ExportRel.containsSymlinkComponent(rel, sessionURL: sessionURL) else {
-                continue
-            }
-            guard ExportRel.containedExportMember(file: url, exportDir: exportDir) != nil else { continue }
-            files.append(url)
-        }
+        var files = containedExportClips(
+            media: media,
+            exportDir: exportDir,
+            sessionURL: sessionURL
+        )
         files.sort { lhs, rhs in
             let left = ExportRel.regularFileByteCount(lhs, sessionRoot: sessionURL) ?? 0
             let right = ExportRel.regularFileByteCount(rhs, sessionRoot: sessionURL) ?? 0
@@ -132,6 +118,35 @@ struct ClipExporter {
                 continue
             }
         }
+    }
+
+    private func containedExportClips(
+        media: URL,
+        exportDir: URL,
+        sessionURL: URL
+    ) -> [URL] {
+        guard let enumerator = FileManager.default.enumerator(
+            at: media,
+            includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey],
+            options: [.skipsHiddenFiles]
+        ) else { return [] }
+        var files: [URL] = []
+        for case let url as URL in enumerator {
+            if (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+                enumerator.skipDescendants()
+                continue
+            }
+            guard url.pathExtension.lowercased() == "mp4" else { continue }
+            guard let rel = ExportRel.unfollowedRelative(url, sessionRoot: sessionURL),
+                  !ExportRel.containsSymlinkComponent(rel, sessionURL: sessionURL) else {
+                continue
+            }
+            guard ExportRel.containedExportMember(file: url, exportDir: exportDir) != nil else {
+                continue
+            }
+            files.append(url)
+        }
+        return files
     }
 
     /// Working clips live under `archive/media-work/`. Tighten rewrites

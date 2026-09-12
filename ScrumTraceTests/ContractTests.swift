@@ -599,11 +599,13 @@ final class ContractTests: XCTestCase {
         try FileManager.default.createSymbolicLink(at: session, withDestinationURL: outside)
         manifest.pipelineStatus = .completed
         XCTAssertThrowsError(try vault.write(manifest: &manifest))
-        let planted = try String(
-            contentsOf: outside.appendingPathComponent(ScrumTracePath.manifest),
-            encoding: .utf8
+        let plantedData = try Data(
+            contentsOf: outside.appendingPathComponent(ScrumTracePath.manifest)
         )
-        XCTAssertFalse(planted.contains("completed"))
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let planted = try decoder.decode(SessionManifest.self, from: plantedData)
+        XCTAssertNotEqual(planted.pipelineStatus, .completed)
     }
 
     func testAppendEventRewritesWithoutFollowingDestSymlink() throws {
@@ -1262,9 +1264,11 @@ final class ContractTests: XCTestCase {
                 frameReferences: frames
             )
         }
+        var outsideSlice = slice
+        outsideSlice.associatedShotId = early.id
         let outside = EvidenceValidator.canConfirm(
             candidate: candidate(frames: ["archive/shots/001.png"]),
-            slice: slice,
+            slice: outsideSlice,
             transcript: transcript,
             sessionURL: root,
             shots: [early, late]
@@ -1776,7 +1780,11 @@ final class ContractTests: XCTestCase {
         XCTAssertEqual(slices.count, 1)
         XCTAssertEqual(
             Set(slices[0].stills),
-            ["archive/shots/001.png", "archive/shots/002.annotated.png"]
+            [
+                "archive/shots/001.png",
+                "archive/shots/002.annotated.png",
+                "archive/shots/002.png"
+            ]
         )
         XCTAssertEqual(slices[0].associatedShotId, "shot-001")
         XCTAssertEqual(

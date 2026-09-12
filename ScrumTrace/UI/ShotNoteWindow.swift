@@ -250,6 +250,7 @@ final class ShotTalkState: ObservableObject {
         }
     }
 
+    @MainActor
     func stopTalk() async {
         guard holdingTalk else { return }
         AgentLog.event("talk_release", [

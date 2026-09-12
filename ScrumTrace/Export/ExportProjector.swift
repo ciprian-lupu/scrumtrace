@@ -17,7 +17,6 @@ struct ExportProjector {
         manifest: SessionManifest,
         includeFullTranscript: Bool = false
     ) throws -> ExportProjection {
-        let fileManager = FileManager.default
         try resetExportTree(sessionURL: sessionURL)
 
         var omitted: [OmittedAsset] = []
