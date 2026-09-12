@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import subprocess
@@ -12,6 +13,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 AGG = ROOT / "scripts" / "inspect_all_gates.py"
+SPEC = importlib.util.spec_from_file_location("inspect_all_gates", AGG)
+assert SPEC and SPEC.loader
+AGGREGATE = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(AGGREGATE)
 
 STUB_PASS = '''#!/usr/bin/env python3
 import json, sys
@@ -164,11 +169,11 @@ def test_strict_fails_on_blocked_or_manual() -> None:
                 "log": str(Path(tmp) / "log.jsonl"),
                 "log_start_line": 1,
             },
-            "0": {"log": str(Path(tmp) / "log.jsonl"), "log_start_line": 1},
+            "0": {"log": str(Path(tmp) / "log.jsonl"), "log_start_line": 2},
             "1/2": {
                 "session": str(Path(tmp) / "s1"),
                 "log": str(Path(tmp) / "log.jsonl"),
-                "log_start_line": 1,
+                "log_start_line": 3,
                 "token": "T",
                 "passphrase": "P",
                 "manual_video_scrub_ok": True,
@@ -186,17 +191,17 @@ def test_strict_fails_on_blocked_or_manual() -> None:
                 "denied": {
                     "session": str(Path(tmp) / "d"),
                     "log": str(Path(tmp) / "log.jsonl"),
-                    "log_start_line": 1,
+                    "log_start_line": 4,
                 },
                 "invalid_key": {
                     "session": str(Path(tmp) / "i"),
                     "log": str(Path(tmp) / "log.jsonl"),
-                    "log_start_line": 1,
+                    "log_start_line": 5,
                 },
                 "retired_model": {
                     "session": str(Path(tmp) / "r"),
                     "log": str(Path(tmp) / "log.jsonl"),
-                    "log_start_line": 1,
+                    "log_start_line": 6,
                 },
                 "evidence": {"session": str(Path(tmp) / "e")},
             },
@@ -344,11 +349,11 @@ def test_all_synthetic_passes_return_zero() -> None:
                 "log": str(log),
                 "log_start_line": 1,
             },
-            "0": {"log": str(log), "log_start_line": 1},
+            "0": {"log": str(log), "log_start_line": 2},
             "1/2": {
                 "session": str(Path(tmp) / "s1"),
                 "log": str(log),
-                "log_start_line": 1,
+                "log_start_line": 3,
                 "token": "T",
                 "passphrase": "P",
                 "manual_video_scrub_ok": True,
@@ -366,17 +371,17 @@ def test_all_synthetic_passes_return_zero() -> None:
                 "denied": {
                     "session": str(Path(tmp) / "d"),
                     "log": str(log),
-                    "log_start_line": 1,
+                    "log_start_line": 4,
                 },
                 "invalid_key": {
                     "session": str(Path(tmp) / "i"),
                     "log": str(log),
-                    "log_start_line": 1,
+                    "log_start_line": 5,
                 },
                 "retired_model": {
                     "session": str(Path(tmp) / "r"),
                     "log": str(log),
-                    "log_start_line": 1,
+                    "log_start_line": 6,
                 },
                 "evidence": {"session": str(Path(tmp) / "e")},
             },
@@ -397,6 +402,56 @@ def test_all_synthetic_passes_return_zero() -> None:
             assert summary["gates"][name]["status"] == "pass"
 
 
+def test_strict_artifact_map_rejects_unknown_keys_and_reuse() -> None:
+    artifact = {
+        "minus0": {"session": "/s/minus0", "log": "/l/all", "log_start_line": 1},
+        "0": {"log": "/l/all", "log_start_line": 2},
+        "1/2": {
+            "session": "/s/gate1",
+            "log": "/l/all",
+            "log_start_line": 3,
+            "token": "T",
+            "passphrase": "P",
+        },
+        "3": {"session": "/s/pipeline"},
+        "4": {"session": "/s/pipeline"},
+        "5": {
+            "denied": {
+                "session": "/s/denied",
+                "log": "/l/all",
+                "log_start_line": 4,
+            },
+            "invalid_key": {
+                "session": "/s/invalid",
+                "log": "/l/all",
+                "log_start_line": 5,
+            },
+            "retired_model": {
+                "session": "/s/retired",
+                "log": "/l/all",
+                "log_start_line": 6,
+            },
+            "evidence": {"session": "/s/evidence"},
+        },
+        "6": {"session": "/s/pipeline"},
+    }
+    assert AGGREGATE.validate_artifact_map(artifact, strict=True) == []
+
+    artifact["3"]["unexpected"] = True
+    errors = AGGREGATE.validate_artifact_map(artifact, strict=True)
+    assert "3_unknown_keys:unexpected" in errors
+    del artifact["3"]["unexpected"]
+
+    artifact["5"]["invalid_key"]["session"] = "/s/denied"
+    errors = AGGREGATE.validate_artifact_map(artifact, strict=True)
+    assert "session_reused:5.denied,5.invalid_key" in errors
+
+    artifact["5"]["invalid_key"]["session"] = "/s/invalid"
+    artifact["5"]["invalid_key"]["log_start_line"] = 4
+    errors = AGGREGATE.validate_artifact_map(artifact, strict=True)
+    assert "log_window_reused:5.denied,5.invalid_key" in errors
+
+
 def main() -> None:
     test_inspect_all_gates_mock_only()
     test_child_exit_0_malformed_json_fails()
@@ -405,6 +460,7 @@ def main() -> None:
     test_minus0_failure_stops_guided_later_gates()
     test_gate1_blocked_prevents_gates_3_to_6()
     test_all_synthetic_passes_return_zero()
+    test_strict_artifact_map_rejects_unknown_keys_and_reuse()
     print("test_all_gates ok")
 
 

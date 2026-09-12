@@ -37,6 +37,30 @@ GATE5_SUBCOMMANDS = {
     "retired_model": "retired-model",
     "evidence": "evidence",
 }
+ARTIFACT_ENTRY_KEYS = {
+    "minus0": {"session", "log", "log_start_line"},
+    "0": {"log", "log_start_line"},
+    "1/2": {
+        "session",
+        "log",
+        "log_start_line",
+        "token",
+        "passphrase",
+        "manual_video_scrub_ok",
+        "manual_audio_scrub_ok",
+        "av_offset_ms",
+        "ptt_temp_deleted_ok",
+    },
+    "3": {"session", "target_media_seconds", "target_wall_seconds"},
+    "4": {"session", "chrome_playback_ok"},
+    "6": {"session"},
+}
+GATE5_ENTRY_KEYS = {
+    "denied": {"session", "log", "log_start_line"},
+    "invalid_key": {"session", "log", "log_start_line"},
+    "retired_model": {"session", "log", "log_start_line"},
+    "evidence": {"session"},
+}
 REQUIRED_REPORT_FIELDS = ("status", "blocked_reasons", "manual_checks")
 ALLOWED_STATUSES = {"pass", "fail", "blocked", "manual_required"}
 
@@ -191,6 +215,15 @@ def validate_artifact_map(data: dict[str, Any], *, strict: bool) -> list[str]:
                 if line < 1:
                     errors.append(f"{label}_log_start_line_must_be_positive")
 
+    def reject_unknown(
+        entry: dict[str, Any], allowed: set[str], label: str
+    ) -> None:
+        if not strict:
+            return
+        extra = sorted(set(entry) - allowed)
+        if extra:
+            errors.append(f"{label}_unknown_keys:{','.join(extra)}")
+
     for key, entry in data.items():
         if key not in ARTIFACT_MAP_KEYS:
             continue
@@ -198,14 +231,18 @@ def validate_artifact_map(data: dict[str, Any], *, strict: bool) -> list[str]:
             errors.append(f"{key}_entry_must_be_object")
             continue
         if key == "minus0":
+            reject_unknown(entry, ARTIFACT_ENTRY_KEYS[key], key)
             require_session(entry, key)
             require_log(entry, key)
         elif key == "0":
+            reject_unknown(entry, ARTIFACT_ENTRY_KEYS[key], key)
             require_log(entry, key)
         elif key == "1/2":
+            reject_unknown(entry, ARTIFACT_ENTRY_KEYS[key], key)
             require_session(entry, key)
             require_log(entry, key)
         elif key in {"3", "4", "6"}:
+            reject_unknown(entry, ARTIFACT_ENTRY_KEYS[key], key)
             require_session(entry, key)
         elif key == "5":
             unknown5 = sorted(set(entry) - set(GATE5_KEYS))
@@ -221,9 +258,57 @@ def validate_artifact_map(data: dict[str, Any], *, strict: bool) -> list[str]:
                 if not isinstance(nested, dict):
                     errors.append(f"gate5_{name}_must_be_object")
                     continue
+                reject_unknown(
+                    nested, GATE5_ENTRY_KEYS[name], f"gate5_{name}"
+                )
                 require_session(nested, f"gate5_{name}")
                 if name != "evidence":
                     require_log(nested, f"gate5_{name}")
+
+    if strict:
+        session_uses: dict[str, list[str]] = {}
+        log_window_uses: dict[tuple[str, int], list[str]] = {}
+
+        def record_artifacts(entry: dict[str, Any], label: str) -> None:
+            session = entry.get("session")
+            if isinstance(session, str) and session.strip():
+                identity = str(Path(session).expanduser().resolve())
+                session_uses.setdefault(identity, []).append(label)
+            log = entry.get("log")
+            line = entry.get("log_start_line")
+            if isinstance(log, str) and log.strip():
+                try:
+                    line_number = int(line)
+                except (TypeError, ValueError):
+                    pass
+                else:
+                    identity = (
+                        str(Path(log).expanduser().resolve()),
+                        line_number,
+                    )
+                    log_window_uses.setdefault(identity, []).append(label)
+
+        for key in ("minus0", "0", "1/2", "3", "4", "6"):
+            value = data.get(key)
+            if isinstance(value, dict):
+                record_artifacts(value, key)
+        gate5 = data.get("5")
+        if isinstance(gate5, dict):
+            for name in GATE5_KEYS:
+                value = gate5.get(name)
+                if isinstance(value, dict):
+                    record_artifacts(value, f"5.{name}")
+
+        related_pipeline = {"3", "4", "6"}
+        for labels in session_uses.values():
+            if len(labels) < 2:
+                continue
+            if set(labels).issubset(related_pipeline):
+                continue
+            errors.append(f"session_reused:{','.join(sorted(labels))}")
+        for labels in log_window_uses.values():
+            if len(labels) > 1:
+                errors.append(f"log_window_reused:{','.join(sorted(labels))}")
     return errors
 
 
