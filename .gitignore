@@ -14,4 +14,4 @@ secrets*
 .idea/
 agent-tools/
 scripts/__pycache__/
-
+.scrumtrace-autopilot/

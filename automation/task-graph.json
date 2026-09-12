@@ -1,0 +1,1532 @@
+{
+  "version": 1,
+  "schema": "scrumtrace-task-graph/v1",
+  "fixed_inventory": [
+    "O00",
+    "O01",
+    "A01",
+    "A02",
+    "A02b",
+    "A03",
+    "A04",
+    "A05",
+    "A06",
+    "A07",
+    "A08",
+    "A09",
+    "A10",
+    "A11",
+    "B01",
+    "B02",
+    "B03",
+    "B04",
+    "C01",
+    "C02",
+    "C03",
+    "C04",
+    "D01",
+    "D02",
+    "D03",
+    "D04",
+    "D05",
+    "D06",
+    "D07",
+    "D08",
+    "E01-standards",
+    "E01-spec",
+    "E01-security",
+    "E02",
+    "E03",
+    "F01-linux",
+    "F01-mac",
+    "F02",
+    "F03",
+    "F04",
+    "G01",
+    "G02",
+    "G03"
+  ],
+  "allowed_blocker_codes": [
+    "tcc",
+    "manual_visual_audio",
+    "signing_material",
+    "provider_credential",
+    "destructive_confirm",
+    "authz_denied",
+    "product_decision",
+    "needs_mac_worker"
+  ],
+  "spawn_id_patterns": [
+    "A06b",
+    "B01a-[0-9]+",
+    "E02-[0-9]+"
+  ],
+  "tasks": [
+    {
+      "id": "O00",
+      "title": "Build the autonomous task ledger",
+      "dependencies": [],
+      "wave": 0,
+      "builder_model": "composer",
+      "reviewer_model": "grok",
+      "owned_paths": [
+        ".gitignore",
+        "automation/task-graph.json",
+        "scripts/autopilot.py",
+        "scripts/test_autopilot.py",
+        "scripts/run_linux_tests.sh"
+      ],
+      "forbidden_paths": [
+        "samples/GATE_LOG.md",
+        "scripts/test_contracts.py",
+        "ScrumTrace/",
+        "FULL_APP_EXECUTION_PLAN.md"
+      ],
+      "focused_tests": [
+        "python3 scripts/test_autopilot.py"
+      ],
+      "environment": "linux",
+      "classification": "automatable",
+      "human_evidence_allowed": false,
+      "allowed_blockers": [
+        "authz_denied"
+      ],
+      "expected_commit_subject": "feat: add autonomous completion ledger",
+      "acceptance_artifacts": [
+        "automation/task-graph.json",
+        "scripts/autopilot.py",
+        "scripts/test_autopilot.py"
+      ],
+      "integration_commands": [
+        "python3 scripts/test_autopilot.py",
+        "bash scripts/run_linux_tests.sh"
+      ],
+      "spawn_allowed": []
+    },
+    {
+      "id": "O01",
+      "title": "Split the monolithic gate test file",
+      "dependencies": [
+        "O00"
+      ],
+      "wave": 0,
+      "builder_model": "composer",
+      "reviewer_model": "grok",
+      "owned_paths": [
+        "scripts/test_inspect_gates.py",
+        "scripts/gate_tests/"
+      ],
+      "forbidden_paths": [
+        "samples/GATE_LOG.md",
+        "scripts/test_contracts.py",
+        "scripts/gate_inspect_lib.py",
+        "scripts/inspect_"
+      ],
+      "focused_tests": [
+        "python3 scripts/test_inspect_gates.py"
+      ],
+      "environment": "linux",
+      "classification": "automatable",
+      "human_evidence_allowed": false,
+      "allowed_blockers": [],
+      "expected_commit_subject": "refactor: split gate inspector tests by ownership",
+      "acceptance_artifacts": [
+        "scripts/gate_tests/"
+      ],
+      "integration_commands": [
+        "python3 scripts/test_inspect_gates.py",
+        "bash scripts/run_linux_tests.sh"
+      ],
+      "spawn_allowed": []
+    },
+    {
+      "id": "A01",
+      "title": "Contain every export evidence path",
+      "dependencies": [
+        "O01"
+      ],
+      "wave": 1,
+      "builder_model": "composer",
+      "reviewer_model": "grok",
+      "owned_paths": [
+        "scripts/gate_inspect_lib.py",
+        "scripts/gate_tests/test_gate_inspect_lib.py"
+      ],
+      "forbidden_paths": [
+        "samples/GATE_LOG.md",
+        "scripts/test_contracts.py",
+        "scripts/inspect_",
+        "scripts/test_inspect_gates.py"
+      ],
+      "focused_tests": [
+        "python3 scripts/gate_tests/test_gate_inspect_lib.py"
+      ],
+      "environment": "linux",
+      "classification": "automatable",
+      "human_evidence_allowed": false,
+      "allowed_blockers": [],
+      "expected_commit_subject": "fix: contain export evidence paths in gate inspectors",
+      "acceptance_artifacts": [
+        "scripts/gate_inspect_lib.py"
+      ],
+      "integration_commands": [
+        "bash scripts/run_linux_tests.sh"
+      ],
+      "spawn_allowed": []
+    },
+    {
+      "id": "A02",
+      "title": "Add an explicit gate-run log window",
+      "dependencies": [
+        "A01"
+      ],
+      "wave": 1,
+      "builder_model": "composer",
+      "reviewer_model": "grok",
+      "owned_paths": [
+        "scripts/gate_inspect_lib.py",
+        "scripts/inspect_gate_minus0.py",
+        "scripts/inspect_gate0_log.py",
+        "scripts/inspect_gate2_shot.py",
+        "scripts/inspect_gate5_provider.py",
+        "scripts/inspect_all_gates.py",
+        "scripts/mac_all_gates.sh",
+        "scripts/gate_tests/test_gate_minus0.py",
+        "scripts/gate_tests/test_gate0.py",
+        "scripts/gate_tests/test_gate2.py",
+        "scripts/gate_tests/test_gate5.py",
+        "scripts/gate_tests/test_all_gates.py",
+        "scripts/gate_tests/test_gate_log_window.py"
+      ],
+      "forbidden_paths": [
+        "samples/GATE_LOG.md",
+        "scripts/test_contracts.py",
+        "scripts/test_inspect_gates.py",
+        "scripts/test_contracts.py"
+      ],
+      "focused_tests": [
+        "python3 scripts/gate_tests/test_gate_log_window.py"
+      ],
+      "environment": "linux",
+      "classification": "automatable",
+      "human_evidence_allowed": false,
+      "allowed_blockers": [],
+      "expected_commit_subject": "fix: scope gate inspectors to an explicit log window",
+      "acceptance_artifacts": [
+        "scripts/gate_inspect_lib.py"
+      ],
+      "integration_commands": [
+        "bash scripts/run_linux_tests.sh"
+      ],
+      "spawn_allowed": []
+    },
+    {
+      "id": "A02b",
+      "title": "Add process and session identity to app logs",
+      "dependencies": [
+        "O01"
+      ],
+      "wave": 1,
+      "builder_model": "composer",
+      "reviewer_model": "grok",
+      "owned_paths": [
+        "ScrumTrace/Capture/AgentLog.swift",
+        "ScrumTrace/Processing/SessionController.swift",
+        "ScrumTrace/Capture/SessionRecorder.swift"
+      ],
+      "forbidden_paths": [
+        "samples/GATE_LOG.md",
+        "scripts/test_contracts.py",
+        "scripts/"
+      ],
+      "focused_tests": [
+        "bash scripts/mac_xcode_test.sh"
+      ],
+      "environment": "mac",
+      "classification": "needs_mac_worker_capable",
+      "human_evidence_allowed": false,
+      "allowed_blockers": [
+        "needs_mac_worker",
+        "authz_denied"
+      ],
+      "expected_commit_subject": "feat: add process and session identity to agent logs",
+      "acceptance_artifacts": [
+        "ScrumTrace/Capture/AgentLog.swift"
+      ],
+      "integration_commands": [
+        "bash scripts/mac_xcode_test.sh"
+      ],
+      "spawn_allowed": []
+    },
+    {
+      "id": "A03",
+      "title": "Make Gate \u22120 prove a 30-second capture",
+      "dependencies": [
+        "A02"
+      ],
+      "wave": 2,
+      "builder_model": "grok",
+      "reviewer_model": "composer",
+      "owned_paths": [
+        "scripts/inspect_gate_minus0.py",
+        "scripts/gate_tests/test_gate_minus0.py"
+      ],
+      "forbidden_paths": [
+        "samples/GATE_LOG.md",
+        "scripts/test_contracts.py",
+        "scripts/gate_inspect_lib.py",
+        "scripts/inspect_all_gates.py"
+      ],
+      "focused_tests": [
+        "python3 scripts/gate_tests/test_gate_minus0.py"
+      ],
+      "environment": "linux",
+      "classification": "automatable",
+      "human_evidence_allowed": false,
+      "allowed_blockers": [],
+      "expected_commit_subject": "fix: require thirty-second capture proof in gate minus zero",
+      "acceptance_artifacts": [
+        "scripts/inspect_gate_minus0.py"
+      ],
+      "integration_commands": [
+        "bash scripts/run_linux_tests.sh"
+      ],
+      "spawn_allowed": []
+    },
+    {
+      "id": "A04",
+      "title": "Make Gate 0 require actual Keynote actions",
+      "dependencies": [
+        "A02"
+      ],
+      "wave": 2,
+      "builder_model": "composer",
+      "reviewer_model": "grok",
+      "owned_paths": [
+        "scripts/inspect_gate0_log.py",
+        "scripts/mac_gate01.sh",
+        "ScrumTrace/UI/HotkeyManager.swift",
+        "scripts/gate_tests/test_gate0.py"
+      ],
+      "forbidden_paths": [
+        "samples/GATE_LOG.md",
+        "scripts/test_contracts.py",
+        "scripts/gate_inspect_lib.py",
+        "scripts/inspect_all_gates.py"
+      ],
+      "focused_tests": [
+        "python3 scripts/gate_tests/test_gate0.py"
+      ],
+      "environment": "either",
+      "classification": "automatable",
+      "human_evidence_allowed": false,
+      "allowed_blockers": [
+        "needs_mac_worker"
+      ],
+      "expected_commit_subject": "fix: require Keynote actions in gate zero",
+      "acceptance_artifacts": [
+        "scripts/inspect_gate0_log.py"
+      ],
+      "integration_commands": [
+        "bash scripts/run_linux_tests.sh"
+      ],
+      "spawn_allowed": []
+    },
+    {
+      "id": "A05",
+      "title": "Separate Gate 1 automation from human media proof",
+      "dependencies": [
+        "A02"
+      ],
+      "wave": 2,
+      "builder_model": "composer",
+      "reviewer_model": "grok",
+      "owned_paths": [
+        "scripts/inspect_gate1_session.py",
+        "scripts/gate_tests/test_gate1.py"
+      ],
+      "forbidden_paths": [
+        "samples/GATE_LOG.md",
+        "scripts/test_contracts.py",
+        "scripts/gate_inspect_lib.py",
+        "scripts/inspect_all_gates.py"
+      ],
+      "focused_tests": [
+        "python3 scripts/gate_tests/test_gate1.py"
+      ],
+      "environment": "linux",
+      "classification": "automatable",
+      "human_evidence_allowed": false,
+      "allowed_blockers": [],
+      "expected_commit_subject": "fix: separate gate one automation from human media proof",
+      "acceptance_artifacts": [
+        "scripts/inspect_gate1_session.py"
+      ],
+      "integration_commands": [
+        "bash scripts/run_linux_tests.sh"
+      ],
+      "spawn_allowed": []
+    },
+    {
+      "id": "A06",
+      "title": "Require every paused action in Phase 2 evidence",
+      "dependencies": [
+        "A02"
+      ],
+      "wave": 2,
+      "builder_model": "grok",
+      "reviewer_model": "composer",
+      "owned_paths": [
+        "scripts/inspect_gate2_shot.py",
+        "scripts/gate_tests/test_gate2.py"
+      ],
+      "forbidden_paths": [
+        "samples/GATE_LOG.md",
+        "scripts/test_contracts.py",
+        "scripts/gate_inspect_lib.py",
+        "scripts/inspect_all_gates.py"
+      ],
+      "focused_tests": [
+        "python3 scripts/gate_tests/test_gate2.py"
+      ],
+      "environment": "linux",
+      "classification": "automatable",
+      "human_evidence_allowed": false,
+      "allowed_blockers": [],
+      "expected_commit_subject": "fix: require paused action evidence in gate two",
+      "acceptance_artifacts": [
+        "scripts/inspect_gate2_shot.py"
+      ],
+      "integration_commands": [
+        "bash scripts/run_linux_tests.sh"
+      ],
+      "spawn_allowed": [
+        "A06b"
+      ]
+    },
+    {
+      "id": "A07",
+      "title": "Make Gate 3 reject incomplete transcription",
+      "dependencies": [
+        "A02"
+      ],
+      "wave": 2,
+      "builder_model": "composer",
+      "reviewer_model": "grok",
+      "owned_paths": [
+        "scripts/inspect_gate3_whisper.py",
+        "scripts/gate_tests/test_gate3.py"
+      ],
+      "forbidden_paths": [
+        "samples/GATE_LOG.md",
+        "scripts/test_contracts.py",
+        "scripts/gate_inspect_lib.py",
+        "scripts/inspect_all_gates.py"
+      ],
+      "focused_tests": [
+        "python3 scripts/gate_tests/test_gate3.py"
+      ],
+      "environment": "linux",
+      "classification": "automatable",
+      "human_evidence_allowed": false,
+      "allowed_blockers": [],
+      "expected_commit_subject": "fix: reject incomplete transcription in gate three",
+      "acceptance_artifacts": [
+        "scripts/inspect_gate3_whisper.py"
+      ],
+      "integration_commands": [
+        "bash scripts/run_linux_tests.sh"
+      ],
+      "spawn_allowed": []
+    },
+    {
+      "id": "A08",
+      "title": "Tie Gate 4 measurements to real files",
+      "dependencies": [
+        "A02"
+      ],
+      "wave": 2,
+      "builder_model": "grok",
+      "reviewer_model": "composer",
+      "owned_paths": [
+        "scripts/inspect_gate4_slicer.py",
+        "scripts/gate_tests/test_gate4.py"
+      ],
+      "forbidden_paths": [
+        "samples/GATE_LOG.md",
+        "scripts/test_contracts.py",
+        "scripts/gate_inspect_lib.py",
+        "scripts/inspect_all_gates.py"
+      ],
+      "focused_tests": [
+        "python3 scripts/gate_tests/test_gate4.py"
+      ],
+      "environment": "linux",
+      "classification": "automatable",
+      "human_evidence_allowed": false,
+      "allowed_blockers": [],
+      "expected_commit_subject": "fix: tie gate four measurements to real files",
+      "acceptance_artifacts": [
+        "scripts/inspect_gate4_slicer.py"
+      ],
+      "integration_commands": [
+        "bash scripts/run_linux_tests.sh"
+      ],
+      "spawn_allowed": []
+    },
+    {
+      "id": "A09",
+      "title": "Split Gate 5 into four explicit scenarios",
+      "dependencies": [
+        "A02"
+      ],
+      "wave": 2,
+      "builder_model": "composer",
+      "reviewer_model": "grok",
+      "owned_paths": [
+        "scripts/inspect_gate5_provider.py",
+        "scripts/gate_tests/test_gate5.py"
+      ],
+      "forbidden_paths": [
+        "samples/GATE_LOG.md",
+        "scripts/test_contracts.py",
+        "scripts/gate_inspect_lib.py",
+        "scripts/inspect_all_gates.py"
+      ],
+      "focused_tests": [
+        "python3 scripts/gate_tests/test_gate5.py"
+      ],
+      "environment": "linux",
+      "classification": "automatable",
+      "human_evidence_allowed": false,
+      "allowed_blockers": [],
+      "expected_commit_subject": "fix: split gate five into explicit scenarios",
+      "acceptance_artifacts": [
+        "scripts/inspect_gate5_provider.py"
+      ],
+      "integration_commands": [
+        "bash scripts/run_linux_tests.sh"
+      ],
+      "spawn_allowed": []
+    },
+    {
+      "id": "A10",
+      "title": "Validate the actual Gate 6 ZIP and projection",
+      "dependencies": [
+        "A03",
+        "A04",
+        "A05",
+        "A06",
+        "A07",
+        "A08",
+        "A09"
+      ],
+      "wave": 3,
+      "builder_model": "grok",
+      "reviewer_model": "composer",
+      "owned_paths": [
+        "scripts/gate_inspect_lib.py",
+        "scripts/inspect_gate6_pack.py",
+        "scripts/gate_tests/test_gate6.py"
+      ],
+      "forbidden_paths": [
+        "samples/GATE_LOG.md",
+        "scripts/test_contracts.py",
+        "scripts/inspect_all_gates.py"
+      ],
+      "focused_tests": [
+        "python3 scripts/gate_tests/test_gate6.py"
+      ],
+      "environment": "linux",
+      "classification": "automatable",
+      "human_evidence_allowed": false,
+      "allowed_blockers": [],
+      "expected_commit_subject": "fix: validate gate six zip and projection contents",
+      "acceptance_artifacts": [
+        "scripts/inspect_gate6_pack.py"
+      ],
+      "integration_commands": [
+        "bash scripts/run_linux_tests.sh"
+      ],
+      "spawn_allowed": []
+    },
+    {
+      "id": "A11",
+      "title": "Make the aggregate honest and deterministic",
+      "dependencies": [
+        "A10"
+      ],
+      "wave": 3,
+      "builder_model": "composer",
+      "reviewer_model": "grok",
+      "owned_paths": [
+        "scripts/inspect_all_gates.py",
+        "scripts/mac_all_gates.sh",
+        "scripts/test_inspect_gates.py",
+        "scripts/test_contracts.py",
+        "scripts/gate_tests/test_all_gates.py",
+        "README.md",
+        "AGENTS.md",
+        "IMPLEMENTATION_PLAN.md",
+        "samples/GATE_LOG.md"
+      ],
+      "forbidden_paths": [
+        "FULL_APP_EXECUTION_PLAN.md",
+        "scripts/gate_inspect_lib.py"
+      ],
+      "focused_tests": [
+        "python3 scripts/test_inspect_gates.py",
+        "python3 scripts/test_contracts.py"
+      ],
+      "environment": "linux",
+      "classification": "automatable",
+      "human_evidence_allowed": false,
+      "allowed_blockers": [],
+      "expected_commit_subject": "fix: make aggregate gate runner honest and deterministic",
+      "acceptance_artifacts": [
+        "scripts/inspect_all_gates.py"
+      ],
+      "integration_commands": [
+        "python3 scripts/test_inspect_gates.py",
+        "bash scripts/run_linux_tests.sh"
+      ],
+      "spawn_allowed": []
+    },
+    {
+      "id": "B01",
+      "title": "Mac compile and Xcode tests",
+      "dependencies": [
+        "A11",
+        "A02b"
+      ],
+      "wave": 4,
+      "builder_model": "composer",
+      "reviewer_model": "grok",
+      "owned_paths": [],
+      "forbidden_paths": [
+        "samples/GATE_LOG.md",
+        "scripts/test_contracts.py"
+      ],
+      "focused_tests": [
+        "bash scripts/mac_xcode_test.sh"
+      ],
+      "environment": "mac",
+      "classification": "operator_no_commit",
+      "human_evidence_allowed": false,
+      "allowed_blockers": [
+        "needs_mac_worker",
+        "authz_denied"
+      ],
+      "expected_commit_subject": "",
+      "acceptance_artifacts": [
+        "samples/GATE_LOG.md#B01"
+      ],
+      "integration_commands": [
+        "bash scripts/run_linux_tests.sh"
+      ],
+      "spawn_allowed": [
+        "B01a-NNN"
+      ]
+    },
+    {
+      "id": "B02",
+      "title": "Fresh TCC and Gate \u22120",
+      "dependencies": [
+        "B01"
+      ],
+      "wave": 4,
+      "builder_model": "composer",
+      "reviewer_model": "grok",
+      "owned_paths": [],
+      "forbidden_paths": [],
+      "focused_tests": [],
+      "environment": "mac",
+      "classification": "human_evidence",
+      "human_evidence_allowed": true,
+      "allowed_blockers": [
+        "needs_mac_worker",
+        "authz_denied",
+        "tcc",
+        "manual_visual_audio"
+      ],
+      "expected_commit_subject": "",
+      "acceptance_artifacts": [
+        "samples/GATE_LOG.md#B02"
+      ],
+      "integration_commands": [
+        "bash scripts/run_linux_tests.sh"
+      ],
+      "spawn_allowed": []
+    },
+    {
+      "id": "B03",
+      "title": "Gate 0 over full-screen Keynote",
+      "dependencies": [
+        "B02"
+      ],
+      "wave": 4,
+      "builder_model": "composer",
+      "reviewer_model": "grok",
+      "owned_paths": [],
+      "forbidden_paths": [],
+      "focused_tests": [],
+      "environment": "mac",
+      "classification": "human_evidence",
+      "human_evidence_allowed": true,
+      "allowed_blockers": [
+        "needs_mac_worker",
+        "authz_denied",
+        "tcc",
+        "manual_visual_audio"
+      ],
+      "expected_commit_subject": "",
+      "acceptance_artifacts": [
+        "samples/GATE_LOG.md#B03"
+      ],
+      "integration_commands": [
+        "bash scripts/run_linux_tests.sh"
+      ],
+      "spawn_allowed": []
+    },
+    {
+      "id": "B04",
+      "title": "Gate 1 all-source pause and drift",
+      "dependencies": [
+        "B03"
+      ],
+      "wave": 4,
+      "builder_model": "composer",
+      "reviewer_model": "grok",
+      "owned_paths": [],
+      "forbidden_paths": [],
+      "focused_tests": [],
+      "environment": "mac",
+      "classification": "human_evidence",
+      "human_evidence_allowed": true,
+      "allowed_blockers": [
+        "needs_mac_worker",
+        "authz_denied",
+        "tcc",
+        "manual_visual_audio"
+      ],
+      "expected_commit_subject": "",
+      "acceptance_artifacts": [
+        "samples/GATE_LOG.md#B04"
+      ],
+      "integration_commands": [
+        "bash scripts/run_linux_tests.sh"
+      ],
+      "spawn_allowed": []
+    },
+    {
+      "id": "C01",
+      "title": "Gate 3 WhisperKit",
+      "dependencies": [
+        "B04"
+      ],
+      "wave": 5,
+      "builder_model": "composer",
+      "reviewer_model": "grok",
+      "owned_paths": [],
+      "forbidden_paths": [],
+      "focused_tests": [],
+      "environment": "mac",
+      "classification": "human_evidence",
+      "human_evidence_allowed": true,
+      "allowed_blockers": [
+        "needs_mac_worker",
+        "manual_visual_audio",
+        "authz_denied"
+      ],
+      "expected_commit_subject": "",
+      "acceptance_artifacts": [
+        "samples/GATE_LOG.md#C01"
+      ],
+      "integration_commands": [
+        "bash scripts/run_linux_tests.sh"
+      ],
+      "spawn_allowed": []
+    },
+    {
+      "id": "C02",
+      "title": "Gate 4 slicer",
+      "dependencies": [
+        "C01"
+      ],
+      "wave": 5,
+      "builder_model": "composer",
+      "reviewer_model": "grok",
+      "owned_paths": [],
+      "forbidden_paths": [],
+      "focused_tests": [],
+      "environment": "mac",
+      "classification": "human_evidence",
+      "human_evidence_allowed": true,
+      "allowed_blockers": [
+        "needs_mac_worker",
+        "manual_visual_audio",
+        "authz_denied"
+      ],
+      "expected_commit_subject": "",
+      "acceptance_artifacts": [
+        "samples/GATE_LOG.md#C02"
+      ],
+      "integration_commands": [
+        "bash scripts/run_linux_tests.sh"
+      ],
+      "spawn_allowed": []
+    },
+    {
+      "id": "C03",
+      "title": "Gate 5 provider scenarios",
+      "dependencies": [
+        "C02"
+      ],
+      "wave": 5,
+      "builder_model": "composer",
+      "reviewer_model": "grok",
+      "owned_paths": [],
+      "forbidden_paths": [],
+      "focused_tests": [],
+      "environment": "mac",
+      "classification": "human_evidence",
+      "human_evidence_allowed": true,
+      "allowed_blockers": [
+        "needs_mac_worker",
+        "manual_visual_audio",
+        "authz_denied",
+        "provider_credential"
+      ],
+      "expected_commit_subject": "",
+      "acceptance_artifacts": [
+        "samples/GATE_LOG.md#C03"
+      ],
+      "integration_commands": [
+        "bash scripts/run_linux_tests.sh"
+      ],
+      "spawn_allowed": []
+    },
+    {
+      "id": "C04",
+      "title": "Gate 6 normal and stress packs",
+      "dependencies": [
+        "C03"
+      ],
+      "wave": 5,
+      "builder_model": "composer",
+      "reviewer_model": "grok",
+      "owned_paths": [],
+      "forbidden_paths": [],
+      "focused_tests": [],
+      "environment": "mac",
+      "classification": "human_evidence",
+      "human_evidence_allowed": true,
+      "allowed_blockers": [
+        "needs_mac_worker",
+        "manual_visual_audio",
+        "authz_denied"
+      ],
+      "expected_commit_subject": "",
+      "acceptance_artifacts": [
+        "samples/GATE_LOG.md#C04"
+      ],
+      "integration_commands": [
+        "bash scripts/run_linux_tests.sh"
+      ],
+      "spawn_allowed": []
+    },
+    {
+      "id": "D01",
+      "title": "feat: add capture preflight panel",
+      "dependencies": [
+        "C04"
+      ],
+      "wave": 6,
+      "builder_model": "composer",
+      "reviewer_model": "grok",
+      "owned_paths": [
+        "ScrumTrace/Capture/CapturePermissions.swift",
+        "ScrumTrace/Processing/SessionController.swift",
+        "ScrumTrace/UI/MenuBarController.swift",
+        "ScrumTrace/UI/SettingsView.swift"
+      ],
+      "forbidden_paths": [
+        "samples/GATE_LOG.md",
+        "scripts/test_contracts.py"
+      ],
+      "focused_tests": [
+        "bash scripts/mac_xcode_test.sh"
+      ],
+      "environment": "mac",
+      "classification": "needs_mac_worker_capable",
+      "human_evidence_allowed": false,
+      "allowed_blockers": [
+        "needs_mac_worker",
+        "authz_denied"
+      ],
+      "expected_commit_subject": "feat: add capture preflight panel",
+      "acceptance_artifacts": [
+        "ScrumTrace/Capture/CapturePermissions.swift"
+      ],
+      "integration_commands": [
+        "bash scripts/mac_xcode_test.sh"
+      ],
+      "spawn_allowed": []
+    },
+    {
+      "id": "D02",
+      "title": "feat: add capture health to the HUD",
+      "dependencies": [
+        "D01"
+      ],
+      "wave": 6,
+      "builder_model": "composer",
+      "reviewer_model": "grok",
+      "owned_paths": [
+        "ScrumTrace/Capture/SessionRecorder.swift",
+        "ScrumTrace/Processing/SessionController.swift",
+        "ScrumTrace/UI/RecordingHUDWindow.swift",
+        "ScrumTrace/Storage/SessionModels.swift"
+      ],
+      "forbidden_paths": [
+        "samples/GATE_LOG.md",
+        "scripts/test_contracts.py"
+      ],
+      "focused_tests": [
+        "bash scripts/mac_xcode_test.sh"
+      ],
+      "environment": "mac",
+      "classification": "needs_mac_worker_capable",
+      "human_evidence_allowed": false,
+      "allowed_blockers": [
+        "needs_mac_worker"
+      ],
+      "expected_commit_subject": "feat: add capture health to the HUD",
+      "acceptance_artifacts": [
+        "ScrumTrace/Capture/SessionRecorder.swift"
+      ],
+      "integration_commands": [
+        "bash scripts/mac_xcode_test.sh"
+      ],
+      "spawn_allowed": []
+    },
+    {
+      "id": "D03",
+      "title": "feat: add payload preview and privacy redaction",
+      "dependencies": [
+        "D02"
+      ],
+      "wave": 6,
+      "builder_model": "composer",
+      "reviewer_model": "grok",
+      "owned_paths": [
+        "ScrumTrace/Processing/SessionController.swift",
+        "ScrumTrace/Processing/SessionProcessor.swift",
+        "ScrumTrace/AI/AIProviderProtocol.swift",
+        "ScrumTrace/Export/ExportProjector.swift",
+        "ScrumTrace/Storage/SessionModels.swift"
+      ],
+      "forbidden_paths": [
+        "samples/GATE_LOG.md",
+        "scripts/test_contracts.py"
+      ],
+      "focused_tests": [
+        "bash scripts/mac_xcode_test.sh"
+      ],
+      "environment": "mac",
+      "classification": "needs_mac_worker_capable",
+      "human_evidence_allowed": false,
+      "allowed_blockers": [
+        "needs_mac_worker"
+      ],
+      "expected_commit_subject": "feat: add payload preview and privacy redaction",
+      "acceptance_artifacts": [
+        "ScrumTrace/Processing/SessionController.swift"
+      ],
+      "integration_commands": [
+        "bash scripts/mac_xcode_test.sh"
+      ],
+      "spawn_allowed": []
+    },
+    {
+      "id": "D04",
+      "title": "feat: make processing crash-safe and resumable",
+      "dependencies": [
+        "D03"
+      ],
+      "wave": 6,
+      "builder_model": "composer",
+      "reviewer_model": "grok",
+      "owned_paths": [
+        "ScrumTrace/Processing/SessionProcessor.swift",
+        "ScrumTrace/Processing/SessionController.swift",
+        "ScrumTrace/Storage/SessionVault.swift",
+        "ScrumTrace/Storage/SessionModels.swift",
+        "ScrumTrace/UI/MenuBarController.swift"
+      ],
+      "forbidden_paths": [
+        "samples/GATE_LOG.md",
+        "scripts/test_contracts.py"
+      ],
+      "focused_tests": [
+        "bash scripts/mac_xcode_test.sh"
+      ],
+      "environment": "mac",
+      "classification": "needs_mac_worker_capable",
+      "human_evidence_allowed": false,
+      "allowed_blockers": [
+        "needs_mac_worker"
+      ],
+      "expected_commit_subject": "feat: make processing crash-safe and resumable",
+      "acceptance_artifacts": [
+        "ScrumTrace/Processing/SessionProcessor.swift"
+      ],
+      "integration_commands": [
+        "bash scripts/mac_xcode_test.sh"
+      ],
+      "spawn_allowed": []
+    },
+    {
+      "id": "D05",
+      "title": "feat: add pre-export session review",
+      "dependencies": [
+        "D04"
+      ],
+      "wave": 6,
+      "builder_model": "composer",
+      "reviewer_model": "grok",
+      "owned_paths": [
+        "ScrumTrace/Processing/SessionController.swift",
+        "ScrumTrace/Processing/SessionProcessor.swift",
+        "ScrumTrace/Storage/SessionModels.swift",
+        "ScrumTrace/Slicing/ClipExporter.swift",
+        "ScrumTrace/Export/ExportProjector.swift"
+      ],
+      "forbidden_paths": [
+        "samples/GATE_LOG.md",
+        "scripts/test_contracts.py"
+      ],
+      "focused_tests": [
+        "bash scripts/mac_xcode_test.sh"
+      ],
+      "environment": "mac",
+      "classification": "needs_mac_worker_capable",
+      "human_evidence_allowed": false,
+      "allowed_blockers": [
+        "needs_mac_worker"
+      ],
+      "expected_commit_subject": "feat: add pre-export session review",
+      "acceptance_artifacts": [
+        "ScrumTrace/Processing/SessionController.swift"
+      ],
+      "integration_commands": [
+        "bash scripts/mac_xcode_test.sh"
+      ],
+      "spawn_allowed": []
+    },
+    {
+      "id": "D06",
+      "title": "feat: add export profiles",
+      "dependencies": [
+        "D05"
+      ],
+      "wave": 6,
+      "builder_model": "composer",
+      "reviewer_model": "grok",
+      "owned_paths": [
+        "ScrumTrace/App/AppSettings.swift",
+        "ScrumTrace/Storage/SessionModels.swift",
+        "ScrumTrace/Export/ExportProjector.swift",
+        "ScrumTrace/Export/SessionPackZipper.swift",
+        "ScrumTrace/Export/AgentContextRenderer.swift",
+        "ScrumTrace/UI/SessionReviewWindow.swift"
+      ],
+      "forbidden_paths": [
+        "samples/GATE_LOG.md",
+        "scripts/test_contracts.py"
+      ],
+      "focused_tests": [
+        "bash scripts/mac_xcode_test.sh"
+      ],
+      "environment": "mac",
+      "classification": "needs_mac_worker_capable",
+      "human_evidence_allowed": false,
+      "allowed_blockers": [
+        "needs_mac_worker"
+      ],
+      "expected_commit_subject": "feat: add export profiles",
+      "acceptance_artifacts": [
+        "ScrumTrace/App/AppSettings.swift"
+      ],
+      "integration_commands": [
+        "bash scripts/mac_xcode_test.sh"
+      ],
+      "spawn_allowed": []
+    },
+    {
+      "id": "D07",
+      "title": "feat: add searchable session history",
+      "dependencies": [
+        "D06"
+      ],
+      "wave": 6,
+      "builder_model": "composer",
+      "reviewer_model": "grok",
+      "owned_paths": [
+        "ScrumTrace/Storage/SessionVault.swift",
+        "ScrumTrace/Storage/SessionModels.swift",
+        "ScrumTrace/UI/MenuBarController.swift"
+      ],
+      "forbidden_paths": [
+        "samples/GATE_LOG.md",
+        "scripts/test_contracts.py"
+      ],
+      "focused_tests": [
+        "bash scripts/mac_xcode_test.sh"
+      ],
+      "environment": "mac",
+      "classification": "needs_mac_worker_capable",
+      "human_evidence_allowed": false,
+      "allowed_blockers": [
+        "needs_mac_worker"
+      ],
+      "expected_commit_subject": "feat: add searchable session history",
+      "acceptance_artifacts": [
+        "ScrumTrace/Storage/SessionVault.swift"
+      ],
+      "integration_commands": [
+        "bash scripts/mac_xcode_test.sh"
+      ],
+      "spawn_allowed": []
+    },
+    {
+      "id": "D08",
+      "title": "feat: implement signed updates and license display",
+      "dependencies": [
+        "D07"
+      ],
+      "wave": 6,
+      "builder_model": "composer",
+      "reviewer_model": "grok",
+      "owned_paths": [
+        "ScrumTrace.xcodeproj/project.pbxproj",
+        "ScrumTrace.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved",
+        "ScrumTrace/App/UpdateChecker.swift",
+        "ScrumTrace/App/AppDelegate.swift",
+        "ScrumTrace/App/Info.plist",
+        "ScrumTrace/UI/SettingsView.swift",
+        "scripts/mac_release.sh"
+      ],
+      "forbidden_paths": [
+        "samples/GATE_LOG.md",
+        "scripts/test_contracts.py"
+      ],
+      "focused_tests": [
+        "bash scripts/mac_xcode_test.sh"
+      ],
+      "environment": "mac",
+      "classification": "needs_mac_worker_capable",
+      "human_evidence_allowed": false,
+      "allowed_blockers": [
+        "needs_mac_worker",
+        "signing_material",
+        "authz_denied"
+      ],
+      "expected_commit_subject": "feat: implement signed updates and license display",
+      "acceptance_artifacts": [
+        "ScrumTrace.xcodeproj/project.pbxproj"
+      ],
+      "integration_commands": [
+        "bash scripts/mac_xcode_test.sh"
+      ],
+      "spawn_allowed": []
+    },
+    {
+      "id": "E01-standards",
+      "title": "Automated standards review",
+      "dependencies": [
+        "D08"
+      ],
+      "wave": 7,
+      "builder_model": "composer",
+      "reviewer_model": "grok",
+      "owned_paths": [
+        "FINAL_REVIEW_STANDARDS.md"
+      ],
+      "forbidden_paths": [
+        "samples/GATE_LOG.md",
+        "scripts/test_contracts.py"
+      ],
+      "focused_tests": [],
+      "environment": "either",
+      "classification": "automatable",
+      "human_evidence_allowed": false,
+      "allowed_blockers": [],
+      "expected_commit_subject": "docs: record E01-standards review findings",
+      "acceptance_artifacts": [
+        "FINAL_REVIEW_STANDARDS.md"
+      ],
+      "integration_commands": [
+        "bash scripts/run_linux_tests.sh"
+      ],
+      "spawn_allowed": []
+    },
+    {
+      "id": "E01-spec",
+      "title": "Automated spec review",
+      "dependencies": [
+        "D08"
+      ],
+      "wave": 7,
+      "builder_model": "grok",
+      "reviewer_model": "composer",
+      "owned_paths": [
+        "FINAL_REVIEW_SPEC.md"
+      ],
+      "forbidden_paths": [
+        "samples/GATE_LOG.md",
+        "scripts/test_contracts.py"
+      ],
+      "focused_tests": [],
+      "environment": "either",
+      "classification": "automatable",
+      "human_evidence_allowed": false,
+      "allowed_blockers": [],
+      "expected_commit_subject": "docs: record E01-spec review findings",
+      "acceptance_artifacts": [
+        "FINAL_REVIEW_SPEC.md"
+      ],
+      "integration_commands": [
+        "bash scripts/run_linux_tests.sh"
+      ],
+      "spawn_allowed": []
+    },
+    {
+      "id": "E01-security",
+      "title": "Automated security review",
+      "dependencies": [
+        "D08"
+      ],
+      "wave": 7,
+      "builder_model": "grok",
+      "reviewer_model": "composer",
+      "owned_paths": [
+        "FINAL_REVIEW_SECURITY.md"
+      ],
+      "forbidden_paths": [
+        "samples/GATE_LOG.md",
+        "scripts/test_contracts.py"
+      ],
+      "focused_tests": [],
+      "environment": "either",
+      "classification": "automatable",
+      "human_evidence_allowed": false,
+      "allowed_blockers": [],
+      "expected_commit_subject": "docs: record E01-security review findings",
+      "acceptance_artifacts": [
+        "FINAL_REVIEW_SECURITY.md"
+      ],
+      "integration_commands": [
+        "bash scripts/run_linux_tests.sh"
+      ],
+      "spawn_allowed": []
+    },
+    {
+      "id": "E02",
+      "title": "Fix accepted review findings",
+      "dependencies": [
+        "E01-standards",
+        "E01-spec",
+        "E01-security"
+      ],
+      "wave": 7,
+      "builder_model": "composer",
+      "reviewer_model": "grok",
+      "owned_paths": [
+        "FINAL_REVIEW.md"
+      ],
+      "forbidden_paths": [],
+      "focused_tests": [],
+      "environment": "either",
+      "classification": "automatable",
+      "human_evidence_allowed": false,
+      "allowed_blockers": [],
+      "expected_commit_subject": "fix: address accepted final review findings",
+      "acceptance_artifacts": [
+        "FINAL_REVIEW.md"
+      ],
+      "integration_commands": [
+        "bash scripts/run_linux_tests.sh"
+      ],
+      "spawn_allowed": [
+        "E02-NNN"
+      ]
+    },
+    {
+      "id": "E03",
+      "title": "Human review checkpoint",
+      "dependencies": [
+        "E02"
+      ],
+      "wave": 7,
+      "builder_model": "composer",
+      "reviewer_model": "grok",
+      "owned_paths": [
+        "FINAL_REVIEW.md"
+      ],
+      "forbidden_paths": [],
+      "focused_tests": [],
+      "environment": "either",
+      "classification": "human_evidence",
+      "human_evidence_allowed": true,
+      "allowed_blockers": [
+        "product_decision",
+        "manual_visual_audio"
+      ],
+      "expected_commit_subject": "",
+      "acceptance_artifacts": [
+        "FINAL_REVIEW.md"
+      ],
+      "integration_commands": [
+        "bash scripts/run_linux_tests.sh"
+      ],
+      "spawn_allowed": []
+    },
+    {
+      "id": "F01-linux",
+      "title": "Clean checkout Linux test matrix",
+      "dependencies": [
+        "E03"
+      ],
+      "wave": 8,
+      "builder_model": "composer",
+      "reviewer_model": "grok",
+      "owned_paths": [],
+      "forbidden_paths": [],
+      "focused_tests": [
+        "bash scripts/run_linux_tests.sh"
+      ],
+      "environment": "linux",
+      "classification": "operator_no_commit",
+      "human_evidence_allowed": false,
+      "allowed_blockers": [],
+      "expected_commit_subject": "",
+      "acceptance_artifacts": [
+        ".scrumtrace-autopilot/f01-linux.json"
+      ],
+      "integration_commands": [
+        "bash scripts/run_linux_tests.sh"
+      ],
+      "spawn_allowed": []
+    },
+    {
+      "id": "F01-mac",
+      "title": "Clean checkout Mac test matrix",
+      "dependencies": [
+        "E03"
+      ],
+      "wave": 8,
+      "builder_model": "composer",
+      "reviewer_model": "grok",
+      "owned_paths": [],
+      "forbidden_paths": [],
+      "focused_tests": [
+        "bash scripts/mac_xcode_test.sh"
+      ],
+      "environment": "mac",
+      "classification": "operator_no_commit",
+      "human_evidence_allowed": false,
+      "allowed_blockers": [
+        "needs_mac_worker",
+        "authz_denied"
+      ],
+      "expected_commit_subject": "",
+      "acceptance_artifacts": [
+        ".scrumtrace-autopilot/f01-mac.json"
+      ],
+      "integration_commands": [
+        "bash scripts/run_linux_tests.sh"
+      ],
+      "spawn_allowed": []
+    },
+    {
+      "id": "F02",
+      "title": "Fresh-user functional walkthrough",
+      "dependencies": [
+        "F01-linux",
+        "F01-mac"
+      ],
+      "wave": 8,
+      "builder_model": "composer",
+      "reviewer_model": "grok",
+      "owned_paths": [],
+      "forbidden_paths": [],
+      "focused_tests": [],
+      "environment": "mac",
+      "classification": "human_evidence",
+      "human_evidence_allowed": true,
+      "allowed_blockers": [
+        "needs_mac_worker",
+        "tcc",
+        "manual_visual_audio",
+        "destructive_confirm"
+      ],
+      "expected_commit_subject": "",
+      "acceptance_artifacts": [
+        ".scrumtrace-autopilot/f02.json"
+      ],
+      "integration_commands": [
+        "bash scripts/run_linux_tests.sh"
+      ],
+      "spawn_allowed": []
+    },
+    {
+      "id": "F03",
+      "title": "Privacy and negative-path audit",
+      "dependencies": [
+        "F02"
+      ],
+      "wave": 8,
+      "builder_model": "composer",
+      "reviewer_model": "grok",
+      "owned_paths": [],
+      "forbidden_paths": [],
+      "focused_tests": [],
+      "environment": "mac",
+      "classification": "human_evidence",
+      "human_evidence_allowed": true,
+      "allowed_blockers": [
+        "needs_mac_worker",
+        "manual_visual_audio",
+        "provider_credential"
+      ],
+      "expected_commit_subject": "",
+      "acceptance_artifacts": [
+        ".scrumtrace-autopilot/f03.json"
+      ],
+      "integration_commands": [
+        "bash scripts/run_linux_tests.sh"
+      ],
+      "spawn_allowed": []
+    },
+    {
+      "id": "F04",
+      "title": "Final gate rerun",
+      "dependencies": [
+        "F03"
+      ],
+      "wave": 8,
+      "builder_model": "composer",
+      "reviewer_model": "grok",
+      "owned_paths": [],
+      "forbidden_paths": [],
+      "focused_tests": [],
+      "environment": "mac",
+      "classification": "human_evidence",
+      "human_evidence_allowed": true,
+      "allowed_blockers": [
+        "needs_mac_worker",
+        "tcc",
+        "manual_visual_audio",
+        "provider_credential"
+      ],
+      "expected_commit_subject": "",
+      "acceptance_artifacts": [
+        ".scrumtrace-autopilot/f04.json"
+      ],
+      "integration_commands": [
+        "bash scripts/run_linux_tests.sh"
+      ],
+      "spawn_allowed": []
+    },
+    {
+      "id": "G01",
+      "title": "Release signing and notarization",
+      "dependencies": [
+        "F04"
+      ],
+      "wave": 9,
+      "builder_model": "composer",
+      "reviewer_model": "grok",
+      "owned_paths": [],
+      "forbidden_paths": [],
+      "focused_tests": [],
+      "environment": "mac",
+      "classification": "human_evidence",
+      "human_evidence_allowed": true,
+      "allowed_blockers": [
+        "needs_mac_worker",
+        "signing_material",
+        "authz_denied"
+      ],
+      "expected_commit_subject": "",
+      "acceptance_artifacts": [
+        ".scrumtrace-autopilot/g01.json"
+      ],
+      "integration_commands": [
+        "bash scripts/run_linux_tests.sh"
+      ],
+      "spawn_allowed": []
+    },
+    {
+      "id": "G02",
+      "title": "Publish and verify the signed update",
+      "dependencies": [
+        "G01"
+      ],
+      "wave": 9,
+      "builder_model": "composer",
+      "reviewer_model": "grok",
+      "owned_paths": [],
+      "forbidden_paths": [],
+      "focused_tests": [],
+      "environment": "mac",
+      "classification": "human_evidence",
+      "human_evidence_allowed": true,
+      "allowed_blockers": [
+        "needs_mac_worker",
+        "signing_material",
+        "authz_denied"
+      ],
+      "expected_commit_subject": "",
+      "acceptance_artifacts": [
+        ".scrumtrace-autopilot/g02.json"
+      ],
+      "integration_commands": [
+        "bash scripts/run_linux_tests.sh"
+      ],
+      "spawn_allowed": []
+    },
+    {
+      "id": "G03",
+      "title": "Final installed-release acceptance test",
+      "dependencies": [
+        "G02"
+      ],
+      "wave": 9,
+      "builder_model": "composer",
+      "reviewer_model": "grok",
+      "owned_paths": [],
+      "forbidden_paths": [],
+      "focused_tests": [],
+      "environment": "mac",
+      "classification": "human_evidence",
+      "human_evidence_allowed": true,
+      "allowed_blockers": [
+        "needs_mac_worker",
+        "tcc",
+        "manual_visual_audio",
+        "signing_material",
+        "authz_denied"
+      ],
+      "expected_commit_subject": "",
+      "acceptance_artifacts": [
+        ".scrumtrace-autopilot/g03.json"
+      ],
+      "integration_commands": [
+        "bash scripts/run_linux_tests.sh"
+      ],
+      "spawn_allowed": []
+    }
+  ]
+}
