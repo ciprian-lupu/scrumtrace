@@ -189,7 +189,7 @@ enum ExportRel {
         let parent = sessionURL.deletingLastPathComponent()
         if parent.path != sessionURL.path, parent.lastPathComponent == "sessions" {
             var parentInfo = stat()
-            let parentStatus = parent.withUnsafeFileSystemRepresentation { ptr in
+            let parentStatus = parent.withUnsafeFileSystemRepresentation { ptr -> Int32 in
                 guard let ptr else { return -1 }
                 return Darwin.lstat(ptr, &parentInfo)
             }
