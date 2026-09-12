@@ -30,6 +30,28 @@ final class ClaudeCLIHandoffTests: XCTestCase {
         }
     }
 
+    func testExportDirectoryRequiresAgentContextNotBriefAlone() throws {
+        try withSession { session in
+            let export = session.appendingPathComponent("export", isDirectory: true)
+            try FileManager.default.createDirectory(at: export, withIntermediateDirectories: true)
+            try Data("<html></html>".utf8).write(to: export.appendingPathComponent("SESSION_BRIEF.html"))
+            XCTAssertNil(ClaudeCLIHandoff.exportDirectory(sessionURL: session))
+            try Data("# ctx\n".utf8).write(to: export.appendingPathComponent("AGENT_CONTEXT.md"))
+            XCTAssertNotNil(ClaudeCLIHandoff.exportDirectory(sessionURL: session))
+        }
+    }
+
+    func testClaudeArgumentsAreInteractiveAndNeverArchiveOrPrintMode() {
+        let argv = ClaudeCLIHandoff.claudeArguments(executable: URL(fileURLWithPath: "/usr/local/bin/claude"))
+        XCTAssertEqual(argv.first, "claude")
+        XCTAssertEqual(argv.dropFirst(), [ClaudeCLIHandoff.startupPrompt])
+        XCTAssertTrue(ClaudeCLIHandoff.startupPrompt.contains("AGENT_CONTEXT.md first"))
+        XCTAssertFalse(argv.contains("-p"))
+        XCTAssertFalse(argv.contains("--print"))
+        XCTAssertFalse(argv.contains(where: { $0.contains("archive") }))
+        XCTAssertFalse(ClaudeCLIHandoff.startupPrompt.contains("-p"))
+    }
+
     func testExportDirectoryRequiresAHandoffDocument() throws {
         try withSession { session in
             try FileManager.default.createDirectory(

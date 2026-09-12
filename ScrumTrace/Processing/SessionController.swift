@@ -293,17 +293,24 @@ final class SessionController: ObservableObject {
     func openInClaude(sessionId: String? = nil) {
         guard let id = sessionId ?? lastSessionId ?? manifest?.sessionId else {
             statusLine = "No session to open in Claude."
+            AgentLog.event("claude_handoff_fail", ["reason": "no_session"])
             return
         }
         do {
             try vault.openExportInClaude(sessionId: id)
             statusLine = "Opened export in Claude"
             AgentLog.event("claude_handoff", ["session": id])
-        } catch {
+        } catch let error as ClaudeCLIHandoffError {
             statusLine = error.localizedDescription
             AgentLog.event("claude_handoff_fail", [
                 "session": id,
-                "error": AgentLog.sanitize(error.localizedDescription)
+                "reason": error.logReason
+            ])
+        } catch {
+            statusLine = ClaudeCLIHandoffError.launchFailed.localizedDescription
+            AgentLog.event("claude_handoff_fail", [
+                "session": id,
+                "reason": ClaudeCLIHandoffError.launchFailed.logReason
             ])
         }
     }
