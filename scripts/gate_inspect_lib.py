@@ -214,22 +214,122 @@ def is_retired_anthropic(model: str) -> bool:
 
 
 def export_file_exists(session: Path, rel: str) -> bool:
-    trimmed = rel.strip().lstrip("./")
-    if not trimmed or trimmed.startswith("archive/"):
+    """Return True only for a non-empty regular file contained under export/.
+
+    Rejects empty paths, absolute paths, control characters, ``..`` components,
+    symlinks (including inside-export symlink hops), and zero-byte files.
+    Does not fall back to ``session / rel``.
+    """
+    if not isinstance(rel, str):
         return False
+    if rel == "" or rel.strip() == "":
+        return False
+    if "\x00" in rel or "\n" in rel or "\r" in rel:
+        return False
+    # Absolute paths (POSIX or Windows drive) are rejected before resolution.
+    if rel.startswith(("/", "\\")) or (len(rel) >= 2 and rel[1] == ":"):
+        return False
+
+    trimmed = rel.strip()
+    # Drop a single leading "./" only; do not treat this as containment.
+    while trimmed.startswith("./"):
+        trimmed = trimmed[2:]
+    if not trimmed:
+        return False
+
     if trimmed.startswith("export/"):
-        return (session / trimmed).is_file()
-    return (session / "export" / trimmed).is_file() or (session / trimmed).is_file()
+        trimmed = trimmed[len("export/") :]
+    if not trimmed:
+        return False
+
+    parts = trimmed.replace("\\", "/").split("/")
+    if any(part == ".." for part in parts):
+        return False
+    if any(part == "" for part in parts):
+        return False
+
+    try:
+        export_root = (session / "export").resolve(strict=False)
+    except OSError:
+        return False
+
+    # Walk components without following symlinks. Any symlink hop is rejected
+    # even when the ultimate target would still sit inside export/.
+    cursor = export_root
+    for part in parts:
+        cursor = cursor / part
+        try:
+            if cursor.is_symlink():
+                return False
+        except OSError:
+            return False
+
+    try:
+        # resolve(strict=False) still follows symlinks for the final path; we
+        # already rejected symlink components above, so this only canonicalizes
+        # real directories.
+        candidate = cursor.resolve(strict=False)
+        candidate.relative_to(export_root)
+    except (OSError, ValueError):
+        return False
+
+    try:
+        if not candidate.is_file() or candidate.is_symlink():
+            return False
+        if candidate.stat().st_size <= 0:
+            return False
+    except OSError:
+        return False
+    return True
 
 
-def emit(report: dict[str, object], failed: list[str], *, blocked: bool = False) -> int:
-    report["failed"] = failed
-    report["blocked"] = blocked
+def emit(
+    report: dict[str, object],
+    failed: list[str],
+    *,
+    status: str | None = None,
+    blocked: bool = False,
+    blocked_reasons: list[str] | None = None,
+    manual_checks: list[str] | None = None,
+) -> int:
+    """Emit the Section 3 inspector result schema and return the exit code.
+
+    ``status`` must be one of ``pass``, ``fail``, ``blocked``, or
+    ``manual_required``. Callers should pass it explicitly. When omitted for
+    compatibility with existing inspectors, ``blocked=True`` maps to
+    ``blocked`` (never ``manual_required``), a non-empty ``failed`` list maps
+    to ``fail``, and otherwise ``pass``.
+    """
+    allowed = {"pass", "fail", "blocked", "manual_required"}
+    if status is None:
+        if blocked:
+            status = "blocked"
+        elif failed:
+            status = "fail"
+        else:
+            status = "pass"
+    if status not in allowed:
+        raise ValueError(f"invalid inspector status: {status!r}")
+    # Never infer manual_required from a Boolean alone.
+    if blocked and status == "manual_required":
+        # Explicit manual_required wins; blocked flag is informational only.
+        pass
+    elif blocked and status not in {"blocked", "manual_required"}:
+        raise ValueError("blocked=True requires status blocked or manual_required")
+
+    report = dict(report)
+    report["status"] = status
+    report["failed"] = list(failed)
+    report["blocked_reasons"] = list(blocked_reasons or [])
+    report["manual_checks"] = list(manual_checks or [])
+    # Preserve legacy boolean for older aggregate readers during migration.
+    report["blocked"] = status in {"blocked", "manual_required"}
     print(json.dumps(report, indent=2))
-    if blocked:
+    if status in {"blocked", "manual_required"}:
         return 2
-    return 1 if failed else 0
+    return 1 if status == "fail" or failed else 0
 
 
 def die_missing(report: dict[str, object]) -> int:
-    return emit(report, [], blocked=True)
+    return emit(report, [], status="blocked", blocked=True, blocked_reasons=["missing_artifacts"])
+
