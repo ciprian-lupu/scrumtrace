@@ -8,11 +8,14 @@ enum UpdateChecker {
 
     enum Result: Equatable {
         case upToDate(current: String)
+        case noPublishedReleases(current: String)
         case newerAvailable(current: String, latest: String)
         case failed(String)
 
         var settingsLine: String {
             switch self {
+            case .noPublishedReleases(let current):
+                return "No GitHub release has been published yet (this build is \(current))."
             case .upToDate(let current):
                 return "\(current) is the latest published tag."
             case .newerAvailable(let current, let latest):
@@ -34,23 +37,29 @@ enum UpdateChecker {
         request.timeoutInterval = 15
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
-            if let http = response as? HTTPURLResponse, http.statusCode == 404 {
-                return .upToDate(current: currentVersion)
+            guard let http = response as? HTTPURLResponse else {
+                return .failed("GitHub returned an invalid response.")
             }
-            guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-                return .failed("GitHub releases response was not JSON.")
-            }
-            let tag = (json["tag_name"] as? String)?.trimmingCharacters(in: CharacterSet(charactersIn: "vV")) ?? ""
-            guard !tag.isEmpty else {
-                return .failed("Latest release has no tag.")
-            }
-            if compareVersions(currentVersion, tag) < 0 {
-                return .newerAvailable(current: currentVersion, latest: tag)
-            }
-            return .upToDate(current: currentVersion)
+            return interpret(data: data, statusCode: http.statusCode, current: currentVersion)
         } catch {
             return .failed(AgentLog.sanitize(error.localizedDescription))
         }
+    }
+
+    static func interpret(data: Data, statusCode: Int, current: String) -> Result {
+        if statusCode == 404 { return .noPublishedReleases(current: current) }
+        guard (200..<300).contains(statusCode) else {
+            return .failed("Could not check updates (GitHub HTTP \(statusCode)).")
+        }
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return .failed("GitHub releases response was not JSON.")
+        }
+        let tag = (json["tag_name"] as? String)?.trimmingCharacters(in: CharacterSet(charactersIn: "vV")) ?? ""
+        guard !tag.isEmpty else { return .failed("Latest release has no tag.") }
+        if compareVersions(current, tag) < 0 {
+            return .newerAvailable(current: current, latest: tag)
+        }
+        return .upToDate(current: current)
     }
 
     static func compareVersions(_ lhs: String, _ rhs: String) -> Int {

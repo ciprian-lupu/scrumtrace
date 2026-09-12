@@ -9,6 +9,7 @@ The working spec is [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) (contracts 
 - Native Swift menu-bar app (`com.str8minds.ScrumTrace`, sandbox off)
 - Pause gate shared by screen, system audio, microphone, metadata, Shot, and Hold-to-Talk
 - WhisperKit transcribes the room-mic WAV **and** system audio in `archive/session.mp4`, then merges on `t_media`
+- Local speaker estimates for room and call audio, with session names, manual corrections and synchronized transcript/video review (macOS 15+)
 - Gate 3/6 timings written to `archive/pipeline-timing.json` (never in the export zip)
 - Session disk layout: `archive/` (private) vs `export/` (handoff, export-relative paths)
 - Measured 35 MB `session-pack.zip` with `OMITTED.md` when the cap drops files
@@ -46,7 +47,7 @@ Xcode resolves WhisperKit **0.11.0** from the committed `Package.resolved`. Firs
 
 Archive capture is **3840×2160 at 4 fps, 16 Mbps H.264 High** (keyframe every second). Export clips stay 720p / 1.2 Mbps.
 
-Menu → Settings has **Speech**, **Capture**, **Logs**, **This process**, **AI**, and **General**. Capture shows the shipped 3840×2160 / 4 fps / 16 Mbps (24 Mbps cap) budget, plus pointer and microphone toggles. Start recording opens a selection overlay like macOS screen recording (lasting box, move, resize, then Record or Return on that display). Logs can export a diagnostic bundle (no `archive/`).
+Menu → Settings (also ⌘,) has **Speech**, **Capture**, **Logs**, **Permissions**, **AI**, and **General**. Capture shows the shipped 3840×2160 / 4 fps / 16 Mbps (24 Mbps cap) budget, plus pointer and microphone toggles. Start recording opens a selection overlay like macOS screen recording (lasting box, move, resize, then Record or Return on that display). Logs can export a diagnostic bundle (no `archive/`).
 
 Inspect every gate that has artifacts (Phase −1 mock, −0, 0, 1, Shot-pause log, 3–6). ASCII / JSON checks are required and still do not replace a Keynote focus check or a manual media scrub. The helpers never write `samples/GATE_LOG.md`:
 
@@ -69,6 +70,18 @@ python3 scripts/inspect_all_gates.py --session /path/to/session \
 
 Gate 0 only: `python3 scripts/inspect_gate0_log.py --log ~/Library/Logs/ScrumTrace/agent.jsonl`  
 Gate 1 only: `python3 scripts/inspect_gate1_session.py --session /path/to/session --token 'ST-G1-PAUSE-TOKEN-9F3C' --passphrase 'orchid lantern seven'`
+
+## Settings and speaker review
+
+In **Settings → Speech**, choose the meeting language and preload the selected Whisper model before recording. Romanian is available explicitly. Existing transcripts keep their recorded language until analysis is run again.
+
+Speaker identification is enabled by default on new installations and runs locally after transcription. It requires macOS 15+ and downloads the FluidAudio 0.15.7 speaker models on first use; **Preload speaker models** prepares them in advance. Room-microphone and call-audio speakers have separate anonymous IDs. Audio and voice embeddings are not uploaded for this analysis, and embeddings are not saved. This does not recognize people's names or link identities between meetings.
+
+Use **Review and name speakers…** to select a session and click a transcript passage to play its video with room and call audio. Enter names for that session, use **Correct** on a passage to change its speaker, then **Save names and corrections**. Saving refreshes the local transcript, brief and session pack without another AI-provider request. **Discard edits** restores the saved version. Older sessions can use **Analyze speakers locally…**; reanalysis replaces names and corrections for sources it successfully analyzes.
+
+The exported brief shows speaker labels and clickable passages within each selected clip. Estimates, unclear passages and overlapping voices remain marked for review. Use headphones to reduce call audio leaking into the room microphone. Real multi-person accuracy and long-run synchronization still need hardware validation; local tests do not close those gates.
+
+In **AI**, each provider retains its own endpoint and model. API keys are saved explicitly for the selected provider and endpoint; saved keys are not displayed again. **Logs** filters the current run and can export diagnostics. **General** explains retention: completed recordings are removed on the next launch when their retention period expires; **Forever** keeps them.
 
 ## Hotkeys
 

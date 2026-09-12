@@ -57,6 +57,20 @@ struct AgentContextRenderer {
             }
         }
         lines.append("")
+        if let transcript = SpeakerTimeline.load(sessionURL: sessionURL) {
+            lines.append("## Speakers in selected excerpts")
+            lines.append("Speaker labels are estimates unless reviewed. Names were supplied for this session; overlapping voices do not establish who said an individual word.")
+            for task in manifest.tasks {
+                guard let slice = manifest.slices.first(where: { $0.sliceId == task.sourceSliceId }) else { continue }
+                let turns = SpeakerTimeline.turns(in: transcript, start: slice.startMedia, end: slice.endMedia)
+                guard !turns.isEmpty else { continue }
+                lines.append("### \(PromptTemplates.wrapUntrustedInline(task.taskId))")
+                for turn in turns {
+                    lines.append("- [t_media \(String(format: "%.1f", turn.start))s–\(String(format: "%.1f", turn.end))s] \(PromptTemplates.wrapUntrustedInline(SpeakerTimeline.displaySpeaker(turn, in: transcript))): \(PromptTemplates.wrapUntrustedInline(turn.text))")
+                }
+            }
+            lines.append("")
+        }
         lines.append("## Manifest")
         lines.append("All timestamps are `t_media`. Source of truth: `session.manifest.json`.")
         return lines.joined(separator: "\n")

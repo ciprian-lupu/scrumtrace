@@ -20,106 +20,121 @@ final class WhisperTranscriber: @unchecked Sendable {
         return support.appendingPathComponent("ScrumTrace/whisperkit", isDirectory: true)
     }
 
-    private var kit: WhisperKit?
-    private let lock = NSLock()
-    private var preparing: Task<Void, Error>?
-    private var ready = false
+    struct LoadedModel: @unchecked Sendable {
+        var transcribe: (String, DecodingOptions) async throws -> [TranscriptionResult]
+    }
 
-    var isReady: Bool {
-        withStateLock { ready }
+    private var kit: LoadedModel?
+    private let loadModel: @Sendable (String) async throws -> LoadedModel
+    private let lock = NSLock()
+    private var preparing: (id: UUID, model: String, task: Task<Void, Error>)?
+    private var ready = false
+    private var loadedModel: String?
+    private var language: SpeechLanguage = .automatic
+
+    init(loadModel: @escaping @Sendable (String) async throws -> LoadedModel = { try await WhisperTranscriber.loadWhisperKit($0) }) {
+        self.loadModel = loadModel
+    }
+
+    var isReady: Bool { withStateLock { ready } }
+    var loadedModelName: String? { withStateLock { loadedModel } }
+    var isPreparing: Bool { withStateLock { preparing != nil } }
+
+    func isReady(for model: String) -> Bool {
+        withStateLock { loadedModel == Self.whisperKitModelName(model) && ready }
+    }
+
+    /// Call at the start of a recording or analysis. In-flight decodes keep their snapshot.
+    func setLanguage(_ language: SpeechLanguage) {
+        withStateLock { self.language = language }
+    }
+
+    static func decodingOptions(language: SpeechLanguage) -> DecodingOptions {
+        DecodingOptions(
+            language: language.code,
+            detectLanguage: language == .automatic,
+            skipSpecialTokens: true,
+            wordTimestamps: true
+        )
     }
 
     func prepare(model: String = WhisperTranscriber.defaultStoredModel) async throws {
+        guard !model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw SettingsValidationError("Choose a speech model before loading it.")
+        }
         let started = Date()
         let resolved = Self.whisperKitModelName(model)
-        let action = preparationAction(resolved: resolved)
-        switch action {
-        case .ready:
-            AgentLog.event("whisper_prepare_ok", [
-                "model": resolved,
-                "reuse": "1",
-                "elapsed_ms": "0"
-            ])
-            return
-        case .wait(let work):
-            AgentLog.event("whisper_prepare_wait", ["model": resolved])
-            do {
-                try await work.value
-                AgentLog.event("whisper_prepare_ok", [
-                    "model": resolved,
-                    "reuse": "1",
-                    "elapsed_ms": String(Int(Date().timeIntervalSince(started) * 1000))
-                ])
+        while true {
+            let action = preparationAction(resolved: resolved)
+            switch action {
+            case .ready:
+                AgentLog.event("whisper_prepare_ok", ["model": resolved, "reuse": "1", "elapsed_ms": "0"])
                 return
-            } catch {
-                AgentLog.event("whisper_prepare_fail", [
-                    "model": resolved,
-                    "error": AgentLog.sanitize(error.localizedDescription)
-                ])
-                throw error
-            }
-        case .start(let work):
-            do {
-                try await work.value
-                AgentLog.event("whisper_prepare_ok", [
-                    "model": resolved,
-                    "reuse": "0",
-                    "elapsed_ms": String(Int(Date().timeIntervalSince(started) * 1000))
-                ])
-            } catch {
-                clearFailedPreparation()
-                AgentLog.event("whisper_prepare_fail", [
-                    "model": resolved,
-                    "error": AgentLog.sanitize(error.localizedDescription)
-                ])
-                throw error
+            case .wait(let pendingModel, let work):
+                AgentLog.event("whisper_prepare_wait", ["model": resolved])
+                do { try await work.value }
+                catch { if pendingModel == resolved { throw error } }
+                // Another model may have been loading. Re-evaluate the requested model.
+                try Task.checkCancellation()
+            case .start(let work):
+                do {
+                    try await work.value
+                    AgentLog.event("whisper_prepare_ok", [
+                        "model": resolved, "reuse": "0",
+                        "elapsed_ms": String(Int(Date().timeIntervalSince(started) * 1000))
+                    ])
+                    return
+                } catch {
+                    AgentLog.event("whisper_prepare_fail", ["model": resolved, "error": AgentLog.sanitize(error.localizedDescription)])
+                    throw error
+                }
             }
         }
     }
 
     private enum PreparationAction {
         case ready
-        case wait(Task<Void, Error>)
+        case wait(String, Task<Void, Error>)
         case start(Task<Void, Error>)
     }
 
     private func preparationAction(resolved: String) -> PreparationAction {
         withStateLock {
-            if ready {
-                return .ready
-            }
-            if let preparing {
-                return .wait(preparing)
-            }
+            if let preparing { return .wait(preparing.model, preparing.task) }
+            if ready, loadedModel == resolved { return .ready }
+            let id = UUID()
             let work = Task.detached {
                 AgentLog.event("whisper_prepare_begin", ["model": resolved])
-                let downloadBase = Self.modelDownloadBase
-                try? FileManager.default.createDirectory(at: downloadBase, withIntermediateDirectories: true)
-                let config = WhisperKitConfig(
-                    model: resolved,
-                    downloadBase: downloadBase,
-                    verbose: false,
-                    logLevel: .error,
-                    prewarm: true,
-                    load: true,
-                    download: true
-                )
-                let loaded = try await WhisperKit(config)
-                self.withStateLock {
-                    self.kit = loaded
-                    self.ready = true
+                do {
+                    let loaded = try await self.loadModel(resolved)
+                    self.withStateLock {
+                        self.kit = loaded
+                        self.ready = true
+                        self.loadedModel = resolved
+                        if self.preparing?.id == id { self.preparing = nil }
+                    }
+                } catch {
+                    self.withStateLock {
+                        if self.preparing?.id == id { self.preparing = nil }
+                    }
+                    throw error
                 }
             }
-            preparing = work
+            preparing = (id, resolved, work)
             return .start(work)
         }
     }
 
-    private func clearFailedPreparation() {
-        withStateLock {
-            if !ready {
-                preparing = nil
-            }
+    private static func loadWhisperKit(_ resolved: String) async throws -> LoadedModel {
+        let downloadBase = Self.modelDownloadBase
+        try FileManager.default.createDirectory(at: downloadBase, withIntermediateDirectories: true)
+        let config = WhisperKitConfig(
+            model: resolved, downloadBase: downloadBase, verbose: false,
+            logLevel: .error, prewarm: true, load: true, download: true
+        )
+        let loaded = try await WhisperKit(config)
+        return LoadedModel { path, options in
+            try await loaded.transcribe(audioPath: path, decodeOptions: options)
         }
     }
 
@@ -158,6 +173,10 @@ final class WhisperTranscriber: @unchecked Sendable {
                 )
             }
             defer { ExportRel.removePrivateTemporaryURL(work) }
+            if (try? SpeechSignal.isDigitalSilence(work)) == true {
+                AgentLog.event("whisper_silence_skipped", ["via": via])
+                return FullTranscript(sessionId: "", language: withStateLock { language.code ?? "und" }, segments: [])
+            }
             let local = lockKit()
             guard let local else {
                 throw NSError(
@@ -166,8 +185,8 @@ final class WhisperTranscriber: @unchecked Sendable {
                     userInfo: [NSLocalizedDescriptionKey: "Whisper model is not loaded yet."]
                 )
             }
-            let options = DecodingOptions(wordTimestamps: true)
-            let results = try await local.transcribe(audioPath: work.path, decodeOptions: options)
+            let options = Self.decodingOptions(language: withStateLock { language })
+            let results = try await local.transcribe(work.path, options)
             var segments: [TranscriptSegment] = []
             for result in results {
                 for segment in result.segments {
@@ -214,12 +233,13 @@ final class WhisperTranscriber: @unchecked Sendable {
     /// Temp AAC is not under the session folder — do not pass `sessionURL` into that transcribe.
     func transcribeMovieAudio(at movie: URL, sessionURL: URL) async throws -> FullTranscript {
         try Self.refuseSymlinkMedia(movie, sessionRoot: sessionURL)
+        let audioOffset = try await SpeechSignal.audioStart(movie)
         do {
             let dest = try ExportRel.makePrivateTemporaryURL(prefix: "scrumtrace-system-audio", ext: "m4a")
             do {
                 try await extractAudio(from: movie, to: dest)
                 defer { ExportRel.removePrivateTemporaryURL(dest) }
-                return try await transcribeFile(at: dest)
+                return SpeechSignal.shifted(try await transcribeFile(at: dest), by: audioOffset)
             } catch {
                 AgentLog.event("extract_audio_fail", ["error": AgentLog.sanitize(error.localizedDescription)])
                 ExportRel.removePrivateTemporaryURL(dest)
@@ -233,7 +253,7 @@ final class WhisperTranscriber: @unchecked Sendable {
             prefix: "scrumtrace-movie"
         )
         defer { ExportRel.removePrivateTemporaryURL(movieCopy) }
-        return try await transcribeFile(at: movieCopy)
+        return SpeechSignal.shifted(try await transcribeFile(at: movieCopy), by: audioOffset)
     }
 
     func extractAudio(from movie: URL, to dest: URL) async throws {
@@ -263,7 +283,7 @@ final class WhisperTranscriber: @unchecked Sendable {
         AgentLog.event("extract_audio_ok", [:])
     }
 
-    private func lockKit() -> WhisperKit? {
+    private func lockKit() -> LoadedModel? {
         lock.lock()
         defer { lock.unlock() }
         return kit
@@ -324,8 +344,7 @@ enum TranscriptQuery {
     }
 
     static func excerpt(from transcript: FullTranscript, start: TimeInterval, end: TimeInterval) -> String {
-        transcript.segments
-            .filter { $0.end >= start && $0.start <= end }
+        SpeakerTimeline.turns(in: transcript, start: start, end: end)
             .map(\.text)
             .joined(separator: " ")
     }
@@ -361,6 +380,7 @@ enum TranscriptQuery {
             }
             for segment in pass.transcript.segments where !segment.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 var copy = segment
+                copy.source = pass.speaker
                 if pass.offsetSeconds != 0 {
                     copy.start += pass.offsetSeconds
                     copy.end += pass.offsetSeconds
@@ -432,11 +452,36 @@ enum TranscriptQuery {
                         merged.speaker = "\(left)+\(right)"
                     }
                 }
+                if merged.source != segment.source {
+                    // The same utterance leaked into both capture sources.
+                    // Do not turn the surviving source into an invented person.
+                    merged.source = "mixed"
+                    merged.speakerAttribution = .uncertain
+                }
                 result[lastIndex] = merged
             } else {
                 result.append(segment)
             }
         }
         return result
+    }
+}
+
+/// Common meeting languages. Automatic explicitly enables WhisperKit language detection.
+enum SpeechLanguage: String, CaseIterable, Identifiable, Sendable {
+    case automatic, romanian = "ro", english = "en", german = "de", french = "fr", spanish = "es", italian = "it", portuguese = "pt"
+    var id: String { rawValue }
+    var code: String? { self == .automatic ? nil : rawValue }
+    var title: String {
+        switch self {
+        case .automatic: return "Detect automatically"
+        case .romanian: return "Romanian (Română)"
+        case .english: return "English"
+        case .german: return "German"
+        case .french: return "French"
+        case .spanish: return "Spanish"
+        case .italian: return "Italian"
+        case .portuguese: return "Portuguese"
+        }
     }
 }

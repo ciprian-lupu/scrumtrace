@@ -93,22 +93,17 @@ enum AIProviderError: LocalizedError {
 enum ProviderEndpoint {
     /// Refuse cleartext remote endpoints. `http://localhost` stays for local models.
     static func requireHTTPSOrLocal(_ raw: String) throws -> URL {
-        let trimmed = raw.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        guard let url = URL(string: trimmed), let scheme = url.scheme?.lowercased() else {
-            throw AIProviderError.invalidURL(raw)
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let parts = URLComponents(string: trimmed),
+              let url = parts.url, let scheme = parts.scheme?.lowercased(),
+              let host = parts.host?.lowercased(), !host.isEmpty,
+              parts.user == nil, parts.password == nil, parts.query == nil, parts.fragment == nil else {
+            throw SettingsValidationError("Enter a complete endpoint URL without credentials, query parameters, or a fragment.")
         }
-        switch scheme {
-        case "https":
-            return url
-        case "http":
-            let host = (url.host ?? "").lowercased()
-            if host == "localhost" || host == "127.0.0.1" || host == "::1" {
-                return url
-            }
-            throw AIProviderError.invalidURL(raw)
-        default:
-            throw AIProviderError.invalidURL(raw)
+        guard scheme == "https" || (scheme == "http" && ["localhost", "127.0.0.1", "::1", "[::1]"].contains(host)) else {
+            throw SettingsValidationError("Use HTTPS for a remote provider. HTTP is supported only on localhost.")
         }
+        return url
     }
 }
 

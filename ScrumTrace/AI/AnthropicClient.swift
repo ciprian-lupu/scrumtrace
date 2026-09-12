@@ -5,6 +5,7 @@ struct AnthropicClient: AIProvider {
     var kind: AIProviderKind { .anthropic }
 
     func evaluate(request: SliceEvaluationRequest) async throws -> CandidateEvaluationResponse {
+        try configuration.validate()
         _ = ProviderWireMedia.mp4BodyURL(configuration: configuration, request: request)
         if ProviderWireMedia.willUploadClip(configuration: configuration) {
             throw AIProviderError.invalidURL("This adapter does not upload clip video.")
@@ -16,7 +17,8 @@ struct AnthropicClient: AIProvider {
         guard !key.isEmpty else { throw AIProviderError.missingAPIKey }
         let root = try ProviderEndpoint.requireHTTPSOrLocal(configuration.baseURL)
             .absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        guard let url = URL(string: "\(root)/v1/messages") else {
+        let versionedRoot = root.hasSuffix("/v1") ? root : "\(root)/v1"
+        guard let url = URL(string: "\(versionedRoot)/messages") else {
             throw AIProviderError.invalidURL(configuration.baseURL)
         }
 

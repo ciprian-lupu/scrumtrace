@@ -540,7 +540,7 @@ enum ExportRel {
             throw SessionVaultError.writeFailed("sessions folder")
         }
         let parent = sessionURL.deletingLastPathComponent().standardizedFileURL
-        guard parent == sessionsRoot.standardizedFileURL else {
+        guard parent.path == sessionsRoot.standardizedFileURL.path else {
             throw SessionVaultError.writeFailed("session folder")
         }
         let name = sessionURL.lastPathComponent
@@ -2491,13 +2491,18 @@ struct TranscriptSegment: Codable, Sendable, Hashable {
     var text: String
     var speaker: String?
     var words: [TranscriptWord]
+    var source: String? = nil
+    var speakerAttribution: SpeakerAttribution? = nil
+    var speakerCandidates: [String]? = nil
 }
 
 struct FullTranscript: Codable, Sendable {
     var sessionId: String
     var language: String
     var segments: [TranscriptSegment]
-    /// Hypotheses: `room` (microphone WAV) and/or `system` (movie audio).
+    var speakers: [SessionSpeaker]? = nil
+    var speakerAnalysis: [SpeakerAnalysis]? = nil
+    /// Capture sources, not individual people: `room` and/or `system`.
     var sources: [String]? = nil
 
     enum CodingKeys: String, CodingKey {
@@ -2505,6 +2510,8 @@ struct FullTranscript: Codable, Sendable {
         case language
         case segments
         case sources
+        case speakers
+        case speakerAnalysis = "speaker_analysis"
     }
 }
 

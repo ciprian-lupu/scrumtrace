@@ -2,7 +2,7 @@
 
 Read this before changing product code, gates, remotes, or TCC/signing. The working spec is [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md). Mac debug loop: [AGENT_DEBUG.md](AGENT_DEBUG.md). Hardware results: [samples/GATE_LOG.md](samples/GATE_LOG.md) (empty until a Mac run).
 
-Snapshot date: **2026-09-11** (audit TASK-01–17 plus leftover *code* items closed; all-gate inspectors: `inspect_all_gates.py` / `mac_all_gates.sh`). Hardware gates still open. Update the snapshot when status in this file changes.
+Snapshot date: **2026-09-12** (audit TASK-01–17 plus leftover *code* items closed; all-gate inspectors: `inspect_all_gates.py` / `mac_all_gates.sh`). Hardware gates still open. Update the snapshot when status in this file changes.
 
 ## What this is
 
@@ -51,7 +51,7 @@ Hard rules:
 
 **Hardware gates are not closed.** `samples/GATE_LOG.md` has no PASS rows. No Mac has run Gate −0 after these fixes. Treat Record, pause, Whisper, and drift as **unproven** until that log is filled.
 
-Explicitly deferred by the plan: speaker diarization, 60-minute drift claims, new product surfaces.
+Speaker review, Settings and menu stabilization were explicitly requested by the user on 2026-09-12 and are implemented and locally verified. Session-local diarization, manual names/corrections, timed clip transcripts and room/call mixing are within that approved scope. Native tests, Linux contracts, Settings and speaker-review UI checks pass; real multi-person accuracy and hardware gates remain open. The status-bar menu still needs a complete visual walkthrough. Still deferred: 60-minute drift claims and unrelated new product surfaces.
 
 ## Where to work
 
@@ -169,7 +169,7 @@ C4 wire truth today: Google may upload a size-capped inline MP4. OpenAI-compatib
 
 ## Next work (priority)
 
-Do **not** add product surfaces. Prefer the first item you can actually finish in this environment.
+The user-approved 2026-09-12 speaker/Settings/menu work is an exception to the product-surface deferral. Keep other new surfaces deferred. Prefer work that can be verified in this environment.
 
 ### On a Mac (blocks “done”)
 
@@ -183,11 +183,11 @@ Do **not** add product surfaces. Prefer the first item you can actually finish i
 
 Code leftovers from `SCRUMTRACE_AUDIT.md` that can be done without a Mac or Apple secrets are implemented. Still open only because they need hardware or secrets: Gate −0 through 6, Developer ID team + notary Apple ID, first Whisper download, Sparkle EdDSA keys, a paid license private key. Do not invent `GATE_LOG.md` cells.
 
-Settings is a six-tab window (Speech, Capture, Logs, This process, AI, General). Start recording opens a macOS-style overlay (dashed rectangle, move/resize, Record / Entire Display / Cancel; Return confirms the key display) and does not request Screen Recording from that click. Capture can turn the pointer and microphone off for the next session.
+Settings is a six-tab window (Speech, Capture, Logs, Permissions, AI, General). Start recording opens a macOS-style overlay (dashed rectangle, move/resize, Record / Entire Display / Cancel; Return confirms the key display) and does not request Screen Recording from that click. Capture can turn the pointer and microphone off for the next session.
 
 ### Plan-deferred (leave alone)
 
-Diarization. 60-minute drift. Redesigning C1–C5. Sparkle SPM (v1 uses GitHub Releases). Gating Record on a license.
+60-minute drift. Redesigning C1–C5. Sparkle SPM (v1 uses GitHub Releases). Gating Record on a license.
 
 ## What “done” is not
 

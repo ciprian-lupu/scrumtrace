@@ -10,6 +10,7 @@ enum AgentLog {
     private static let queue = DispatchQueue(label: "com.str8minds.ScrumTrace.agentlog")
     private static let maxBytes = 2_000_000
     private static let runID = UUID().uuidString.lowercased()
+    static var currentRunID: String { runID }
     private static var activeSessionID: String?
     private static var testFileURL: URL?
     private static let forbiddenCanonicalKeys: Set<String> = [
@@ -136,15 +137,29 @@ enum AgentLog {
         }
     }
 
-    static func readTail(maxLines: Int = 250) -> String {
+    static func readTail(maxLines: Int = 250, runID: String? = nil, query: String = "", newestFirst: Bool = false) -> String {
         guard FileManager.default.fileExists(atPath: fileURL.path),
               let data = try? Data(contentsOf: fileURL),
               let text = String(data: data, encoding: .utf8)
         else {
             return ""
         }
-        let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
-        return lines.suffix(maxLines).joined(separator: "\n")
+        return filteredTail(text, maxLines: maxLines, runID: runID, query: query, newestFirst: newestFirst)
+    }
+
+    static func filteredTail(_ text: String, maxLines: Int, runID: String?, query: String, newestFirst: Bool) -> String {
+        guard maxLines > 0 else { return "" }
+        let query = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        let lines = text.split(separator: "\n").filter { line in
+            if let runID {
+                guard let data = String(line).data(using: .utf8),
+                      let row = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      row["run_id"] as? String == runID else { return false }
+            }
+            return query.isEmpty || line.localizedCaseInsensitiveContains(query)
+        }
+        let tail = Array(lines.suffix(maxLines))
+        return (newestFirst ? Array(tail.reversed()) : tail).joined(separator: "\n")
     }
 
     static func exportDiagnosticBundle() throws -> URL {

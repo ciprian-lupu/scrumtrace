@@ -83,6 +83,10 @@ final class SessionController: ObservableObject {
         phase == .recording || phase == .paused
     }
 
+    var canChangeCaptureSettings: Bool {
+        !isRecording && !isBusy && !startInFlight
+    }
+
     var hudShouldShow: Bool {
         (isRecording || isBusy || startInFlight) && !suppressHUD
     }
@@ -236,7 +240,7 @@ final class SessionController: ObservableObject {
     }
 
     func retryAnalysis(sessionId: String) {
-        guard !isBusy, !isRecording else {
+        guard !isBusy, !isRecording, !startInFlight else {
             statusLine = isBusy ? "Already processing a session" : "Stop recording before retry"
             AgentLog.event("retry_ignored", [
                 "reason": isBusy ? "busy" : "recording",
@@ -253,6 +257,27 @@ final class SessionController: ObservableObject {
         AgentLog.event("retry_begin", ["session": sessionId])
         lastSessionId = sessionId
         Task { await runProcessor(sessionId: sessionId) }
+    }
+
+    func updateSpeakers(sessionId: String, names: [String: String]? = nil, assignments: [Int: String] = [:], reanalyze: Bool = false) async throws -> FullTranscript {
+        guard canChangeCaptureSettings, let processor else {
+            throw SettingsValidationError("Wait for recording or analysis to finish.")
+        }
+        let previousPhase = phase
+        isBusy = true
+        lastSessionId = sessionId
+        defer { isBusy = false; phase = previousPhase }
+        do {
+            let transcript = try await processor.updateSpeakers(sessionId: sessionId, names: names, assignments: assignments, reanalyze: reanalyze) { [weak self] phase, message in
+                self?.phase = phase
+                self?.statusLine = message
+            }
+            statusLine = "Speaker review saved locally; export updated"
+            return transcript
+        } catch {
+            statusLine = "Could not finish updating the speaker export"
+            throw error
+        }
     }
 
     func revealLast() {
@@ -506,6 +531,7 @@ final class SessionController: ObservableObject {
             startTimer()
             log(.start, [:])
             let transcriber = self.transcriber
+            transcriber.setLanguage(settings.speechLanguage)
             let model = settings.whisperModel
             Task.detached {
                 do {
@@ -695,11 +721,13 @@ final class SessionController: ObservableObject {
             let storedPins = vault.loadPinTimes(sessionId: sessionId)
             let livePins = pinTimesSessionId == sessionId ? pinTimes : []
             let pins = Self.mergePins(livePins, storedPins)
+            transcriber.setLanguage(settings.speechLanguage)
             let result = try await processor?.process(
                 sessionId: sessionId,
                 pinTimes: pins,
                 configuration: settings.providerConfiguration(),
                 whisperModel: settings.whisperModel,
+                identifySpeakers: settings.identifySpeakers,
                 onStatus: { [weak self] status, line in
                     AgentLog.event("pipeline_status", [
                         "status": status.rawValue,
@@ -742,7 +770,7 @@ final class SessionController: ObservableObject {
         let uploadsClip = ProviderWireMedia.willUploadClip(configuration: capabilities)
         let payload: String
         if uploadsClip {
-            payload = "Stills and transcript excerpts, and clip audio will leave this Mac, plus window titles, scrubbed URLs, Shot notes, product context, and the 720p clip video."
+            payload = "Stills and transcript excerpts, and clip audio will leave this Mac, plus window titles, scrubbed URLs, Shot notes, product context, and the 720p clip video. Clip audio includes the room microphone and call audio."
         } else {
             payload = "Stills and transcript excerpts will leave this Mac, plus window titles, scrubbed URLs, Shot notes, and product context. Clip video and the master movie are not uploaded."
         }
@@ -1149,6 +1177,10 @@ final class SessionController: ObservableObject {
     }
 
     func relaunchForPermissions() {
+        guard canChangeCaptureSettings else {
+            AgentLog.event("relaunch_ignored", ["reason": "session_active"])
+            return
+        }
         CapturePermissions.relaunchRunningApp()
     }
     #endif

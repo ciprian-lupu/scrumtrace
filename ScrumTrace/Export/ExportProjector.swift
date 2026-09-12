@@ -200,12 +200,13 @@ struct ExportProjector {
         guard ExportRel.isUsableSessionRoot(sessionURL) else {
             throw SessionVaultError.writeFailed("session folder")
         }
-        let export = sessionURL.appendingPathComponent(ScrumTracePath.export)
+        var export = sessionURL.appendingPathComponent(ScrumTracePath.export)
         // fileExists follows links. A dangling or archive-pointing export/
         // symlink must be unlinked first or mkdirat fails and the
         // destination tree can be removed (C2).
         if (try? export.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
             try ExportRel.removeItemIfRegularFile(export, sessionRoot: sessionURL)
+            export.removeAllCachedResourceValues()
             if (try? export.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
                 throw SessionVaultError.writeFailed("export/")
             }

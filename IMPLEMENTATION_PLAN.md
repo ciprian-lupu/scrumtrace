@@ -243,7 +243,7 @@ Zip is built from an **explicit allow-list** of paths under `export/`, never by 
 - Model: compressed turbo `large-v3-v20240930_turbo_632MB` (upstream `openai_whisper-large-v3-v20240930_turbo_632MB`). Old `large-v3_turbo` / `openai_whisper-large-v3_turbo` UserDefaults values remap to that folder. Uncompressed `openai_whisper-large-v3_turbo` is opt-in.
 - Writes `archive/full_transcript.json` with word-level timestamps.
 - **Target (measure, do not guarantee):** 5 minutes of 16 kHz mono on Apple Silicon, model already on disk, wall time recorded in the Gate 3 log. No reference Mac is claimed here.
-- Diarization deferred; speaker labels are hypotheses.
+- User-approved extension (2026-09-12): local FluidAudio 0.15.7 offline speaker diarization on macOS 15+, separately for room and system audio. Word-level estimates, uncertain/overlapping speech, session-local names and manual turn corrections; synchronized private playback and selected-window export. Models download on first use; audio and voice embeddings are not uploaded, and embeddings are not saved. Multi-person meeting accuracy and long-run drift remain unverified hardware checks.
 
 ---
 

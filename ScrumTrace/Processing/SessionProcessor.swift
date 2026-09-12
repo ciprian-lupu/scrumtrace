@@ -28,6 +28,7 @@ final class SessionProcessor: @unchecked Sendable {
         pinTimes: [TimeInterval],
         configuration: AIProviderConfiguration,
         whisperModel: String,
+        identifySpeakers: Bool = false,
         onStatus: @escaping @MainActor (PipelineStatus, String) -> Void
     ) async throws -> SessionManifest {
         let sessionURL = vault.sessionURL(id: sessionId)
@@ -72,6 +73,10 @@ final class SessionProcessor: @unchecked Sendable {
             )
             var transcript = transcribed.transcript
             transcript.sessionId = sessionId
+            if identifySpeakers, !transcribed.incomplete {
+                await onStatus(.transcribing, "Identifying speakers locally (first use downloads models)…")
+                transcript = await SpeakerDiarizer.shared.analyze(transcript, sessionURL: sessionURL)
+            }
             timing.whisperIncomplete = transcribed.incomplete
             try requireUsableSession(sessionURL, id: sessionId)
             let persistablePass = !(transcript.sources ?? []).isEmpty || !transcript.segments.isEmpty
@@ -106,6 +111,13 @@ final class SessionProcessor: @unchecked Sendable {
             try vault.write(manifest: &manifest)
         }
 
+        if identifySpeakers, manifest.hasCompleted(.transcribing),
+           let archived = SpeakerTimeline.load(sessionURL: sessionURL), archived.speakerAnalysis == nil {
+            await onStatus(.transcribing, "Identifying speakers locally (first use downloads models)…")
+            let analyzed = await SpeakerDiarizer.shared.analyze(archived, sessionURL: sessionURL)
+            try SpeakerTimeline.save(analyzed, sessionURL: sessionURL)
+            writtenTranscript = analyzed
+        }
         let transcript = loadTranscript(sessionURL: sessionURL, sessionId: sessionId)
         var recoveredReadableTranscript = false
         if manifest.hasCompleted(.transcribing), transcriptArchiveUnreadable(sessionURL: sessionURL) {
@@ -316,6 +328,53 @@ final class SessionProcessor: @unchecked Sendable {
             await onStatus(.synthesizing, "Writing AGENT_CONTEXT.md and SESSION_BRIEF.html")
         }
         manifest.pipelineStatus = .synthesizing
+        return try await finishExport(sessionId: sessionId, sessionURL: sessionURL, manifest: &manifest,
+                                      transcript: transcript, timing: &timing, onStatus: onStatus)
+    }
+
+    /// Local-only edits never call a provider or rerun task synthesis. Names
+    /// apply to this recording only. Reanalysis is explicitly selected in UI.
+    func updateSpeakers(sessionId: String, names: [String: String]?, assignments: [Int: String] = [:], reanalyze: Bool,
+                        onStatus: @escaping @MainActor (PipelineStatus, String) -> Void) async throws -> FullTranscript {
+        let sessionURL = vault.sessionURL(id: sessionId)
+        try requireUsableSession(sessionURL, id: sessionId)
+        var manifest = try vault.loadManifest(id: sessionId)
+        guard manifest.hasCompleted(.transcribing), var transcript = SpeakerTimeline.load(sessionURL: sessionURL) else {
+            throw SettingsValidationError("Finish transcription with Retry Analysis before reviewing speakers.")
+        }
+        if reanalyze {
+            await onStatus(.transcribing, "Identifying speakers locally (first use downloads models)…")
+            transcript = await SpeakerDiarizer.shared.analyze(transcript, sessionURL: sessionURL)
+        }
+        if let names { transcript = SpeakerTimeline.names(names, appliedTo: transcript) }
+        transcript = try SpeakerTimeline.correcting(assignments, in: transcript)
+        try SpeakerTimeline.save(transcript, sessionURL: sessionURL)
+        writtenTranscript = transcript
+        for index in manifest.tasks.indices {
+            manifest.tasks[index].quotes = manifest.tasks[index].quotes.map { quote in
+                var updated = quote
+                updated.speaker = SpeakerTimeline.quoteSpeaker(quote, transcript: transcript)
+                return updated
+            }
+        }
+        // Old packs may contain system-only audio. An explicit local speaker
+        // analysis also refreshes those clips with microphone + call audio.
+        if reanalyze {
+            await onStatus(.slicing, "Updating clips with room and call audio…")
+            for index in manifest.slices.indices where manifest.slices[index].clipPath != nil {
+                manifest.slices[index] = try await exporter.export(sessionURL: sessionURL, slice: manifest.slices[index], mediaDuration: manifest.duration.mediaSeconds)
+            }
+        }
+        try vault.write(manifest: &manifest)
+        var timing = PipelineTiming.load(sessionURL: sessionURL) ?? PipelineTiming()
+        _ = try await finishExport(sessionId: sessionId, sessionURL: sessionURL, manifest: &manifest,
+                                   transcript: transcript, timing: &timing, onStatus: onStatus)
+        return transcript
+    }
+
+    private func finishExport(sessionId: String, sessionURL: URL, manifest: inout SessionManifest,
+                              transcript: FullTranscript, timing: inout PipelineTiming,
+                              onStatus: @escaping @MainActor (PipelineStatus, String) -> Void) async throws -> SessionManifest {
         let excerpts = excerptMap(manifest: manifest, transcript: transcript)
         let projector = ExportProjector()
         var projection = try projector.project(
@@ -323,6 +382,9 @@ final class SessionProcessor: @unchecked Sendable {
             manifest: manifest,
             includeFullTranscript: manifest.includeFullTranscriptInZip
         )
+        projection.manifest.markCompleted(.synthesizing)
+        projection.manifest.pipelineStatus = manifest.slices.contains(where: { $0.analysisStatus == .offlineFailed }) ? .offlineFailed : .completed
+        projection.manifest.markCompleted(.completed)
         projection.manifest.tasks = EvidenceValidator.applyExportEvidence(
             tasks: projection.manifest.tasks,
             sessionURL: sessionURL,
@@ -569,7 +631,7 @@ final class SessionProcessor: @unchecked Sendable {
     ) async -> (transcript: FullTranscript, incomplete: Bool) {
         let resolved = WhisperTranscriber.whisperKitModelName(model)
         do {
-            if !transcriber.isReady {
+            if !transcriber.isReady(for: model) {
                 try await waitForPrepare(model: model, resolved: resolved, onStatus: onStatus)
             }
             await onStatus(.transcribing, "Transcribing locally with WhisperKit")
@@ -659,7 +721,7 @@ final class SessionProcessor: @unchecked Sendable {
         }
         let ticker = Task { @MainActor in
             var elapsed = 0
-            while !Task.isCancelled && !self.transcriber.isReady {
+            while !Task.isCancelled && !self.transcriber.isReady(for: model) {
                 try? await Task.sleep(nanoseconds: 2_000_000_000)
                 guard !Task.isCancelled else { return }
                 elapsed += 2
@@ -1030,7 +1092,11 @@ final class SessionProcessor: @unchecked Sendable {
                     stated: candidate.stated,
                     inferred: candidate.inferred,
                     agentInstructions: instructions,
-                    quotes: candidate.quotes,
+                    quotes: candidate.quotes.map { quote in
+                        var copy = quote
+                        copy.speaker = SpeakerTimeline.quoteSpeaker(quote, transcript: transcript)
+                        return copy
+                    },
                     evidenceMedia: uniqueEvidence,
                     confidence: candidate.confidence
                 )

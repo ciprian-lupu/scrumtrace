@@ -77,6 +77,9 @@ struct SessionBriefRenderer {
         if js.isEmpty {
             js = Self.fallbackJS
         }
+        js += Self.speakerJS
+        css += Self.speakerCSS
+        let transcript = SpeakerTimeline.load(sessionURL: sessionURL)
         let confirmed = manifest.tasks.filter { $0.status == .confirmed }
         let review = manifest.tasks.filter { $0.status == .needsReview }
         let replacements: [String: String] = [
@@ -96,7 +99,7 @@ struct SessionBriefRenderer {
             "{{NEEDS_REVIEW_HTML}}": review.isEmpty ? "" : review.map { taskCard($0, excerpts: excerpts, sessionURL: sessionURL, omitted: manifest.omitted) }.joined(),
             "{{TIMELINE_HTML}}": timeline(manifest),
             "{{SHOTS_HTML}}": shots(manifest, sessionURL: sessionURL),
-            "{{TRANSCRIPT_HTML}}": transcriptHTML(manifest: manifest, excerpts: excerpts),
+            "{{TRANSCRIPT_HTML}}": transcriptHTML(manifest: manifest, excerpts: excerpts, sessionURL: sessionURL, transcript: transcript),
             "{{CONFIRMED_COUNT}}": "\(confirmed.count)",
             "{{REVIEW_COUNT}}": "\(review.count)",
             "{{OMITTED_HTML}}": omittedHTML(manifest)
@@ -134,7 +137,7 @@ struct SessionBriefRenderer {
             guard let rel = ExportRel.packMediaHandoff(path, sessionURL: sessionURL, omitted: omitted) else { return nil }
             if rel.hasSuffix(".mp4") {
                 return """
-                <video class="clip" controls preload="metadata" src="\(HTMLEscaper.escape(rel))"></video>
+                <div class="speaker-player"><video class="clip" controls tabindex="0" preload="metadata" src="\(HTMLEscaper.escape(rel))"></video><p class="now-speaking" aria-live="polite">Select a transcript passage to play it.</p></div>
                 """
             }
             return """
@@ -174,10 +177,26 @@ struct SessionBriefRenderer {
         """
     }
 
-    private func transcriptHTML(manifest: SessionManifest, excerpts: [String: String]) -> String {
+    private func transcriptHTML(manifest: SessionManifest, excerpts: [String: String], sessionURL: URL, transcript: FullTranscript?) -> String {
         manifest.tasks.compactMap { task -> String? in
-            guard let text = excerpts[task.taskId], !text.isEmpty else { return nil }
-            return "<p><span class=\"slate\">\(HTMLEscaper.escape(task.taskId))</span> \(HTMLEscaper.escape(text))</p>"
+            guard let transcript, let slice = manifest.slices.first(where: { $0.sliceId == task.sourceSliceId }) else {
+                guard let text = excerpts[task.taskId], !text.isEmpty else { return nil }
+                return "<p><span class=\"slate\">\(HTMLEscaper.escape(task.taskId))</span> \(HTMLEscaper.escape(text))</p>"
+            }
+            let turns = SpeakerTimeline.turns(in: transcript, start: slice.startMedia, end: slice.endMedia)
+            let clip = task.evidenceMedia.compactMap { ExportRel.packMediaHandoff($0, sessionURL: sessionURL, omitted: manifest.omitted) }.first { $0.hasSuffix(".mp4") }
+            let rows = turns.map { turn -> String in
+                let label = SpeakerTimeline.displaySpeaker(turn, in: transcript)
+                let content = "<span class=\"turn-meta\">t_media \(Self.clock(turn.start))–\(Self.clock(turn.end)) · \(HTMLEscaper.escape(label))</span><span>\(HTMLEscaper.escape(turn.text))</span>"
+                if let clip {
+                    let start = String(format: "%.3f", locale: Locale(identifier: "en_US_POSIX"), max(0, turn.start - slice.startMedia))
+                    let end = String(format: "%.3f", locale: Locale(identifier: "en_US_POSIX"), max(0, turn.end - slice.startMedia))
+                    return "<button class=\"transcript-turn\" data-clip=\"\(HTMLEscaper.escape(clip))\" data-start=\"\(start)\" data-end=\"\(end)\" data-speaker=\"\(HTMLEscaper.escape(label))\">\(content)</button>"
+                }
+                return "<p class=\"transcript-turn\">\(content)</p>"
+            }.joined()
+            guard !rows.isEmpty else { return nil }
+            return "<section class=\"speaker-transcript\"><h3>\(HTMLEscaper.escape(task.taskId))</h3><p class=\"muted\">Selected clip only · speaker labels are estimates unless reviewed.</p>\(rows)</section>"
         }.joined()
     }
 
@@ -248,6 +267,50 @@ struct SessionBriefRenderer {
         }
         return String(format: "%d:%02d", m, s)
     }
+
+    private static let speakerCSS = """
+    .speaker-player{width:100%;min-width:0}.now-speaking{font-size:.85rem;color:var(--muted,#aaa);min-height:1.4em}
+    .speaker-transcript{margin:1.5rem 0}.transcript-turn{display:flex;flex-direction:column;gap:.3rem;text-align:left;width:100%;padding:.75rem;margin:.4rem 0;border:1px solid #6665;border-radius:6px;background:transparent;color:inherit;font:inherit}
+    button.transcript-turn{cursor:pointer}button.transcript-turn:hover,.transcript-turn[aria-current=true]{background:#688bd326;border-color:#769dde}.transcript-turn:focus-visible{outline:3px solid #769dde;outline-offset:2px}.turn-meta{font-size:.8rem;opacity:.8}
+    """
+
+    private static let speakerJS = #"""
+    ;(() => {
+      const turns = Array.from(document.querySelectorAll('button.transcript-turn[data-clip]'));
+      const videos = Array.from(document.querySelectorAll('video.clip'));
+      const related = video => turns.filter(turn => turn.getAttribute('data-clip') === video.getAttribute('src'));
+      videos.forEach(video => {
+        const rows = related(video);
+        const status = video.parentElement.querySelector('.now-speaking');
+        const update = () => {
+          const labels = [];
+          rows.forEach(row => {
+            const active = video.currentTime >= Number(row.dataset.start) && video.currentTime < Number(row.dataset.end);
+            if (active) { row.setAttribute('aria-current', 'true'); labels.push(row.dataset.speaker); }
+            else row.removeAttribute('aria-current');
+          });
+          const label = Array.from(new Set(labels)).join(' / ') || 'No attributed speech at this time';
+          if (status && status.textContent !== label) status.textContent = label;
+        };
+        video.addEventListener('timeupdate', update);
+        video.addEventListener('seeked', update);
+      });
+      turns.forEach(turn => turn.addEventListener('click', () => {
+        const video = videos.find(item => item.getAttribute('src') === turn.getAttribute('data-clip'));
+        const start = Number(turn.dataset.start);
+        if (!video || !Number.isFinite(start) || start < 0) return;
+        videos.forEach(other => { if (other !== video) other.pause(); });
+        video.currentTime = start;
+        video.scrollIntoView({block:'center', behavior:'smooth'});
+        video.focus({preventScroll:true});
+        const playing = video.play();
+        if (playing) playing.catch(() => {
+          const status = video.parentElement.querySelector('.now-speaking');
+          if (status) status.textContent = 'Press Play to hear this passage.';
+        });
+      }));
+    })();
+    """#
 
     /// Used when `brief.shell.html` is missing from the bundle. Must keep
     /// timeline, contact sheet, lightbox, and omitted-assets tokens.
