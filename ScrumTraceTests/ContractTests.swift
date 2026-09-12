@@ -41,7 +41,7 @@ final class ContractTests: XCTestCase {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("st-handoff-\(UUID().uuidString)")
         let shots = root.appendingPathComponent("export/shots")
         try FileManager.default.createDirectory(at: shots, withIntermediateDirectories: true)
-        try Data("jpg").write(to: shots.appendingPathComponent("001.jpg"))
+        try Data("jpg".utf8).write(to: shots.appendingPathComponent("001.jpg"))
         defer { try? FileManager.default.removeItem(at: root) }
         XCTAssertEqual(
             ExportRel.handoffFileIfPresent("export/shots/001.jpg", sessionURL: root),
@@ -50,7 +50,7 @@ final class ContractTests: XCTestCase {
         XCTAssertNil(ExportRel.handoffFileIfPresent("export/shots/missing.jpg", sessionURL: root))
         XCTAssertNil(ExportRel.handoffFileIfPresent("archive/session.mp4", sessionURL: root))
         let outside = FileManager.default.temporaryDirectory.appendingPathComponent("st-handoff-secret-\(UUID().uuidString)")
-        try Data("secret").write(to: outside)
+        try Data("secret".utf8).write(to: outside)
         defer { try? FileManager.default.removeItem(at: outside) }
         try FileManager.default.createSymbolicLink(
             at: shots.appendingPathComponent("leak.jpg"),
@@ -63,7 +63,7 @@ final class ContractTests: XCTestCase {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("st-omitted-handoff-\(UUID().uuidString)")
         let shots = root.appendingPathComponent("export/shots")
         try FileManager.default.createDirectory(at: shots, withIntermediateDirectories: true)
-        try Data("jpg").write(to: shots.appendingPathComponent("001.jpg"))
+        try Data("jpg".utf8).write(to: shots.appendingPathComponent("001.jpg"))
         defer { try? FileManager.default.removeItem(at: root) }
         XCTAssertEqual(
             ExportRel.packMediaHandoff("shots/001.jpg", sessionURL: root),
@@ -539,7 +539,7 @@ final class ContractTests: XCTestCase {
         try FileManager.default.createDirectory(at: export, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: archive, withIntermediateDirectories: true)
         let secret = archive.appendingPathComponent("session.mp4")
-        try Data("MASTER").write(to: secret)
+        try Data("MASTER".utf8).write(to: secret)
         let dest = export.appendingPathComponent("AGENT_CONTEXT.md")
         try FileManager.default.createSymbolicLink(at: dest, withDestinationURL: secret)
         defer { try? FileManager.default.removeItem(at: root) }
@@ -615,7 +615,7 @@ final class ContractTests: XCTestCase {
         let dest = session.appendingPathComponent(ScrumTracePath.events)
         let secret = FileManager.default.temporaryDirectory.appendingPathComponent("st-append-secret-\(UUID().uuidString).jsonl")
         defer { try? FileManager.default.removeItem(at: secret) }
-        try Data("DO-NOT-APPEND\n").write(to: secret)
+        try Data("DO-NOT-APPEND\n".utf8).write(to: secret)
         try? FileManager.default.removeItem(at: dest)
         try FileManager.default.createSymbolicLink(at: dest, withDestinationURL: secret)
         let event = SessionEvent(tWall: 1, tMedia: 1, kind: .pin, payload: ["k": "v"])
@@ -632,7 +632,7 @@ final class ContractTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: root) }
         let secret = FileManager.default.temporaryDirectory.appendingPathComponent("st-canon-secret-\(UUID().uuidString).json")
         defer { try? FileManager.default.removeItem(at: secret) }
-        try Data("DO-NOT-OVERWRITE").write(to: secret)
+        try Data("DO-NOT-OVERWRITE".utf8).write(to: secret)
         let dest = root.appendingPathComponent(ScrumTracePath.manifest)
         try FileManager.default.createSymbolicLink(at: dest, withDestinationURL: secret)
         let payload = Data("{\"manifest_version\":\"1.1.0\"}".utf8)
@@ -773,7 +773,7 @@ final class ContractTests: XCTestCase {
         let created = try vault.createSession(product: .empty)
         let session = vault.sessionURL(id: created.manifest.sessionId)
         try ExportRel.writeContainedData(
-            Data("PNG"),
+            Data("PNG".utf8),
             relative: "\(ScrumTracePath.shots)/001.png",
             sessionURL: session
         )
@@ -803,12 +803,12 @@ final class ContractTests: XCTestCase {
             source: .typed
         )
         try ExportRel.writeContainedData(
-            Data("PNG"),
+            Data("PNG".utf8),
             relative: shot.rawPath,
             sessionURL: session
         )
         try ExportRel.writeContainedData(
-            Data("ANN"),
+            Data("ANN".utf8),
             relative: shot.annotatedPath!,
             sessionURL: session
         )
@@ -839,7 +839,7 @@ final class ContractTests: XCTestCase {
         let created = try vault.createSession(product: .empty)
         let session = vault.sessionURL(id: created.manifest.sessionId)
         try ExportRel.writeContainedData(
-            Data("PNG"),
+            Data("PNG".utf8),
             relative: "\(ScrumTracePath.shots)/001.png",
             sessionURL: session
         )
@@ -910,7 +910,7 @@ final class ContractTests: XCTestCase {
         )
         defer { try? FileManager.default.removeItem(at: outside) }
         try FileManager.default.createDirectory(at: outside, withIntermediateDirectories: true)
-        try Data("SECRET-PNG").write(to: outside.appendingPathComponent("001.png"))
+        try Data("SECRET-PNG".utf8).write(to: outside.appendingPathComponent("001.png"))
         try FileManager.default.removeItem(at: shots)
         try FileManager.default.createSymbolicLink(at: shots, withDestinationURL: outside)
         vault.pruneAbandonedStarts()
@@ -958,7 +958,7 @@ final class ContractTests: XCTestCase {
         let shots = root.appendingPathComponent("archive/shots")
         try FileManager.default.createDirectory(at: shots, withIntermediateDirectories: true)
         let real = shots.appendingPathComponent("001.png")
-        try Data("still").write(to: real)
+        try Data("still".utf8).write(to: real)
         try FileManager.default.createSymbolicLink(
             at: shots.appendingPathComponent("alias.png"),
             withDestinationURL: real
@@ -1157,8 +1157,8 @@ final class ContractTests: XCTestCase {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("st-frame-window-\(UUID().uuidString)")
         let shotsDir = root.appendingPathComponent("export/shots")
         try FileManager.default.createDirectory(at: shotsDir, withIntermediateDirectories: true)
-        try Data("one").write(to: shotsDir.appendingPathComponent("001.jpg"))
-        try Data("two").write(to: shotsDir.appendingPathComponent("002.jpg"))
+        try Data("one".utf8).write(to: shotsDir.appendingPathComponent("001.jpg"))
+        try Data("two".utf8).write(to: shotsDir.appendingPathComponent("002.jpg"))
         defer { try? FileManager.default.removeItem(at: root) }
         let slice = SliceRecord(
             sliceId: "slice-01",
@@ -1217,8 +1217,8 @@ final class ContractTests: XCTestCase {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("st-clamp-\(UUID().uuidString)")
         let shotsDir = root.appendingPathComponent("archive/shots")
         try FileManager.default.createDirectory(at: shotsDir, withIntermediateDirectories: true)
-        try Data("early").write(to: shotsDir.appendingPathComponent("001.png"))
-        try Data("late").write(to: shotsDir.appendingPathComponent("002.png"))
+        try Data("early".utf8).write(to: shotsDir.appendingPathComponent("001.png"))
+        try Data("late".utf8).write(to: shotsDir.appendingPathComponent("002.png"))
         defer { try? FileManager.default.removeItem(at: root) }
         let slice = SliceRecord(
             sliceId: "slice-01",
@@ -1284,8 +1284,8 @@ final class ContractTests: XCTestCase {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("st-other-assoc-\(UUID().uuidString)")
         let shotsDir = root.appendingPathComponent("archive/shots")
         try FileManager.default.createDirectory(at: shotsDir, withIntermediateDirectories: true)
-        try Data("one").write(to: shotsDir.appendingPathComponent("001.png"))
-        try Data("two").write(to: shotsDir.appendingPathComponent("002.png"))
+        try Data("one".utf8).write(to: shotsDir.appendingPathComponent("001.png"))
+        try Data("two".utf8).write(to: shotsDir.appendingPathComponent("002.png"))
         defer { try? FileManager.default.removeItem(at: root) }
         let slice = SliceRecord(
             sliceId: "slice-01",
@@ -1360,8 +1360,8 @@ final class ContractTests: XCTestCase {
         let grabDir = root.appendingPathComponent("archive/media-work/task-01")
         try FileManager.default.createDirectory(at: shotsDir, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: grabDir, withIntermediateDirectories: true)
-        try Data("one").write(to: shotsDir.appendingPathComponent("001.png"))
-        try Data("grab").write(to: grabDir.appendingPathComponent("shot-1.jpg"))
+        try Data("one".utf8).write(to: shotsDir.appendingPathComponent("001.png"))
+        try Data("grab".utf8).write(to: grabDir.appendingPathComponent("shot-1.jpg"))
         defer { try? FileManager.default.removeItem(at: root) }
         let slice = SliceRecord(
             sliceId: "slice-01",
@@ -2397,8 +2397,8 @@ final class ContractTests: XCTestCase {
         let trap = shots.appendingPathComponent("trap")
         try FileManager.default.createDirectory(at: trap, withIntermediateDirectories: true)
         let outside = FileManager.default.temporaryDirectory.appendingPathComponent("scrumtrace-frame-secret-\(UUID().uuidString)")
-        try Data("ARCHIVE-LEAK").write(to: outside)
-        try Data("real-shot").write(to: shots.appendingPathComponent("001.png"))
+        try Data("ARCHIVE-LEAK".utf8).write(to: outside)
+        try Data("real-shot".utf8).write(to: shots.appendingPathComponent("001.png"))
         defer {
             try? FileManager.default.removeItem(at: root)
             try? FileManager.default.removeItem(at: outside)
@@ -2793,9 +2793,9 @@ final class ContractTests: XCTestCase {
         let orphan = export.appendingPathComponent("media/task-99")
         try FileManager.default.createDirectory(at: archive, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: orphan, withIntermediateDirectories: true)
-        try Data("stale-export-transcript").write(to: export.appendingPathComponent("full_transcript.json"))
-        try Data("orphan-clip").write(to: orphan.appendingPathComponent("clip.mp4"))
-        try Data("archive-transcript").write(to: archive.appendingPathComponent("full_transcript.json"))
+        try Data("stale-export-transcript".utf8).write(to: export.appendingPathComponent("full_transcript.json"))
+        try Data("orphan-clip".utf8).write(to: orphan.appendingPathComponent("clip.mp4"))
+        try Data("archive-transcript".utf8).write(to: archive.appendingPathComponent("full_transcript.json"))
         defer { try? FileManager.default.removeItem(at: root) }
 
         let manifest = SessionManifest.makeNew(sessionId: "reset-export", product: .empty)
@@ -2825,8 +2825,8 @@ final class ContractTests: XCTestCase {
     func testAllowListOmitsTranscriptUnlessOptedIn() throws {
         let export = FileManager.default.temporaryDirectory.appendingPathComponent("scrumtrace-allow-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: export, withIntermediateDirectories: true)
-        try Data("# ctx\n").write(to: export.appendingPathComponent("AGENT_CONTEXT.md"))
-        try Data("{}").write(to: export.appendingPathComponent("full_transcript.json"))
+        try Data("# ctx\n".utf8).write(to: export.appendingPathComponent("AGENT_CONTEXT.md"))
+        try Data("{}".utf8).write(to: export.appendingPathComponent("full_transcript.json"))
         defer { try? FileManager.default.removeItem(at: export) }
         XCTAssertFalse(PackBudget.allowList(exportDir: export, includeFullTranscript: false).contains("full_transcript.json"))
         XCTAssertTrue(PackBudget.allowList(exportDir: export, includeFullTranscript: true).contains("full_transcript.json"))
@@ -2838,10 +2838,10 @@ final class ContractTests: XCTestCase {
         let media = export.appendingPathComponent("media")
         try FileManager.default.createDirectory(at: shots, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: media, withIntermediateDirectories: true)
-        try Data("still").write(to: shots.appendingPathComponent("ok.png"))
-        try Data("# ctx\n").write(to: export.appendingPathComponent("AGENT_CONTEXT.md"))
+        try Data("still".utf8).write(to: shots.appendingPathComponent("ok.png"))
+        try Data("# ctx\n".utf8).write(to: export.appendingPathComponent("AGENT_CONTEXT.md"))
         let outside = FileManager.default.temporaryDirectory.appendingPathComponent("scrumtrace-zip-secret-\(UUID().uuidString)")
-        try Data("ARCHIVE-LEAK").write(to: outside)
+        try Data("ARCHIVE-LEAK".utf8).write(to: outside)
         defer {
             try? FileManager.default.removeItem(at: export)
             try? FileManager.default.removeItem(at: outside)
@@ -2878,7 +2878,7 @@ final class ContractTests: XCTestCase {
         let exportUnderSession = session.appendingPathComponent("export")
         try FileManager.default.createDirectory(at: exportUnderSession.appendingPathComponent("shots"), withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: exportUnderSession.appendingPathComponent("media"), withIntermediateDirectories: true)
-        try Data("still").write(to: exportUnderSession.appendingPathComponent("shots/ok.png"))
+        try Data("still".utf8).write(to: exportUnderSession.appendingPathComponent("shots/ok.png"))
         try FileManager.default.createSymbolicLink(
             at: exportUnderSession.appendingPathComponent("media/leak.mp4"),
             withDestinationURL: outside
@@ -2896,7 +2896,7 @@ final class ContractTests: XCTestCase {
         try FileManager.default.createDirectory(at: export.appendingPathComponent("shots"), withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: archive, withIntermediateDirectories: true)
         let secret = archive.appendingPathComponent("session.mp4")
-        try Data("secret-movie").write(to: secret)
+        try Data("secret-movie".utf8).write(to: secret)
         defer { try? FileManager.default.removeItem(at: session) }
 
         let media = export.appendingPathComponent("media")
@@ -2921,7 +2921,7 @@ final class ContractTests: XCTestCase {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("scrumtrace-keep-\(UUID().uuidString)")
         let shots = root.appendingPathComponent("export/shots")
         try FileManager.default.createDirectory(at: shots, withIntermediateDirectories: true)
-        try Data("jpg").write(to: shots.appendingPathComponent("001.jpg"))
+        try Data("jpg".utf8).write(to: shots.appendingPathComponent("001.jpg"))
         defer { try? FileManager.default.removeItem(at: root) }
         let slice = SliceRecord(
             sliceId: "slice-01",
@@ -2982,7 +2982,7 @@ final class ContractTests: XCTestCase {
         )
         let exportShots = root.appendingPathComponent("export/shots")
         try FileManager.default.createDirectory(at: exportShots, withIntermediateDirectories: true)
-        try Data("export-still").write(to: exportShots.appendingPathComponent("001.png"))
+        try Data("export-still".utf8).write(to: exportShots.appendingPathComponent("001.png"))
         try FileManager.default.createSymbolicLink(
             at: root.appendingPathComponent("archive"),
             withDestinationURL: root.appendingPathComponent("export")
@@ -3004,7 +3004,7 @@ final class ContractTests: XCTestCase {
         let shots = realRoot.appendingPathComponent("archive/shots")
         try FileManager.default.createDirectory(at: shots, withIntermediateDirectories: true)
         let png = shots.appendingPathComponent("001.png")
-        try Data("raw").write(to: png)
+        try Data("raw".utf8).write(to: png)
         defer { try? FileManager.default.removeItem(at: realRoot) }
         XCTAssertTrue(ExportRel.isReadableSessionFile(png, sessionRoot: realRoot))
         XCTAssertEqual(
@@ -3020,7 +3020,7 @@ final class ContractTests: XCTestCase {
         let archive = root.appendingPathComponent("archive")
         try FileManager.default.createDirectory(at: archive, withIntermediateDirectories: true)
         let master = archive.appendingPathComponent("session.mp4")
-        try Data("MASTER-MOVIE").write(to: master)
+        try Data("MASTER-MOVIE".utf8).write(to: master)
         try FileManager.default.createSymbolicLink(
             at: root.appendingPathComponent("export"),
             withDestinationURL: archive
@@ -3035,7 +3035,7 @@ final class ContractTests: XCTestCase {
         )
         var isDir: ObjCBool = false
         XCTAssertTrue(FileManager.default.fileExists(atPath: export.path, isDirectory: &isDir) && isDir.boolValue)
-        XCTAssertEqual(try Data(contentsOf: master), Data("MASTER-MOVIE"))
+        XCTAssertEqual(try Data(contentsOf: master), Data("MASTER-MOVIE".utf8))
     }
 
     func testResetExportTreeReplacesDanglingExportSymlink() throws {
