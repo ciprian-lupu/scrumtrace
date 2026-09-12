@@ -424,6 +424,14 @@ final class SessionVault: @unchecked Sendable {
     }
 
     func openExportInClaude(sessionId: String) throws {
+        try openExportInLocalCLI(sessionId: sessionId, cli: .claude)
+    }
+
+    func openExportInChatGPT(sessionId: String) throws {
+        try openExportInLocalCLI(sessionId: sessionId, cli: .chatGPT)
+    }
+
+    func openExportInLocalCLI(sessionId: String, cli: LocalCodingCLI) throws {
         guard Self.isValidSessionId(sessionId) else {
             throw ClaudeCLIHandoffError.sessionUnusable
         }
@@ -437,7 +445,7 @@ final class SessionVault: @unchecked Sendable {
         if (try? session.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
             throw ClaudeCLIHandoffError.sessionUnusable
         }
-        try ClaudeCLIHandoff.open(sessionURL: session, sessionId: sessionId)
+        try ClaudeCLIHandoff.open(sessionURL: session, sessionId: sessionId, cli: cli)
     }
 
     func revealRootInFinder() {

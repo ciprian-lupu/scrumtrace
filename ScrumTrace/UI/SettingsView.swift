@@ -286,6 +286,11 @@ struct SettingsView: View {
 
     private var aiTab: some View {
         Form {
+            Section("Local coding agents") {
+                Text("Open last session in Claude or ChatGPT starts the CLI installed on this Mac (`claude` or `codex`) in Terminal, signed in with your Claude or ChatGPT account. That path does not use the API key below and never opens archive/.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
             Section("AI provider") {
                 Picker("Backend", selection: $settings.provider) {
                     ForEach(AIProviderKind.allCases) { kind in

@@ -121,9 +121,43 @@ final class ClaudeCLIHandoffTests: XCTestCase {
             return XCTFail("osascript argv must be passed after --")
         }
         let forwarded = Array(plan.arguments[(dash + 1)...])
-        XCTAssertEqual(forwarded, [executable.path, ClaudeCLIHandoff.execFlag, sessionId, claude.path])
+        XCTAssertEqual(
+            forwarded,
+            [executable.path, ClaudeCLIHandoff.execFlag, sessionId, LocalCodingCLI.claude.rawValue, claude.path]
+        )
         XCTAssertFalse(forwarded.contains(where: { $0.contains("/export") }))
         XCTAssertFalse(forwarded.contains(where: { $0.split(separator: "/").contains("archive") }))
+    }
+
+    func testChatGPTInvocationUsesCodexAndNeverExecOrPrintMode() {
+        let executable = URL(fileURLWithPath: "/Applications/ScrumTrace.app/Contents/MacOS/ScrumTrace")
+        let codex = URL(fileURLWithPath: "/usr/local/bin/codex")
+        let sessionId = "20260101-abcdef"
+        let plan = ClaudeCLIHandoff.invocation(
+            executable: executable,
+            sessionId: sessionId,
+            cli: .chatGPT,
+            binary: codex
+        )
+        guard let dash = plan.arguments.firstIndex(of: "--") else {
+            return XCTFail("osascript argv must be passed after --")
+        }
+        let forwarded = Array(plan.arguments[(dash + 1)...])
+        XCTAssertEqual(
+            forwarded,
+            [executable.path, ClaudeCLIHandoff.execFlag, sessionId, LocalCodingCLI.chatGPT.rawValue, codex.path]
+        )
+        let argv = ClaudeCLIHandoff.cliArguments(executable: codex, cli: .chatGPT)
+        XCTAssertEqual(argv, ["codex", ClaudeCLIHandoff.startupPrompt])
+        XCTAssertFalse(argv.contains("exec"))
+        XCTAssertFalse(argv.contains("-p"))
+        XCTAssertTrue(ClaudeCLIHandoff.isAllowedExecutable(codex, cli: .chatGPT))
+        XCTAssertFalse(
+            ClaudeCLIHandoff.isAllowedExecutable(URL(fileURLWithPath: "/usr/bin/yes"), cli: .chatGPT)
+        )
+        XCTAssertFalse(
+            ClaudeCLIHandoff.isAllowedExecutable(URL(fileURLWithPath: "/usr/local/bin/claude"), cli: .chatGPT)
+        )
     }
 
     func testOpenValidatedExportFdFailsAfterExportIsSwappedForArchiveLink() throws {
@@ -172,6 +206,8 @@ final class ClaudeCLIHandoffTests: XCTestCase {
         )
         controller.openInClaude()
         XCTAssertEqual(controller.statusLine, "No session to open in Claude.")
+        controller.openInChatGPT()
+        XCTAssertEqual(controller.statusLine, "No session to open in ChatGPT.")
     }
 
     @MainActor
@@ -195,6 +231,8 @@ final class ClaudeCLIHandoffTests: XCTestCase {
         menu.update()
         XCTAssertNotNil(menu.item(withTitle: "Open last session in Claude"))
         XCTAssertTrue(try XCTUnwrap(menu.item(withTitle: "Open last session in Claude")).isEnabled)
+        XCTAssertNotNil(menu.item(withTitle: "Open last session in ChatGPT"))
+        XCTAssertTrue(try XCTUnwrap(menu.item(withTitle: "Open last session in ChatGPT")).isEnabled)
         XCTAssertNil(menu.item(withTitle: "Open last session in Cursor"))
     }
 }

@@ -291,24 +291,32 @@ final class SessionController: ObservableObject {
     }
 
     func openInClaude(sessionId: String? = nil) {
+        openInLocalCLI(.claude, sessionId: sessionId)
+    }
+
+    func openInChatGPT(sessionId: String? = nil) {
+        openInLocalCLI(.chatGPT, sessionId: sessionId)
+    }
+
+    func openInLocalCLI(_ cli: LocalCodingCLI, sessionId: String? = nil) {
         guard let id = sessionId ?? lastSessionId ?? manifest?.sessionId else {
-            statusLine = "No session to open in Claude."
-            AgentLog.event("claude_handoff_fail", ["reason": "no_session"])
+            statusLine = cli.noSessionStatus
+            AgentLog.event(cli.logFail, ["reason": "no_session"])
             return
         }
         do {
-            try vault.openExportInClaude(sessionId: id)
-            statusLine = "Opened export in Claude"
-            AgentLog.event("claude_handoff", ["session": id])
+            try vault.openExportInLocalCLI(sessionId: id, cli: cli)
+            statusLine = cli.successStatus
+            AgentLog.event(cli.logSuccess, ["session": id])
         } catch let error as ClaudeCLIHandoffError {
             statusLine = error.localizedDescription
-            AgentLog.event("claude_handoff_fail", [
+            AgentLog.event(cli.logFail, [
                 "session": id,
                 "reason": error.logReason
             ])
         } catch {
             statusLine = ClaudeCLIHandoffError.launchFailed.localizedDescription
-            AgentLog.event("claude_handoff_fail", [
+            AgentLog.event(cli.logFail, [
                 "session": id,
                 "reason": ClaudeCLIHandoffError.launchFailed.logReason
             ])

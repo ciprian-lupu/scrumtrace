@@ -167,6 +167,9 @@ final class MenuBarController: NSObject {
         let claude = actionItem("Open last session in Claude", #selector(openLastInClaude))
         claude.isEnabled = controller.lastSessionId != nil
         menu.addItem(claude)
+        let chatGPT = actionItem("Open last session in ChatGPT", #selector(openLastInChatGPT))
+        chatGPT.isEnabled = controller.lastSessionId != nil
+        menu.addItem(chatGPT)
         let recent = NSMenuItem(title: "Recent", action: nil, keyEquivalent: "")
         let recentMenu = NSMenu()
         recentMenu.autoenablesItems = false
@@ -206,8 +209,16 @@ final class MenuBarController: NSObject {
                 )
                 claudeItem.representedObject = session.sessionId
                 claudeItem.target = self
+                let chatGPTItem = NSMenuItem(
+                    title: "Open in ChatGPT",
+                    action: #selector(openRecentInChatGPT(_:)),
+                    keyEquivalent: ""
+                )
+                chatGPTItem.representedObject = session.sessionId
+                chatGPTItem.target = self
                 sub.addItem(revealItem)
                 sub.addItem(claudeItem)
+                sub.addItem(chatGPTItem)
                 sub.addItem(retryItem)
                 item.submenu = sub
                 recentMenu.addItem(item)
@@ -403,6 +414,10 @@ final class MenuBarController: NSObject {
         AgentLog.event("menu_claude", [:])
         controller.openInClaude()
     }
+    @objc private func openLastInChatGPT() {
+        AgentLog.event("menu_chatgpt", [:])
+        controller.openInChatGPT()
+    }
     @objc private func revealLog() {
         AgentLog.event("menu_reveal_log", [:])
         AgentLog.reveal()
@@ -508,6 +523,12 @@ final class MenuBarController: NSObject {
         guard let id = sender.representedObject as? String else { return }
         AgentLog.event("menu_claude", ["session": id])
         controller.openInClaude(sessionId: id)
+    }
+
+    @objc private func openRecentInChatGPT(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? String else { return }
+        AgentLog.event("menu_chatgpt", ["session": id])
+        controller.openInChatGPT(sessionId: id)
     }
 }
 

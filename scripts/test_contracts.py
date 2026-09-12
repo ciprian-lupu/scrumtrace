@@ -3127,8 +3127,13 @@ def test_claude_cli_handoff() -> None:
     assert "session.mp4" in handoff
     assert "startupPrompt" in handoff
     assert "claudeArguments" in handoff
+    assert "enum LocalCodingCLI" in handoff
+    assert "case chatGPT" in handoff
+    assert "return \"codex\"" in handoff
+    assert "codex exec" not in handoff
     assert "quoted form of" in handoff
     assert "tell application \"Terminal\"" in handoff
+    assert "--local-cli-exec" in handoff
     assert "--claude-cli-exec" in handoff
     assert "fchdir" in handoff
     assert "openUnfollowedDirectory" in handoff
@@ -3143,16 +3148,26 @@ def test_claude_cli_handoff() -> None:
     assert "/archive/" not in handoff or "pathComponents.contains(\"archive\")" in handoff
     menu = (ROOT / "ScrumTrace" / "UI" / "MenuBarController.swift").read_text()
     assert "Open last session in Claude" in menu
+    assert "Open last session in ChatGPT" in menu
     assert "Open in Claude" in menu
+    assert "Open in ChatGPT" in menu
     assert "openLastInClaude" in menu
+    assert "openLastInChatGPT" in menu
     assert "openRecentInClaude" in menu
+    assert "openRecentInChatGPT" in menu
     assert "menu_claude" in menu
+    assert "menu_chatgpt" in menu
     assert "Open last session in Cursor" not in menu
     assert "openInCursor" not in menu
     controller = (ROOT / "ScrumTrace" / "Processing" / "SessionController.swift").read_text()
     assert "func openInClaude" in controller
-    assert "claude_handoff" in controller
-    assert "claude_handoff_fail" in controller
+    assert "func openInChatGPT" in controller
+    assert "cli.logSuccess" in controller
+    assert "cli.logFail" in controller
+    assert "return \"claude_handoff\"" in handoff
+    assert "return \"chatgpt_handoff\"" in handoff
+    assert "return \"claude_handoff_fail\"" in handoff
+    assert "return \"chatgpt_handoff_fail\"" in handoff
     open_fn = controller.split("func openInClaude")[1].split("func applyHotkeyPause")[0]
     assert "error.logReason" in open_fn
     assert "no_session" in open_fn
@@ -3160,6 +3175,7 @@ def test_claude_cli_handoff() -> None:
     assert "cursor_handoff" not in controller
     vault = (ROOT / "ScrumTrace" / "Storage" / "SessionVault.swift").read_text()
     assert "func openExportInClaude" in vault
+    assert "func openExportInChatGPT" in vault
     assert "ClaudeCLIHandoff.open" in vault
     assert "sessionId: sessionId" in vault.split("func openExportInClaude")[1].split("func revealRootInFinder")[0]
     assert "openExportInCursor" not in vault
@@ -3168,7 +3184,12 @@ def test_claude_cli_handoff() -> None:
     assert "tryExecFromArguments" in app
     readme = (ROOT / "README.md").read_text()
     assert "Open last session in Claude" in readme
+    assert "Open last session in ChatGPT" in readme
     assert "claude -p" in readme
+    assert "codex exec" in readme
+    settings_ui = (ROOT / "ScrumTrace" / "UI" / "SettingsView.swift").read_text()
+    assert "Local coding agents" in settings_ui
+    assert "codex" in settings_ui
     assert not (ROOT / "ScrumTrace" / "Export" / "CursorHandoff.swift").exists()
 
 

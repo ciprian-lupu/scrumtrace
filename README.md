@@ -106,7 +106,7 @@ In **AI**, each provider retains its own endpoint and model. API keys are saved 
 
 Give the agent **`export/`** only. Never drop the session root or `archive/` (master `session.mp4`, `audio.wav`, full transcript, raw events). Paths inside the pack are relative to that folder (`shots/…`, `media/…`).
 
-**Open last session in Claude** (also Recent → **Open in Claude**) starts an interactive Claude Code CLI in Terminal with the working directory set to that session’s `export/`. It uses your local `claude` login (including Claude Max). It does not send the archive, does not call `claude -p`, and does not use a ScrumTrace API key. Install Claude Code and confirm `claude` runs in Terminal first. If the CLI is missing, the status line says so.
+**Open last session in Claude** and **Open last session in ChatGPT** (also under Recent) start an interactive local coding CLI in Terminal with the working directory bound to that session’s `export/`. Claude uses the `claude` command (Claude Max login). ChatGPT uses the `codex` command (ChatGPT login). Neither sends the archive, calls `claude -p` / `codex exec`, nor uses a ScrumTrace API key. Install the CLI and confirm it runs in Terminal first. If it is missing, the status line says so.
 
 Phase -1 mock pack (open in a browser or drop into Cursor):
 
