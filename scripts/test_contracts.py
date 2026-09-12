@@ -2363,7 +2363,7 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "MediaBudget.archiveMaxWidth" in recorder
     assert "MediaBudget.archiveVideoBitrate" in recorder
     assert "MediaBudget.archiveVideoMaxBitrate" in recorder
-    assert "AVVideoDataRateLimitsKey" in recorder
+    assert "kVTCompressionPropertyKey_DataRateLimits" in recorder
     assert "6_000_000" not in recorder
     assert "AVVideoMaxKeyFrameIntervalKey" in recorder
     assert "AVVideoExpectedSourceFrameRateKey" in recorder

@@ -5,6 +5,7 @@ import CoreVideo
 import Darwin
 import Foundation
 import ScreenCaptureKit
+import VideoToolbox
 
 enum SessionRecorderError: LocalizedError {
     case permissionDenied
@@ -1107,8 +1108,8 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             AVVideoHeightKey: h,
             AVVideoCompressionPropertiesKey: [
                 AVVideoAverageBitRateKey: MediaBudget.archiveVideoBitrate,
-                // AVVideoDataRateLimitsKey uses bytes/second + duration.
-                AVVideoDataRateLimitsKey: [
+                // VideoToolbox data-rate limits use bytes/second + duration.
+                kVTCompressionPropertyKey_DataRateLimits as String: [
                     MediaBudget.archiveVideoMaxBitrate / 8,
                     1
                 ],
