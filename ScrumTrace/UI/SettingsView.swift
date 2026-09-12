@@ -5,6 +5,8 @@ struct SettingsView: View {
     @ObservedObject var settings: AppSettings
     @ObservedObject var controller: SessionController
     @State private var keyStatus = ""
+    @State private var testingConnection = false
+    @State private var connectionLine = ""
     @ObservedObject var navigation: SettingsNavigation
     @State private var licenseDraft = ""
     @State private var licenseLine = LicenseStore.status().settingsLine
@@ -43,9 +45,18 @@ struct SettingsView: View {
             SpeakerReviewView(controller: controller)
         }
         .onChange(of: settings.whisperModel) { _, _ in preloadLine = "" }
-        .onChange(of: settings.provider) { _, _ in keyStatus = "" }
-        .onChange(of: settings.baseURL) { _, _ in keyStatus = "" }
-        .onChange(of: settings.model) { _, _ in keyStatus = "" }
+        .onChange(of: settings.provider) { _, _ in
+            keyStatus = ""
+            connectionLine = ""
+        }
+        .onChange(of: settings.baseURL) { _, _ in
+            keyStatus = ""
+            connectionLine = ""
+        }
+        .onChange(of: settings.model) { _, _ in
+            keyStatus = ""
+            connectionLine = ""
+        }
         .alert("Remove saved key?", isPresented: $removingKey) {
             Button("Remove key", role: .destructive) {
                 do {
@@ -341,6 +352,21 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                 }
             }
+            Section("Test connection") {
+                Text("Sends a one-word ping with the current endpoint, model, and key. Nothing from a meeting is uploaded. A typed key that is not saved yet is used for this test only.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Button(testingConnection ? "Testing…" : "Test current settings") {
+                    testCurrentSettings()
+                }
+                .disabled(!canTestConnection)
+                if !connectionLine.isEmpty {
+                    Text(connectionLine)
+                        .font(.caption)
+                        .textSelection(.enabled)
+                        .foregroundStyle(connectionLine.hasPrefix("Key accepted") ? .secondary : .red)
+                }
+            }
             Section("Provider capabilities") {
                 Text("MVP backend: OpenAI-compatible. Adapters send only what these flags allow. Google may upload a clip (inline MP4, size-capped) when Video is yes. OpenAI-compatible and Anthropic send stills and transcript only.")
                     .font(.caption)
@@ -463,6 +489,47 @@ struct SettingsView: View {
 
     private var capabilities: AIProviderConfiguration {
         settings.providerConfiguration(includeKey: false)
+    }
+
+    private var canTestConnection: Bool {
+        !testingConnection
+            && settings.configurationIssue == nil
+            && (settings.hasSavedAPIKey
+                || !settings.apiKeyDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+    }
+
+    private func configurationForConnectionTest() -> AIProviderConfiguration {
+        var configuration = settings.providerConfiguration()
+        let draft = settings.apiKeyDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !draft.isEmpty {
+            configuration.apiKey = draft
+        }
+        return configuration
+    }
+
+    private func testCurrentSettings() {
+        guard canTestConnection else { return }
+        testingConnection = true
+        connectionLine = "Sending a one-word ping…"
+        let configuration = configurationForConnectionTest()
+        AgentLog.event("settings_action", ["action": "test_llm"])
+        Task {
+            defer { testingConnection = false }
+            do {
+                let result = try await AIConnectionTest.run(configuration: configuration)
+                connectionLine = AIConnectionTest.successLine(result: result, model: configuration.model)
+                AgentLog.event("settings_action", [
+                    "action": "test_llm_ok",
+                    "ms": String(result.elapsedMs)
+                ])
+            } catch {
+                connectionLine = AIConnectionTest.userMessage(for: error)
+                AgentLog.event("settings_action", [
+                    "action": "test_llm_fail",
+                    "error": AIProviderError.diagnosticCode(error)
+                ])
+            }
+        }
     }
 
     private var screenRecordingLabel: String {

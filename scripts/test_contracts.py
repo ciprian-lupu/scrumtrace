@@ -1557,6 +1557,13 @@ def test_agent_log_covers_debug_events() -> None:
     assert "screen_request" in perms
     settings = (ROOT / "ScrumTrace" / "UI" / "SettingsView.swift").read_text()
     assert "settings_action" in settings
+    assert "Test current settings" in settings
+    assert "test_llm" in settings
+    ping = (ROOT / "ScrumTrace" / "AI" / "AIConnectionTest.swift").read_text()
+    assert 'static let prompt = "Reply with the single word pong."' in ping
+    assert "isDeepSeekEndpoint" in ping
+    assert '["type": "disabled"]' in ping
+    assert "userMessage(for" in ping
     app = (ROOT / "ScrumTrace" / "App" / "AppDelegate.swift").read_text()
     assert "settings_open" in app
     hud = (ROOT / "ScrumTrace" / "UI" / "RecordingHUDWindow.swift").read_text()

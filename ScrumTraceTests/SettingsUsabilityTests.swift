@@ -220,6 +220,33 @@ final class SettingsUsabilityTests: XCTestCase {
         XCTAssertFalse(filtered.contains("current-extra"))
         XCTAssertEqual(AgentLog.filteredTail(input, maxLines: 2, runID: "missing", query: "", newestFirst: false), "")
     }
+
+    func testConnectionPingCopyDoesNotEchoProviderBodies() {
+        XCTAssertEqual(AIConnectionTest.prompt, "Reply with the single word pong.")
+        XCTAssertEqual(
+            AIConnectionTest.sanitizePreview("  pong \n"),
+            "pong"
+        )
+        XCTAssertTrue(AIConnectionTest.sanitizePreview(String(repeating: "x", count: 80)).hasSuffix("…"))
+        XCTAssertEqual(
+            AIConnectionTest.userMessage(for: AIProviderError.missingAPIKey),
+            "Save an API key first, or paste one above and test before saving."
+        )
+        XCTAssertEqual(
+            AIConnectionTest.userMessage(for: AIProviderError.httpStatus(401, "secret-token-should-not-appear")),
+            "The key was rejected (HTTP 401). Check that it belongs to this endpoint."
+        )
+        XCTAssertFalse(
+            AIConnectionTest.userMessage(for: AIProviderError.httpStatus(500, "captured-key")).contains("captured-key")
+        )
+        XCTAssertEqual(
+            AIConnectionTest.successLine(
+                result: ProviderPingResult(replyPreview: "pong", elapsedMs: 400),
+                model: "deepseek-flash"
+            ),
+            "Key accepted. deepseek-flash replied “pong” in 0.4s."
+        )
+    }
 }
 
 private final class MemoryKeys {
