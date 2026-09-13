@@ -1887,6 +1887,44 @@ final class ContractTests: XCTestCase {
         )
     }
 
+    func testMultiDestinationConsentRepromptsForSetEndpointModelOrVideoChange() {
+        let openAI = UploadDestination(serviceId: "openai", serviceName: "GPT", provider: "openai_compatible", endpoint: "https://api.openai.com", model: "gpt-4o", includesClipVideo: false)
+        let google = UploadDestination(serviceId: "google", serviceName: "Gemini", provider: "google", endpoint: "https://generativelanguage.googleapis.com", model: "gemini-2.5-flash", includesClipVideo: true)
+        let consent = UploadConsent(approved: true, approvedAt: Date(), provider: openAI.provider, endpoint: openAI.endpoint, model: openAI.model, includesClipAudio: true, includesClipVideo: true, includesStills: true, destinations: [openAI, google])
+        XCTAssertFalse(consent.needsReprompt(destinations: [google, openAI]))
+        XCTAssertTrue(consent.needsReprompt(destinations: [openAI]))
+        var changedModel = google; changedModel.model = "gemini-3"
+        XCTAssertTrue(consent.needsReprompt(destinations: [openAI, changedModel]))
+        var changedVideo = google; changedVideo.includesClipVideo = false
+        XCTAssertTrue(consent.needsReprompt(destinations: [openAI, changedVideo]))
+    }
+
+    func testLegacyManifestDecodesWithoutComparisonFields() throws {
+        let json = #"{"slice_id":"s1","start_media":0,"end_media":1,"trigger":"pin","stills":[],"analysis_status":"success","score":1}"#
+        let slice = try JSONDecoder().decode(SliceRecord.self, from: Data(json.utf8))
+        XCTAssertTrue(slice.serviceEvaluations.isEmpty)
+        let taskJSON = #"{"task_id":"TASK-01","source_slice_id":"s1","kind":"bug","status":"needs_review","title":"Legacy","observed":"","stated":"","inferred":"","agent_instructions":"","quotes":[],"evidence_media":[],"confidence":0}"#
+        let task = try JSONDecoder().decode(TaskRecord.self, from: Data(taskJSON.utf8))
+        XCTAssertNil(task.serviceId)
+    }
+
+    func testExportsKeepModelFindingsInSeparateGroupsWithoutCrossModelDeduplication() {
+        var manifest = SessionManifest.makeNew(sessionId: "compare", product: .empty)
+        manifest.slices = [SliceRecord(sliceId: "s1", startMedia: 0, endMedia: 2, trigger: .pin, associatedShotId: nil, clipPath: nil, stills: [], analysisStatus: .success, score: 1, serviceEvaluations: [
+            SliceServiceEvaluation(serviceId: "gpt", serviceName: "GPT", provider: "openai_compatible", model: "gpt-4o", status: .success, mediaSent: ["transcript"]),
+            SliceServiceEvaluation(serviceId: "claude", serviceName: "Claude", provider: "anthropic", model: "claude-sonnet-4", status: .success, mediaSent: ["transcript"])
+        ])]
+        let makeTask: (String, String, String) -> TaskRecord = { id, name, model in
+            var task = TaskRecord(taskId: id, sourceSliceId: "s1", kind: .bug, status: .needsReview, title: "Same visible issue", observed: "Observed", stated: "", inferred: "", agentInstructions: "", quotes: [], evidenceMedia: [], confidence: 0.7)
+            task.serviceId = id; task.serviceName = name; task.serviceModel = model
+            return task
+        }
+        manifest.tasks = [makeTask("gpt", "GPT", "gpt-4o"), makeTask("claude", "Claude", "claude-sonnet-4")]
+        XCTAssertEqual(manifest.tasks.count, 2, "Equivalent findings from different services must not be deduplicated")
+        XCTAssertEqual(Set(manifest.tasks.compactMap(\.serviceId)), Set(["gpt", "claude"]))
+        XCTAssertEqual(Set(manifest.tasks.compactMap(\.serviceModel)), Set(["gpt-4o", "claude-sonnet-4"]))
+    }
+
     func testOpenAIAndAnthropicNeverAttachMp4() {
         let configuration = AIProviderConfiguration(
             kind: .openaiCompatible,

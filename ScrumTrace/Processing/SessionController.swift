@@ -721,34 +721,26 @@ final class SessionController: ObservableObject {
             }
             if var local {
                 local.includeFullTranscriptInZip = settings.includeFullTranscriptInZip
-                let capabilities = settings.providerConfiguration()
-                let hasAPIKey = !capabilities.apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                let services = settings.comparisonServiceConfigurations
+                let destinations = services.map(\.destination)
+                let hasAPIKey = services.contains { !$0.configuration.apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
                 // No key means nothing can leave this Mac; asking a first-time
                 // local-only user to approve an upload would only confuse them.
                 if !hasAPIKey {
                     AgentLog.event("consent_skipped", ["reason": "key_missing"])
-                } else if local.uploadConsent.needsReprompt(
-                    provider: settings.provider.rawValue,
-                    endpoint: settings.baseURL,
-                    model: settings.model,
-                    acceptsVideo: ProviderWireMedia.willUploadClip(configuration: capabilities)
-                ) {
+                } else if local.uploadConsent.needsReprompt(destinations: destinations) {
                     let previous = local.uploadConsent
-                    let askedBefore = !previous.provider.isEmpty
-                    local.uploadConsent = requestUploadConsent()
-                    if askedBefore && (
-                        previous.provider != local.uploadConsent.provider
-                        || previous.endpoint != local.uploadConsent.endpoint
-                        || previous.model != local.uploadConsent.model
-                        || previous.includesClipAudio != local.uploadConsent.includesClipAudio
-                        || previous.includesClipVideo != local.uploadConsent.includesClipVideo
-                    ) {
+                    let askedBefore = !previous.destinations.isEmpty || !previous.provider.isEmpty
+                    local.uploadConsent = requestUploadConsent(destinations: destinations)
+                    if askedBefore && (previous.needsReprompt(destinations: destinations)
+                        || previous.includesClipVideo != local.uploadConsent.includesClipVideo) {
                         local.completedStages.removeAll {
                             $0 == .evaluating || $0 == .synthesizing || $0 == .completed
                         }
                         local.tasks = []
                         for index in local.slices.indices {
                             local.slices[index].analysisStatus = .pending
+                            local.slices[index].serviceEvaluations = []
                         }
                     }
                 }
@@ -762,7 +754,8 @@ final class SessionController: ObservableObject {
             let result = try await processor?.process(
                 sessionId: sessionId,
                 pinTimes: pins,
-                configuration: settings.providerConfiguration(),
+                configuration: settings.comparisonServiceConfigurations.first?.configuration ?? settings.providerConfiguration(includeKey: false),
+                serviceConfigurations: settings.comparisonServiceConfigurations,
                 whisperModel: settings.whisperModel,
                 identifySpeakers: settings.identifySpeakers,
                 onStatus: { [weak self] status, line in
@@ -798,23 +791,23 @@ final class SessionController: ObservableObject {
         isBusy = false
     }
 
-    private func requestUploadConsent() -> UploadConsent {
+    private func requestUploadConsent(destinations: [UploadDestination]) -> UploadConsent {
         #if os(macOS)
         NSApp.activate(ignoringOtherApps: true)
         let alert = NSAlert()
-        alert.messageText = "Send stills and transcript excerpts off this Mac?"
-        let capabilities = settings.providerConfiguration()
-        let uploadsClip = ProviderWireMedia.willUploadClip(configuration: capabilities)
-        let payload: String
-        if uploadsClip {
-            payload = "Stills and transcript excerpts, and clip audio will leave this Mac, plus window titles, scrubbed URLs, Shot notes, product context, and the 720p clip video. Clip audio includes the room microphone and call audio."
-        } else {
-            payload = "Stills and transcript excerpts will leave this Mac, plus window titles, scrubbed URLs, Shot notes, and product context. Clip video and the master movie are not uploaded."
-        }
+        alert.messageText = "Send evidence to selected AI services?"
+        // `includesClipVideo` was snapshotted from ProviderWireMedia.willUploadClip
+        // for every selected service before this consent sheet is displayed.
+        let uploadsClip = destinations.contains(where: \.includesClipVideo)
+        let details = destinations.map { destination in
+            "• \(destination.serviceName) — \(destination.provider)\n  \(destination.endpoint)\n  Model: \(destination.model.isEmpty ? "(none)" : destination.model)\n  \(destination.includesClipVideo ? "Google may receive the size-capped clip video (including clip audio)." : "Stills and transcript excerpts only; no clip video.")"
+        }.joined(separator: "\n")
+        let payload = uploadsClip
+            ? "Stills and transcript excerpts, window titles, scrubbed URLs, Shot notes, and product context may leave this Mac. Selected Google services may also receive the size-capped clip video; clip audio will leave this Mac with that clip."
+            : "Stills and transcript excerpts, window titles, scrubbed URLs, Shot notes, and product context may leave this Mac. Clip video and the master movie are not uploaded."
         alert.informativeText = """
-        Destination: \(settings.provider.title)
-        \(settings.baseURL)
-        Model: \(settings.model.isEmpty ? "(none)" : settings.model)
+        Destinations (serial upload):
+        \(details.isEmpty ? "No valid selected service." : details)
 
         \(payload) The archive (session.mp4, full transcript, raw events) stays local. Keychain storage is not consent. This sheet runs at Stop before transcription.
         """
@@ -823,18 +816,19 @@ final class SessionController: ObservableObject {
         let approved = alert.runModal() == .alertFirstButtonReturn
         AgentLog.event("consent_result", [
             "approved": approved ? "1" : "0",
-            "provider": settings.provider.rawValue,
+            "destinations": String(destinations.count),
             "clip": (approved && uploadsClip) ? "1" : "0"
         ])
         return UploadConsent(
             approved: approved,
             approvedAt: Date(),
-            provider: settings.provider.rawValue,
-            endpoint: settings.baseURL,
-            model: settings.model,
+            provider: destinations.first?.provider ?? "",
+            endpoint: destinations.first?.endpoint ?? "",
+            model: destinations.first?.model ?? "",
             includesClipAudio: approved && uploadsClip,
             includesClipVideo: approved && uploadsClip,
-            includesStills: approved
+            includesStills: approved,
+            destinations: destinations
         )
         #else
         return .denied

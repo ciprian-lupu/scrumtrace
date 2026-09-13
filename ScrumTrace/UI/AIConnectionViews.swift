@@ -19,7 +19,7 @@ struct AIConnectionsSettingsView: View {
 
     var body: some View {
         Section("Saved services") {
-            Text("Save Hive, DeepSeek, OpenAI, Anthropic, or any other endpoint as a named service. Only the selected service is used for analysis. Recording and local export work without one.")
+            Text("Choose one active service to edit or test. Select every service that may receive the same evidence for a serial, side-by-side comparison. Unselected services receive nothing.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
             if let issue = settings.connectionLibraryIssue {
@@ -33,6 +33,28 @@ struct AIConnectionsSettingsView: View {
                     ForEach(settings.connectionLibrary.connections) { connection in
                         Text(connection.name).tag(connection.id)
                     }
+                }
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Include in multi-model comparison")
+                        .font(.subheadline.weight(.medium))
+                    ForEach(settings.connectionLibrary.connections) { connection in
+                        Toggle(isOn: Binding(
+                            get: { connection.isIncludedInComparison },
+                            set: { included in
+                                do { try settings.setComparisonIncluded(included, id: connection.id); message = "" }
+                                catch { message = error.localizedDescription }
+                            }
+                        )) {
+                            VStack(alignment: .leading) {
+                                Text(connection.name)
+                                Text("\(connection.provider.title) · \(connection.model)")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                        .accessibilityIdentifier("ai.comparison.\(connection.id)")
+                    }
+                    Text("Each selected destination is shown again for approval at Stop. Keys remain separate in Keychain.")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
             }
             HStack {

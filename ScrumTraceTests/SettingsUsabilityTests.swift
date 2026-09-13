@@ -207,6 +207,26 @@ final class SettingsUsabilityTests: XCTestCase {
     }
 
     @MainActor
+    func testComparisonSelectionKeepsActiveEditorAndSeparateKeychainServices() throws {
+        try withSettings { settings, _, keys in
+            let openAI = try XCTUnwrap(settings.connectionLibrary.selected)
+            settings.apiKeyDraft = "fixture-openai-key"
+            try settings.saveAPIKey()
+            let google = try settings.addAIConnection(name: "Google", provider: .google)
+            settings.apiKeyDraft = "fixture-google-key"
+            try settings.saveAPIKey()
+            try settings.setComparisonIncluded(true, id: openAI.id)
+            try settings.setComparisonIncluded(true, id: google.id)
+            try settings.selectAIConnection(id: openAI.id)
+
+            XCTAssertEqual(settings.connectionLibrary.selectedID, openAI.id, "Editing remains single-service")
+            XCTAssertEqual(Set(settings.comparisonServiceConfigurations.map { $0.service.id }), Set([openAI.id, google.id]))
+            XCTAssertEqual(keys.values[AppSettings.connectionKeyAccount(id: openAI.id)], "fixture-openai-key")
+            XCTAssertEqual(keys.values[AppSettings.connectionKeyAccount(id: google.id)], "fixture-google-key")
+        }
+    }
+
+    @MainActor
     func testServiceNamesAreValidatedAndUnreadableLibraryIsPreserved() throws {
         try withSettings { settings, _, _ in
             XCTAssertThrowsError(try settings.addAIConnection(name: "openai"))

@@ -193,7 +193,8 @@ final class AppSettings: ObservableObject {
                     endpoint: endpoint,
                     legacyScope: legacyCredentialScope,
                     keyStore: keyStore
-                )
+                ),
+                isIncludedInComparison: true
             )
             var library = AIConnectionLibrary()
             library.connections = [imported]
@@ -203,8 +204,19 @@ final class AppSettings: ObservableObject {
             }
             self.connectionLibrary = library
         } else {
-            self.connectionLibrary = loaded.library
-            if let selected = loaded.library.selected {
+            var library = loaded.library
+            // One-service installs predate comparison selection. Preserve the
+            // existing behavior by selecting the previously active service once.
+            if !library.connections.contains(where: \.isIncludedInComparison),
+               let selectedID = library.selectedID,
+               let index = library.connections.firstIndex(where: { $0.id == selectedID }) {
+                library.connections[index].isIncludedInComparison = true
+                if let data = try? JSONEncoder().encode(library) {
+                    defaults.set(data, forKey: AIConnectionLibrary.defaultsKey)
+                }
+            }
+            self.connectionLibrary = library
+            if let selected = library.selected {
                 self.provider = selected.provider
                 self.baseURL = selected.baseURL
                 self.model = selected.model
@@ -379,6 +391,34 @@ final class AppSettings: ObservableObject {
         applyingConnection = false
         apiKeyDraft = ""
         refreshKeyStatus()
+    }
+
+    func setComparisonIncluded(_ included: Bool, id: String) throws {
+        guard let index = connectionLibrary.connections.firstIndex(where: { $0.id == id }) else {
+            throw SettingsValidationError("The selected service is no longer available. Choose another service.")
+        }
+        var library = connectionLibrary
+        library.connections[index].isIncludedInComparison = included
+        try persistConnections(library)
+    }
+
+    var comparisonServiceConfigurations: [AIServiceConfiguration] {
+        connectionLibrary.connections.filter(\.isIncludedInComparison).map { connection in
+            let configuration = AIProviderConfiguration(
+                kind: connection.provider,
+                baseURL: connection.baseURL.trimmingCharacters(in: .whitespacesAndNewlines),
+                model: connection.model.trimmingCharacters(in: .whitespacesAndNewlines),
+                apiKey: storedAPIKey(for: connection) ?? "",
+                acceptsText: true,
+                acceptsImages: connection.provider != .anthropic || !connection.model.isEmpty,
+                acceptsVideo: ProviderWireMedia.adapterCanUploadVideo(connection.provider) && allowGoogleClipUpload
+            )
+            return AIServiceConfiguration(service: connection, configuration: configuration)
+        }
+    }
+
+    var comparisonDestinations: [UploadDestination] {
+        comparisonServiceConfigurations.map(\.destination)
     }
 
     private func persistConnections(_ library: AIConnectionLibrary) throws {

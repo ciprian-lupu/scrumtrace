@@ -8,6 +8,35 @@ struct SavedAIConnection: Codable, Identifiable, Equatable, Sendable {
     var model: String
     /// Host-scoped or legacy Keychain account from import. Never a secret.
     var fallbackKeyAccount: String?
+    /// Explicit opt-in for comparison uploads. The active service is still
+    /// independent: it only controls which service is being edited/tested.
+    var isIncludedInComparison: Bool = false
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, provider, baseURL, model, fallbackKeyAccount
+        case isIncludedInComparison = "is_included_in_comparison"
+    }
+
+    init(id: String = UUID().uuidString, name: String, provider: AIProviderKind, baseURL: String, model: String, fallbackKeyAccount: String? = nil, isIncludedInComparison: Bool = false) {
+        self.id = id
+        self.name = name
+        self.provider = provider
+        self.baseURL = baseURL
+        self.model = model
+        self.fallbackKeyAccount = fallbackKeyAccount
+        self.isIncludedInComparison = isIncludedInComparison
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        provider = try container.decode(AIProviderKind.self, forKey: .provider)
+        baseURL = try container.decode(String.self, forKey: .baseURL)
+        model = try container.decode(String.self, forKey: .model)
+        fallbackKeyAccount = try container.decodeIfPresent(String.self, forKey: .fallbackKeyAccount)
+        isIncludedInComparison = try container.decodeIfPresent(Bool.self, forKey: .isIncludedInComparison) ?? false
+    }
 }
 
 struct AIConnectionLibrary: Codable, Equatable, Sendable {
@@ -34,6 +63,24 @@ struct AIConnectionLibrary: Codable, Equatable, Sendable {
             return (library, nil, false)
         }
         return (Self(), nil, true)
+    }
+}
+
+/// Runtime-only service configuration. `configuration.apiKey` is fetched from
+/// Keychain immediately before processing and is never encoded into a manifest.
+struct AIServiceConfiguration: Sendable {
+    var service: SavedAIConnection
+    var configuration: AIProviderConfiguration
+
+    var destination: UploadDestination {
+        UploadDestination(
+            serviceId: service.id,
+            serviceName: service.name,
+            provider: service.provider.rawValue,
+            endpoint: service.baseURL.trimmingCharacters(in: .whitespacesAndNewlines),
+            model: service.model.trimmingCharacters(in: .whitespacesAndNewlines),
+            includesClipVideo: ProviderWireMedia.willUploadClip(configuration: configuration)
+        )
     }
 }
 
