@@ -31,43 +31,52 @@ final class MenuAccessTests: XCTestCase {
     @MainActor
     func testSettingsAndLogsActionsOpenAndReuseTheWindow() throws {
         try withController { controller in
-            let presenter = SettingsWindowPresenter(controller: controller)
+            let presenter = MainWindowPresenter(controller: controller, frameAutosaveName: nil)
             defer { presenter.window?.close() }
             let menuBar = MenuBarController(
                 controller: controller,
-                openSettings: { presenter.show() },
+                openSettings: { presenter.show(section: .settings) },
                 openLogs: { presenter.show(tab: .logs) }
             )
             let settings = try XCTUnwrap(menuBar.menu.item(withTitle: "Settings")?.submenu)
             settings.performActionForItem(at: settings.indexOfItem(withTitle: "Settings Window…"))
             let window = try XCTUnwrap(presenter.window)
             XCTAssertTrue(window.isVisible)
-            XCTAssertEqual(presenter.navigation.selectedTab, .speech)
+            XCTAssertEqual(presenter.navigation.section, .settings)
+            XCTAssertEqual(presenter.navigation.settings.selectedTab, .speech)
             window.close()
             XCTAssertFalse(window.isVisible)
             settings.performActionForItem(at: settings.indexOfItem(withTitle: "Agent Log…"))
             XCTAssertTrue(presenter.window === window)
             XCTAssertTrue(window.isVisible)
-            XCTAssertEqual(presenter.navigation.selectedTab, .logs)
+            XCTAssertEqual(presenter.navigation.section, .settings)
+            XCTAssertEqual(presenter.navigation.settings.selectedTab, .logs)
             window.miniaturize(nil)
+            let miniaturizeDeadline = Date().addingTimeInterval(3)
+            while !window.isMiniaturized && Date() < miniaturizeDeadline {
+                RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.02))
+            }
+            XCTAssertTrue(window.isMiniaturized, "The window must be miniaturized before show()")
             presenter.show()
             XCTAssertFalse(window.isMiniaturized)
             XCTAssertTrue(window.isVisible)
-            XCTAssertEqual(presenter.navigation.selectedTab, .logs)
+            XCTAssertEqual(presenter.navigation.section, .settings)
+            XCTAssertEqual(presenter.navigation.settings.selectedTab, .logs)
         }
     }
 
     @MainActor
     func testAllSixSettingsTabsRemainInTheSameWindow() throws {
         try withController { controller in
-            let presenter = SettingsWindowPresenter(controller: controller)
+            let presenter = MainWindowPresenter(controller: controller, frameAutosaveName: nil)
             defer { presenter.window?.close() }
             presenter.show()
             let window = try XCTUnwrap(presenter.window)
             XCTAssertEqual(SettingsTab.allCases.count, 6)
             for tab in SettingsTab.allCases {
                 presenter.show(tab: tab)
-                XCTAssertEqual(presenter.navigation.selectedTab, tab)
+                XCTAssertEqual(presenter.navigation.section, .settings)
+                XCTAssertEqual(presenter.navigation.settings.selectedTab, tab)
                 XCTAssertTrue(presenter.window === window)
                 XCTAssertTrue(window.isVisible)
             }

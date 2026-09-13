@@ -11,6 +11,7 @@ final class MenuBarController: NSObject {
     let menu = NSMenu()
     private let openSettings: () -> Void
     private let openLogs: () -> Void
+    private let openMain: () -> Void
     private var isMenuOpen = false
     private var checkingUpdates = false
     private var hud: RecordingHUDWindow?
@@ -25,12 +26,14 @@ final class MenuBarController: NSObject {
         controller: SessionController,
         hud: RecordingHUDWindow? = nil,
         openSettings: @escaping () -> Void,
-        openLogs: @escaping () -> Void
+        openLogs: @escaping () -> Void,
+        openMain: @escaping () -> Void = {}
     ) {
         self.controller = controller
         self.hud = hud
         self.openSettings = openSettings
         self.openLogs = openLogs
+        self.openMain = openMain
         item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         super.init()
         menu.autoenablesItems = false
@@ -227,6 +230,8 @@ final class MenuBarController: NSObject {
         recent.submenu = recentMenu
         menu.addItem(recent)
         menu.addItem(.separator())
+        // Enabled in every state: opening the window never changes capture.
+        menu.addItem(actionItem("Open ScrumTrace…", #selector(openMainWindow)))
         let settingsRoot = NSMenuItem(title: "Settings", action: nil, keyEquivalent: "")
         let settingsMenu = NSMenu()
         settingsMenu.autoenablesItems = false
@@ -426,6 +431,10 @@ final class MenuBarController: NSObject {
         AgentLog.event("menu_probe", [:])
         CapturePermissions.probeAndLog()
         controller.statusLine = "Permission probe written to agent log"
+    }
+    @objc private func openMainWindow() {
+        AgentLog.event("menu_open_main", [:])
+        openMain()
     }
     @objc private func settings() {
         AgentLog.event("menu_settings", [:])

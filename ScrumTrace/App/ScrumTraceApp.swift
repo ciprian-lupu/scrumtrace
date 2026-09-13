@@ -9,7 +9,7 @@ struct ScrumTraceApp: App {
     var body: some Scene {
         Settings {
             #if os(macOS)
-            SettingsView(settings: appDelegate.controller.settings, controller: appDelegate.controller, navigation: appDelegate.settingsPresenter.navigation)
+            SettingsView(settings: appDelegate.controller.settings, controller: appDelegate.controller, navigation: appDelegate.mainPresenter.navigation.settings)
             #else
             Text("ScrumTrace is a macOS menu-bar app.")
             #endif
@@ -23,6 +23,12 @@ struct ScrumTraceApp: App {
             CommandGroup(replacing: .appSettings) {
                 Button("Settings…") { appDelegate.showSettingsWindow(nil) }
                     .keyboardShortcut(",", modifiers: .command)
+            }
+            CommandGroup(after: .sidebar) {
+                ForEach(MainSection.allCases) { section in
+                    Button(section.title) { appDelegate.showMainWindow(section: section, source: .command) }
+                        .keyboardShortcut(section.keyEquivalent, modifiers: .command)
+                }
             }
         }
         #endif
