@@ -167,13 +167,30 @@ final class MainWindowTests: XCTestCase {
             defer { presenter.window?.close() }
             presenter.show(section: .recordings)
             let window = try XCTUnwrap(presenter.window)
+            let recordings = presenter.recordings
+            XCTAssertTrue(recordings.isPeriodicRefreshActive)
+            window.miniaturize(nil)
+            XCTAssertTrue(spinRunLoop(until: { window.isMiniaturized }))
+            XCTAssertTrue(
+                spinRunLoop(until: { !recordings.isPeriodicRefreshActive }),
+                "A minimized window stops the periodic refresh"
+            )
+            XCTAssertFalse(recordings.isWindowVisible)
+            window.deminiaturize(nil)
+            XCTAssertTrue(
+                spinRunLoop(until: { !window.isMiniaturized && recordings.isPeriodicRefreshActive }),
+                "Restoring the window from the Dock starts it again"
+            )
+            XCTAssertTrue(recordings.isWindowVisible)
             window.miniaturize(nil)
             XCTAssertTrue(spinRunLoop(until: { window.isMiniaturized }), "The window must be miniaturized before show()")
+            XCTAssertTrue(spinRunLoop(until: { !recordings.isPeriodicRefreshActive }))
             presenter.show()
             XCTAssertFalse(window.isMiniaturized)
             XCTAssertTrue(window.isVisible)
             XCTAssertTrue(presenter.window === window)
             XCTAssertEqual(presenter.navigation.section, .recordings)
+            XCTAssertTrue(recordings.isPeriodicRefreshActive)
         }
     }
 
@@ -467,9 +484,15 @@ final class MainWindowTests: XCTestCase {
             let navigation = MainNavigation()
             navigation.section = .settings
             var builds = 0
+            let recordings = RecordingsModel(
+                library: SessionLibrary(vault: controller.vault),
+                navigation: navigation,
+                dependencies: .live(controller: controller, startRecording: {})
+            )
             let hosting = NSHostingController(rootView: MainWindowView(
                 controller: controller,
                 navigation: navigation,
+                recordings: recordings,
                 settingsView: {
                     builds += 1
                     return SettingsView(settings: controller.settings, controller: controller, navigation: navigation.settings)
@@ -490,5 +513,1247 @@ final class MainWindowTests: XCTestCase {
             // A fresh SettingsView starts from current state, such as the license line.
             XCTAssertTrue(spinRunLoop(until: { builds > before }), "Returning to Settings builds a new SettingsView")
         }
+    }
+
+    // MARK: - Recordings
+
+    private struct RecordingsFixture {
+        let root: URL
+        let vault: SessionVault
+        let lockURL: URL
+        let log: URL
+        /// Newest readable row: transcribing, no export files.
+        let unfinished: String
+        /// Completed, with export files, a pack, a full transcript archive and approved upload consent.
+        let completed: String
+        /// Oldest row: a folder whose manifest is not JSON.
+        let corrupt: String
+    }
+
+    @MainActor
+    private func withRecordingsFixture(_ body: (RecordingsFixture) async throws -> Void) async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ScrumTrace.MainWindowTests.Recordings.\(UUID().uuidString)", isDirectory: true)
+        let log = root.appendingPathComponent("agent.jsonl")
+        AgentLog.setFileURLForTesting(log)
+        defer {
+            AgentLog.setFileURLForTesting(nil)
+            try? FileManager.default.removeItem(at: root)
+        }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try await body(makeRecordingsFixture(root: root, log: log))
+    }
+
+    /// A controller over the fixture vault, with its own defaults suite.
+    @MainActor
+    private func withFixtureController(_ f: RecordingsFixture, _ body: (SessionController) async throws -> Void) async throws {
+        let suite = "ScrumTrace.MainWindowTests.Controller.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let controller = SessionController(settings: AppSettings(defaults: defaults, keyStore: .empty), vault: f.vault)
+        try await body(controller)
+    }
+
+    private func makeRecordingsFixture(root: URL, log: URL) throws -> RecordingsFixture {
+        let vault = SessionVault(rootURL: root.appendingPathComponent("sessions", isDirectory: true))
+        var completed = try vault.createSession(product: ProductContext(
+            appName: "Orbit Checkout",
+            repoURL: "",
+            techStack: "",
+            contextID: "ctx-orbit",
+            contextName: "Orbit web"
+        )).manifest
+        completed.createdAt = Date().addingTimeInterval(-7_200)
+        completed.pipelineStatus = .completed
+        completed.completedStages = PipelineStatusOrder.processingFlow
+        completed.duration = DurationPair(wallSeconds: 700, mediaSeconds: 600)
+        completed.uploadConsent = UploadConsent(
+            approved: true,
+            approvedAt: Date(),
+            provider: "anthropic",
+            endpoint: "https://api.example.test",
+            model: "model-x",
+            includesClipAudio: true,
+            includesClipVideo: false,
+            includesStills: true
+        )
+        try vault.write(manifest: &completed)
+        let completedURL = vault.sessionURL(id: completed.sessionId)
+        try writeFile(Data("# Agent context".utf8), to: ScrumTracePath.agentContext, in: completedURL)
+        try writeFile(Data("<html></html>".utf8), to: ScrumTracePath.sessionBrief, in: completedURL)
+        try writeFile(Data(count: 2_048), to: ScrumTracePath.packZip, in: completedURL)
+        try writeFile(Data(#"{"segments":[]}"#.utf8), to: ScrumTracePath.fullTranscript, in: completedURL)
+        // A movie keeps controller start-up from pruning the fixture as an abandoned start.
+        try writeFile(Data(count: 64), to: ScrumTracePath.sessionMovie, in: completedURL)
+
+        var unfinished = try vault.createSession(product: .empty).manifest
+        unfinished.createdAt = Date().addingTimeInterval(-600)
+        unfinished.pipelineStatus = .transcribing
+        try vault.write(manifest: &unfinished)
+        try writeFile(Data(count: 64), to: ScrumTracePath.sessionMovie, in: vault.sessionURL(id: unfinished.sessionId))
+
+        let corrupt = "2020-01-01-0000-bad001"
+        let corruptURL = vault.sessionURL(id: corrupt)
+        try writeFile(Data("{ not json".utf8), to: ScrumTracePath.manifest, in: corruptURL)
+        try writeFile(Data(count: 64), to: ScrumTracePath.sessionMovie, in: corruptURL)
+
+        return RecordingsFixture(
+            root: root,
+            vault: vault,
+            lockURL: root.appendingPathComponent("recording.lock"),
+            log: log,
+            unfinished: unfinished.sessionId,
+            completed: completed.sessionId,
+            corrupt: corrupt
+        )
+    }
+
+    private func makeSession(in vault: SessionVault, status: PipelineStatus) throws -> String {
+        var manifest = try vault.createSession(product: .empty).manifest
+        manifest.pipelineStatus = status
+        try vault.write(manifest: &manifest)
+        try writeFile(Data(count: 64), to: ScrumTracePath.sessionMovie, in: vault.sessionURL(id: manifest.sessionId))
+        return manifest.sessionId
+    }
+
+    private func writeFile(_ data: Data, to relative: String, in session: URL) throws {
+        let url = session.appendingPathComponent(relative)
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try data.write(to: url)
+    }
+
+    private func pngData() throws -> Data {
+        let bitmap = try XCTUnwrap(NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: 640,
+            pixelsHigh: 400,
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 0
+        ))
+        return try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
+    }
+
+    /// A model whose every outside effect is a recorded closure, except the `export/` check, deletion and
+    /// detail loading, which use the fixture vault and lock file.
+    @MainActor
+    private func makeRecordingsModel(
+        _ f: RecordingsFixture,
+        navigation: MainNavigation? = nil,
+        recorder: CallRecorder,
+        detailLoads: CallRecorder? = nil,
+        canChange: @escaping @MainActor () -> Bool = { true },
+        activeSessionId: @escaping @MainActor () -> String? = { nil },
+        handoffFailure: @escaping @MainActor () -> String? = { nil },
+        manifestLoads: CallRecorder? = nil,
+        refreshInterval: Duration = RecordingsModel.refreshInterval
+    ) -> RecordingsModel {
+        let vault = f.vault
+        let lockURL = f.lockURL
+        let dependencies = RecordingsDependencies(
+            canChangeSessions: canChange,
+            activeSessionId: activeSessionId,
+            exportDirectory: { SessionFileAccess.exportDirectory(vault: vault, id: $0) },
+            revealExport: { folder in
+                // Finder gets the folder the off-main check accepted, `<session>/export`.
+                XCTAssertEqual(folder, SessionFileAccess.exportDirectory(vault: vault, id: folder.deletingLastPathComponent().lastPathComponent))
+                recorder.record("revealExport \(folder.deletingLastPathComponent().lastPathComponent)")
+            },
+            openInCLI: { cli, id in
+                recorder.record("\(cli.rawValue) \(id)")
+                return handoffFailure()
+            },
+            openBrief: { id in
+                recorder.record("openBrief \(id)")
+                return true
+            },
+            retryAnalysis: { recorder.record("retryAnalysis \($0)") },
+            copyExportPath: { folder in
+                // The folder is `<session>/export`; record the session it belongs to.
+                recorder.record("copyExportPath \(folder.deletingLastPathComponent().lastPathComponent)")
+                return true
+            },
+            revealArchive: { id in
+                recorder.record("revealArchive \(id)")
+                return true
+            },
+            revealFolder: { id in
+                recorder.record("revealFolder \(id)")
+                return true
+            },
+            deleteSession: { id in
+                recorder.record("deleteSession \(id)")
+                try vault.deleteSession(id: id, recordingLockURL: lockURL)
+            },
+            loadDetail: { id in
+                detailLoads?.record(id)
+                return SessionDetailFacts.load(vault: vault, id: id)
+            },
+            startRecording: { recorder.record("startRecording") }
+        )
+        return RecordingsModel(
+            library: SessionLibrary(vault: vault, loadManifest: { vault, id in
+                manifestLoads?.record(id)
+                return try vault.loadManifest(id: id)
+            }),
+            navigation: navigation ?? MainNavigation(),
+            dependencies: dependencies,
+            refreshInterval: refreshInterval
+        )
+    }
+
+    @MainActor
+    private func waitUntil(timeout: TimeInterval = 5, _ condition: () -> Bool) async -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while !condition() && Date() < deadline {
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+        return condition()
+    }
+
+    /// Lets every block already queued on the main queue run, such as Combine sinks that receive on it.
+    @MainActor
+    private func drainMainQueue() async {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            DispatchQueue.main.async { continuation.resume() }
+        }
+    }
+
+    /// `main_*` rows so far. Beyond the fields every row carries, each may hold the session id and nothing else.
+    private func mainEventRows(in f: RecordingsFixture, file: StaticString = #filePath, line: UInt = #line) throws -> [[String: String]] {
+        AgentLog.event("recordings_test_baseline", [:])
+        let rows = try logRows(at: f.log)
+        let baseline = try XCTUnwrap(rows.last { $0["event"] == "recordings_test_baseline" }, file: file, line: line)
+        let common = Set(baseline.keys)
+        let main = rows.filter { ($0["event"] ?? "").hasPrefix("main_") }
+        for row in main {
+            let extra = Set(row.keys).subtracting(common)
+            XCTAssertTrue(extra.isSubset(of: ["session"]), "\(row["event"] ?? "") carries \(extra)", file: file, line: line)
+            for value in row.values {
+                XCTAssertFalse(value.contains(f.root.lastPathComponent), "No path in \(row["event"] ?? "")", file: file, line: line)
+            }
+        }
+        return main
+    }
+
+    @MainActor
+    private func recordingsTable(in window: NSWindow) -> NSTableView? {
+        func find(_ view: NSView) -> NSTableView? {
+            if let table = view as? NSTableView, table.tableColumns.count == 7 { return table }
+            for subview in view.subviews {
+                if let table = find(subview) { return table }
+            }
+            return nil
+        }
+        return window.contentView.flatMap(find)
+    }
+
+    @MainActor
+    func testRecordingActionsDispatchToTheInjectedClosuresWithTheSelectedId() async throws {
+        try await withRecordingsFixture { f in
+            let navigation = MainNavigation()
+            let recorder = CallRecorder()
+            let model = makeRecordingsModel(f, navigation: navigation, recorder: recorder)
+            await model.refresh().value
+            XCTAssertTrue(model.hasLoaded)
+            XCTAssertEqual(model.library.entries.map(\.id), [f.unfinished, f.completed, f.corrupt])
+
+            XCTAssertFalse(model.performOnSelection(.revealExport), "Nothing is selected")
+            navigation.selectedSessionId = f.completed
+            let immediate: [RecordingAction] = [.revealExport, .openInClaude, .openInChatGPT, .openBrief, .copyExportPath, .retryAnalysis]
+            for action in immediate {
+                XCTAssertTrue(model.isEnabled(action), "\(action)")
+                XCTAssertNil(model.unavailableReason(action), "\(action)")
+                XCTAssertTrue(model.performOnSelection(action), "\(action)")
+                // Reveal export/ and Copy export path check export/ off the main actor first.
+                await model.actionTask?.value
+            }
+            XCTAssertEqual(recorder.calls, [
+                "revealExport \(f.completed)",
+                "claude \(f.completed)",
+                "chatgpt \(f.completed)",
+                "openBrief \(f.completed)",
+                "copyExportPath \(f.completed)",
+                "retryAnalysis \(f.completed)"
+            ])
+            XCTAssertNil(model.message)
+
+            XCTAssertTrue(model.performOnSelection(.reviewSpeakers))
+            XCTAssertEqual(model.speakerReview, SpeakerReviewRequest(sessionId: f.completed))
+
+            XCTAssertTrue(model.performOnSelection(.revealArchive))
+            let reveal = try XCTUnwrap(model.pendingPrivateReveal)
+            XCTAssertEqual(reveal, PrivateRevealRequest(sessionId: f.completed, action: .revealArchive))
+            XCTAssertEqual(recorder.calls.count, 6, "Reveal archive… waits for the warning")
+            model.cancelPrivateReveal()
+            XCTAssertNil(model.pendingPrivateReveal)
+            XCTAssertEqual(recorder.calls.count, 6, "Cancelling the warning reveals nothing")
+            XCTAssertTrue(model.performOnSelection(.revealArchive))
+            model.confirmPrivateReveal(reveal)
+            XCTAssertNil(model.pendingPrivateReveal)
+            XCTAssertEqual(recorder.calls.last, "revealArchive \(f.completed)")
+
+            // The row context menu acts on the clicked row, not the selection.
+            XCTAssertTrue(model.perform(.revealExport, on: f.unfinished))
+            await model.actionTask?.value
+            XCTAssertEqual(recorder.calls.last, "revealExport \(f.unfinished)")
+            let unfinished = try XCTUnwrap(model.entry(id: f.unfinished))
+            XCTAssertFalse(model.isEnabled(.openBrief, for: unfinished), "No brief yet")
+            XCTAssertEqual(model.unavailableReason(.openBrief, for: unfinished), "This recording has no brief yet.")
+            XCTAssertFalse(model.perform(.openBrief, on: f.unfinished))
+            for handoff in [RecordingAction.openInClaude, .openInChatGPT] {
+                XCTAssertFalse(model.perform(handoff, on: f.unfinished), "No AGENT_CONTEXT.md to hand over: \(handoff)")
+                XCTAssertEqual(model.unavailableReason(handoff, for: unfinished), "This recording has no export to hand to an agent yet.")
+            }
+            XCTAssertFalse(model.perform(.reviewSpeakers, on: f.unfinished), "No full transcript to review")
+            XCTAssertEqual(model.unavailableReason(.reviewSpeakers, for: unfinished), "This recording has no transcript to review yet.")
+            XCTAssertFalse(model.perform(.revealExport, on: "2026-01-01-0000-absent"), "Only listed sessions")
+            XCTAssertEqual(recorder.calls.count, 8)
+
+            model.startRecording()
+            XCTAssertEqual(recorder.calls.last, "startRecording")
+
+            let rows = try mainEventRows(in: f)
+            XCTAssertEqual(rows.compactMap { $0["event"] }, [
+                "main_reveal_export", "main_claude", "main_chatgpt", "main_open_brief", "main_copy_export_path",
+                "main_retry", "main_review_speakers", "main_reveal_archive", "main_reveal_export", "main_start"
+            ])
+            XCTAssertEqual(
+                rows.map { $0["session"] ?? "" },
+                Array(repeating: f.completed, count: 8) + [f.unfinished, ""]
+            )
+        }
+    }
+
+    @MainActor
+    func testExportActionsAndPrivateRevealsSayWhyTheyDidNotRun() async throws {
+        try await withRecordingsFixture { f in
+            let recorder = CallRecorder()
+            let canChange = MainActorBox(true)
+            let handoffFailure = MainActorBox<String?>(nil)
+            let model = makeRecordingsModel(
+                f,
+                recorder: recorder,
+                canChange: { canChange.value },
+                handoffFailure: { handoffFailure.value }
+            )
+            await model.refresh().value
+
+            // A handoff that fails says why here, not only in the menu bar status line.
+            handoffFailure.value = "Claude Code is not installed. Install the claude command, sign in, then try again."
+            XCTAssertTrue(model.perform(.openInClaude, on: f.completed))
+            XCTAssertEqual(model.message, handoffFailure.value)
+            handoffFailure.value = nil
+            XCTAssertTrue(model.perform(.openInChatGPT, on: f.completed))
+            XCTAssertNil(model.message, "A handoff that starts clears the line")
+
+            // export/ gone: Reveal export/ and Copy export path explain, and a drag offers nothing.
+            let completed = f.vault.sessionURL(id: f.completed)
+            try FileManager.default.moveItem(
+                at: completed.appendingPathComponent(ScrumTracePath.export),
+                to: completed.appendingPathComponent("export-moved")
+            )
+            XCTAssertNil(model.exportDragURL(for: f.completed), "No export/ folder, nothing to drag")
+            XCTAssertNil(model.dragItemProvider(for: f.completed))
+            XCTAssertTrue(model.perform(.revealExport, on: f.completed))
+            await model.actionTask?.value
+            XCTAssertEqual(model.message, "The export folder is missing or contains a link, so it was not revealed.")
+            XCTAssertTrue(model.perform(.copyExportPath, on: f.completed))
+            await model.actionTask?.value
+            XCTAssertEqual(model.message, "The export folder is missing or contains a link, so its path was not copied.")
+            XCTAssertEqual(recorder.calls, ["claude \(f.completed)", "chatgpt \(f.completed)"], "Nothing ran without a validated folder")
+
+            // A private reveal confirmed after recording started, or after its row went away, says why.
+            XCTAssertTrue(model.perform(.revealArchive, on: f.completed))
+            let reveal = try XCTUnwrap(model.pendingPrivateReveal)
+            canChange.value = false
+            model.confirmPrivateReveal(reveal)
+            XCTAssertEqual(model.message, RecordingsModel.busyReason)
+            canChange.value = true
+            model.confirmPrivateReveal(PrivateRevealRequest(sessionId: "2026-01-01-0000-absent", action: .revealArchive))
+            XCTAssertEqual(model.message, RecordingsModel.unlistedReason)
+            XCTAssertEqual(recorder.calls.count, 2, "Neither reveal ran")
+            let events = try mainEventRows(in: f).compactMap { $0["event"] }
+            XCTAssertFalse(events.contains("main_reveal_archive"))
+            XCTAssertFalse(events.contains("main_drag_export"))
+        }
+    }
+
+    @MainActor
+    func testDeleteAsksFirstCancelChangesNothingAndConfirmDeletesThenRefreshes() async throws {
+        try await withRecordingsFixture { f in
+            let navigation = MainNavigation()
+            let recorder = CallRecorder()
+            let model = makeRecordingsModel(f, navigation: navigation, recorder: recorder)
+            await model.refresh().value
+            navigation.selectedSessionId = f.completed
+            let folder = f.vault.sessionURL(id: f.completed)
+
+            XCTAssertTrue(model.performOnSelection(.delete))
+            XCTAssertEqual(model.pendingDelete, f.completed)
+            XCTAssertEqual(recorder.calls, [], "Delete… only asks")
+            model.cancelDelete()
+            XCTAssertNil(model.pendingDelete)
+            await model.refresh().value
+            XCTAssertEqual(recorder.calls, [])
+            XCTAssertTrue(FileManager.default.fileExists(atPath: folder.path))
+            XCTAssertEqual(navigation.selectedSessionId, f.completed)
+            XCTAssertEqual(model.library.entries.map(\.id), [f.unfinished, f.completed, f.corrupt])
+            XCTAssertEqual(try mainEventRows(in: f).count, 0, "Nothing is logged for a cancelled delete")
+
+            XCTAssertTrue(model.performOnSelection(.delete))
+            let deletion = try XCTUnwrap(model.confirmDelete(f.completed))
+            XCTAssertNil(model.pendingDelete)
+            await deletion.value
+            XCTAssertEqual(recorder.calls, ["deleteSession \(f.completed)"])
+            XCTAssertFalse(FileManager.default.fileExists(atPath: folder.path))
+            XCTAssertEqual(model.library.entries.map(\.id), [f.unfinished, f.corrupt], "The list refreshed after the delete")
+            XCTAssertNil(navigation.selectedSessionId, "The deleted row is no longer selected")
+            XCTAssertNil(model.message)
+            let rows = try mainEventRows(in: f)
+            XCTAssertEqual(rows.compactMap { $0["event"] }, ["main_delete"])
+            XCTAssertEqual(rows.first?["session"], f.completed)
+        }
+    }
+
+    @MainActor
+    func testDeleteRefusesTheActiveSessionAndALiveRecordingLock() async throws {
+        try await withRecordingsFixture { f in
+            let navigation = MainNavigation()
+            let recorder = CallRecorder()
+            let active = ActiveSessionBox(f.completed.uppercased())
+            let model = makeRecordingsModel(f, navigation: navigation, recorder: recorder, activeSessionId: { active.id })
+            await model.refresh().value
+            navigation.selectedSessionId = f.completed
+
+            XCTAssertFalse(model.isEnabled(.delete), "The controller's session, in any spelling")
+            XCTAssertEqual(model.unavailableReason(.delete), RecordingsModel.heldSessionReason, "The disabled Delete says why")
+            XCTAssertTrue(model.isEnabled(.retryAnalysis))
+            XCTAssertFalse(model.performOnSelection(.delete))
+            XCTAssertNil(model.pendingDelete)
+            XCTAssertNil(model.confirmDelete(f.completed), "Confirming cannot bypass the check")
+            XCTAssertEqual(model.message, RecordingsModel.heldSessionReason)
+            XCTAssertEqual(recorder.calls, [])
+
+            // The session became the controller's while the dialog was open.
+            active.id = nil
+            XCTAssertTrue(model.performOnSelection(.delete))
+            active.id = f.completed
+            XCTAssertNil(model.confirmDelete(f.completed))
+            XCTAssertNil(model.pendingDelete)
+            XCTAssertEqual(model.message, RecordingsModel.heldSessionReason)
+            XCTAssertEqual(recorder.calls, [])
+            XCTAssertTrue(FileManager.default.fileExists(atPath: f.vault.sessionURL(id: f.completed).path))
+
+            // A row that left the list is refused with its own reason.
+            XCTAssertNil(model.confirmDelete("2026-01-01-0000-absent"))
+            XCTAssertEqual(model.message, RecordingsModel.unlistedReason)
+
+            // A live recording.lock names the other session: the vault refuses and the row stays.
+            try "\(f.unfinished)\n\(ProcessInfo.processInfo.processIdentifier)\n"
+                .write(to: f.lockURL, atomically: true, encoding: .utf8)
+            XCTAssertTrue(model.perform(.delete, on: f.unfinished))
+            let refused = try XCTUnwrap(model.confirmDelete(f.unfinished))
+            // Deleting a large archive can outlast a selection change; the line names its recording.
+            navigation.selectedSessionId = f.corrupt
+            await refused.value
+            XCTAssertEqual(recorder.calls, ["deleteSession \(f.unfinished)"])
+            XCTAssertTrue(FileManager.default.fileExists(atPath: f.vault.sessionURL(id: f.unfinished).path))
+            XCTAssertEqual(model.message, "Recording \(f.unfinished) is still live. Stop it before deleting.")
+            XCTAssertEqual(model.library.entries.map(\.id), [f.unfinished, f.completed, f.corrupt])
+            XCTAssertEqual(navigation.selectedSessionId, f.corrupt)
+            XCTAssertTrue(try mainEventRows(in: f).contains { $0["event"] == "main_delete_refused" && $0["session"] == f.unfinished })
+        }
+    }
+
+    @MainActor
+    func testBusyOrRecordingDisablesRetryDeleteSpeakerReviewAndPrivateReveals() async throws {
+        try await withRecordingsFixture { f in
+            try await withFixtureController(f) { controller in
+                XCTAssertNil(controller.activeSessionId, "No session is held before a recording or a retry")
+                let model = RecordingsModel(
+                    library: SessionLibrary(vault: f.vault),
+                    navigation: MainNavigation(),
+                    dependencies: .live(controller: controller, startRecording: {})
+                )
+                model.observe(controller: controller)
+                await model.refresh().value
+                XCTAssertEqual(model.library.entries.map(\.id), [f.unfinished, f.completed, f.corrupt])
+                let completed = try XCTUnwrap(model.entry(id: f.completed))
+                let unreadable = try XCTUnwrap(model.entry(id: f.corrupt))
+                let gated: [RecordingAction] = [.retryAnalysis, .delete, .reviewSpeakers, .revealArchive]
+                let handoff: [RecordingAction] = [.revealExport, .openInClaude, .openInChatGPT, .openBrief, .copyExportPath]
+                for action in gated + handoff {
+                    XCTAssertTrue(model.isEnabled(action, for: completed), "idle \(action)")
+                }
+                XCTAssertTrue(model.isEnabled(.revealFolder, for: unreadable))
+                XCTAssertTrue(model.isEnabled(.delete, for: unreadable))
+
+                let states: [(name: String, apply: () -> Void)] = [
+                    ("busy", { controller.isBusy = true; controller.phase = .transcribing }),
+                    ("recording", { controller.isBusy = false; controller.phase = .recording }),
+                    ("paused", { controller.isBusy = false; controller.phase = .paused })
+                ]
+                for state in states {
+                    state.apply()
+                    let followed = await waitUntil { !model.canChangeSessions }
+                    XCTAssertTrue(followed, "\(state.name): the model follows the controller")
+                    for action in gated {
+                        XCTAssertFalse(model.isEnabled(action, for: completed), "\(state.name) \(action)")
+                        XCTAssertEqual(model.unavailableReason(action, for: completed), RecordingsModel.busyReason, "\(state.name) \(action)")
+                        XCTAssertFalse(model.perform(action, on: f.completed), "\(state.name) \(action)")
+                    }
+                    XCTAssertFalse(model.isEnabled(.revealFolder, for: unreadable), state.name)
+                    XCTAssertFalse(model.isEnabled(.delete, for: unreadable), state.name)
+                    XCTAssertNil(model.confirmDelete(f.completed), state.name)
+                    XCTAssertEqual(model.message, RecordingsModel.busyReason, state.name)
+                    for action in handoff {
+                        XCTAssertTrue(model.isEnabled(action, for: completed), "\(state.name) \(action)")
+                    }
+                    XCTAssertNil(model.pendingDelete, state.name)
+                    XCTAssertNil(model.pendingPrivateReveal, state.name)
+                    XCTAssertNil(model.speakerReview, state.name)
+                }
+                XCTAssertTrue(FileManager.default.fileExists(atPath: f.vault.sessionURL(id: f.completed).path))
+
+                controller.phase = .idle
+                let idle = await waitUntil { model.canChangeSessions }
+                XCTAssertTrue(idle)
+                XCTAssertTrue(model.isEnabled(.delete, for: completed))
+            }
+        }
+    }
+
+    @MainActor
+    func testAnUnreadableEntryOffersOnlyRevealFolderAndDelete() async throws {
+        try await withRecordingsFixture { f in
+            let navigation = MainNavigation()
+            let recorder = CallRecorder()
+            let model = makeRecordingsModel(f, navigation: navigation, recorder: recorder)
+            await model.refresh().value
+            let entry = try XCTUnwrap(model.entry(id: f.corrupt))
+            XCTAssertNil(entry.summary)
+            XCTAssertEqual(model.actions(for: entry), [.revealFolder, .delete])
+            XCTAssertFalse(model.actions(for: try XCTUnwrap(model.entry(id: f.completed))).contains(.revealFolder))
+            for action in RecordingAction.allCases {
+                XCTAssertEqual(model.isEnabled(action, for: entry), action == .revealFolder || action == .delete, "\(action)")
+            }
+            for action in RecordingAction.allCases where action != .revealFolder && action != .delete {
+                XCTAssertFalse(model.perform(action, on: f.corrupt), "\(action)")
+            }
+            XCTAssertNil(model.exportDragURL(for: f.corrupt), "An unreadable row offers nothing to drag")
+            XCTAssertNil(model.dragItemProvider(for: f.corrupt))
+            XCTAssertEqual(recorder.calls, [])
+            XCTAssertNil(model.speakerReview)
+
+            XCTAssertTrue(model.perform(.revealFolder, on: f.corrupt))
+            let request = try XCTUnwrap(model.pendingPrivateReveal)
+            XCTAssertEqual(request.action, .revealFolder)
+            XCTAssertEqual(recorder.calls, [], "The folder holds archive/, so it is revealed only after the warning")
+            model.confirmPrivateReveal(request)
+            XCTAssertEqual(recorder.calls, ["revealFolder \(f.corrupt)"])
+
+            navigation.selectedSessionId = f.corrupt
+            XCTAssertTrue(model.performOnSelection(.delete))
+            await model.confirmDelete(f.corrupt)?.value
+            XCTAssertEqual(recorder.calls.last, "deleteSession \(f.corrupt)")
+            XCTAssertEqual(model.library.entries.map(\.id), [f.unfinished, f.completed])
+            XCTAssertNil(navigation.selectedSessionId)
+            XCTAssertEqual(try mainEventRows(in: f).compactMap { $0["event"] }, ["main_reveal_folder", "main_delete"])
+        }
+    }
+
+    @MainActor
+    func testASelectionHiddenBySearchOrFilterLeavesTheDetailAndToolbarIdle() async throws {
+        try await withRecordingsFixture { f in
+            let navigation = MainNavigation()
+            let recorder = CallRecorder()
+            let model = makeRecordingsModel(f, navigation: navigation, recorder: recorder)
+            await model.refresh().value
+            navigation.selectedSessionId = f.completed
+            XCTAssertEqual(model.selectedEntry?.id, f.completed)
+            XCTAssertTrue(model.isEnabled(.delete))
+
+            model.searchText = f.unfinished
+            XCTAssertEqual(model.visibleEntries.map(\.id), [f.unfinished])
+            XCTAssertNil(model.selectedEntry, "The table no longer lists the selected row")
+            for action in RecordingAction.allCases {
+                XCTAssertFalse(model.isEnabled(action), "\(action)")
+                XCTAssertNil(model.unavailableReason(action), "\(action)")
+                XCTAssertFalse(model.performOnSelection(action), "\(action)")
+            }
+            XCTAssertNil(model.pendingDelete)
+            XCTAssertNil(model.pendingPrivateReveal)
+            XCTAssertEqual(navigation.selectedSessionId, f.completed, "The selection is kept for when the search is cleared")
+
+            model.searchText = ""
+            model.statusFilter = .unfinished
+            XCTAssertNil(model.selectedEntry, "A status filter hides it too")
+            model.statusFilter = nil
+            model.contextFilter = "ctx-orbit"
+            XCTAssertEqual(model.selectedEntry?.id, f.completed, "Its own context keeps it listed")
+            model.clearFilters()
+            XCTAssertEqual(model.selectedEntry?.id, f.completed)
+            XCTAssertTrue(model.performOnSelection(.delete))
+            XCTAssertEqual(model.pendingDelete, f.completed)
+            XCTAssertEqual(recorder.calls, [])
+        }
+    }
+
+    @MainActor
+    func testDetailFactsStayOnScreenAndReloadAfterSpeakerReviewRetryAndRowChanges() async throws {
+        try await withRecordingsFixture { f in
+            let navigation = MainNavigation()
+            let recorder = CallRecorder()
+            let loads = CallRecorder()
+            let model = makeRecordingsModel(f, navigation: navigation, recorder: recorder, detailLoads: loads)
+            await model.refresh().value
+            navigation.selectedSessionId = f.completed
+            let summary = try XCTUnwrap(model.selectedEntry?.summary)
+            @MainActor func names(_ row: SessionSummary) -> [String] {
+                model.detail(for: row)?.exportFiles.map(\.name) ?? []
+            }
+            XCTAssertNil(model.detail(for: summary))
+            await model.loadDetail(for: summary)?.value
+            XCTAssertEqual(names(summary), ["AGENT_CONTEXT.md", "SESSION_BRIEF.html", "session-pack.zip"])
+            XCTAssertTrue(model.isDetailCurrent(for: summary))
+            XCTAssertNil(model.loadDetail(for: summary), "Current facts are not read again")
+            XCTAssertEqual(loads.calls, [f.completed])
+
+            // Review speakers closed without saving writes nothing and leaves the row unchanged. The facts stay
+            // on screen and are read again, because a saved review rebuilds export files the row does not track.
+            let completedURL = f.vault.sessionURL(id: f.completed)
+            try writeFile(Data("prompt".utf8), to: ScrumTracePath.agentPrompt, in: completedURL)
+            let addedBeforeReview = try makeSession(in: f.vault, status: .completed)
+            XCTAssertTrue(model.performOnSelection(.reviewSpeakers))
+            model.speakerReview = nil
+            model.speakerReviewDidClose()
+            XCTAssertEqual(
+                names(summary), ["AGENT_CONTEXT.md", "SESSION_BRIEF.html", "session-pack.zip"],
+                "The pane keeps its facts while they reload, instead of a spinner"
+            )
+            let reviewed = await waitUntil { names(summary).contains("AGENT_PROMPT.txt") }
+            XCTAssertTrue(reviewed, "The facts come back without selecting another row")
+            let listedAfterReview = await waitUntil { model.library.entries.contains { $0.id == addedBeforeReview } }
+            XCTAssertTrue(listedAfterReview, "Closing the sheet refreshes the list")
+            XCTAssertEqual(model.selectedEntry?.summary, summary, "The row itself did not change")
+            XCTAssertTrue(model.isDetailCurrent(for: summary))
+            XCTAssertEqual(loads.calls, [f.completed, f.completed])
+
+            // Retry analysis, including a retry the controller refuses without writing anything.
+            try writeFile(Data("omitted".utf8), to: ScrumTracePath.omitted, in: completedURL)
+            let addedBeforeRetry = try makeSession(in: f.vault, status: .completed)
+            XCTAssertTrue(model.performOnSelection(.retryAnalysis))
+            XCTAssertEqual(recorder.calls.last, "retryAnalysis \(f.completed)")
+            XCTAssertTrue(names(summary).contains("AGENT_PROMPT.txt"), "Still shown while reloading")
+            let retried = await waitUntil { names(summary).contains("OMITTED.md") }
+            XCTAssertTrue(retried)
+            let listedAfterRetry = await waitUntil { model.library.entries.contains { $0.id == addedBeforeRetry } }
+            XCTAssertTrue(listedAfterRetry, "Retry refreshes the list")
+            XCTAssertEqual(loads.calls.count, 3)
+
+            // A changed row shows the previous facts until its own load finishes, and one load serves both callers.
+            var manifest = try f.vault.loadManifest(id: f.completed)
+            manifest.duration = DurationPair(wallSeconds: 900, mediaSeconds: 800)
+            try f.vault.write(manifest: &manifest)
+            await model.refresh().value
+            let changed = try XCTUnwrap(model.selectedEntry?.summary)
+            XCTAssertNotEqual(changed, summary)
+            XCTAssertFalse(model.isDetailCurrent(for: changed))
+            XCTAssertEqual(names(changed), names(summary), "No flicker to a spinner while the new facts load")
+            let first = try XCTUnwrap(model.loadDetail(for: changed))
+            XCTAssertNotNil(model.loadDetail(for: changed), "The running load is returned")
+            await first.value
+            XCTAssertTrue(model.isDetailCurrent(for: changed))
+            XCTAssertEqual(loads.calls.count, 4, "A second request for the same row did not read again")
+        }
+    }
+
+    @MainActor
+    func testThumbnailLoaderReadsOnlyExportShotsAndNeverFollowsLinks() async throws {
+        try await withRecordingsFixture { f in
+            let session = f.vault.sessionURL(id: f.completed)
+            let png = try pngData()
+            try writeFile(png, to: "export/shots/001.jpg", in: session)
+            try writeFile(png, to: "export/shots/001.annotated.jpg", in: session)
+            try writeFile(png, to: "export/shots/002.png", in: session)
+            try writeFile(Data(), to: "export/shots/003.jpg", in: session)
+            try writeFile(png, to: "export/shots/nested/005.jpg", in: session)
+            try writeFile(png, to: "export/shots/.hidden.jpg", in: session)
+            try writeFile(Data("text".utf8), to: "export/shots/notes.txt", in: session)
+            try writeFile(png, to: "archive/shots/004.png", in: session)
+            try FileManager.default.createSymbolicLink(
+                at: session.appendingPathComponent("export/shots/004.jpg"),
+                withDestinationURL: session.appendingPathComponent("archive/shots/004.png")
+            )
+
+            let reads = CallRecorder()
+            let reader: SessionThumbnailLoader.Reader = { relative, sessionURL in
+                reads.record(relative)
+                return SessionThumbnailLoader.containedRead(relative, sessionURL)
+            }
+            XCTAssertEqual(SessionThumbnailLoader.shotCandidates(sessionURL: session), [
+                ["export/shots/001.annotated.jpg", "export/shots/001.jpg"],
+                ["export/shots/002.png"],
+                ["export/shots/003.jpg"],
+                ["export/shots/004.jpg"]
+            ])
+            XCTAssertEqual(SessionThumbnailLoader.thumbnails(sessionURL: session, limit: 1).map(\.id), ["export/shots/001.annotated.jpg"])
+            let thumbnails = SessionThumbnailLoader.thumbnails(sessionURL: session, read: reader)
+            XCTAssertEqual(thumbnails.map(\.id), ["export/shots/001.annotated.jpg", "export/shots/002.png"])
+            XCTAssertEqual(
+                reads.calls, ["export/shots/001.annotated.jpg", "export/shots/002.png"],
+                "An empty still and a link into archive/ are refused before anything is read"
+            )
+            XCTAssertLessThanOrEqual(thumbnails.first?.image.width ?? .max, SessionThumbnailLoader.maxPixelSize)
+
+            let refused = [
+                "archive/shots/004.png",
+                "export/shots/../../archive/shots/004.png",
+                "export/shots/../shots/002.png",
+                "./export/shots/002.png",
+                "export//shots/002.png",
+                "export/002.png",
+                "export/shots/004.jpg",
+                "export/shots/nested/005.jpg",
+                "export/shots/.hidden.jpg",
+                "export/shots/notes.txt",
+                session.appendingPathComponent("export/shots/002.png").path
+            ]
+            for path in refused {
+                XCTAssertNil(SessionThumbnailLoader.loadThumbnail(relative: path, sessionURL: session, read: reader), path)
+            }
+            XCTAssertTrue(SessionThumbnailLoader.isShotPath("export/shots/002.png"))
+            XCTAssertEqual(reads.calls.count, 2, "Paths outside export/shots are never opened")
+
+            let facts = SessionDetailFacts.load(vault: f.vault, id: f.completed)
+            XCTAssertEqual(facts.exportFiles.map(\.name), ["AGENT_CONTEXT.md", "SESSION_BRIEF.html", "session-pack.zip"])
+            XCTAssertEqual(facts.exportFiles.map(\.bytes), [15, 13, 2_048])
+            XCTAssertEqual(facts.consent, SessionDetailFacts.Consent(
+                approved: true, provider: "anthropic", model: "model-x", includesClipAudio: true, includesClipVideo: false
+            ))
+            XCTAssertEqual(facts.thumbnails.map(\.id), ["export/shots/001.annotated.jpg", "export/shots/002.png"])
+            let denied = SessionDetailFacts.Consent(UploadConsent(
+                approved: false, approvedAt: nil, provider: "openai", endpoint: "https://api.example.test",
+                model: "model-y", includesClipAudio: false, includesClipVideo: false, includesStills: false
+            ))
+            XCTAssertNil(denied.provider, "Provider and model are shown only for an approved upload")
+            XCTAssertNil(denied.model)
+
+            // export/shots swapped for a link into archive/: nothing is listed or read.
+            let shots = session.appendingPathComponent(ScrumTracePath.exportShots)
+            try FileManager.default.moveItem(at: shots, to: session.appendingPathComponent("export/shots-real"))
+            try FileManager.default.createSymbolicLink(at: shots, withDestinationURL: session.appendingPathComponent("archive/shots"))
+            XCTAssertEqual(SessionThumbnailLoader.shotCandidates(sessionURL: session), [])
+            XCTAssertEqual(SessionThumbnailLoader.thumbnails(sessionURL: session, read: reader), [])
+            XCTAssertNil(SessionThumbnailLoader.loadThumbnail(relative: "export/shots/004.png", sessionURL: session, read: reader))
+
+            // export/ itself swapped for a link.
+            let other = f.vault.sessionURL(id: f.unfinished)
+            try writeFile(png, to: "archive/shots/001.png", in: other)
+            let otherExport = other.appendingPathComponent(ScrumTracePath.export)
+            try FileManager.default.moveItem(at: otherExport, to: other.appendingPathComponent("export-real"))
+            try FileManager.default.createSymbolicLink(at: otherExport, withDestinationURL: other.appendingPathComponent("archive"))
+            XCTAssertEqual(SessionThumbnailLoader.shotCandidates(sessionURL: other), [])
+            XCTAssertNil(SessionThumbnailLoader.loadThumbnail(relative: "export/shots/001.png", sessionURL: other, read: reader))
+            XCTAssertEqual(SessionDetailFacts.load(vault: f.vault, id: f.unfinished).thumbnails, [])
+            XCTAssertEqual(reads.calls.count, 2, "Nothing behind a link is read")
+        }
+    }
+
+    @MainActor
+    func testThumbnailsFallBackPastBrokenStillsAndStillFillTheLimit() async throws {
+        try await withRecordingsFixture { f in
+            let session = f.vault.sessionURL(id: f.completed)
+            let png = try pngData()
+            // Shot 001: the annotated copy is empty, the plain still is good.
+            try writeFile(Data(), to: "export/shots/001.annotated.png", in: session)
+            try writeFile(png, to: "export/shots/001.png", in: session)
+            // Shot 002: not an image, and no other copy.
+            try writeFile(Data("not an image".utf8), to: "export/shots/002.png", in: session)
+            // Shot 003: two annotated copies. The png is chosen whatever order the folder lists them in.
+            try writeFile(png, to: "export/shots/003.annotated.jpg", in: session)
+            try writeFile(png, to: "export/shots/003.annotated.png", in: session)
+            for index in 4...10 {
+                try writeFile(png, to: String(format: "export/shots/%03d.png", index), in: session)
+            }
+            let candidates = SessionThumbnailLoader.shotCandidates(sessionURL: session)
+            XCTAssertEqual(candidates.count, 10)
+            XCTAssertEqual(candidates[0], ["export/shots/001.annotated.png", "export/shots/001.png"])
+            XCTAssertEqual(candidates[2], ["export/shots/003.annotated.png", "export/shots/003.annotated.jpg"])
+
+            let thumbnails = SessionThumbnailLoader.thumbnails(sessionURL: session)
+            XCTAssertEqual(thumbnails.map(\.id), [
+                "export/shots/001.png", "export/shots/003.annotated.png", "export/shots/004.png", "export/shots/005.png",
+                "export/shots/006.png", "export/shots/007.png", "export/shots/008.png", "export/shots/009.png"
+            ], "A broken still falls back to the Shot's plain copy, and a broken Shot leaves room for a later one")
+            XCTAssertEqual(thumbnails.count, SessionThumbnailLoader.limit)
+
+            // A folder of broken stills is tried only up to the attempt cap.
+            let broken = f.vault.sessionURL(id: f.unfinished)
+            for index in 1...(SessionThumbnailLoader.maxAttempts + 10) {
+                try writeFile(Data("broken".utf8), to: String(format: "export/shots/%03d.png", index), in: broken)
+            }
+            let reads = CallRecorder()
+            let loaded = SessionThumbnailLoader.thumbnails(sessionURL: broken, read: { relative, sessionURL in
+                reads.record(relative)
+                return SessionThumbnailLoader.containedRead(relative, sessionURL)
+            })
+            XCTAssertEqual(loaded, [])
+            XCTAssertEqual(reads.calls.count, SessionThumbnailLoader.maxAttempts)
+        }
+    }
+
+    @MainActor
+    func testFileAccessAndDragOfferOnlyRealFoldersInsideTheSession() async throws {
+        try await withRecordingsFixture { f in
+            let completed = f.vault.sessionURL(id: f.completed)
+            let export = try XCTUnwrap(SessionFileAccess.exportDirectory(vault: f.vault, id: f.completed))
+            XCTAssertEqual(export.lastPathComponent, ScrumTracePath.export)
+            XCTAssertEqual(
+                export.resolvingSymlinksInPath().path,
+                completed.appendingPathComponent(ScrumTracePath.export).resolvingSymlinksInPath().path
+            )
+            XCTAssertEqual(SessionFileAccess.archiveDirectory(vault: f.vault, id: f.completed)?.lastPathComponent, ScrumTracePath.archive)
+            XCTAssertEqual(SessionFileAccess.sessionDirectory(vault: f.vault, id: f.corrupt)?.lastPathComponent, f.corrupt)
+            XCTAssertEqual(SessionFileAccess.briefURL(vault: f.vault, id: f.completed)?.lastPathComponent, "SESSION_BRIEF.html")
+            XCTAssertNil(SessionFileAccess.briefURL(vault: f.vault, id: f.unfinished), "No brief yet")
+            for id in ["", "../outside", "2026-01-01-0000-absent"] {
+                XCTAssertNil(SessionFileAccess.exportDirectory(vault: f.vault, id: id), id)
+                XCTAssertNil(SessionFileAccess.archiveDirectory(vault: f.vault, id: id), id)
+                XCTAssertNil(SessionFileAccess.sessionDirectory(vault: f.vault, id: id), id)
+                XCTAssertNil(SessionFileAccess.briefURL(vault: f.vault, id: id), id)
+            }
+
+            let model = makeRecordingsModel(f, recorder: CallRecorder())
+            await model.refresh().value
+            XCTAssertEqual(model.exportDragURL(for: f.completed), export, "A row drags its export/ folder, nothing else")
+            let provider = try XCTUnwrap(model.dragItemProvider(for: f.completed))
+            XCTAssertTrue(provider.hasItemConformingToTypeIdentifier("public.file-url"))
+            XCTAssertEqual(try mainEventRows(in: f).compactMap { $0["event"] }, ["main_drag_export"])
+
+            // A link planted inside export/ could lead a drop into archive/.
+            let planted = completed.appendingPathComponent("export/archive-link")
+            try FileManager.default.createSymbolicLink(at: planted, withDestinationURL: completed.appendingPathComponent(ScrumTracePath.archive))
+            XCTAssertNil(SessionFileAccess.exportDirectory(vault: f.vault, id: f.completed))
+            XCTAssertNil(model.exportDragURL(for: f.completed))
+            XCTAssertNil(model.dragItemProvider(for: f.completed))
+            try FileManager.default.removeItem(at: planted)
+
+            // archive/ or export/ replaced by a link is never offered.
+            let unfinished = f.vault.sessionURL(id: f.unfinished)
+            let archive = unfinished.appendingPathComponent(ScrumTracePath.archive)
+            try FileManager.default.moveItem(at: archive, to: unfinished.appendingPathComponent("archive-real"))
+            try FileManager.default.createSymbolicLink(at: archive, withDestinationURL: unfinished.appendingPathComponent("archive-real"))
+            XCTAssertNil(SessionFileAccess.archiveDirectory(vault: f.vault, id: f.unfinished))
+            let unfinishedExport = unfinished.appendingPathComponent(ScrumTracePath.export)
+            try FileManager.default.moveItem(at: unfinishedExport, to: unfinished.appendingPathComponent("export-real"))
+            try FileManager.default.createSymbolicLink(at: unfinishedExport, withDestinationURL: unfinished.appendingPathComponent("archive-real"))
+            XCTAssertNil(SessionFileAccess.exportDirectory(vault: f.vault, id: f.unfinished))
+            XCTAssertNil(model.exportDragURL(for: f.unfinished))
+
+            // A session folder that is itself a link is refused.
+            let linked = "2020-02-02-0000-link01"
+            try FileManager.default.createSymbolicLink(at: f.vault.rootURL.appendingPathComponent(linked), withDestinationURL: completed)
+            XCTAssertNil(SessionFileAccess.sessionDirectory(vault: f.vault, id: linked))
+            XCTAssertNil(SessionFileAccess.exportDirectory(vault: f.vault, id: linked))
+            XCTAssertNil(SessionFileAccess.archiveDirectory(vault: f.vault, id: linked))
+            XCTAssertNil(SessionFileAccess.briefURL(vault: f.vault, id: linked))
+        }
+    }
+
+    @MainActor
+    func testShowSessionSelectsItsRowInTheRecordingsTable() async throws {
+        try await withRecordingsFixture { f in
+            try await withFixtureController(f) { controller in
+                let presenter = MainWindowPresenter(controller: controller, frameAutosaveName: nil)
+                defer { presenter.window?.close() }
+                XCTAssertFalse(presenter.recordings.isWindowVisible)
+
+                presenter.show(sessionId: f.completed)
+                let window = try XCTUnwrap(presenter.window)
+                XCTAssertTrue(presenter.recordings.isWindowVisible)
+                XCTAssertTrue(presenter.recordings.isPeriodicRefreshActive)
+                let selected = await waitUntil { (self.recordingsTable(in: window)?.selectedRow ?? -1) >= 0 }
+                XCTAssertTrue(selected, "The row show(sessionId:) asked for is selected once the list loads")
+                let rows = presenter.recordings.visibleEntries.map(\.id)
+                XCTAssertEqual(rows, [f.unfinished, f.completed, f.corrupt])
+                let table = try XCTUnwrap(recordingsTable(in: window))
+                XCTAssertEqual(table.numberOfRows, 3)
+                XCTAssertEqual(table.selectedRow, rows.firstIndex(of: f.completed))
+                XCTAssertEqual(presenter.recordings.selectedEntry?.id, f.completed)
+                XCTAssertTrue(
+                    window.toolbar?.items.contains { $0 is NSSearchToolbarItem } == true,
+                    "Search sits in the window toolbar"
+                )
+                let summary = try XCTUnwrap(presenter.recordings.selectedEntry?.summary)
+                let loaded = await waitUntil { presenter.recordings.isDetailCurrent(for: summary) }
+                XCTAssertTrue(loaded, "The detail pane loads the selected row's facts")
+                spinRunLoop(for: 0.05)
+                writeSnapshot(of: window, named: "recordings-selected")
+
+                presenter.recordings.searchText = f.unfinished
+                let filtered = await waitUntil { self.recordingsTable(in: window)?.numberOfRows == 1 }
+                XCTAssertTrue(filtered)
+                presenter.show(sessionId: f.corrupt)
+                XCTAssertEqual(presenter.recordings.searchText, "", "A search that hides the requested row is cleared")
+                let moved = await waitUntil {
+                    let current = self.recordingsTable(in: window)
+                    return current?.numberOfRows == 3 && current?.selectedRow == 2
+                }
+                XCTAssertTrue(moved)
+                XCTAssertEqual(presenter.navigation.selectedSessionId, f.corrupt)
+                writeSnapshot(of: window, named: "recordings-unreadable")
+
+                window.close()
+                XCTAssertFalse(presenter.recordings.isWindowVisible)
+                XCTAssertFalse(presenter.recordings.isPeriodicRefreshActive, "A closed window does no periodic work")
+            }
+        }
+    }
+
+    @MainActor
+    func testRecordingsRefreshWhenProcessingEndsAndPeriodicallyOnlyWhileVisible() async throws {
+        try await withRecordingsFixture { f in
+            try await withFixtureController(f) { controller in
+                let navigation = MainNavigation()
+                navigation.section = .recordings
+                let model = makeRecordingsModel(f, navigation: navigation, recorder: CallRecorder(), refreshInterval: .milliseconds(50))
+                model.observe(controller: controller)
+                // A refresh marks the library loading at once, so after the queued sinks ran this proves none started.
+                await drainMainQueue()
+                XCTAssertFalse(model.library.isLoading, "Nothing refreshes until the section, the window or processing asks")
+                XCTAssertEqual(model.library.entries, [])
+                XCTAssertFalse(model.isPeriodicRefreshActive)
+
+                controller.isBusy = true
+                controller.phase = .transcribing
+                await drainMainQueue()
+                XCTAssertFalse(model.library.isLoading, "A processing stage is not the end of processing")
+                XCTAssertFalse(model.hasLoaded)
+                controller.phase = .completed
+                controller.isBusy = false
+                let refreshed = await waitUntil { model.library.entries.count == 3 }
+                XCTAssertTrue(refreshed, "Processing that ends refreshes the list")
+
+                // Analysis that ends offline is an end of processing too.
+                let failedOffline = try makeSession(in: f.vault, status: .offlineFailed)
+                controller.isBusy = true
+                controller.phase = .evaluating
+                controller.phase = .offlineFailed
+                controller.isBusy = false
+                let listedOffline = await waitUntil { model.library.entries.contains { $0.id == failedOffline } }
+                XCTAssertTrue(listedOffline, "Processing that ends offline refreshes the list")
+                for phase: PipelineStatus in [.recording, .paused, .transcribing, .slicing, .evaluating, .synthesizing] {
+                    XCTAssertFalse(RecordingsModel.endsProcessing(phase), phase.rawValue)
+                }
+
+                model.setWindowVisible(true)
+                XCTAssertTrue(model.isPeriodicRefreshActive)
+                await model.refresh().value
+                let added = try makeSession(in: f.vault, status: .completed)
+                let ticked = await waitUntil { model.library.entries.contains { $0.id == added } }
+                XCTAssertTrue(ticked, "A visible window refreshes on its own")
+
+                let loop = try XCTUnwrap(model.periodicRefresh)
+                model.setWindowVisible(false)
+                XCTAssertFalse(model.isPeriodicRefreshActive)
+                let ended = MainActorBox(false)
+                Task { @MainActor in
+                    await loop.value
+                    ended.value = true
+                }
+                let stopped = await waitUntil { ended.value }
+                XCTAssertTrue(stopped, "Hiding the window ends the refresh loop, so no timer refreshes a hidden window")
+            }
+        }
+    }
+
+    @MainActor
+    func testRecordingsRefreshesNeverCreateOrShowTheWindow() async throws {
+        try await withRecordingsFixture { f in
+            try await withFixtureController(f) { controller in
+                let presenter = MainWindowPresenter(controller: controller, frameAutosaveName: nil)
+                defer { presenter.window?.close() }
+                let model = presenter.recordings
+
+                model.sectionDidAppear()
+                controller.isBusy = true
+                controller.phase = .transcribing
+                controller.phase = .completed
+                controller.isBusy = false
+                let listed = await waitUntil { model.library.entries.count == 3 }
+                XCTAssertTrue(listed)
+                await model.refresh().value
+                XCTAssertNil(presenter.window, "Refreshing, and processing that ends, never create the window")
+                XCTAssertFalse(model.isWindowVisible)
+                XCTAssertFalse(model.isPeriodicRefreshActive)
+
+                presenter.show(section: .recordings)
+                let window = try XCTUnwrap(presenter.window)
+                XCTAssertTrue(model.isPeriodicRefreshActive)
+                let shown = await waitUntil { self.recordingsTable(in: window)?.numberOfRows == 3 }
+                XCTAssertTrue(shown, "The section appeared and listed its rows")
+                window.close()
+                XCTAssertFalse(model.isPeriodicRefreshActive)
+                // Supersede every refresh the open window started, so only processing can list the next session.
+                await model.refresh().value
+
+                let added = try makeSession(in: f.vault, status: .offlineFailed)
+                controller.isBusy = true
+                controller.phase = .synthesizing
+                controller.phase = .offlineFailed
+                controller.isBusy = false
+                let refreshed = await waitUntil { model.library.entries.contains { $0.id == added } }
+                XCTAssertTrue(refreshed, "The list of a closed window still follows processing")
+                model.sectionDidAppear()
+                await model.refresh().value
+                XCTAssertTrue(presenter.window === window)
+                XCTAssertFalse(window.isVisible, "Refreshing leaves a closed window closed")
+                XCTAssertFalse(window.isMiniaturized)
+                XCTAssertFalse(model.isWindowVisible)
+                XCTAssertFalse(model.isPeriodicRefreshActive)
+            }
+        }
+    }
+
+    @MainActor
+    func testSwitchingToRecordingsInAnOpenWindowRefreshesAtOnce() async throws {
+        try await withRecordingsFixture { f in
+            try await withFixtureController(f) { controller in
+                let presenter = MainWindowPresenter(controller: controller, frameAutosaveName: nil)
+                defer { presenter.window?.close() }
+                let model = presenter.recordings
+                presenter.show(section: .overview)
+                let window = try XCTUnwrap(presenter.window)
+                XCTAssertTrue(model.isPeriodicRefreshActive)
+                XCTAssertFalse(model.library.isLoading, "Opening the window on Overview scans nothing")
+                spinRunLoop(for: 0.05)
+                XCTAssertEqual(model.library.entries, [])
+
+                // Rows listed earlier, as if Recordings had been shown before.
+                await model.refresh().value
+                XCTAssertEqual(model.library.entries.count, 3)
+                let added = try makeSession(in: f.vault, status: .completed)
+                presenter.navigation.section = .recordings
+                // Well inside the 5 s timer, so only the section appearing can list the new row this soon.
+                let listed = await waitUntil(timeout: 2) { self.recordingsTable(in: window)?.numberOfRows == 4 }
+                XCTAssertTrue(listed, "Recordings refreshes when it appears")
+                XCTAssertTrue(model.library.entries.contains { $0.id == added })
+            }
+        }
+    }
+
+    @MainActor
+    func testOpeningOnRecordingsScansOnceAndOtherSectionsScanNothing() async throws {
+        try await withRecordingsFixture { f in
+            let navigation = MainNavigation()
+            navigation.section = .settings
+            let loads = CallRecorder()
+            let model = makeRecordingsModel(f, navigation: navigation, recorder: CallRecorder(), manifestLoads: loads)
+
+            // Command-comma on a closed window shows Settings: nothing to list.
+            model.setWindowVisible(true)
+            XCTAssertTrue(model.isPeriodicRefreshActive)
+            XCTAssertFalse(model.library.isLoading, "Becoming visible on another section scans nothing")
+            model.setWindowVisible(false)
+            await drainMainQueue()
+            XCTAssertEqual(loads.calls, [])
+
+            // The window opens on Recordings, then RecordingsView appears: one scan, each manifest decoded once.
+            navigation.section = .recordings
+            model.setWindowVisible(true)
+            XCTAssertTrue(model.library.isLoading, "Becoming visible on Recordings scans at once")
+            await model.sectionDidAppear().value
+            XCTAssertEqual(model.library.entries.map(\.id), [f.unfinished, f.completed, f.corrupt])
+            _ = await waitUntil(timeout: 0.3) { loads.calls.count > 3 }
+            XCTAssertEqual(loads.calls.count, 3, "The section appearing joined the scan the window started")
+
+            // After that scan finished, appearing again scans again and decodes only what is new.
+            let added = try makeSession(in: f.vault, status: .completed)
+            await model.sectionDidAppear().value
+            XCTAssertTrue(model.library.entries.contains { $0.id == added })
+            XCTAssertEqual(loads.calls.count, 4)
+            model.setWindowVisible(false)
+        }
+    }
+
+    @MainActor
+    func testTheMessageLineBelongsToItsRowAndSupersededExportChecksDoNothing() async throws {
+        try await withRecordingsFixture { f in
+            let navigation = MainNavigation()
+            navigation.section = .recordings
+            let recorder = CallRecorder()
+            let failure = "Claude Code is not installed. Install the claude command, sign in, then try again."
+            let model = makeRecordingsModel(f, navigation: navigation, recorder: recorder, handoffFailure: { failure })
+            await model.refresh().value
+            navigation.selectedSessionId = f.completed
+            func exportCalls() -> [String] { recorder.calls.filter { !$0.hasPrefix("claude ") } }
+
+            // A line stays with its row and section.
+            XCTAssertTrue(model.perform(.openInClaude, on: f.completed))
+            XCTAssertEqual(model.message, failure)
+            navigation.selectedSessionId = f.completed
+            XCTAssertEqual(model.message, failure, "Selecting the same row keeps it")
+            navigation.selectedSessionId = f.unfinished
+            XCTAssertNil(model.message, "Another row does not inherit the line")
+            XCTAssertTrue(model.perform(.openInClaude, on: f.completed))
+            XCTAssertEqual(model.message, failure)
+            navigation.section = .overview
+            XCTAssertNil(model.message, "Leaving the section clears it")
+            navigation.section = .recordings
+
+            // A newer action supersedes an export/ check still running, so an older path never reaches the pasteboard.
+            XCTAssertTrue(model.perform(.copyExportPath, on: f.completed))
+            let copy = try XCTUnwrap(model.actionTask)
+            XCTAssertTrue(model.perform(.revealExport, on: f.completed))
+            let reveal = try XCTUnwrap(model.actionTask)
+            await copy.value
+            await reveal.value
+            XCTAssertEqual(exportCalls(), ["revealExport \(f.completed)"])
+
+            // export/ gone: a check that finishes after a newer action, or after the selection changed, shows no line.
+            let completed = f.vault.sessionURL(id: f.completed)
+            try FileManager.default.moveItem(
+                at: completed.appendingPathComponent(ScrumTracePath.export),
+                to: completed.appendingPathComponent("export-moved")
+            )
+            XCTAssertTrue(model.perform(.revealExport, on: f.completed))
+            let missing = try XCTUnwrap(model.actionTask)
+            XCTAssertTrue(model.perform(.openInClaude, on: f.completed))
+            await missing.value
+            XCTAssertEqual(model.message, failure, "The older check does not overwrite the newer line")
+            XCTAssertTrue(model.perform(.copyExportPath, on: f.completed))
+            let hidden = try XCTUnwrap(model.actionTask)
+            navigation.selectedSessionId = f.corrupt
+            await hidden.value
+            XCTAssertNil(model.message, "A line for the previous row does not appear under the new one")
+            XCTAssertTrue(model.perform(.copyExportPath, on: f.completed))
+            await model.actionTask?.value
+            XCTAssertEqual(
+                model.message, "The export folder is missing or contains a link, so its path was not copied.",
+                "A check nothing interrupted still says why"
+            )
+            XCTAssertEqual(exportCalls(), ["revealExport \(f.completed)"])
+        }
+    }
+
+    @MainActor
+    func testSpeakerReviewOpensOnTheRequestedSessionAndKeepsItsDefaultOtherwise() {
+        func manifest(_ id: String) -> SessionManifest {
+            SessionManifest.makeNew(sessionId: id, product: .empty)
+        }
+        let newest = manifest("2026-09-14-1200-aaa001")
+        let last = manifest("2026-09-13-1200-bbb002")
+        let older = manifest("2026-01-01-1200-ccc003")
+        let recent = [newest, last]
+        var loaded: [String] = []
+        let load: (String) -> SessionManifest? = { id in
+            loaded.append(id)
+            return id == older.sessionId ? older : nil
+        }
+        func ids(_ sessions: [SessionManifest]) -> [String] { sessions.map(\.sessionId) }
+
+        var picker = SpeakerReviewView.pickerSessions(recent: recent, initialSessionId: nil, lastSessionId: last.sessionId, loadManifest: load)
+        XCTAssertEqual(ids(picker.sessions), ids(recent))
+        XCTAssertEqual(picker.selected, last.sessionId, "Without a request the last session stays the default")
+        picker = SpeakerReviewView.pickerSessions(recent: recent, initialSessionId: nil, lastSessionId: nil, loadManifest: load)
+        XCTAssertEqual(picker.selected, newest.sessionId, "Else the newest")
+        picker = SpeakerReviewView.pickerSessions(recent: [], initialSessionId: nil, lastSessionId: nil, loadManifest: load)
+        XCTAssertEqual(picker.selected, "")
+        XCTAssertEqual(loaded, [], "Nothing more is read without a request")
+
+        picker = SpeakerReviewView.pickerSessions(recent: recent, initialSessionId: newest.sessionId, lastSessionId: last.sessionId, loadManifest: load)
+        XCTAssertEqual(ids(picker.sessions), ids(recent))
+        XCTAssertEqual(picker.selected, newest.sessionId, "The requested session wins over the last one")
+        XCTAssertEqual(loaded, [], "A listed session is not read again")
+
+        picker = SpeakerReviewView.pickerSessions(recent: recent, initialSessionId: older.sessionId, lastSessionId: last.sessionId, loadManifest: load)
+        XCTAssertEqual(ids(picker.sessions), ids(recent) + [older.sessionId], "An older requested session joins the list")
+        XCTAssertEqual(picker.selected, older.sessionId)
+        XCTAssertEqual(loaded, [older.sessionId])
+
+        picker = SpeakerReviewView.pickerSessions(
+            recent: recent, initialSessionId: "2026-02-02-1200-ddd004", lastSessionId: last.sessionId, loadManifest: load
+        )
+        XCTAssertEqual(ids(picker.sessions), ids(recent))
+        XCTAssertEqual(picker.selected, last.sessionId, "A request that cannot be read falls back to the default")
+    }
+
+    @MainActor
+    func testStageProgressAndRowTextComeFromTheSummary() {
+        func summary(_ status: PipelineStatus, _ done: [PipelineStatus], context: String? = nil, product: String = "") -> SessionSummary {
+            var manifest = SessionManifest.makeNew(
+                sessionId: "2026-09-13-1200-abc123",
+                product: ProductContext(appName: product, repoURL: "", techStack: "", contextID: context.map { _ in "ctx" }, contextName: context)
+            )
+            manifest.pipelineStatus = status
+            manifest.completedStages = done
+            return SessionSummary(manifest: manifest, exportProbe: SessionExportProbe())
+        }
+        func states(_ summary: SessionSummary) -> [SessionStageStep.State] {
+            SessionStageStep.steps(for: summary).map(\.state)
+        }
+        XCTAssertEqual(SessionStageStep.steps(for: summary(.completed, [])).map(\.stage), PipelineStatusOrder.processingFlow)
+        XCTAssertEqual(states(summary(.completed, [])), [.done, .done, .done, .done, .done])
+        XCTAssertEqual(states(summary(.transcribing, [])), [.current, .pending, .pending, .pending, .pending])
+        XCTAssertEqual(states(summary(.evaluating, [.transcribing, .slicing])), [.done, .done, .current, .pending, .pending])
+        XCTAssertEqual(
+            states(summary(.offlineFailed, [.transcribing, .slicing])), [.done, .done, .failed, .pending, .pending],
+            "An offline failure is its own state, never shown as in progress"
+        )
+        XCTAssertEqual(states(summary(.recording, [])), [.pending, .pending, .pending, .pending, .pending])
+
+        XCTAssertEqual(RecordingRowText.contextAndProduct(summary(.completed, [], context: "Orbit web", product: "Orbit Checkout")), "Orbit web / Orbit Checkout")
+        XCTAssertEqual(RecordingRowText.contextAndProduct(summary(.completed, [], context: "Orbit web")), "Orbit web")
+        XCTAssertEqual(RecordingRowText.contextAndProduct(summary(.completed, [])), "No context")
+        let unreadable = SessionEntry.unreadable(id: "2020-01-01-0000-bad001", reason: SessionEntry.decodingFailed)
+        XCTAssertEqual(RecordingRowText.export(unreadable), "—")
+        XCTAssertEqual(RecordingRowText.duration(unreadable), "—")
+        XCTAssertEqual(RecordingRowText.tasks(.loaded(summary(.completed, []))), "0 / 0")
+        XCTAssertEqual(RecordingRowText.export(.loaded(summary(.completed, []))), "—", "No pack yet")
+        XCTAssertFalse(RecordingRowText.needsReviewMarker(summary(.offlineFailed, [])), "The status already says it needs review")
+    }
+}
+
+/// Records calls from injected closures, including the delete that runs off the main actor.
+private final class CallRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var recorded: [String] = []
+
+    var calls: [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        return recorded
+    }
+
+    func record(_ call: String) {
+        lock.lock()
+        recorded.append(call)
+        lock.unlock()
+    }
+}
+
+/// The controller's session id as a test changes it.
+@MainActor
+private final class ActiveSessionBox {
+    var id: String?
+
+    init(_ id: String?) {
+        self.id = id
+    }
+}
+
+/// A value an injected main-actor closure reads while a test changes it.
+@MainActor
+private final class MainActorBox<Value> {
+    var value: Value
+
+    init(_ value: Value) {
+        self.value = value
     }
 }

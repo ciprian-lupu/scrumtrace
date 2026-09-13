@@ -22,7 +22,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var mainPresenterStorage: MainWindowPresenter?
     var mainPresenter: MainWindowPresenter {
         if let mainPresenterStorage { return mainPresenterStorage }
-        let presenter = MainWindowPresenter(controller: controller)
+        // The empty Recordings state starts a session through the same flow as the menu.
+        let presenter = MainWindowPresenter(controller: controller, onStartRecording: { [weak self] in
+            self?.menuBar?.requestStart()
+        })
         mainPresenterStorage = presenter
         return presenter
     }
@@ -127,16 +130,29 @@ final class MainWindowPresenter: NSObject, NSWindowDelegate {
     nonisolated static let frameAutosaveName = "ScrumTraceMain"
     nonisolated static let minimumContentSize = NSSize(width: 840, height: 580)
     let navigation: MainNavigation
+    /// The Recordings section and its session index, kept for the life of the presenter.
+    let recordings: RecordingsModel
     private let controller: SessionController
     private let autosaveName: String?
     private(set) var window: NSWindow?
 
     /// Tests pass `nil` so window frames never reach the app's real defaults.
-    init(controller: SessionController, frameAutosaveName: String? = MainWindowPresenter.frameAutosaveName) {
-        self.navigation = MainNavigation()
+    init(
+        controller: SessionController,
+        frameAutosaveName: String? = MainWindowPresenter.frameAutosaveName,
+        onStartRecording: @escaping @MainActor () -> Void = {}
+    ) {
+        let navigation = MainNavigation()
+        self.navigation = navigation
         self.controller = controller
         self.autosaveName = frameAutosaveName
+        self.recordings = RecordingsModel(
+            library: SessionLibrary(vault: controller.vault),
+            navigation: navigation,
+            dependencies: .live(controller: controller, startRecording: onStartRecording)
+        )
         super.init()
+        recordings.observe(controller: controller)
     }
 
     /// The only place the main window activates ScrumTrace. Call it from explicit user actions.
@@ -146,6 +162,7 @@ final class MainWindowPresenter: NSObject, NSWindowDelegate {
                 rootView: MainWindowView(
                     controller: controller,
                     navigation: navigation,
+                    recordings: recordings,
                     settingsView: { [controller, navigation] in
                         SettingsView(settings: controller.settings, controller: controller, navigation: navigation.settings)
                     }
@@ -154,6 +171,8 @@ final class MainWindowPresenter: NSObject, NSWindowDelegate {
             // Explicit window sizing prevents the macOS 26 hosting/safe-area feedback
             // loop (see RecordingContextPresenter) when the live banner or section changes.
             hosting.sizingOptions = []
+            // Recordings puts its search field and actions in the window toolbar. The title stays ours.
+            hosting.sceneBridgingOptions = [.toolbars]
             let created = NSWindow(contentViewController: hosting)
             created.title = "ScrumTrace"
             created.styleMask = [.titled, .closable, .miniaturizable, .resizable]
@@ -171,6 +190,25 @@ final class MainWindowPresenter: NSObject, NSWindowDelegate {
         if window?.isMiniaturized == true { window?.deminiaturize(nil) }
         NSApp.activate(ignoringOtherApps: true)
         window?.makeKeyAndOrderFront(nil)
+        recordings.setWindowVisible(true)
+    }
+
+    // The recordings list refreshes periodically only while the window is on screen.
+    func windowWillClose(_ notification: Notification) {
+        recordings.setWindowVisible(false)
+    }
+
+    func windowDidMiniaturize(_ notification: Notification) {
+        recordings.setWindowVisible(false)
+    }
+
+    func windowDidDeminiaturize(_ notification: Notification) {
+        recordings.setWindowVisible(true)
+    }
+
+    func windowDidChangeOcclusionState(_ notification: Notification) {
+        guard let window else { return }
+        recordings.setWindowVisible(window.isVisible && !window.isMiniaturized && window.occlusionState.contains(.visible))
     }
 
     /// Keeps the window at least 840×580 points of content, for user resizes and for a
@@ -197,7 +235,10 @@ final class MainWindowPresenter: NSObject, NSWindowDelegate {
     }
 
     func show(sessionId: String) {
-        if canNavigate { navigation.selectedSessionId = sessionId }
+        if canNavigate {
+            recordings.revealInList(sessionId: sessionId)
+            navigation.selectedSessionId = sessionId
+        }
         show(section: .recordings)
     }
 }

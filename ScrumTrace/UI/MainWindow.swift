@@ -75,6 +75,8 @@ struct MainWindowView: View {
     /// media clock does not re-render the section content ten times a second.
     let controller: SessionController
     @ObservedObject var navigation: MainNavigation
+    /// Owned by the presenter, so the session index and its caches outlive section changes.
+    let recordings: RecordingsModel
     /// Built by the presenter so the six-tab Settings view stays whole. A builder, not a
     /// value: leaving the section removes Settings, and coming back must start from
     /// current state (for example the license line), not from window creation.
@@ -105,6 +107,7 @@ struct MainWindowView: View {
             .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity, alignment: .top)
             .clipped()
         }
+        .modifier(StableWindowToolbar())
     }
 
     @ViewBuilder
@@ -117,10 +120,11 @@ struct MainWindowView: View {
                 description: Text("Readiness, the last recording and storage will be summarized here. Start a recording from the ScrumTrace menu bar item.")
             )
         case .recordings:
-            ContentUnavailableView(
-                "Recordings",
-                systemImage: MainSection.recordings.systemImage,
-                description: Text("Your recordings will be listed here. Until then, use Recent in the ScrumTrace menu bar item.")
+            RecordingsView(
+                model: recordings,
+                library: recordings.library,
+                navigation: navigation,
+                controller: controller
             )
         case .contexts:
             ContentUnavailableView {
@@ -137,6 +141,31 @@ struct MainWindowView: View {
         case .settings:
             settingsView()
         }
+    }
+}
+
+/// Keeps one window toolbar in every section. Without it AppKit adds the toolbar when a section brings
+/// its own items (Recordings' search field) and grows the window frame by the toolbar height, then
+/// shrinks it again on the next section.
+private struct StableWindowToolbar: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(macOS 26.0, *) {
+            // macOS 26 draws a shared glass capsule behind toolbar items; this one holds nothing to see.
+            content.toolbar {
+                ToolbarItem(placement: .navigation) { Self.placeholder }
+                    .sharedBackgroundVisibility(.hidden)
+            }
+        } else {
+            content.toolbar {
+                ToolbarItem(placement: .navigation) { Self.placeholder }
+            }
+        }
+    }
+
+    private static var placeholder: some View {
+        Color.clear
+            .frame(width: 1, height: 1)
+            .accessibilityHidden(true)
     }
 }
 

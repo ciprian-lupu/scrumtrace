@@ -3,6 +3,8 @@ import SwiftUI
 
 struct SpeakerReviewView: View {
     @ObservedObject var controller: SessionController
+    /// Selected when the sheet opens. Nil keeps the previous choice: the last session, else the newest.
+    var initialSessionId: String? = nil
     @Environment(\.dismiss) private var dismiss
     @State private var sessions: [SessionManifest] = []
     @State private var selected = ""
@@ -79,8 +81,15 @@ struct SpeakerReviewView: View {
         .padding(20).frame(minWidth: 760, idealWidth: 800, minHeight: 650)
         .interactiveDismissDisabled(controller.isBusy || changed)
         .onAppear {
-            sessions = controller.vault.recentSessions(limit: 100)
-            selected = sessions.first(where: { $0.sessionId == controller.lastSessionId })?.sessionId ?? sessions.first?.sessionId ?? ""
+            let vault = controller.vault
+            let picker = Self.pickerSessions(
+                recent: vault.recentSessions(limit: 100),
+                initialSessionId: initialSessionId,
+                lastSessionId: controller.lastSessionId,
+                loadManifest: { try? vault.loadManifest(id: $0) }
+            )
+            sessions = picker.sessions
+            selected = picker.selected
         }
         .task(id: selected) {
             reload()
@@ -94,6 +103,26 @@ struct SpeakerReviewView: View {
         } message: {
             Text("This estimates speakers from the room and call audio and refreshes the local export with both audio sources. It replaces previous speaker names and corrections for successfully analyzed sources. The first run downloads public models; recording audio is not uploaded.")
         }
+    }
+
+    /// The sessions the picker lists and the one it opens on. `initialSessionId` is listed and selected
+    /// when its manifest loads, even when it is older than the recent list. Without it, or when it cannot
+    /// be listed, the choice is the previous one: the last session, else the newest.
+    static func pickerSessions(
+        recent: [SessionManifest],
+        initialSessionId: String?,
+        lastSessionId: String?,
+        loadManifest: (String) -> SessionManifest?
+    ) -> (sessions: [SessionManifest], selected: String) {
+        var sessions = recent
+        if let initialSessionId, !sessions.contains(where: { $0.sessionId == initialSessionId }),
+           let older = loadManifest(initialSessionId) {
+            sessions.append(older)
+        }
+        let selected = sessions.first(where: { $0.sessionId == initialSessionId })?.sessionId
+            ?? sessions.first(where: { $0.sessionId == lastSessionId })?.sessionId
+            ?? sessions.first?.sessionId ?? ""
+        return (sessions, selected)
     }
 
     private var displayedTranscript: FullTranscript? {

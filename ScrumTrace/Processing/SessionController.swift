@@ -87,6 +87,13 @@ final class SessionController: ObservableObject {
         !isRecording && !isBusy && !startInFlight
     }
 
+    /// The session this controller holds in memory: the one being recorded or processed, and afterwards
+    /// the last one it recorded or processed (retries included), until another recording starts, another
+    /// session is retried, or the app relaunches. Read-only; the main window refuses to delete it.
+    var activeSessionId: String? {
+        manifest?.sessionId
+    }
+
     var hudShouldShow: Bool {
         (isRecording || isBusy || startInFlight) && !suppressHUD
     }
