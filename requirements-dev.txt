@@ -1,0 +1,2 @@
+# Python tooling used by scripts/generate_mock_session.py and the Linux suite.
+Pillow>=10.0,<12

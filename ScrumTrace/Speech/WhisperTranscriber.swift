@@ -41,7 +41,8 @@ final class WhisperTranscriber: @unchecked Sendable {
     var isPreparing: Bool { withStateLock { preparing != nil } }
 
     func isReady(for model: String) -> Bool {
-        withStateLock { loadedModel == Self.whisperKitModelName(model) && ready }
+        let resolved = Self.whisperKitModelName(model)
+        return withStateLock { ready && (loadedModel == resolved || loadedModel?.hasPrefix("\(resolved)|") == true) }
     }
 
     /// Call at the start of a recording or analysis. In-flight decodes keep their snapshot.
@@ -62,14 +63,16 @@ final class WhisperTranscriber: @unchecked Sendable {
         )
     }
 
-    func prepare(model: String = WhisperTranscriber.defaultStoredModel) async throws {
+    func prepare(model: String = WhisperTranscriber.defaultStoredModel, source: WhisperModelSource = .standard) async throws {
         guard !model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw SettingsValidationError("Choose a speech model before loading it.")
         }
+        try source.validated()
         let started = Date()
         let resolved = Self.whisperKitModelName(model)
+        let cacheKey = "\(resolved)|\(source.value ?? "standard")|\(source.title)"
         while true {
-            let action = preparationAction(resolved: resolved)
+            let action = preparationAction(resolved: cacheKey, model: resolved, source: source)
             switch action {
             case .ready:
                 AgentLog.event("whisper_prepare_ok", ["model": resolved, "reuse": "1", "elapsed_ms": "0"])
@@ -102,7 +105,7 @@ final class WhisperTranscriber: @unchecked Sendable {
         case start(Task<Void, Error>)
     }
 
-    private func preparationAction(resolved: String) -> PreparationAction {
+    private func preparationAction(resolved: String, model: String, source: WhisperModelSource) -> PreparationAction {
         withStateLock {
             if let preparing { return .wait(preparing.model, preparing.task) }
             if ready, loadedModel == resolved { return .ready }
@@ -110,7 +113,12 @@ final class WhisperTranscriber: @unchecked Sendable {
             let work = Task.detached {
                 AgentLog.event("whisper_prepare_begin", ["model": resolved])
                 do {
-                    let loaded = try await self.loadModel(resolved)
+                    let loaded: LoadedModel
+                    if case .standard = source {
+                        loaded = try await self.loadModel(model)
+                    } else {
+                        loaded = try await Self.loadWhisperKit(model, source: source)
+                    }
                     self.withStateLock {
                         self.kit = loaded
                         self.ready = true
@@ -129,13 +137,18 @@ final class WhisperTranscriber: @unchecked Sendable {
         }
     }
 
-    private static func loadWhisperKit(_ resolved: String) async throws -> LoadedModel {
+    private static func loadWhisperKit(_ resolved: String, source: WhisperModelSource = .standard) async throws -> LoadedModel {
         let downloadBase = Self.modelDownloadBase
         try FileManager.default.createDirectory(at: downloadBase, withIntermediateDirectories: true)
-        let config = WhisperKitConfig(
-            model: resolved, downloadBase: downloadBase, verbose: false,
-            logLevel: .error, prewarm: true, load: true, download: true
-        )
+        let config: WhisperKitConfig
+        switch source {
+        case .standard:
+            config = WhisperKitConfig(model: resolved, downloadBase: downloadBase, verbose: false, logLevel: .error, prewarm: true, load: true, download: true)
+        case .repository(let repository):
+            config = WhisperKitConfig(model: resolved, downloadBase: downloadBase, modelRepo: repository, verbose: false, logLevel: .error, prewarm: true, load: true, download: true)
+        case .folder(let folder):
+            config = WhisperKitConfig(model: resolved, modelFolder: folder, tokenizerFolder: URL(fileURLWithPath: folder), verbose: false, logLevel: .error, prewarm: true, load: true, download: false)
+        }
         let loaded = try await WhisperKit(config)
         return LoadedModel { path, options in
             try await loaded.transcribe(audioPath: path, decodeOptions: options)

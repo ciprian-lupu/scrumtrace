@@ -39,6 +39,16 @@ final class SessionProcessor: @unchecked Sendable {
             .run(sessionURL: sessionURL, configurations: configurations)
     }
 
+    /// Retry must use an already selected, timestamped primary transcript
+    /// exactly as stored. Profile edits only affect explicit new comparisons
+    /// or recovery when this archive artifact is absent/corrupt.
+    func hasValidPrimaryTranscript(sessionId: String) -> Bool {
+        let sessionURL = vault.sessionURL(id: sessionId)
+        guard ExportRel.isUsableSessionRoot(sessionURL),
+              let transcript = SpeakerTimeline.load(sessionURL: sessionURL) else { return false }
+        return transcript.hasTimedSegments && !transcript.needsTranscriptionRetry
+    }
+
     /// Promote a reviewed comparative result to the normal transcript. Earlier
     /// runs remain private history. Dependent slices and AI outputs are cleared
     /// so no old analysis is presented as belonging to the new text.
@@ -53,6 +63,13 @@ final class SessionProcessor: @unchecked Sendable {
         manifest.markCompleted(.transcribing)
         manifest.pipelineStatus = .transcribing
         try vault.write(manifest: &manifest)
+        // Remove stale brief, clips, projection and pack before any later Retry
+        // can produce evidence from the newly selected transcript.
+        _ = try ExportProjector().project(
+            sessionURL: sessionURL,
+            manifest: manifest,
+            includeFullTranscript: manifest.includeFullTranscriptInZip
+        )
         return transcript
     }
 

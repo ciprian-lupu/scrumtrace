@@ -64,6 +64,8 @@ private struct SpeechServiceEditor: View {
     @State var draft: SpeechServiceDraft
     @State private var key = ""
     @State private var error = ""
+    @State private var whisperSourceKind = "standard"
+    @State private var whisperSourceValue = ""
     let save: (SavedTranscriptionService, String) throws -> Void
 
     var body: some View {
@@ -75,6 +77,17 @@ private struct SpeechServiceEditor: View {
                     ForEach(SpeechBackendKind.allCases) { Text($0.title).tag($0) }
                 }
                 TextField("Model", text: $draft.service.model)
+                if draft.service.backend == .whisperKit {
+                    Picker("Model source", selection: $whisperSourceKind) {
+                        Text("Standard catalog").tag("standard")
+                        Text("Custom repository").tag("repository")
+                        Text("Local folder").tag("folder")
+                    }
+                    if whisperSourceKind != "standard" {
+                        TextField(whisperSourceKind == "repository" ? "Repository name or URL" : "Absolute model folder", text: $whisperSourceValue)
+                    }
+                    Text("Custom sources are loaded only on this Mac. Repository access tokens are not stored in this profile.").font(.caption).foregroundStyle(.secondary)
+                }
                 if draft.service.backend.requiresCredential {
                     TextField("Endpoint", text: $draft.service.endpoint)
                     TextField("Credential ID (reuse to share a saved key)", text: Binding(get: { draft.service.credentialID ?? "" }, set: { draft.service.credentialID = $0 }))
@@ -98,7 +111,15 @@ private struct SpeechServiceEditor: View {
             }
             if !error.isEmpty { Text(error).foregroundStyle(.red).font(.caption) }
             HStack { Button("Cancel", role: .cancel) { dismiss() }; Spacer(); Button("Save") {
-                do { try save(draft.service, key); dismiss() } catch { self.error = error.localizedDescription }
+                do {
+                    switch whisperSourceKind {
+                    case "repository": draft.service.whisperSource = .repository(whisperSourceValue)
+                    case "folder": draft.service.whisperSource = .folder(whisperSourceValue)
+                    default: draft.service.whisperSource = nil
+                    }
+                    try draft.service.whisperSource?.validated()
+                    try save(draft.service, key); dismiss()
+                } catch { self.error = error.localizedDescription }
             }.keyboardShortcut(.defaultAction) }
         }
         .padding(24).frame(width: 560).interactiveDismissDisabled()
@@ -111,6 +132,13 @@ private struct SpeechServiceEditor: View {
             if mode == .automatic { draft.service.language.languages = [] }
             if mode == .single && draft.service.language.languages.count != 1 { draft.service.language.languages = [.romanian] }
             if mode == .expected && draft.service.language.languages.count < 2 { draft.service.language.languages = [.romanian, .english, .hungarian] }
+        }
+        .onAppear {
+            switch draft.service.whisperSource ?? .standard {
+            case .standard: whisperSourceKind = "standard"
+            case .repository(let value): whisperSourceKind = "repository"; whisperSourceValue = value
+            case .folder(let value): whisperSourceKind = "folder"; whisperSourceValue = value
+            }
         }
     }
 }

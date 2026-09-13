@@ -2585,9 +2585,16 @@ struct FullTranscript: Codable, Sendable {
     var transcriptionAnalysis: [TranscriptionAnalysis]? = nil
     /// Capture sources, not individual people: `room` and/or `system`.
     var sources: [String]? = nil
+    /// Untimed cloud text is reviewable but cannot drive clips or become primary.
+    var untimedText: String? = nil
 
     var hasUsableText: Bool {
         segments.contains { !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            || !(untimedText ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    var hasTimedSegments: Bool {
+        segments.contains { $0.start.isFinite && $0.end.isFinite && $0.end > $0.start && !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     }
 
     /// Empty legacy transcripts were previously marked complete, even when
@@ -2607,6 +2614,7 @@ struct FullTranscript: Codable, Sendable {
         case speakers
         case speakerAnalysis = "speaker_analysis"
         case transcriptionAnalysis = "transcription_analysis"
+        case untimedText = "untimed_text"
     }
 }
 

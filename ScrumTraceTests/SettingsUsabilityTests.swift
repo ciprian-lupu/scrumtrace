@@ -414,6 +414,44 @@ final class SettingsUsabilityTests: XCTestCase {
         XCTAssertEqual(TranscriptionRunStore.loadTranscript(id: first.id, sessionURL: session)?.segments.first?.text, "Ales")
     }
 
+    func testCloudTranscriptionUsesAudioMultipartAndKeepsUntimedTextNonPromotable() async throws {
+        let audio = try ExportRel.makePrivateTemporaryURL(prefix: "speech-http-fixture", ext: "m4a")
+        defer { ExportRel.removePrivateTemporaryURL(audio) }
+        try Data("AUDIO_ONLY_FIXTURE".utf8).write(to: audio)
+        let service = SavedTranscriptionService(
+            name: "fixture", backend: .openAITranscription, endpoint: "http://127.0.0.1:9999",
+            model: "gpt-transcribe", credentialID: "fixture",
+            language: .init(mode: .expected, languages: [.romanian, .english])
+        )
+        let engine = OpenAITranscriptionEngine { request in
+            let body = try XCTUnwrap(request.httpBody)
+            let text = try XCTUnwrap(String(data: body, encoding: .utf8))
+            XCTAssertTrue(text.contains("filename=\"audio.m4a\""))
+            XCTAssertTrue(text.contains("AUDIO_ONLY_FIXTURE"))
+            XCTAssertTrue(text.contains("name=\"languages[]\""))
+            XCTAssertFalse(text.contains("session.mp4"))
+            XCTAssertFalse(text.contains("name=\"prompt\""))
+            let response = HTTPURLResponse(url: try XCTUnwrap(request.url), statusCode: 200, httpVersion: nil, headerFields: nil)!
+            return (Data("{\"text\":\"fără timestamps\",\"languages\":[\"ro\"]}".utf8), response)
+        }
+        let transcript = try await engine.transcribe(audioURL: audio, configuration: .init(service: service, apiKey: "fixture-key"))
+        XCTAssertTrue(transcript.segments.isEmpty)
+        XCTAssertEqual(transcript.untimedText, "fără timestamps")
+        XCTAssertFalse(transcript.hasTimedSegments)
+    }
+
+    func testUntimedComparisonCannotReplacePrimaryTranscript() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("untimed-runs-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let vault = SessionVault(rootURL: root)
+        let created = try vault.createSession(product: .empty)
+        let session = vault.sessionURL(id: created.manifest.sessionId)
+        let config = TranscriptionServiceConfiguration.Snapshot(serviceID: "one", name: "One", backend: .openAITranscription, endpoint: "", requestedModel: "gpt-transcribe", whisperSource: nil, language: .automatic, credentialRequired: true)
+        try TranscriptionRunStore.saveTranscript(FullTranscript(sessionId: "", language: "ro", segments: [], untimedText: "doar text"), id: "untimed", sessionURL: session)
+        XCTAssertThrowsError(try TranscriptionRunStore.selectPrimary(id: "untimed", sessionURL: session))
+        _ = config
+    }
+
     func testCurrentRunFilterIsExactAndSearchPrecedesLimit() {
         let input = """
         {"run_id":"old","event":"permission_probe"}

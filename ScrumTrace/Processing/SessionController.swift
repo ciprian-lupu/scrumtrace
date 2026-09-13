@@ -283,17 +283,20 @@ final class SessionController: ObservableObject {
         }
         isBusy = true; lastSessionId = sessionId; statusLine = "Comparing transcriptions serially…"
         Task {
-            defer { isBusy = false }
             do {
                 let runs = try await processor.compareTranscriptions(sessionId: sessionId, configurations: configurations)
                 let succeeded = runs.filter { $0.status == .succeeded }.count
                 statusLine = "Saved \(succeeded) of \(runs.count) transcription comparison results."
                 AgentLog.event("transcription_compare_ok", ["session": sessionId, "runs": String(runs.count), "succeeded": String(succeeded)])
+                // Selection itself invalidates outputs, so it must not be
+                // rejected by the busy guard left by the comparison task.
+                isBusy = false
                 presentPrimaryTranscriptionPicker(sessionId: sessionId, runs: runs)
             } catch {
                 statusLine = error.localizedDescription; lastError = error.localizedDescription
                 AgentLog.event("transcription_compare_fail", ["session": sessionId, "error": AgentLog.sanitize(error.localizedDescription)])
             }
+            isBusy = false
         }
     }
 
@@ -309,15 +312,17 @@ final class SessionController: ObservableObject {
     private func requestAudioUploadConsent(sessionId: String, services: [TranscriptionServiceConfiguration]) -> Bool {
         #if os(macOS)
         let duration = vault.recentSessions().first(where: { $0.sessionId == sessionId })?.duration.mediaSeconds ?? 0
+        let sessionURL = vault.sessionURL(id: sessionId)
+        let audioSources = TranscriptionComparisonRunner.uploadDescription(sessionURL: sessionURL)
         let rows = services.map { "• \($0.service.name)\n  \($0.service.endpoint)\n  Model: \($0.service.model)" }.joined(separator: "\n")
         let alert = NSAlert()
         alert.messageText = "Send meeting audio to transcription services?"
         alert.informativeText = """
-        The selected cloud services receive the canonical meeting-audio source for this existing session (about \(Int(duration)) seconds), serially. This is audio upload, separate from AI-analysis consent.
+        The selected cloud services receive only this captured audio (about \(Int(duration)) seconds), serially: \(audioSources). This is audio upload, separate from AI-analysis consent.
 
         \(rows)
 
-        The archive master movie and all other archive data stay on this Mac. Saved API keys and comparison checkboxes are not consent. Temporary upload copies are removed after each request.
+        The archive master movie and all other archive data stay on this Mac. When system audio is in the movie, ScrumTrace extracts a private audio-only M4A locally; the movie itself is never uploaded. Saved API keys and comparison checkboxes are not consent. Temporary upload copies are removed after each request.
         """
         alert.addButton(withTitle: "Approve audio upload")
         alert.addButton(withTitle: "Cancel")
@@ -844,20 +849,26 @@ final class SessionController: ObservableObject {
             let defaultSpeech = settings.selectedTranscriptionServiceConfiguration()
             let whisperModel: String
             if let speech = defaultSpeech, speech.service.backend == .openAITranscription {
-                guard requestAudioUploadConsent(sessionId: sessionId, services: [speech]) else {
-                    throw SettingsValidationError("Audio upload was not approved, so the cloud transcription service was not used.")
+                if processor!.hasValidPrimaryTranscript(sessionId: sessionId) {
+                    // Retry Analysis is deterministic with respect to the
+                    // selected primary. Do not re-consent or make a new cloud
+                    // request merely because a default profile changed.
+                    whisperModel = settings.whisperModel
+                } else {
+                    guard requestAudioUploadConsent(sessionId: sessionId, services: [speech]) else {
+                        throw SettingsValidationError("Audio upload was not approved, so the cloud transcription service was not used.")
+                    }
+                    let runs = try await processor!.compareTranscriptions(sessionId: sessionId, configurations: [speech])
+                    guard let success = runs.last(where: { $0.status == .succeeded }) else {
+                        throw SettingsValidationError(runs.last?.diagnostic ?? "Cloud transcription did not return a usable result.")
+                    }
+                    _ = try processor!.selectPrimaryTranscription(sessionId: sessionId, runID: success.id)
+                    whisperModel = settings.whisperModel
                 }
-                let runs = try await processor!.compareTranscriptions(sessionId: sessionId, configurations: [speech])
-                guard let success = runs.last(where: { $0.status == .succeeded }) else {
-                    throw SettingsValidationError(runs.last?.diagnostic ?? "Cloud transcription did not return a usable result.")
-                }
-                _ = try processor!.selectPrimaryTranscription(sessionId: sessionId, runID: success.id)
-                // `process` observes the completed transcribing stage and uses
-                // the selected archive transcript without loading WhisperKit.
-                whisperModel = settings.whisperModel
             } else if let speech = defaultSpeech {
                 let language = speech.service.language
                 transcriber.setLanguage(language.mode == .single && language.languages.count == 1 ? language.languages[0] : .automatic)
+                try await transcriber.prepare(model: speech.service.model, source: speech.service.whisperSource ?? .standard)
                 whisperModel = speech.service.model
             } else {
                 transcriber.setLanguage(settings.speechLanguage)
