@@ -92,7 +92,7 @@ WhisperKit's prefill cache is disabled for decoding because it produced empty 30
 
 The exported brief shows speaker labels and clickable passages within each selected clip. Estimates, unclear passages and overlapping voices remain marked for review. Use headphones to reduce call audio leaking into the room microphone. Real multi-person accuracy and long-run synchronization still need hardware validation; local tests do not close those gates.
 
-In **AI**, each provider retains its own endpoint and model. API keys are saved explicitly for the selected provider and endpoint; saved keys are not displayed again. **Logs** filters the current run and can export diagnostics. **General** explains retention: completed recordings are removed on the next launch when their retention period expires; **Forever** keeps them.
+In **AI**, save each provider as a named service (Hive, DeepSeek, OpenAI, and so on) with its own endpoint, model, and key. Only the selected service is used for analysis. Saved keys are not displayed again. The previous single provider setting is imported once. **Logs** filters the current run and can export diagnostics. **General** explains retention: completed recordings are removed on the next launch when their retention period expires; **Forever** keeps them.
 
 ## Hotkeys
 

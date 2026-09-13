@@ -57,6 +57,10 @@ struct SettingsView: View {
             keyStatus = ""
             connectionLine = ""
         }
+        .onChange(of: settings.connectionLibrary.selectedID) { _, _ in
+            keyStatus = ""
+            connectionLine = ""
+        }
         .alert("Remove saved key?", isPresented: $removingKey) {
             Button("Remove key", role: .destructive) {
                 do {
@@ -66,7 +70,7 @@ struct SettingsView: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("This removes the key for the selected provider and endpoint from this Mac. You will need to enter it again to use AI analysis.")
+            Text("This removes the key for the selected service from this Mac. You will need to enter it again to use AI analysis.")
         }
     }
 
@@ -291,7 +295,8 @@ struct SettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            Section("AI provider") {
+            AIConnectionsSettingsView(settings: settings, controller: controller)
+            Section("Selected service") {
                 Picker("Backend", selection: $settings.provider) {
                     ForEach(AIProviderKind.allCases) { kind in
                         Text(kind.title).tag(kind)
@@ -299,7 +304,7 @@ struct SettingsView: View {
                 }
                 TextField("Endpoint", text: $settings.baseURL)
                 TextField("Model", text: $settings.model)
-                Text("Each provider remembers its endpoint and model. Enter an API root; OpenAI-compatible and Anthropic endpoints may end in /v1. Hive: https://api.thehive.ai and a Playground / Service V3 secret key (not a V2 project token).")
+                Text("These fields belong to the selected service. Enter an API root; OpenAI-compatible and Anthropic endpoints may end in /v1. Hive: https://api.thehive.ai and a Playground / Service V3 secret key (not a V2 project token).")
                     .font(.caption).foregroundStyle(.secondary)
                 HStack {
                     Button("Validate configuration") {
@@ -325,9 +330,9 @@ struct SettingsView: View {
                             .foregroundStyle(.red)
                     }
                 }
-                LabeledContent("Saved key", value: settings.hasSavedAPIKey ? "Stored for this endpoint" : "Not saved for this endpoint")
+                LabeledContent("Saved key", value: settings.hasSavedAPIKey ? "Stored for this service" : "Not saved for this service")
                 SecureField(settings.hasSavedAPIKey ? "Replacement API key" : "API key (Keychain)", text: $settings.apiKeyDraft)
-                Text("Saved in this Mac’s Keychain for this provider and endpoint. A saved key is never displayed here. Changing the endpoint host requires a key for that host.")
+                Text("Saved in this Mac’s Keychain for the selected service. A saved key is never displayed here. Switching services uses that service’s key only.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Button("Save key") {
@@ -343,12 +348,19 @@ struct SettingsView: View {
                         ])
                     }
                 }
-                .disabled(settings.apiKeyDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || settings.configurationIssue != nil)
+                .disabled(
+                    settings.connectionLibrary.selected == nil
+                        || settings.apiKeyDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        || settings.configurationIssue != nil
+                )
                 if settings.hasSavedAPIKey {
                     Button("Remove saved key…", role: .destructive) { removingKey = true }
                 }
-                if !settings.hasSavedAPIKey {
-                    Text("AI is not configured for this endpoint. You can still record and produce a local export.")
+                if settings.connectionLibrary.selected == nil {
+                    Text("Select or add a service to save a key. You can still record and produce a local export.")
+                        .font(.caption).foregroundStyle(.secondary)
+                } else if !settings.hasSavedAPIKey {
+                    Text("AI is not configured for this service. You can still record and produce a local export.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 if !keyStatus.isEmpty {
@@ -357,8 +369,9 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                 }
             }
+            .disabled(settings.connectionLibrary.selected == nil)
             Section("Test connection") {
-                Text("Sends a one-word ping with the current endpoint, model, and key. Nothing from a meeting is uploaded. A typed key that is not saved yet is used for this test only.")
+                Text("Sends a one-word ping with the selected service’s endpoint, model, and key. Nothing from a meeting is uploaded. A typed key that is not saved yet is used for this test only.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Button(testingConnection ? "Testing…" : "Test current settings") {
@@ -498,6 +511,7 @@ struct SettingsView: View {
 
     private var canTestConnection: Bool {
         !testingConnection
+            && settings.connectionLibrary.selected != nil
             && settings.configurationIssue == nil
             && (settings.hasSavedAPIKey
                 || !settings.apiKeyDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)

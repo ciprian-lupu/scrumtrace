@@ -14,75 +14,216 @@ final class SettingsUsabilityTests: XCTestCase {
     }
 
     @MainActor
-    private func withSettings(_ body: (AppSettings, UserDefaults, MemoryKeys) throws -> Void) throws {
+    private func withDefaults(_ body: (UserDefaults, MemoryKeys) throws -> Void) throws {
         let suite = "ScrumTrace.SettingsTests.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         let keys = MemoryKeys()
         defer { defaults.removePersistentDomain(forName: suite) }
-        let settings = AppSettings(defaults: defaults, keyStore: keys.store)
-        try body(settings, defaults, keys)
+        try body(defaults, keys)
     }
 
     @MainActor
-    func testProviderProfilesSurviveSwitchAndRelaunch() throws {
-        try withSettings { settings, defaults, keys in
-            settings.baseURL = "https://example.test/proxy/v1"
-            settings.model = "custom-model"
-            settings.provider = .anthropic
-            XCTAssertEqual(settings.baseURL, AIProviderKind.anthropic.defaultBaseURL)
-            settings.model = "custom-anthropic-model"
-            settings.provider = .openaiCompatible
-            XCTAssertEqual(settings.baseURL, "https://example.test/proxy/v1")
-            XCTAssertEqual(settings.model, "custom-model")
-            let restored = AppSettings(defaults: defaults, keyStore: keys.store)
-            restored.provider = .anthropic
-            XCTAssertEqual(restored.model, "custom-anthropic-model")
+    private func withSettings(_ body: (AppSettings, UserDefaults, MemoryKeys) throws -> Void) throws {
+        try withDefaults { defaults, keys in
+            let settings = AppSettings(defaults: defaults, keyStore: keys.store)
+            try body(settings, defaults, keys)
         }
     }
 
     @MainActor
-    func testLegacyPreferencesAndKeyStayWithOriginalProvider() throws {
-        try withSettings { _, defaults, keys in
+    func testFreshInstallHasDefaultServiceAndNoKey() throws {
+        try withSettings { settings, _, keys in
+            XCTAssertEqual(settings.connectionLibrary.connections.count, 1)
+            XCTAssertEqual(settings.connectionLibrary.selected?.name, "OpenAI")
+            XCTAssertEqual(settings.provider, .openaiCompatible)
+            XCTAssertFalse(settings.hasSavedAPIKey)
+            XCTAssertEqual(keys.reads, 0)
+            XCTAssertTrue(settings.configurationSummary.contains("No saved key"))
+        }
+    }
+
+    @MainActor
+    func testSavedServicesSurviveSwitchAndRelaunch() throws {
+        try withSettings { settings, defaults, keys in
+            let firstID = try XCTUnwrap(settings.connectionLibrary.selectedID)
+            settings.baseURL = "https://example.test/proxy/v1"
+            settings.model = "custom-model"
+            settings.apiKeyDraft = "fixture-openai-key"
+            try settings.saveAPIKey()
+            try settings.addAIConnection(name: "Anthropic work", provider: .anthropic)
+            XCTAssertEqual(settings.provider, .anthropic)
+            settings.model = "custom-anthropic-model"
+            settings.apiKeyDraft = "fixture-anthropic-key"
+            try settings.saveAPIKey()
+            let secondID = try XCTUnwrap(settings.connectionLibrary.selectedID)
+            XCTAssertNotEqual(firstID, secondID)
+
+            try settings.selectAIConnection(id: firstID)
+            XCTAssertEqual(settings.baseURL, "https://example.test/proxy/v1")
+            XCTAssertEqual(settings.model, "custom-model")
+            XCTAssertEqual(settings.providerConfiguration().apiKey, "fixture-openai-key")
+
+            try settings.selectAIConnection(id: secondID)
+            XCTAssertEqual(settings.provider, .anthropic)
+            XCTAssertEqual(settings.model, "custom-anthropic-model")
+            XCTAssertEqual(settings.providerConfiguration().apiKey, "fixture-anthropic-key")
+
+            let restored = AppSettings(defaults: defaults, keyStore: keys.store)
+            XCTAssertEqual(restored.connectionLibrary.selectedID, secondID)
+            XCTAssertEqual(restored.model, "custom-anthropic-model")
+            try restored.selectAIConnection(id: firstID)
+            XCTAssertEqual(restored.baseURL, "https://example.test/proxy/v1")
+            XCTAssertEqual(restored.providerConfiguration().apiKey, "fixture-openai-key")
+        }
+    }
+
+    @MainActor
+    func testLegacyPreferencesAndKeyStayWithImportedService() throws {
+        try withDefaults { defaults, keys in
             defaults.set("anthropic", forKey: "scrumtrace.provider")
             defaults.set("https://legacy.example.test", forKey: "scrumtrace.baseURL")
             defaults.set("existing-model", forKey: "scrumtrace.model")
             defaults.removeObject(forKey: "scrumtrace.legacyCredentialScope")
             keys.values["ai.apiKey"] = "fixture-legacy-key"
             let settings = AppSettings(defaults: defaults, keyStore: keys.store)
+            XCTAssertEqual(settings.connectionLibrary.connections.count, 1)
+            XCTAssertEqual(settings.connectionLibrary.selected?.name, "Imported service")
             XCTAssertEqual(settings.baseURL, "https://legacy.example.test")
             XCTAssertEqual(settings.model, "existing-model")
             XCTAssertTrue(settings.hasSavedAPIKey)
             XCTAssertTrue(settings.apiKeyDraft.isEmpty)
             XCTAssertEqual(keys.reads, 0, "Opening Settings must not read a saved secret")
             XCTAssertEqual(settings.providerConfiguration().apiKey, "fixture-legacy-key")
-            settings.provider = .google
+            try settings.addAIConnection(name: "Hive")
             XCTAssertFalse(settings.hasSavedAPIKey)
             XCTAssertEqual(settings.providerConfiguration().apiKey, "")
-            settings.provider = .anthropic
+            let importedID = try XCTUnwrap(
+                settings.connectionLibrary.connections.first { $0.name == "Imported service" }?.id
+            )
+            try settings.selectAIConnection(id: importedID)
             XCTAssertEqual(settings.providerConfiguration().apiKey, "fixture-legacy-key")
+            try settings.selectAIConnection(id: nil)
+            XCTAssertFalse(settings.hasSavedAPIKey)
+            XCTAssertEqual(settings.providerConfiguration().apiKey, "")
         }
     }
 
     @MainActor
-    func testKeysAreScopedToProviderAndEndpointHost() throws {
-        try withSettings { settings, _, _ in
+    func testHostScopedKeyMigratesAsFallbackForImportedService() throws {
+        try withDefaults { defaults, keys in
+            let scope = AppSettings.credentialScope(
+                provider: .openaiCompatible,
+                endpoint: "https://api.openai.com"
+            )
+            keys.values["ai.apiKey.\(scope)"] = "fixture-host-key"
+            let settings = AppSettings(defaults: defaults, keyStore: keys.store)
+            XCTAssertEqual(settings.connectionLibrary.selected?.name, "OpenAI")
+            XCTAssertEqual(settings.connectionLibrary.selected?.fallbackKeyAccount, "ai.apiKey.\(scope)")
+            XCTAssertTrue(settings.hasSavedAPIKey)
+            XCTAssertEqual(keys.reads, 0)
+            XCTAssertEqual(settings.providerConfiguration().apiKey, "fixture-host-key")
+        }
+    }
+
+    @MainActor
+    func testKeysStayWithSelectedServiceWhenEndpointChanges() throws {
+        try withSettings { settings, _, keys in
+            let firstID = try XCTUnwrap(settings.connectionLibrary.selectedID)
             settings.apiKeyDraft = " fixture-openai-key "
             try settings.saveAPIKey()
             XCTAssertTrue(settings.apiKeyDraft.isEmpty)
             XCTAssertTrue(settings.hasSavedAPIKey)
             settings.baseURL = "https://another.example.test"
-            XCTAssertFalse(settings.hasSavedAPIKey)
-            XCTAssertEqual(settings.providerConfiguration().apiKey, "")
-            settings.apiKeyDraft = "fixture-proxy-key"
-            try settings.saveAPIKey()
-            settings.baseURL = "https://API.OPENAI.COM:443/v1"
+            XCTAssertTrue(settings.hasSavedAPIKey)
             XCTAssertEqual(settings.providerConfiguration().apiKey, "fixture-openai-key")
             settings.provider = .google
-            XCTAssertEqual(settings.providerConfiguration().apiKey, "")
+            XCTAssertEqual(settings.provider, .google)
+            XCTAssertEqual(settings.baseURL, AIProviderKind.google.defaultBaseURL)
+            XCTAssertTrue(settings.hasSavedAPIKey)
+            XCTAssertEqual(settings.providerConfiguration().apiKey, "fixture-openai-key")
+            XCTAssertEqual(keys.values[AppSettings.connectionKeyAccount(id: firstID)], "fixture-openai-key")
+
+            try settings.addAIConnection(name: "Google", provider: .google)
             settings.apiKeyDraft = "fixture-google-key"
             try settings.saveAPIKey()
-            settings.provider = .openaiCompatible
+            let secondID = try XCTUnwrap(settings.connectionLibrary.selectedID)
+            XCTAssertEqual(settings.providerConfiguration().apiKey, "fixture-google-key")
+            try settings.selectAIConnection(id: firstID)
             XCTAssertEqual(settings.providerConfiguration().apiKey, "fixture-openai-key")
+            XCTAssertEqual(keys.values[AppSettings.connectionKeyAccount(id: secondID)], "fixture-google-key")
+        }
+    }
+
+    @MainActor
+    func testDeletingServiceRemovesItsKeyAndDoesNotSelectAnother() throws {
+        try withSettings { settings, defaults, keys in
+            let first = try XCTUnwrap(settings.connectionLibrary.selected)
+            settings.apiKeyDraft = "fixture-first-key"
+            try settings.saveAPIKey()
+            try settings.addAIConnection(name: "Hive")
+            settings.apiKeyDraft = "fixture-hive-key"
+            try settings.saveAPIKey()
+            let hiveID = try XCTUnwrap(settings.connectionLibrary.selectedID)
+            try settings.deleteAIConnection(id: hiveID)
+            XCTAssertNil(settings.connectionLibrary.selectedID)
+            XCTAssertEqual(settings.connectionLibrary.connections.map(\.id), [first.id])
+            XCTAssertNil(keys.values[AppSettings.connectionKeyAccount(id: hiveID)])
+            XCTAssertEqual(settings.providerConfiguration().apiKey, "")
+            let restored = AppSettings(defaults: defaults, keyStore: keys.store)
+            XCTAssertNil(restored.connectionLibrary.selectedID)
+            XCTAssertEqual(restored.connectionLibrary.connections.map(\.id), [first.id])
+            XCTAssertTrue(restored.configurationSummary.contains("No service selected"))
+        }
+    }
+
+    @MainActor
+    func testDeletingLastServiceDoesNotRemigrate() throws {
+        try withSettings { settings, defaults, keys in
+            let id = try XCTUnwrap(settings.connectionLibrary.selectedID)
+            try settings.deleteAIConnection(id: id)
+            XCTAssertTrue(settings.connectionLibrary.connections.isEmpty)
+            let restored = AppSettings(defaults: defaults, keyStore: keys.store)
+            XCTAssertTrue(restored.connectionLibrary.connections.isEmpty)
+            XCTAssertNil(restored.connectionLibrary.selectedID)
+        }
+    }
+
+    @MainActor
+    func testDuplicateServiceCopiesKeyOntoANewAccount() throws {
+        try withSettings { settings, _, keys in
+            settings.apiKeyDraft = "fixture-shared-shape"
+            try settings.saveAPIKey()
+            let source = try XCTUnwrap(settings.connectionLibrary.selected)
+            let copy = try settings.duplicateAIConnection(id: source.id)
+            XCTAssertEqual(copy.name, "\(source.name) copy")
+            XCTAssertNotEqual(copy.id, source.id)
+            XCTAssertEqual(settings.providerConfiguration().apiKey, "fixture-shared-shape")
+            XCTAssertEqual(keys.values[AppSettings.connectionKeyAccount(id: copy.id)], "fixture-shared-shape")
+            settings.apiKeyDraft = "fixture-copy-only"
+            try settings.saveAPIKey()
+            try settings.selectAIConnection(id: source.id)
+            XCTAssertEqual(settings.providerConfiguration().apiKey, "fixture-shared-shape")
+        }
+    }
+
+    @MainActor
+    func testServiceNamesAreValidatedAndUnreadableLibraryIsPreserved() throws {
+        try withSettings { settings, _, _ in
+            XCTAssertThrowsError(try settings.addAIConnection(name: "openai"))
+            XCTAssertThrowsError(try settings.addAIConnection(name: "  "))
+            XCTAssertThrowsError(try settings.addAIConnection(name: String(repeating: "x", count: 81)))
+            try settings.addAIConnection(name: "Hive")
+            XCTAssertEqual(settings.connectionLibrary.connections.count, 2)
+        }
+        try withDefaults { defaults, keys in
+            let unreadable = Data("incomplete preferences".utf8)
+            defaults.set(unreadable, forKey: AIConnectionLibrary.defaultsKey)
+            let settings = AppSettings(defaults: defaults, keyStore: keys.store)
+            XCTAssertEqual(settings.connectionLibraryIssue, AIConnectionLibrary.unreadableMessage)
+            XCTAssertTrue(settings.connectionLibrary.connections.isEmpty)
+            XCTAssertThrowsError(try settings.addAIConnection(name: "Hive"))
+            XCTAssertEqual(defaults.data(forKey: AIConnectionLibrary.defaultsKey), unreadable)
+            XCTAssertEqual(settings.providerConfiguration().apiKey, "")
         }
     }
 

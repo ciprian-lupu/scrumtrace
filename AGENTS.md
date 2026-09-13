@@ -185,6 +185,8 @@ Code leftovers from `SCRUMTRACE_AUDIT.md` that can be done without a Mac or Appl
 
 Product contexts are a saved library in General. Start/⌘N confirms one (or No context) before capture-area selection. Copy the confirmed value into the session; never look up a current profile when retrying old sessions. The previous single context migrates once. Automatic selection is deferred to v2.
 
+AI keys are a saved library of named services in Settings → AI. Only the selected service supplies provider, endpoint, model, and key. The previous single provider setting migrates once. Keys stay on the service id, not the endpoint host. Never log keys.
+
 Settings is a six-tab window (Speech, Capture, Logs, Permissions, AI, General). Start recording opens a macOS-style overlay (dashed rectangle, move/resize, Record / Entire Display / Cancel; Return confirms the key display) and does not request Screen Recording from that click. Capture can turn the pointer and microphone off for the next session.
 
 ### Plan-deferred (leave alone)

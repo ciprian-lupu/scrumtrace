@@ -3197,6 +3197,39 @@ def test_claude_cli_handoff() -> None:
     assert not (ROOT / "ScrumTrace" / "Export" / "CursorHandoff.swift").exists()
 
 
+def test_ai_connection_library() -> None:
+    connections = (ROOT / "ScrumTrace" / "App" / "AIConnections.swift").read_text()
+    assert "struct SavedAIConnection" in connections
+    assert "struct AIConnectionLibrary" in connections
+    assert 'static let defaultsKey = "scrumtrace.aiConnections.v1"' in connections
+    assert "fallbackKeyAccount" in connections
+    settings = (ROOT / "ScrumTrace" / "App" / "AppSettings.swift").read_text()
+    assert '"ai.apiKey.connection.\\(id)"' in settings
+    assert "func selectAIConnection" in settings
+    assert "func saveAIConnection" in settings
+    assert "func deleteAIConnection" in settings
+    assert "func duplicateAIConnection" in settings
+    assert "Select or add a service before saving a key." in settings
+    assert "No service selected." in settings
+    assert "No saved key for this service." in settings
+    assert "connectionLibrary.selected" in settings.split("func providerConfiguration")[1].split("var configurationIssue")[0]
+    ui = (ROOT / "ScrumTrace" / "UI" / "SettingsView.swift").read_text()
+    assert "AIConnectionsSettingsView" in ui
+    assert "Stored for this service" in ui
+    assert "Selected service" in ui
+    views = (ROOT / "ScrumTrace" / "UI" / "AIConnectionViews.swift").read_text()
+    assert "Active service" in views
+    assert "No service" in views
+    assert "New service…" in views
+    assert "Duplicate" in views
+    assert "Delete service" in views
+    readme = (ROOT / "README.md").read_text()
+    assert "Only the selected service is used for analysis" in readme
+    agents = (ROOT / "AGENTS.md").read_text()
+    assert "named services" in agents
+    assert "Never log keys" in agents
+
+
 def test_sanitize_untrusted_strips_whitespace_breakout() -> None:
     prompts = (ROOT / "ScrumTrace" / "AI" / "PromptTemplates.swift").read_text()
     sanitize_fn = prompts.split("func sanitizeUntrusted")[1].split("func evaluationUserPrompt")[0]
@@ -3241,6 +3274,7 @@ def main() -> None:
     test_write_contained_data_refuses_directory_symlinks()
     test_audit_leftovers_are_implemented()
     test_claude_cli_handoff()
+    test_ai_connection_library()
     test_sanitize_untrusted_strips_whitespace_breakout()
     print("contract tests ok")
 

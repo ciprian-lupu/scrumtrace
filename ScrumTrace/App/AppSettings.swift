@@ -56,20 +56,22 @@ final class AppSettings: ObservableObject {
     private let keyStore: SettingsKeyStore
     private let legacyCredentialScope: String
 
-    /// The legacy key belongs only to the provider/endpoint selected on upgrade.
-    /// New saves are scoped so switching a backend cannot reuse another service's key.
-    private var credentialScope: String { Self.credentialScope(provider: provider, endpoint: baseURL) }
-    private var keyAccount: String { "ai.apiKey.\(credentialScope)" }
+    /// Host-scoped accounts remain only as import fallbacks for one migrated service.
+    private var applyingConnection = false
+    @Published private(set) var connectionLibrary: AIConnectionLibrary
+    let connectionLibraryIssue: String?
     @Published private(set) var hasSavedAPIKey = false
 
     @Published var provider: AIProviderKind {
         didSet {
             guard provider != oldValue else { return }
             defaults.set(provider.rawValue, forKey: Keys.provider)
-            let endpoint = defaults.string(forKey: Keys.profile(provider, "baseURL")) ?? provider.defaultBaseURL
-            let selectedModel = defaults.string(forKey: Keys.profile(provider, "model")) ?? provider.defaultModel
-            baseURL = endpoint
-            model = selectedModel
+            if applyingConnection { return }
+            applyingConnection = true
+            baseURL = provider.defaultBaseURL
+            model = provider.defaultModel
+            applyingConnection = false
+            persistSelectedConnectionFields()
             apiKeyDraft = ""
             refreshKeyStatus()
         }
@@ -79,10 +81,10 @@ final class AppSettings: ObservableObject {
         didSet {
             defaults.set(baseURL, forKey: Keys.baseURL)
             defaults.set(baseURL, forKey: Keys.profile(provider, "baseURL"))
-            if Self.credentialScope(provider: provider, endpoint: oldValue) != credentialScope {
-                apiKeyDraft = ""
-                refreshKeyStatus()
-            }
+            if applyingConnection { return }
+            persistSelectedConnectionFields()
+            apiKeyDraft = ""
+            refreshKeyStatus()
         }
     }
 
@@ -90,6 +92,8 @@ final class AppSettings: ObservableObject {
         didSet {
             defaults.set(model, forKey: Keys.model)
             defaults.set(model, forKey: Keys.profile(provider, "model"))
+            if applyingConnection { return }
+            persistSelectedConnectionFields()
         }
     }
 
@@ -176,8 +180,41 @@ final class AppSettings: ObservableObject {
         self.showCursor = defaults.object(forKey: Keys.showCursor) as? Bool ?? true
         self.includeMicrophone = defaults.object(forKey: Keys.includeMicrophone) as? Bool ?? true
         self.apiKeyDraft = ""
-        defaults.set(endpoint, forKey: Keys.profile(selectedProvider, "baseURL"))
-        defaults.set(selectedModel, forKey: Keys.profile(selectedProvider, "model"))
+        let loaded = AIConnectionLibrary.load(from: defaults)
+        self.connectionLibraryIssue = loaded.issue
+        if loaded.migrated {
+            let imported = SavedAIConnection(
+                name: AIConnectionNaming.suggestedName(provider: selectedProvider, endpoint: endpoint),
+                provider: selectedProvider,
+                baseURL: endpoint,
+                model: selectedModel,
+                fallbackKeyAccount: Self.importedFallbackAccount(
+                    provider: selectedProvider,
+                    endpoint: endpoint,
+                    legacyScope: legacyCredentialScope,
+                    keyStore: keyStore
+                )
+            )
+            var library = AIConnectionLibrary()
+            library.connections = [imported]
+            library.selectedID = imported.id
+            if let data = try? JSONEncoder().encode(library) {
+                defaults.set(data, forKey: AIConnectionLibrary.defaultsKey)
+            }
+            self.connectionLibrary = library
+        } else {
+            self.connectionLibrary = loaded.library
+            if let selected = loaded.library.selected {
+                self.provider = selected.provider
+                self.baseURL = selected.baseURL
+                self.model = selected.model
+            }
+        }
+        defaults.set(provider.rawValue, forKey: Keys.provider)
+        defaults.set(baseURL, forKey: Keys.baseURL)
+        defaults.set(model, forKey: Keys.model)
+        defaults.set(baseURL, forKey: Keys.profile(provider, "baseURL"))
+        defaults.set(model, forKey: Keys.profile(provider, "model"))
         defaults.set(legacyCredentialScope, forKey: Keys.legacyCredentialScope)
         refreshKeyStatus()
     }
@@ -238,6 +275,147 @@ final class AppSettings: ObservableObject {
         contextLibrary = library
     }
 
+    func saveAIConnection(_ connection: SavedAIConnection, isNew: Bool) throws {
+        var connection = connection
+        connection.name = connection.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !connection.name.isEmpty, connection.name.count <= 80 else {
+            throw SettingsValidationError("Enter a service name of up to 80 characters.")
+        }
+        guard !connectionLibrary.connections.contains(where: {
+            $0.id != connection.id
+                && $0.name.compare(connection.name, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame
+        }) else {
+            throw SettingsValidationError("A service with this name already exists. Choose a different name.")
+        }
+        var library = connectionLibrary
+        if isNew {
+            guard !connection.id.isEmpty, !library.connections.contains(where: { $0.id == connection.id }) else {
+                throw SettingsValidationError("This service already exists. Reopen the editor.")
+            }
+            connection.fallbackKeyAccount = nil
+            library.connections.append(connection)
+        } else {
+            guard let index = library.connections.firstIndex(where: { $0.id == connection.id }) else {
+                throw SettingsValidationError("This service was deleted. Close the editor and add a new service.")
+            }
+            library.connections[index].name = connection.name
+        }
+        try persistConnections(library)
+    }
+
+    @discardableResult
+    func addAIConnection(
+        name: String,
+        provider: AIProviderKind = .openaiCompatible,
+        baseURL: String? = nil,
+        model: String? = nil
+    ) throws -> SavedAIConnection {
+        let connection = SavedAIConnection(
+            name: name,
+            provider: provider,
+            baseURL: baseURL ?? provider.defaultBaseURL,
+            model: model ?? provider.defaultModel
+        )
+        try saveAIConnection(connection, isNew: true)
+        try selectAIConnection(id: connection.id)
+        return connection
+    }
+
+    @discardableResult
+    func duplicateAIConnection(id: String) throws -> SavedAIConnection {
+        guard let source = connectionLibrary.connections.first(where: { $0.id == id }) else {
+            throw SettingsValidationError("This service is no longer available. Choose another service.")
+        }
+        var copy = source
+        copy.id = UUID().uuidString
+        copy.name = uniqueConnectionName(copying: source.name)
+        copy.fallbackKeyAccount = nil
+        try saveAIConnection(copy, isNew: true)
+        if let secret = storedAPIKey(for: source) {
+            try keyStore.set(secret, Self.connectionKeyAccount(id: copy.id))
+        }
+        try selectAIConnection(id: copy.id)
+        return copy
+    }
+
+    func deleteAIConnection(id: String) throws {
+        guard let connection = connectionLibrary.connections.first(where: { $0.id == id }) else {
+            throw SettingsValidationError("This service is no longer available. Choose another service.")
+        }
+        try keyStore.remove(Self.connectionKeyAccount(id: id))
+        if let fallback = connection.fallbackKeyAccount {
+            try keyStore.remove(fallback)
+        }
+        var library = connectionLibrary
+        library.connections.removeAll { $0.id == id }
+        if library.selectedID == id { library.selectedID = nil }
+        try persistConnections(library)
+        apiKeyDraft = ""
+        refreshKeyStatus()
+    }
+
+    /// Explicit nil means "No service"; never substitute another saved service.
+    func selectAIConnection(id: String?) throws {
+        if let connectionLibraryIssue {
+            if id == nil {
+                apiKeyDraft = ""
+                refreshKeyStatus()
+                return
+            }
+            throw SettingsValidationError(connectionLibraryIssue)
+        }
+        guard id == nil || connectionLibrary.connections.contains(where: { $0.id == id }) else {
+            throw SettingsValidationError("The selected service is no longer available. Choose another service.")
+        }
+        var library = connectionLibrary
+        library.selectedID = id
+        try persistConnections(library)
+        applyingConnection = true
+        if let selected = library.selected {
+            provider = selected.provider
+            baseURL = selected.baseURL
+            model = selected.model
+        }
+        applyingConnection = false
+        apiKeyDraft = ""
+        refreshKeyStatus()
+    }
+
+    private func persistConnections(_ library: AIConnectionLibrary) throws {
+        if let connectionLibraryIssue { throw SettingsValidationError(connectionLibraryIssue) }
+        let data = try JSONEncoder().encode(library)
+        defaults.set(data, forKey: AIConnectionLibrary.defaultsKey)
+        connectionLibrary = library
+    }
+
+    private func persistSelectedConnectionFields() {
+        guard !applyingConnection,
+              connectionLibraryIssue == nil,
+              let index = connectionLibrary.connections.firstIndex(where: { $0.id == connectionLibrary.selectedID })
+        else { return }
+        var library = connectionLibrary
+        library.connections[index].provider = provider
+        library.connections[index].baseURL = baseURL
+        library.connections[index].model = model
+        if let data = try? JSONEncoder().encode(library) {
+            defaults.set(data, forKey: AIConnectionLibrary.defaultsKey)
+            connectionLibrary = library
+        }
+    }
+
+    private func uniqueConnectionName(copying name: String) -> String {
+        let base = String(name.prefix(65))
+        var number = 1
+        var candidate = "\(base) copy"
+        while connectionLibrary.connections.contains(where: {
+            $0.name.compare(candidate, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame
+        }) {
+            number += 1
+            candidate = "\(base) copy \(number)"
+        }
+        return candidate
+    }
+
     private func persistCaptureArea() {
         if let data = try? JSONEncoder().encode(captureArea) {
             defaults.set(data, forKey: Keys.captureArea)
@@ -245,31 +423,48 @@ final class AppSettings: ObservableObject {
     }
 
     func saveAPIKey() throws {
+        guard let selected = connectionLibrary.selected else {
+            throw SettingsValidationError("Select or add a service before saving a key.")
+        }
         let trimmed = apiKeyDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { throw SettingsValidationError("Enter a key to save. Use Remove saved key to delete it.") }
         _ = try ProviderEndpoint.requireHTTPSOrLocal(baseURL)
-        try keyStore.set(trimmed, keyAccount)
+        try keyStore.set(trimmed, Self.connectionKeyAccount(id: selected.id))
+        if selected.fallbackKeyAccount != nil {
+            clearFallbackKeyAccount(id: selected.id)
+        }
         apiKeyDraft = ""
         refreshKeyStatus()
     }
 
     func removeSavedAPIKey() throws {
-        try keyStore.remove(keyAccount)
-        if credentialScope == legacyCredentialScope { try keyStore.remove("ai.apiKey") }
+        guard let selected = connectionLibrary.selected else {
+            throw SettingsValidationError("Select or add a service before removing a key.")
+        }
+        try keyStore.remove(Self.connectionKeyAccount(id: selected.id))
+        if let fallback = selected.fallbackKeyAccount {
+            try keyStore.remove(fallback)
+            clearFallbackKeyAccount(id: selected.id)
+        }
         apiKeyDraft = ""
         refreshKeyStatus()
     }
 
     func refreshKeyStatus() {
-        hasSavedAPIKey = keyStore.contains(keyAccount)
-            || (credentialScope == legacyCredentialScope && keyStore.contains("ai.apiKey"))
+        guard let selected = connectionLibrary.selected else {
+            hasSavedAPIKey = false
+            return
+        }
+        hasSavedAPIKey = keyStore.contains(Self.connectionKeyAccount(id: selected.id))
+            || (selected.fallbackKeyAccount.map(keyStore.contains) ?? false)
     }
 
     func providerConfiguration(includeKey: Bool = true) -> AIProviderConfiguration {
         var key = ""
-        if includeKey, (try? ProviderEndpoint.requireHTTPSOrLocal(baseURL)) != nil {
-            key = keyStore.get(keyAccount)
-                ?? (credentialScope == legacyCredentialScope ? keyStore.get("ai.apiKey") : nil) ?? ""
+        if includeKey,
+           let selected = connectionLibrary.selected,
+           (try? ProviderEndpoint.requireHTTPSOrLocal(baseURL)) != nil {
+            key = storedAPIKey(for: selected) ?? ""
         }
         return AIProviderConfiguration(
             kind: provider,
@@ -290,10 +485,45 @@ final class AppSettings: ObservableObject {
     }
 
     var configurationSummary: String {
+        if connectionLibrary.selected == nil {
+            return "No service selected. Add one to use AI analysis. Recording and local export remain available."
+        }
         if let configurationIssue { return configurationIssue }
         return hasSavedAPIKey
             ? "Configured locally. Key validity and model availability have not been checked online."
-            : "No saved key for this endpoint. Recording and local export remain available."
+            : "No saved key for this service. Recording and local export remain available."
+    }
+
+    static func connectionKeyAccount(id: String) -> String {
+        "ai.apiKey.connection.\(id)"
+    }
+
+    private func storedAPIKey(for connection: SavedAIConnection) -> String? {
+        keyStore.get(Self.connectionKeyAccount(id: connection.id))
+            ?? connection.fallbackKeyAccount.flatMap { keyStore.get($0) }
+    }
+
+    private func clearFallbackKeyAccount(id: String) {
+        guard let index = connectionLibrary.connections.firstIndex(where: { $0.id == id }) else { return }
+        var library = connectionLibrary
+        library.connections[index].fallbackKeyAccount = nil
+        if let data = try? JSONEncoder().encode(library) {
+            defaults.set(data, forKey: AIConnectionLibrary.defaultsKey)
+            connectionLibrary = library
+        }
+    }
+
+    private static func importedFallbackAccount(
+        provider: AIProviderKind,
+        endpoint: String,
+        legacyScope: String,
+        keyStore: SettingsKeyStore
+    ) -> String? {
+        let scope = credentialScope(provider: provider, endpoint: endpoint)
+        let hostAccount = "ai.apiKey.\(scope)"
+        if keyStore.contains(hostAccount) { return hostAccount }
+        if scope == legacyScope && keyStore.contains("ai.apiKey") { return "ai.apiKey" }
+        return nil
     }
 
     func applyProviderDefaults() {
