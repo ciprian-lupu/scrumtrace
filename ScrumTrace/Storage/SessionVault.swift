@@ -218,7 +218,7 @@ final class SessionVault: @unchecked Sendable {
     /// Real session-directory names only. `contentsOfDirectory(atPath:)` plus a
     /// later `isUsableSessionRoot` still briefly treats a planted `<id>` symlink
     /// as a candidate; skip those names here.
-    private func listedSessionIds() -> [String] {
+    func listedSessionIds() -> [String] {
         guard ExportRel.isUsableSessionRoot(rootURL) else { return [] }
         let children = (try? fileManager.contentsOfDirectory(
             at: rootURL,

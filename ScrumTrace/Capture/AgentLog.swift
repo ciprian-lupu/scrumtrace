@@ -137,6 +137,41 @@ enum AgentLog {
         }
     }
 
+    /// `recording.lock` as `setRecording` writes it: "<sessionId>\n<pid>\n".
+    struct RecordingLock: Equatable, Sendable {
+        let sessionId: String
+        let pid: Int32
+    }
+
+    /// Nil unless the text has a session line followed by a positive pid line.
+    static func parseRecordingLock(_ text: String) -> RecordingLock? {
+        let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
+        guard lines.count >= 2,
+              let pid = Int32(lines[1].trimmingCharacters(in: .whitespacesAndNewlines)),
+              pid > 0 else { return nil }
+        return RecordingLock(sessionId: lines[0].trimmingCharacters(in: .whitespacesAndNewlines), pid: pid)
+    }
+
+    /// The lock of a live recording. Nil when the file is missing, a symlink or malformed, or
+    /// when it names a dead pid: that lock is stale, as `mac_agent_loop.sh` treats it. Read-only
+    /// on purpose, because a recording that is starting may be replacing the file.
+    static func liveRecordingLock(
+        at url: URL = AgentLog.recordingLockURL,
+        isAlive: (Int32) -> Bool = AgentLog.isProcessAlive
+    ) -> RecordingLock? {
+        guard let text = ExportRel.unfollowedUTF8Text(url, maxBytes: 4_096),
+              let lock = parseRecordingLock(text),
+              isAlive(lock.pid) else { return nil }
+        return lock
+    }
+
+    /// `kill(pid, 0)` sends no signal. EPERM means the process exists but belongs to another user.
+    static func isProcessAlive(_ pid: Int32) -> Bool {
+        guard pid > 0 else { return false }
+        if kill(pid, 0) == 0 { return true }
+        return errno == EPERM
+    }
+
     static func readTail(maxLines: Int = 250, runID: String? = nil, query: String = "", newestFirst: Bool = false) -> String {
         guard FileManager.default.fileExists(atPath: fileURL.path),
               let data = try? Data(contentsOf: fileURL),
