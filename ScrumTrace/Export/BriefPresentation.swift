@@ -60,6 +60,7 @@ struct BriefPresentation {
     }
 
     var summaryHTML: String {
+        if !ComparisonReport.rows(manifest).isEmpty { return ComparisonReport.html(manifest) }
         let introduction: String
         if !confirmed.isEmpty {
             introduction = "Highlights from the selected evidence. Follow each item to its supporting clip, image and quotes."

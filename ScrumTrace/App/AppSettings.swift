@@ -204,17 +204,7 @@ final class AppSettings: ObservableObject {
             }
             self.connectionLibrary = library
         } else {
-            var library = loaded.library
-            // One-service installs predate comparison selection. Preserve the
-            // existing behavior by selecting the previously active service once.
-            if !library.connections.contains(where: \.isIncludedInComparison),
-               let selectedID = library.selectedID,
-               let index = library.connections.firstIndex(where: { $0.id == selectedID }) {
-                library.connections[index].isIncludedInComparison = true
-                if let data = try? JSONEncoder().encode(library) {
-                    defaults.set(data, forKey: AIConnectionLibrary.defaultsKey)
-                }
-            }
+            let library = loaded.library
             self.connectionLibrary = library
             if let selected = library.selected {
                 self.provider = selected.provider
@@ -410,8 +400,8 @@ final class AppSettings: ObservableObject {
                 model: connection.model.trimmingCharacters(in: .whitespacesAndNewlines),
                 apiKey: storedAPIKey(for: connection) ?? "",
                 acceptsText: true,
-                acceptsImages: connection.provider != .anthropic || !connection.model.isEmpty,
-                acceptsVideo: ProviderWireMedia.adapterCanUploadVideo(connection.provider) && allowGoogleClipUpload
+                acceptsImages: true,
+                acceptsVideo: false
             )
             return AIServiceConfiguration(service: connection, configuration: configuration)
         }

@@ -92,7 +92,7 @@ WhisperKit's prefill cache is disabled for decoding because it produced empty 30
 
 The exported brief shows speaker labels and clickable passages within each selected clip. Estimates, unclear passages and overlapping voices remain marked for review. Use headphones to reduce call audio leaking into the room microphone. Real multi-person accuracy and long-run synchronization still need hardware validation; local tests do not close those gates.
 
-In **AI**, save each provider as a named service (Hive, DeepSeek, OpenAI, and so on) with its own endpoint, model, and key. Only the selected service is used for analysis. Saved keys are not displayed again. The previous single provider setting is imported once. **Logs** filters the current run and can export diagnostics. **General** explains retention: completed recordings are removed on the next launch when their retention period expires; **Forever** keeps them.
+In **AI**, save each provider as a named service (Hive, DeepSeek, OpenAI, and so on) with its own endpoint, model, and key. Only explicitly checked services are used for comparison analysis. Saved keys are not displayed again. The previous single provider setting is imported once. **Logs** filters the current run and can export diagnostics. **General** explains retention: completed recordings are removed on the next launch when their retention period expires; **Forever** keeps them.
 
 ## Hotkeys
 
@@ -141,3 +141,18 @@ Use the fill-in log at [`samples/GATE_LOG.md`](samples/GATE_LOG.md). Linux tests
 2. Phase 0–1: Keynote focus; 20 min record, 3 pauses, all-source pause token test (screen, system audio, mic, Shot, Hold-to-Talk)
 3. Phase 3: WhisperKit elapsed time on a named Mac; confirm `full_transcript.json` `sources` includes room and system when both were captured
 4. Phase 4–6: ≤ 12 slices; measured zip ≤ 35 MB; consent / evidence; remaining `AGENT_CONTEXT.md` paths exist
+
+
+### Comparing services and models
+
+In Settings → AI, add a named service for each endpoint/model combination. Duplicate a service to compare another model at the same endpoint, then edit its model and save. The active service controls editing and connection testing; the comparison checkboxes control uploads. Unchecking all services stays local, including after relaunch.
+
+Record once, then approve the listed destinations at Stop. Every selected, configured service evaluates every slice serially using the same system/user prompts, transcript excerpt, notes, context and up to four JPEG stills. Comparison excludes video for all providers. The HTTP envelope and provider-specific structured-output controls still differ; model outputs are not deterministic.
+
+The brief and AGENT_CONTEXT include a per-slice/service status table and SHA-256 input fingerprints. Results stay grouped by service/model; there is no consensus or ranking across models. A successful empty candidate response is still a completed evaluation, with any local evidence review shown separately.
+
+Retry Analysis resumes unfinished pairs and preserves successful results for unchanged destinations. Adding a service asks for consent again and evaluates only the new service plus unfinished pairs. Changing a model or endpoint invalidates that service's results. Missing keys/configuration skip that service; HTTP 401/403 stops all remaining uploads for that attempt.
+
+The fingerprint includes the exact prompts and encoded image bytes. If evidence or prompts changed between attempts, Retry refuses the changed input before uploading it and reports `comparison_input_changed`; existing results stay available. Start a new recording for revised evidence. Older results without fingerprints must be evaluated once with the new implementation before they count as verified comparisons. No transcript, image payload or API key is included in the fingerprint table.
+
+Verification uses synthetic providers and temporary sessions. A live multi-provider session still requires configured keys, explicit upload consent and inspection of the resulting export; software tests do not close hardware gates.

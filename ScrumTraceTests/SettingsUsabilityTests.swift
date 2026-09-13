@@ -227,6 +227,16 @@ final class SettingsUsabilityTests: XCTestCase {
     }
 
     @MainActor
+    func testDeselectedServicesStayDeselectedAfterRelaunch() throws {
+        try withSettings { settings, defaults, keys in
+            let id = try XCTUnwrap(settings.connectionLibrary.selectedID)
+            try settings.setComparisonIncluded(false, id: id)
+            let reloaded = AppSettings(defaults: defaults, keyStore: keys.store)
+            XCTAssertTrue(reloaded.comparisonServiceConfigurations.isEmpty)
+        }
+    }
+
+    @MainActor
     func testServiceNamesAreValidatedAndUnreadableLibraryIsPreserved() throws {
         try withSettings { settings, _, _ in
             XCTAssertThrowsError(try settings.addAIConnection(name: "openai"))

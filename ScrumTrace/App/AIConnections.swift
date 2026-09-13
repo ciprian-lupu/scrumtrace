@@ -59,6 +59,13 @@ struct AIConnectionLibrary: Codable, Equatable, Sendable {
                   }) else {
                 return (Self(), unreadableMessage, false)
             }
+            if let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let rows = object["connections"] as? [[String: Any]],
+               rows.allSatisfy({ $0["is_included_in_comparison"] == nil }),
+               let index = library.connections.firstIndex(where: { $0.id == library.selectedID }) {
+                library.connections[index].isIncludedInComparison = true
+                if let migrated = try? JSONEncoder().encode(library) { defaults.set(migrated, forKey: defaultsKey) }
+            }
             if library.selected == nil { library.selectedID = nil }
             return (library, nil, false)
         }
@@ -76,10 +83,10 @@ struct AIServiceConfiguration: Sendable {
         UploadDestination(
             serviceId: service.id,
             serviceName: service.name,
-            provider: service.provider.rawValue,
-            endpoint: service.baseURL.trimmingCharacters(in: .whitespacesAndNewlines),
-            model: service.model.trimmingCharacters(in: .whitespacesAndNewlines),
-            includesClipVideo: ProviderWireMedia.willUploadClip(configuration: configuration)
+            provider: configuration.kind.rawValue,
+            endpoint: configuration.baseURL.trimmingCharacters(in: .whitespacesAndNewlines),
+            model: configuration.model.trimmingCharacters(in: .whitespacesAndNewlines),
+            includesClipVideo: false
         )
     }
 }

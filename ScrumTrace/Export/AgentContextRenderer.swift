@@ -16,6 +16,7 @@ struct AgentContextRenderer {
         lines.append("- Stack: \(PromptTemplates.wrapUntrustedInline(manifest.productContext.techStack))")
         lines.append("- Media duration: \(Self.clock(manifest.duration.mediaSeconds)) (wall \(Self.clock(manifest.duration.wallSeconds)), \(Self.pauseLabel(manifest.pauses.count)))")
         lines.append("")
+        lines.append(ComparisonReport.markdown(manifest))
         let confirmed = manifest.tasks.filter { $0.status == .confirmed }
         let review = manifest.tasks.filter { $0.status == .needsReview }
         lines.append("## Confirmed findings by service/model")
@@ -125,11 +126,13 @@ struct AgentContextRenderer {
 
     private func appendGrouped(_ tasks: [TaskRecord], to lines: inout [String], manifest: SessionManifest, sessionURL: URL) {
         let groups = Dictionary(grouping: tasks) { task in
-            task.serviceId.map { "\($0)|\(task.serviceName ?? "Unknown service")|\(task.serviceModel ?? "unknown")" } ?? "local|Local review|No model"
+            task.serviceId ?? "local"
         }
         for key in groups.keys.sorted() {
-            let parts = key.split(separator: "|", maxSplits: 2).map(String.init)
-            lines.append("### \(PromptTemplates.wrapUntrustedInline(parts[1])) — `\(PromptTemplates.wrapUntrustedInline(parts[2]))`")
+            let first = groups[key]?.first
+            let name = first?.serviceName ?? "Local review"
+            let model = first?.serviceModel ?? "No model"
+            lines.append("### \(PromptTemplates.wrapUntrustedInline(name)) — `\(PromptTemplates.wrapUntrustedInline(model))`")
             for task in groups[key] ?? [] {
                 let status = manifest.slices.first { $0.sliceId == task.sourceSliceId }?.serviceEvaluations.first { $0.serviceId == task.serviceId }?.status
                     ?? manifest.slices.first { $0.sliceId == task.sourceSliceId }?.analysisStatus

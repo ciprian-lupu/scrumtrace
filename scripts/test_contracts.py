@@ -1889,8 +1889,8 @@ def test_phase45_clip_consent_and_budget() -> None:
     controller_src = (ROOT / "ScrumTrace" / "Processing" / "SessionController.swift").read_text()
     assert "Privacy_ScreenCapture" in controller_src
     assert "enum SystemPrivacySettings" in controller_src
-    assert "capabilities.acceptsText" in settings
-    assert "willUploadClip" in settings
+    assert 'Section("Comparison input")' in settings
+    assert "no — identical input comparison" in settings
     assert "Save key" in settings
     assert "Key saved on this Mac" in settings
     models = (ROOT / "ScrumTrace" / "Storage" / "SessionModels.swift").read_text()
@@ -2048,9 +2048,10 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "readContainedData" in payload
     assert "NSImage(data:" in payload
     assert "NSImage(contentsOf:" not in payload
-    assert "sessionRoot: request.sessionURL" in openai
-    assert "sessionRoot: request.sessionURL" in anthropic
-    assert "sessionRoot: request.sessionURL" in google
+    # Every adapter uses the same contained JPEG encoder, or the frozen comparison payload.
+    for adapter in (openai, anthropic, google):
+        assert "request.imagePayloads" in adapter
+    assert "ImageBase64.jpegPayload(url: $0, sessionRoot: sessionURL)" in protocol_src
     assert "mp4BodyURL" in openai
     assert "mp4BodyURL" in anthropic
     assert "mp4BodyURL" in google
@@ -3224,7 +3225,7 @@ def test_ai_connection_library() -> None:
     assert "Duplicate" in views
     assert "Delete service" in views
     readme = (ROOT / "README.md").read_text()
-    assert "Only the selected service is used for analysis" in readme
+    assert "Only explicitly checked services are used for comparison analysis" in readme
     agents = (ROOT / "AGENTS.md").read_text()
     assert "named services" in agents
     assert "Never log keys" in agents

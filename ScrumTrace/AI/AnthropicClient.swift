@@ -23,26 +23,18 @@ struct AnthropicClient: AIProvider {
         }
 
         var content: [[String: Any]] = [
-            ["type": "text", "text": PromptTemplates.evaluationUserPrompt(
-                product: request.product,
-                slice: request.slice,
-                transcript: request.transcriptExcerpt,
-                shotNote: request.shotNote,
-                windowContext: request.windowContext
-            )]
+            ["type": "text", "text": request.userPrompt]
         ]
         if configuration.acceptsImages {
-            for imageURL in request.imageURLs.prefix(4) {
-                if let payload = ImageBase64.jpegPayload(url: imageURL, sessionRoot: request.sessionURL) {
-                    content.append([
-                        "type": "image",
-                        "source": [
-                            "type": "base64",
-                            "media_type": payload.mime,
-                            "data": payload.base64
-                        ]
-                    ])
-                }
+            for payload in request.imagePayloads {
+                content.append([
+                    "type": "image",
+                    "source": [
+                        "type": "base64",
+                        "media_type": payload.mime,
+                        "data": payload.base64
+                    ]
+                ])
             }
         }
 
@@ -50,7 +42,7 @@ struct AnthropicClient: AIProvider {
             "model": configuration.model,
             "max_tokens": 4096,
             "temperature": 0.1,
-            "system": PromptTemplates.system,
+            "system": request.systemPrompt,
             "messages": [["role": "user", "content": content]]
         ]
 

@@ -54,7 +54,7 @@ struct AIConnectionsSettingsView: View {
                         .accessibilityIdentifier("ai.comparison.\(connection.id)")
                         .accessibilityLabel("Include \(connection.name) in multi-model comparison")
                     }
-                    Text("Each selected destination is shown again for approval at Stop. Keys remain separate in Keychain.")
+                    Text("Every selected model receives identical prompts, transcript excerpts and up to four JPEG stills. Comparison excludes video. Duplicate a service to compare another model. Each destination requires approval at Stop.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }

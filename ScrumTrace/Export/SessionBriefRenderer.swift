@@ -203,14 +203,16 @@ struct SessionBriefRenderer {
 
     private func groupedTaskCards(_ tasks: [TaskRecord], excerpts: [String: String], sessionURL: URL, omitted: [OmittedAsset], manifest: SessionManifest, transcript: FullTranscript?) -> String {
         let groups = Dictionary(grouping: tasks) { task in
-            task.serviceId.map { "\($0)|\(task.serviceName ?? "Unknown service")|\(task.serviceModel ?? "unknown")" } ?? "local|Local review|No model"
+            task.serviceId ?? "local"
         }
         return groups.keys.sorted().map { key in
-            let parts = key.split(separator: "|", maxSplits: 2).map(String.init)
+            let first = groups[key]?.first
+            let name = first?.serviceName ?? "Local review"
+            let model = first?.serviceModel ?? "No model"
             let cards = (groups[key] ?? []).map { task in
                 taskCard(task, excerpts: excerpts, sessionURL: sessionURL, omitted: omitted, slice: manifest.slices.first { $0.sliceId == task.sourceSliceId }, transcript: transcript)
             }.joined()
-            return "<section class=\"model-results\"><h3>\(HTMLEscaper.escape(parts[1])) <span class=\"muted\">· \(HTMLEscaper.escape(parts[2]))</span></h3>\(cards)</section>"
+            return "<section class=\"model-results\"><h3>\(HTMLEscaper.escape(name)) <span class=\"muted\">· \(HTMLEscaper.escape(model))</span></h3>\(cards)</section>"
         }.joined()
     }
 

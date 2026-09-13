@@ -2292,9 +2292,14 @@ struct SliceServiceEvaluation: Codable, Sendable, Hashable, Identifiable {
     var model: String
     var status: SliceAnalysisStatus
     var mediaSent: [String]
+    var inputFingerprint: String? = nil
+    var destination: UploadDestination? = nil
+    var diagnostic: String? = nil
     var id: String { serviceId }
 
     enum CodingKeys: String, CodingKey {
+        case inputFingerprint = "input_fingerprint"
+        case destination, diagnostic
         case serviceId = "service_id"
         case serviceName = "service_name"
         case provider, model, status

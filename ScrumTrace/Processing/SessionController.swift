@@ -719,28 +719,32 @@ final class SessionController: ObservableObject {
                     local = memory
                 }
             }
+            let services = settings.comparisonServiceConfigurations
             if var local {
                 local.includeFullTranscriptInZip = settings.includeFullTranscriptInZip
-                let services = settings.comparisonServiceConfigurations
                 let destinations = services.map(\.destination)
                 let hasAPIKey = services.contains { !$0.configuration.apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
                 // No key means nothing can leave this Mac; asking a first-time
                 // local-only user to approve an upload would only confuse them.
-                if !hasAPIKey {
+                if services.isEmpty {
+                    local.uploadConsent = .denied
+                } else if !hasAPIKey {
+                    local.uploadConsent.approved = false
                     AgentLog.event("consent_skipped", ["reason": "key_missing"])
-                } else if local.uploadConsent.needsReprompt(destinations: destinations) {
+                } else if !local.uploadConsent.approved || local.uploadConsent.needsReprompt(destinations: destinations) {
                     let previous = local.uploadConsent
                     let askedBefore = !previous.destinations.isEmpty || !previous.provider.isEmpty
                     local.uploadConsent = requestUploadConsent(destinations: destinations)
-                    if askedBefore && (previous.needsReprompt(destinations: destinations)
+                    if local.uploadConsent.approved && askedBefore && (previous.needsReprompt(destinations: destinations)
                         || previous.includesClipVideo != local.uploadConsent.includesClipVideo) {
                         local.completedStages.removeAll {
                             $0 == .evaluating || $0 == .synthesizing || $0 == .completed
                         }
-                        local.tasks = []
+                        let unchanged = Set(destinations.filter { previous.destinations.contains($0) }.map(\.serviceId))
+                        local.tasks.removeAll { !unchanged.contains($0.serviceId ?? "") }
                         for index in local.slices.indices {
                             local.slices[index].analysisStatus = .pending
-                            local.slices[index].serviceEvaluations = []
+                            local.slices[index].serviceEvaluations.removeAll { !unchanged.contains($0.serviceId) }
                         }
                     }
                 }
@@ -754,8 +758,8 @@ final class SessionController: ObservableObject {
             let result = try await processor?.process(
                 sessionId: sessionId,
                 pinTimes: pins,
-                configuration: settings.comparisonServiceConfigurations.first?.configuration ?? settings.providerConfiguration(includeKey: false),
-                serviceConfigurations: settings.comparisonServiceConfigurations,
+                configuration: services.first?.configuration ?? settings.providerConfiguration(includeKey: false),
+                serviceConfigurations: services,
                 whisperModel: settings.whisperModel,
                 identifySpeakers: settings.identifySpeakers,
                 onStatus: { [weak self] status, line in

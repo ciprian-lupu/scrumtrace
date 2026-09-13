@@ -16,24 +16,16 @@ struct GoogleClient: AIProvider {
         }
 
         var parts: [[String: Any]] = [
-            ["text": PromptTemplates.evaluationUserPrompt(
-                product: request.product,
-                slice: request.slice,
-                transcript: request.transcriptExcerpt,
-                shotNote: request.shotNote,
-                windowContext: request.windowContext
-            )]
+            ["text": request.userPrompt]
         ]
         if configuration.acceptsImages {
-            for imageURL in request.imageURLs.prefix(4) {
-                if let payload = ImageBase64.jpegPayload(url: imageURL, sessionRoot: request.sessionURL) {
-                    parts.append([
-                        "inline_data": [
-                            "mime_type": payload.mime,
-                            "data": payload.base64
-                        ]
-                    ])
-                }
+            for payload in request.imagePayloads {
+                parts.append([
+                    "inline_data": [
+                        "mime_type": payload.mime,
+                        "data": payload.base64
+                    ]
+                ])
             }
         }
         if let clip = ProviderWireMedia.mp4BodyURL(configuration: configuration, request: request),
@@ -48,7 +40,7 @@ struct GoogleClient: AIProvider {
 
         let body: [String: Any] = [
             "systemInstruction": [
-                "parts": [["text": PromptTemplates.system]]
+                "parts": [["text": request.systemPrompt]]
             ],
             "contents": [["role": "user", "parts": parts]],
             "generationConfig": [
