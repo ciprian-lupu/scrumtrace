@@ -164,6 +164,9 @@ final class MenuBarController: NSObject {
         let compareSpeech = actionItem("Compare transcriptions", #selector(compareTranscriptions))
         compareSpeech.isEnabled = controller.lastSessionId != nil && controller.canChangeCaptureSettings
         menu.addItem(compareSpeech)
+        let reviewSpeech = actionItem("Review transcription results", #selector(reviewTranscriptions))
+        reviewSpeech.isEnabled = controller.lastSessionId != nil && controller.canChangeCaptureSettings
+        menu.addItem(reviewSpeech)
         let reveal = actionItem("Reveal last session", #selector(reveal))
         reveal.isEnabled = controller.lastSessionId != nil
         menu.addItem(reveal)
@@ -422,6 +425,11 @@ final class MenuBarController: NSObject {
         guard let id = controller.lastSessionId else { return }
         AgentLog.event("menu_transcription_compare", ["session": id])
         controller.compareTranscriptions(sessionId: id)
+    }
+    @objc private func reviewTranscriptions() {
+        guard let id = controller.lastSessionId else { return }
+        AgentLog.event("menu_transcription_review", ["session": id])
+        controller.reviewTranscriptions(sessionId: id)
     }
     @objc private func reveal() {
         AgentLog.event("menu_reveal", [:])

@@ -340,7 +340,7 @@ final class SessionController: ObservableObject {
         guard !successful.isEmpty else { return }
         let alert = NSAlert()
         alert.messageText = "Transcription comparison complete"
-        alert.informativeText = "Choose a result to make it the primary transcript. Existing transcripts and comparison runs stay in the private archive. Selecting a new primary clears dependent slices and AI analysis; you can then run Retry Analysis."
+        alert.informativeText = transcriptionReviewText(sessionId: sessionId, runs: successful) + "\n\nChoose a timestamped result to make it primary. Existing results stay in the private archive."
         for run in successful {
             alert.addButton(withTitle: "Use \(run.configuration.name) · \(run.resolvedModel ?? run.configuration.requestedModel)")
         }
@@ -349,6 +349,32 @@ final class SessionController: ObservableObject {
         guard successful.indices.contains(choice) else { return }
         selectPrimaryTranscription(sessionId: sessionId, runID: successful[choice].id)
         #endif
+    }
+
+    /// Reopens private comparison evidence without starting a new request.
+    /// It deliberately renders a compact preview only; archive run files never
+    /// enter export/ until a timestamped choice is promoted and reprocessed.
+    func reviewTranscriptions(sessionId: String) {
+        #if os(macOS)
+        let runs = TranscriptionRunStore.load(sessionURL: vault.sessionURL(id: sessionId))
+        guard !runs.isEmpty else { statusLine = "No saved transcription comparisons for this session."; return }
+        let alert = NSAlert()
+        alert.messageText = "Saved transcription results"
+        alert.informativeText = transcriptionReviewText(sessionId: sessionId, runs: runs)
+        alert.addButton(withTitle: "Done")
+        alert.runModal()
+        #endif
+    }
+
+    private func transcriptionReviewText(sessionId: String, runs: [TranscriptionRun]) -> String {
+        let sessionURL = vault.sessionURL(id: sessionId)
+        return runs.map { run in
+            let transcript = TranscriptionRunStore.loadTranscript(id: run.id, sessionURL: sessionURL)
+            let timestamps = transcript?.hasTimedSegments == true ? "timestamps: available" : "timestamps: unavailable (cannot promote)"
+            let input = run.inputs.map { "\($0.source) · \($0.transform) · \($0.bytes) bytes" }.joined(separator: "; ")
+            let preview = (transcript?.segments.map(\.text).joined(separator: " ") ?? transcript?.untimedText ?? "").prefix(280)
+            return "\(run.configuration.name) · requested \(run.configuration.requestedModel)\nstatus: \(run.status.rawValue) · duration: \(Int(run.processingSeconds ?? 0))s · \(timestamps)\naudio: \(input)\n\(preview)"
+        }.joined(separator: "\n\n")
     }
 
     func updateSpeakers(sessionId: String, names: [String: String]? = nil, assignments: [Int: String] = [:], reanalyze: Bool = false) async throws -> FullTranscript {
