@@ -77,9 +77,11 @@ def _run(
         str(session / "archive" / "session.mp4"): 30.0,
         str(session / "archive" / "audio.wav"): 30.0,
     }
+    # The inspector resolves --session; on macOS /var/folders -> /private/var/folders.
+    resolved = {str(Path(key).resolve()): value for key, value in durations.items()}
 
     def fake_duration(path: Path, _probe: str) -> float | None:
-        return durations.get(str(path))
+        return resolved.get(str(Path(path).resolve()))
 
     argv = [
         "inspect_gate_minus0.py",
