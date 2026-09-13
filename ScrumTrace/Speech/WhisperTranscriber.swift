@@ -488,8 +488,8 @@ enum TranscriptQuery {
 }
 
 /// Common meeting languages. Automatic explicitly enables WhisperKit language detection.
-enum SpeechLanguage: String, CaseIterable, Identifiable, Sendable {
-    case automatic, romanian = "ro", english = "en", german = "de", french = "fr", spanish = "es", italian = "it", portuguese = "pt"
+enum SpeechLanguage: String, CaseIterable, Identifiable, Codable, Sendable {
+    case automatic, romanian = "ro", english = "en", hungarian = "hu", german = "de", french = "fr", spanish = "es", italian = "it", portuguese = "pt"
     var id: String { rawValue }
     var code: String? { self == .automatic ? nil : rawValue }
     var title: String {
@@ -497,6 +497,7 @@ enum SpeechLanguage: String, CaseIterable, Identifiable, Sendable {
         case .automatic: return "Detect automatically"
         case .romanian: return "Romanian (Română)"
         case .english: return "English"
+        case .hungarian: return "Hungarian (Magyar)"
         case .german: return "German"
         case .french: return "French"
         case .spanish: return "Spanish"

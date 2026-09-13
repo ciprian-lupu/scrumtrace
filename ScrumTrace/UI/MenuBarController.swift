@@ -161,6 +161,9 @@ final class MenuBarController: NSObject {
         let retry = actionItem("Retry analysis", #selector(retry))
         retry.isEnabled = controller.lastSessionId != nil && controller.canChangeCaptureSettings
         menu.addItem(retry)
+        let compareSpeech = actionItem("Compare transcriptions", #selector(compareTranscriptions))
+        compareSpeech.isEnabled = controller.lastSessionId != nil && controller.canChangeCaptureSettings
+        menu.addItem(compareSpeech)
         let reveal = actionItem("Reveal last session", #selector(reveal))
         reveal.isEnabled = controller.lastSessionId != nil
         menu.addItem(reveal)
@@ -202,6 +205,14 @@ final class MenuBarController: NSObject {
                 retryItem.representedObject = session.sessionId
                 retryItem.target = self
                 retryItem.isEnabled = controller.canChangeCaptureSettings
+                let compareItem = NSMenuItem(
+                    title: "Compare transcriptions",
+                    action: #selector(compareRecentTranscriptions(_:)),
+                    keyEquivalent: ""
+                )
+                compareItem.representedObject = session.sessionId
+                compareItem.target = self
+                compareItem.isEnabled = controller.canChangeCaptureSettings
                 let claudeItem = NSMenuItem(
                     title: "Open in Claude",
                     action: #selector(openRecentInClaude(_:)),
@@ -220,6 +231,7 @@ final class MenuBarController: NSObject {
                 sub.addItem(claudeItem)
                 sub.addItem(chatGPTItem)
                 sub.addItem(retryItem)
+                sub.addItem(compareItem)
                 item.submenu = sub
                 recentMenu.addItem(item)
             }
@@ -406,6 +418,11 @@ final class MenuBarController: NSObject {
         AgentLog.event("menu_retry", [:])
         controller.retryAnalysis()
     }
+    @objc private func compareTranscriptions() {
+        guard let id = controller.lastSessionId else { return }
+        AgentLog.event("menu_transcription_compare", ["session": id])
+        controller.compareTranscriptions(sessionId: id)
+    }
     @objc private func reveal() {
         AgentLog.event("menu_reveal", [:])
         controller.revealLast()
@@ -517,6 +534,12 @@ final class MenuBarController: NSObject {
         guard let id = sender.representedObject as? String else { return }
         AgentLog.event("menu_retry", ["session": id])
         controller.retryAnalysis(sessionId: id)
+    }
+
+    @objc private func compareRecentTranscriptions(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? String else { return }
+        AgentLog.event("menu_transcription_compare", ["session": id])
+        controller.compareTranscriptions(sessionId: id)
     }
 
     @objc private func openRecentInClaude(_ sender: NSMenuItem) {

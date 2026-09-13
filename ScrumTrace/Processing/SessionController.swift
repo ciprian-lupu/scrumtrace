@@ -263,6 +263,89 @@ final class SessionController: ObservableObject {
         Task { await runProcessor(sessionId: sessionId) }
     }
 
+    /// This is intentionally separate from Retry Analysis: it runs only the
+    /// checked speech profiles against the already-recorded canonical audio and
+    /// never replaces the current transcript without a later explicit choice.
+    func compareTranscriptions(sessionId: String) {
+        guard canChangeCaptureSettings, let processor else {
+            statusLine = "Wait for recording or processing to finish."
+            return
+        }
+        let configurations = settings.transcriptionServiceConfigurations(includedOnly: true)
+        guard !configurations.isEmpty else {
+            statusLine = "Choose one or more transcription services in Settings → Speech."
+            return
+        }
+        let cloud = configurations.filter { $0.service.backend.requiresCredential }
+        guard cloud.isEmpty || requestAudioUploadConsent(sessionId: sessionId, services: cloud) else {
+            statusLine = "Transcription comparison kept local; audio was not uploaded."
+            return
+        }
+        isBusy = true; lastSessionId = sessionId; statusLine = "Comparing transcriptions serially…"
+        Task {
+            defer { isBusy = false }
+            do {
+                let runs = try await processor.compareTranscriptions(sessionId: sessionId, configurations: configurations)
+                let succeeded = runs.filter { $0.status == .succeeded }.count
+                statusLine = "Saved \(succeeded) of \(runs.count) transcription comparison results."
+                AgentLog.event("transcription_compare_ok", ["session": sessionId, "runs": String(runs.count), "succeeded": String(succeeded)])
+                presentPrimaryTranscriptionPicker(sessionId: sessionId, runs: runs)
+            } catch {
+                statusLine = error.localizedDescription; lastError = error.localizedDescription
+                AgentLog.event("transcription_compare_fail", ["session": sessionId, "error": AgentLog.sanitize(error.localizedDescription)])
+            }
+        }
+    }
+
+    func selectPrimaryTranscription(sessionId: String, runID: String) {
+        guard canChangeCaptureSettings, let processor else { statusLine = "Wait for recording or processing to finish."; return }
+        do {
+            _ = try processor.selectPrimaryTranscription(sessionId: sessionId, runID: runID)
+            lastSessionId = sessionId
+            statusLine = "Selected transcript is now primary. Re-run analysis to generate results for it."
+        } catch { statusLine = error.localizedDescription; lastError = error.localizedDescription }
+    }
+
+    private func requestAudioUploadConsent(sessionId: String, services: [TranscriptionServiceConfiguration]) -> Bool {
+        #if os(macOS)
+        let duration = vault.recentSessions().first(where: { $0.sessionId == sessionId })?.duration.mediaSeconds ?? 0
+        let rows = services.map { "• \($0.service.name)\n  \($0.service.endpoint)\n  Model: \($0.service.model)" }.joined(separator: "\n")
+        let alert = NSAlert()
+        alert.messageText = "Send meeting audio to transcription services?"
+        alert.informativeText = """
+        The selected cloud services receive the canonical meeting-audio source for this existing session (about \(Int(duration)) seconds), serially. This is audio upload, separate from AI-analysis consent.
+
+        \(rows)
+
+        The archive master movie and all other archive data stay on this Mac. Saved API keys and comparison checkboxes are not consent. Temporary upload copies are removed after each request.
+        """
+        alert.addButton(withTitle: "Approve audio upload")
+        alert.addButton(withTitle: "Cancel")
+        let approved = alert.runModal() == .alertFirstButtonReturn
+        AgentLog.event("transcription_audio_consent", ["approved": approved ? "1" : "0", "destinations": String(services.count)])
+        return approved
+        #else
+        return false
+        #endif
+    }
+
+    private func presentPrimaryTranscriptionPicker(sessionId: String, runs: [TranscriptionRun]) {
+        #if os(macOS)
+        let successful = runs.filter { $0.status == .succeeded }
+        guard !successful.isEmpty else { return }
+        let alert = NSAlert()
+        alert.messageText = "Transcription comparison complete"
+        alert.informativeText = "Choose a result to make it the primary transcript. Existing transcripts and comparison runs stay in the private archive. Selecting a new primary clears dependent slices and AI analysis; you can then run Retry Analysis."
+        for run in successful {
+            alert.addButton(withTitle: "Use \(run.configuration.name) · \(run.resolvedModel ?? run.configuration.requestedModel)")
+        }
+        alert.addButton(withTitle: "Keep current transcript")
+        let choice = Int(alert.runModal().rawValue - NSApplication.ModalResponse.alertFirstButtonReturn.rawValue)
+        guard successful.indices.contains(choice) else { return }
+        selectPrimaryTranscription(sessionId: sessionId, runID: successful[choice].id)
+        #endif
+    }
+
     func updateSpeakers(sessionId: String, names: [String: String]? = nil, assignments: [Int: String] = [:], reanalyze: Bool = false) async throws -> FullTranscript {
         guard canChangeCaptureSettings, let processor else {
             throw SettingsValidationError("Wait for recording or analysis to finish.")
@@ -754,13 +837,38 @@ final class SessionController: ObservableObject {
             let storedPins = vault.loadPinTimes(sessionId: sessionId)
             let livePins = pinTimesSessionId == sessionId ? pinTimes : []
             let pins = Self.mergePins(livePins, storedPins)
-            transcriber.setLanguage(settings.speechLanguage)
+            // The saved speech default is independent from the selected AI
+            // analysis service. Cloud speech is completed first and promoted
+            // to the normal transcript only for this normal-processing path;
+            // explicit comparison never promotes automatically.
+            let defaultSpeech = settings.selectedTranscriptionServiceConfiguration()
+            let whisperModel: String
+            if let speech = defaultSpeech, speech.service.backend == .openAITranscription {
+                guard requestAudioUploadConsent(sessionId: sessionId, services: [speech]) else {
+                    throw SettingsValidationError("Audio upload was not approved, so the cloud transcription service was not used.")
+                }
+                let runs = try await processor!.compareTranscriptions(sessionId: sessionId, configurations: [speech])
+                guard let success = runs.last(where: { $0.status == .succeeded }) else {
+                    throw SettingsValidationError(runs.last?.diagnostic ?? "Cloud transcription did not return a usable result.")
+                }
+                _ = try processor!.selectPrimaryTranscription(sessionId: sessionId, runID: success.id)
+                // `process` observes the completed transcribing stage and uses
+                // the selected archive transcript without loading WhisperKit.
+                whisperModel = settings.whisperModel
+            } else if let speech = defaultSpeech {
+                let language = speech.service.language
+                transcriber.setLanguage(language.mode == .single && language.languages.count == 1 ? language.languages[0] : .automatic)
+                whisperModel = speech.service.model
+            } else {
+                transcriber.setLanguage(settings.speechLanguage)
+                whisperModel = settings.whisperModel
+            }
             let result = try await processor?.process(
                 sessionId: sessionId,
                 pinTimes: pins,
                 configuration: services.first?.configuration ?? settings.providerConfiguration(includeKey: false),
                 serviceConfigurations: services,
-                whisperModel: settings.whisperModel,
+                whisperModel: whisperModel,
                 identifySpeakers: settings.identifySpeakers,
                 onStatus: { [weak self] status, line in
                     AgentLog.event("pipeline_status", [

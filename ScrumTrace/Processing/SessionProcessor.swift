@@ -25,6 +25,37 @@ final class SessionProcessor: @unchecked Sendable {
         self.transcriber = transcriber
     }
 
+    /// Explicit comparison for an already captured session. This intentionally
+    /// does not participate in normal `process`: the caller supplies only the
+    /// configurations the user checked and consented to, and every invocation
+    /// appends fresh private run records.
+    func compareTranscriptions(
+        sessionId: String,
+        configurations: [TranscriptionServiceConfiguration]
+    ) async throws -> [TranscriptionRun] {
+        let sessionURL = vault.sessionURL(id: sessionId)
+        try requireUsableSession(sessionURL, id: sessionId)
+        return try await TranscriptionComparisonRunner(transcriber: transcriber)
+            .run(sessionURL: sessionURL, configurations: configurations)
+    }
+
+    /// Promote a reviewed comparative result to the normal transcript. Earlier
+    /// runs remain private history. Dependent slices and AI outputs are cleared
+    /// so no old analysis is presented as belonging to the new text.
+    func selectPrimaryTranscription(sessionId: String, runID: String) throws -> FullTranscript {
+        let sessionURL = vault.sessionURL(id: sessionId)
+        try requireUsableSession(sessionURL, id: sessionId)
+        let transcript = try TranscriptionRunStore.selectPrimary(id: runID, sessionURL: sessionURL)
+        var manifest = try vault.loadManifest(id: sessionId)
+        manifest.slices = []
+        manifest.tasks = []
+        manifest.completedStages.removeAll { $0 == .slicing || $0 == .evaluating || $0 == .synthesizing || $0 == .completed }
+        manifest.markCompleted(.transcribing)
+        manifest.pipelineStatus = .transcribing
+        try vault.write(manifest: &manifest)
+        return transcript
+    }
+
     func process(
         sessionId: String,
         pinTimes: [TimeInterval],

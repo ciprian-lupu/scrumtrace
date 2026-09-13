@@ -374,6 +374,46 @@ final class SettingsUsabilityTests: XCTestCase {
         XCTAssertTrue(filtersTokens)
     }
 
+    @MainActor
+    func testSpeechProfilesPersistSharedCredentialAndMultilingualStrategy() throws {
+        try withSettings { settings, defaults, keys in
+            let credential = "shared-fixture-credential"
+            let first = SavedTranscriptionService(name: "OpenAI Romanian", backend: .openAITranscription, model: "gpt-transcribe", credentialID: credential, language: .one(.romanian), isIncludedInComparison: true)
+            let second = SavedTranscriptionService(name: "OpenAI mixed", backend: .openAITranscription, model: "gpt-transcribe", credentialID: credential, language: .init(mode: .expected, languages: [.romanian, .english, .hungarian]), isIncludedInComparison: true)
+            try settings.saveTranscriptionService(first, isNew: true)
+            try settings.saveTranscriptionService(second, isNew: true)
+            try settings.saveTranscriptionAPIKey("fixture-speech-key", credentialID: credential)
+
+            let configured = settings.transcriptionServiceConfigurations(includedOnly: true)
+            XCTAssertEqual(configured.count, 2)
+            XCTAssertTrue(configured.allSatisfy { $0.apiKey == "fixture-speech-key" })
+            XCTAssertNil(configured[1].service.language.singleEngineHint, "Expected-language mode must not serialize ro,en,hu as a false engine code")
+            XCTAssertTrue(configured[1].service.language.explanation.contains("context/validation"))
+            XCTAssertEqual(keys.values[AppSettings.transcriptionKeyAccount(id: credential)], "fixture-speech-key")
+
+            let restored = AppSettings(defaults: defaults, keyStore: keys.store)
+            XCTAssertEqual(restored.transcriptionServiceConfigurations(includedOnly: true).count, 2)
+            XCTAssertEqual(restored.transcriptionLibrary.services.first { $0.id == second.id }?.language.languages, [.romanian, .english, .hungarian])
+        }
+    }
+
+    func testTranscriptionRunsRemainSeparateAndPrimaryPromotionCopiesOnlyChosenText() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("speech-runs-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let vault = SessionVault(rootURL: root)
+        let created = try vault.createSession(product: .empty)
+        let session = vault.sessionURL(id: created.manifest.sessionId)
+        let config = TranscriptionServiceConfiguration.Snapshot(serviceID: "one", name: "One", backend: .whisperKit, endpoint: "", requestedModel: "base", language: .automatic, credentialRequired: false)
+        let first = TranscriptionRun(id: "run-one", createdAt: Date(), status: .succeeded, configuration: config, inputs: [], resolvedModel: "openai_whisper-base", processingSeconds: 1, transcriptPath: TranscriptionRunStore.transcriptPath("run-one"), diagnostic: nil)
+        let failed = TranscriptionRun(id: "run-two", createdAt: Date(), status: .failed, configuration: config, inputs: [], resolvedModel: nil, processingSeconds: 2, transcriptPath: nil, diagnostic: "fixture failure")
+        try TranscriptionRunStore.save([first, failed], sessionURL: session)
+        try TranscriptionRunStore.saveTranscript(FullTranscript(sessionId: "", language: "ro", segments: [.init(start: 0, end: 1, text: "Ales", speaker: nil, words: [])]), id: first.id, sessionURL: session)
+        let promoted = try TranscriptionRunStore.selectPrimary(id: first.id, sessionURL: session)
+        XCTAssertEqual(promoted.segments.first?.text, "Ales")
+        XCTAssertEqual(TranscriptionRunStore.load(sessionURL: session).map(\.id), ["run-one", "run-two"])
+        XCTAssertEqual(TranscriptionRunStore.loadTranscript(id: first.id, sessionURL: session)?.segments.first?.text, "Ales")
+    }
+
     func testCurrentRunFilterIsExactAndSearchPrecedesLimit() {
         let input = """
         {"run_id":"old","event":"permission_probe"}

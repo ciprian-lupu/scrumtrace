@@ -119,6 +119,7 @@ struct SettingsView: View {
                 Text("Speech is processed on this Mac. Preload before a meeting to finish the model download and preparation in advance.")
                     .font(.caption).foregroundStyle(.secondary)
             }
+            TranscriptionConnectionViews(settings: settings, controller: controller)
             Section("Speakers in the room and in calls") {
                 Toggle("Identify speakers locally after recording", isOn: $settings.identifySpeakers)
                     .disabled(!controller.canChangeCaptureSettings)

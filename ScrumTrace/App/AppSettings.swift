@@ -109,6 +109,12 @@ final class AppSettings: ObservableObject {
         didSet { defaults.set(speechLanguage.rawValue, forKey: Keys.speechLanguage) }
     }
 
+    /// Saved speech services are separate from AI analysis services. The
+    /// selected entry is the normal recording default; checked entries are
+    /// only used by the explicit, existing-session comparison action.
+    @Published private(set) var transcriptionLibrary: TranscriptionServiceLibrary
+    let transcriptionLibraryIssue: String?
+
     @Published private(set) var contextLibrary: ProductContextLibrary
     let contextLibraryIssue: String?
 
@@ -161,9 +167,36 @@ final class AppSettings: ObservableObject {
         self.legacyCredentialScope = defaults.string(forKey: Keys.legacyCredentialScope)
             ?? Self.credentialScope(provider: selectedProvider, endpoint: endpoint)
         let storedWhisper = defaults.string(forKey: Keys.whisperModel) ?? WhisperTranscriber.defaultStoredModel
-        self.whisperModel = Self.migratedWhisperModel(storedWhisper)
+        let migratedWhisper = Self.migratedWhisperModel(storedWhisper)
+        self.whisperModel = migratedWhisper
         self.identifySpeakers = defaults.object(forKey: Keys.identifySpeakers) as? Bool ?? true
-        self.speechLanguage = defaults.string(forKey: Keys.speechLanguage).flatMap(SpeechLanguage.init(rawValue:)) ?? .automatic
+        let migratedSpeechLanguage = defaults.string(forKey: Keys.speechLanguage).flatMap(SpeechLanguage.init(rawValue:)) ?? .automatic
+        self.speechLanguage = migratedSpeechLanguage
+        if let data = defaults.data(forKey: TranscriptionServiceLibrary.defaultsKey),
+           let decoded = try? JSONDecoder().decode(TranscriptionServiceLibrary.self, from: data),
+           Set(decoded.services.map(\.id)).count == decoded.services.count {
+            self.transcriptionLibrary = decoded
+            self.transcriptionLibraryIssue = nil
+        } else if defaults.object(forKey: TranscriptionServiceLibrary.defaultsKey) != nil {
+            self.transcriptionLibrary = TranscriptionServiceLibrary()
+            self.transcriptionLibraryIssue = "Saved transcription services could not be loaded. Their stored data was left untouched."
+        } else {
+            // Legacy Whisper settings migrate to a local default once. This
+            // does not rewrite an explicitly entered custom model ID.
+            let local = SavedTranscriptionService(
+                name: "Local WhisperKit",
+                backend: .whisperKit,
+                model: migratedWhisper,
+                language: migratedSpeechLanguage == .automatic ? .automatic : .one(migratedSpeechLanguage),
+                isIncludedInComparison: false
+            )
+            let library = TranscriptionServiceLibrary(services: [local], selectedID: local.id)
+            self.transcriptionLibrary = library
+            self.transcriptionLibraryIssue = nil
+            if let data = try? JSONEncoder().encode(library) {
+                defaults.set(data, forKey: TranscriptionServiceLibrary.defaultsKey)
+            }
+        }
         let contexts = ProductContextLibrary.load(from: defaults)
         self.contextLibrary = contexts.library
         self.contextLibraryIssue = contexts.issue
@@ -392,6 +425,78 @@ final class AppSettings: ObservableObject {
         try persistConnections(library)
     }
 
+    func saveTranscriptionService(_ service: SavedTranscriptionService, isNew: Bool) throws {
+        guard transcriptionLibraryIssue == nil else { throw SettingsValidationError(transcriptionLibraryIssue!) }
+        var service = service
+        service.name = service.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        service.endpoint = service.endpoint.trimmingCharacters(in: .whitespacesAndNewlines)
+        service.model = service.model.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !service.name.isEmpty, !service.model.isEmpty else { throw SettingsValidationError("Enter a transcription service name and model.") }
+        try service.language.validated()
+        if service.backend.requiresCredential {
+            _ = try ProviderEndpoint.requireHTTPSOrLocal(service.endpoint)
+            if service.credentialID?.isEmpty != false { service.credentialID = UUID().uuidString }
+        } else { service.credentialID = nil }
+        guard !transcriptionLibrary.services.contains(where: { $0.id != service.id && $0.name.compare(service.name, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame }) else {
+            throw SettingsValidationError("A transcription service with this name already exists.")
+        }
+        var library = transcriptionLibrary
+        if let index = library.services.firstIndex(where: { $0.id == service.id }) {
+            library.services[index] = service
+        } else if isNew {
+            library.services.append(service)
+        } else { throw SettingsValidationError("This transcription service was deleted.") }
+        try persistTranscriptionLibrary(library)
+    }
+
+    func selectTranscriptionService(id: String?) throws {
+        guard id == nil || transcriptionLibrary.services.contains(where: { $0.id == id }) else { throw SettingsValidationError("The selected transcription service no longer exists.") }
+        var library = transcriptionLibrary; library.selectedID = id
+        try persistTranscriptionLibrary(library)
+    }
+
+    func setTranscriptionComparisonIncluded(_ included: Bool, id: String) throws {
+        var library = transcriptionLibrary
+        guard let index = library.services.firstIndex(where: { $0.id == id }) else { throw SettingsValidationError("The selected transcription service no longer exists.") }
+        library.services[index].isIncludedInComparison = included
+        try persistTranscriptionLibrary(library)
+    }
+
+    func deleteTranscriptionService(id: String) throws {
+        var library = transcriptionLibrary
+        guard library.services.contains(where: { $0.id == id }) else { throw SettingsValidationError("This transcription service was already deleted.") }
+        library.services.removeAll { $0.id == id }
+        if library.selectedID == id { library.selectedID = nil }
+        // Do not delete the Keychain item: credential IDs may be intentionally
+        // shared by another profile, and this operation must not affect it.
+        try persistTranscriptionLibrary(library)
+    }
+
+    /// A credential ID can be deliberately reused by several cloud speech
+    /// profiles. The secret stays in Keychain; only the opaque ID is saved.
+    func saveTranscriptionAPIKey(_ key: String, credentialID: String) throws {
+        let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !credentialID.isEmpty else { throw SettingsValidationError("Enter an API key and choose its credential ID.") }
+        try keyStore.set(trimmed, Self.transcriptionKeyAccount(id: credentialID))
+    }
+
+    func transcriptionServiceConfigurations(includedOnly: Bool) -> [TranscriptionServiceConfiguration] {
+        transcriptionLibrary.services.filter { !includedOnly || $0.isIncludedInComparison }.map { service in
+            TranscriptionServiceConfiguration(service: service, apiKey: service.credentialID.flatMap { keyStore.get(Self.transcriptionKeyAccount(id: $0)) } ?? "")
+        }
+    }
+
+    func selectedTranscriptionServiceConfiguration() -> TranscriptionServiceConfiguration? {
+        guard let service = transcriptionLibrary.selected else { return nil }
+        return TranscriptionServiceConfiguration(service: service, apiKey: service.credentialID.flatMap { keyStore.get(Self.transcriptionKeyAccount(id: $0)) } ?? "")
+    }
+
+    private func persistTranscriptionLibrary(_ library: TranscriptionServiceLibrary) throws {
+        let data = try JSONEncoder().encode(library)
+        defaults.set(data, forKey: TranscriptionServiceLibrary.defaultsKey)
+        transcriptionLibrary = library
+    }
+
     var comparisonServiceConfigurations: [AIServiceConfiguration] {
         connectionLibrary.connections.filter(\.isIncludedInComparison).map { connection in
             let configuration = AIProviderConfiguration(
@@ -527,6 +632,8 @@ final class AppSettings: ObservableObject {
     static func connectionKeyAccount(id: String) -> String {
         "ai.apiKey.connection.\(id)"
     }
+
+    static func transcriptionKeyAccount(id: String) -> String { "speech.apiKey.credential.\(id)" }
 
     private func storedAPIKey(for connection: SavedAIConnection) -> String? {
         keyStore.get(Self.connectionKeyAccount(id: connection.id))
