@@ -20,7 +20,9 @@ final class MenuBarController: NSObject {
     private var hudObserver: NSObjectProtocol?
     private var lastStartEnabled: Bool?
     private let contextPresenter = RecordingContextPresenter()
-    private var isPreparingRecording = false
+    /// True while the recording-context window or the capture-area overlay of a Start is up.
+    /// The main window reads it to disable its own Start recording button.
+    private(set) var isPreparingRecording = false
 
     init(
         controller: SessionController,

@@ -1371,3 +1371,11 @@ enum ScreenSnap {
 private final class HaltStopBox: @unchecked Sendable {
     var message: String?
 }
+
+extension SessionController {
+    /// Tests only. `startRecording` sets `startInFlight` after Screen Recording passes and then starts a
+    /// real capture, so tests of views that follow the flag set it here.
+    func setStartInFlightForTesting(_ value: Bool) {
+        startInFlight = value
+    }
+}

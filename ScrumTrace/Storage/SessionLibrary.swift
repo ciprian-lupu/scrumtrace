@@ -591,7 +591,8 @@ final class SessionLibrary: ObservableObject {
     /// True until the first refresh publishes. Later refreshes update rows in place without toggling
     /// it, so a periodic refresh that finds nothing new publishes no change at all.
     @Published private(set) var isLoading = false
-    /// Bytes under every listed session's `archive/`. Nil until `loadTotalArchiveBytes()` first finishes.
+    /// Bytes under every listed session's `archive/`. Nil until a total was asked for and measured after a
+    /// scan published, so it never reads zero for sessions that were not listed yet.
     @Published private(set) var totalArchiveBytes: Int?
 
     let vault: SessionVault
@@ -603,6 +604,11 @@ final class SessionLibrary: ObservableObject {
     private var refreshGeneration = 0
     private var archiveGeneration = 0
     private var tracksArchiveBytes = false
+    /// The newest refresh. Only it can publish, so a total asked for before the first scan waits for it.
+    private var latestRefresh: Task<Void, Never>?
+    /// A total was asked for before any scan published. The scan that publishes measures it, even when it
+    /// finds no session.
+    private var isArchiveTotalWaitingForScan = false
 
     init(
         vault: SessionVault,
@@ -616,7 +622,8 @@ final class SessionLibrary: ObservableObject {
 
     /// Lists and decodes off the main actor, then publishes here. A refresh that finishes after a newer
     /// one started is dropped, so a slow scan cannot bring back a row that was just deleted. Once a view
-    /// asked for the archive total, the returned task also waits for the total to catch up.
+    /// asked for the archive total, the returned task also waits for the total to catch up. The first
+    /// scan that publishes measures a total asked for earlier, even when it lists no session.
     @discardableResult
     func refresh() -> Task<Void, Never> {
         refreshGeneration += 1
@@ -627,7 +634,7 @@ final class SessionLibrary: ObservableObject {
         let vault = vault
         let previous = cache
         let loadManifest = loadManifest
-        return Task { @MainActor [weak self] in
+        let task = Task { @MainActor [weak self] in
             let scan = await Task.detached(priority: .utility) {
                 vault.scanSessionIndex(reusing: previous, loadManifest: loadManifest)
             }.value
@@ -637,20 +644,37 @@ final class SessionLibrary: ObservableObject {
             if self.isLoading {
                 self.isLoading = false
             }
-            guard scan.entries != self.entries else { return }
-            self.entries = scan.entries
-            if self.tracksArchiveBytes {
+            let changed = scan.entries != self.entries
+            if changed {
+                self.entries = scan.entries
+            }
+            let totalWaited = self.isArchiveTotalWaitingForScan
+            self.isArchiveTotalWaitingForScan = false
+            if self.tracksArchiveBytes, changed || totalWaited {
                 await self.loadTotalArchiveBytes().value
             }
         }
+        latestRefresh = task
+        return task
     }
 
     /// Sums `archive/` sizes off the main actor. Nothing walks archives until a view asks once. After
     /// that, a refresh that changes the list updates the total, walking only the sessions whose
     /// manifest or `archive/` folder changed since they were last measured.
+    ///
+    /// Before any scan has published there is no list to measure: the returned task waits for the newest
+    /// refresh, including one that replaced an earlier scan, and that refresh measures the total.
     @discardableResult
     func loadTotalArchiveBytes() -> Task<Void, Never> {
         tracksArchiveBytes = true
+        guard hasPublishedScan else {
+            isArchiveTotalWaitingForScan = true
+            return Task { @MainActor [weak self] in
+                while let self, !self.hasPublishedScan, let running = self.latestRefresh {
+                    await running.value
+                }
+            }
+        }
         archiveGeneration += 1
         let generation = archiveGeneration
         let vault = vault

@@ -642,16 +642,23 @@ final class RecordingsModel: ObservableObject {
         return runningRefresh ?? refresh()
     }
 
-    /// The presenter reports whether the window is on screen. Becoming visible on Recordings refreshes at
-    /// once; another section refreshes nothing, and Recordings refreshes when it appears. While the window
-    /// stays visible, Recordings refreshes every `refreshInterval`. A hidden window does no periodic work.
+    /// Sections that show rows from the session index: Recordings, and the Overview's unfinished recordings,
+    /// last recording and storage line.
+    nonisolated static func listsSessions(_ section: MainSection) -> Bool {
+        section == .recordings || section == .overview
+    }
+
+    /// The presenter reports whether the window is on screen. Becoming visible on a section that lists
+    /// sessions refreshes at once; another section refreshes nothing, and a listing section refreshes when it
+    /// appears. While the window stays visible, those sections refresh every `refreshInterval`. A hidden
+    /// window does no periodic work.
     func setWindowVisible(_ visible: Bool) {
         guard visible != isWindowVisible else { return }
         isWindowVisible = visible
         periodicRefresh?.cancel()
         periodicRefresh = nil
         guard visible else { return }
-        if navigation.section == .recordings {
+        if Self.listsSessions(navigation.section) {
             refresh()
         }
         let interval = refreshInterval
@@ -659,7 +666,7 @@ final class RecordingsModel: ObservableObject {
             while !Task.isCancelled {
                 try? await Task.sleep(for: interval)
                 guard !Task.isCancelled, let self else { return }
-                if self.navigation.section == .recordings {
+                if Self.listsSessions(self.navigation.section) {
                     await self.refresh().value
                 }
             }

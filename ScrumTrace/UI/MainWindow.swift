@@ -77,6 +77,8 @@ struct MainWindowView: View {
     @ObservedObject var navigation: MainNavigation
     /// Owned by the presenter, so the session index and its caches outlive section changes.
     let recordings: RecordingsModel
+    /// Owned by the presenter too. Its session rows and their actions come from `recordings`.
+    let overview: OverviewModel
     /// Built by the presenter so the six-tab Settings view stays whole. A builder, not a
     /// value: leaving the section removes Settings, and coming back must start from
     /// current state (for example the license line), not from window creation.
@@ -114,11 +116,7 @@ struct MainWindowView: View {
     private var detail: some View {
         switch navigation.section {
         case .overview:
-            ContentUnavailableView(
-                "Overview",
-                systemImage: MainSection.overview.systemImage,
-                description: Text("Readiness, the last recording and storage will be summarized here. Start a recording from the ScrumTrace menu bar item.")
-            )
+            OverviewView(model: overview, recordings: recordings, library: recordings.library)
         case .recordings:
             RecordingsView(
                 model: recordings,

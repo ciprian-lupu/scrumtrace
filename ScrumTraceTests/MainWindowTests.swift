@@ -489,10 +489,16 @@ final class MainWindowTests: XCTestCase {
                 navigation: navigation,
                 dependencies: .live(controller: controller, startRecording: {})
             )
+            let overview = OverviewModel(
+                recordings: recordings,
+                navigation: navigation,
+                dependencies: .live(controller: controller, startRecording: {}, isPreparingRecording: { false })
+            )
             let hosting = NSHostingController(rootView: MainWindowView(
                 controller: controller,
                 navigation: navigation,
                 recordings: recordings,
+                overview: overview,
                 settingsView: {
                     builds += 1
                     return SettingsView(settings: controller.settings, controller: controller, navigation: navigation.settings)
@@ -650,6 +656,8 @@ final class MainWindowTests: XCTestCase {
         activeSessionId: @escaping @MainActor () -> String? = { nil },
         handoffFailure: @escaping @MainActor () -> String? = { nil },
         manifestLoads: CallRecorder? = nil,
+        manifestLoadGate: DispatchGroup? = nil,
+        beforeManifestLoad: (@Sendable () -> Void)? = nil,
         refreshInterval: Duration = RecordingsModel.refreshInterval
     ) -> RecordingsModel {
         let vault = f.vault
@@ -698,6 +706,9 @@ final class MainWindowTests: XCTestCase {
         return RecordingsModel(
             library: SessionLibrary(vault: vault, loadManifest: { vault, id in
                 manifestLoads?.record(id)
+                // A scan waits here, off the main actor, until the test leaves the group.
+                manifestLoadGate?.wait()
+                beforeManifestLoad?()
                 return try vault.loadManifest(id: id)
             }),
             navigation: navigation ?? MainNavigation(),
@@ -1528,10 +1539,11 @@ final class MainWindowTests: XCTestCase {
                 let presenter = MainWindowPresenter(controller: controller, frameAutosaveName: nil)
                 defer { presenter.window?.close() }
                 let model = presenter.recordings
-                presenter.show(section: .overview)
+                // Overview lists sessions too, so open on a section that lists none.
+                presenter.show(section: .settings)
                 let window = try XCTUnwrap(presenter.window)
                 XCTAssertTrue(model.isPeriodicRefreshActive)
-                XCTAssertFalse(model.library.isLoading, "Opening the window on Overview scans nothing")
+                XCTAssertFalse(model.library.isLoading, "Opening the window on Settings scans nothing")
                 spinRunLoop(for: 0.05)
                 XCTAssertEqual(model.library.entries, [])
 
@@ -1718,6 +1730,951 @@ final class MainWindowTests: XCTestCase {
         XCTAssertEqual(RecordingRowText.export(.loaded(summary(.completed, []))), "—", "No pack yet")
         XCTAssertFalse(RecordingRowText.needsReviewMarker(summary(.offlineFailed, [])), "The status already says it needs review")
     }
+
+    // MARK: - Overview
+
+    /// An Overview model whose every outside effect is a recorded closure reading `state`. Any update check,
+    /// through the model or `UpdateChecker.check()` directly, is recorded as "updateCheck" until teardown.
+    @MainActor
+    private func makeOverviewModel(
+        recordings: RecordingsModel,
+        state: OverviewState,
+        recorder: CallRecorder,
+        preload: @escaping @Sendable (String) async throws -> Void = { _ in },
+        evaluationInterval: Duration = OverviewModel.evaluationInterval,
+        preparingInterval: Duration = OverviewModel.preparingInterval
+    ) -> OverviewModel {
+        UpdateChecker.setRequestForTesting {
+            recorder.record("updateCheck")
+            return .upToDate(current: "1.0.0")
+        }
+        addTeardownBlock { await UpdateChecker.setRequestForTesting(nil) }
+        let dependencies = OverviewDependencies(
+            readinessInputs: {
+                state.readinessReads += 1
+                return state.inputs
+            },
+            canChangeSessions: { state.canChange },
+            isPreparingRecording: { state.preparing },
+            lastError: { state.lastError },
+            retentionDays: { state.retentionDays },
+            captureAreaSummary: { state.captureArea },
+            sessionsFolder: { "~/Movies/ScrumTrace/sessions" },
+            updates: OverviewUpdateSource(lastResult: {
+                state.updateReads += 1
+                return state.update
+            }),
+            startRecording: { recorder.record("startRecording") },
+            askForScreenRecording: { recorder.record("askForScreenRecording") },
+            openScreenRecordingSettings: { recorder.record("openScreenRecordingSettings") },
+            openMicrophoneSettings: { recorder.record("openMicrophoneSettings") },
+            relaunch: { recorder.record("relaunch") },
+            preloadSpeechModel: preload,
+            revealSessionsFolder: { recorder.record("revealSessionsFolder") },
+            openReleasesPage: { recorder.record("openReleasesPage") }
+        )
+        return OverviewModel(
+            recordings: recordings,
+            navigation: recordings.navigation,
+            dependencies: dependencies,
+            evaluationInterval: evaluationInterval,
+            preparingInterval: preparingInterval
+        )
+    }
+
+    /// `main_*` rows so far. `main_readiness` may carry its action and `main_start` its section; every other
+    /// `main_*` row the session id only.
+    private func overviewEventRows(at log: URL, file: StaticString = #filePath, line: UInt = #line) throws -> [[String: String]] {
+        AgentLog.event("overview_test_baseline", [:])
+        let rows = try logRows(at: log)
+        let baseline = try XCTUnwrap(rows.last { $0["event"] == "overview_test_baseline" }, file: file, line: line)
+        let common = Set(baseline.keys)
+        let allowed: [String: Set<String>] = ["main_readiness": ["action"], "main_start": ["section"]]
+        let main = rows.filter { ($0["event"] ?? "").hasPrefix("main_") }
+        for row in main {
+            let event = row["event"] ?? ""
+            let extra = Set(row.keys).subtracting(common)
+            XCTAssertTrue(extra.isSubset(of: allowed[event] ?? ["session"]), "\(event) carries \(extra)", file: file, line: line)
+        }
+        return main
+    }
+
+    /// Scrolls the tallest scroll view to its end, for a snapshot of the lower sections.
+    @MainActor
+    private func scrollToBottom(in window: NSWindow) {
+        guard let content = window.contentView else { return }
+        var stack: [NSView] = [content]
+        var tallest: NSScrollView?
+        while let view = stack.popLast() {
+            if let scroll = view as? NSScrollView,
+               (scroll.documentView?.frame.height ?? 0) > (tallest?.documentView?.frame.height ?? 0) {
+                tallest = scroll
+            }
+            stack.append(contentsOf: view.subviews)
+        }
+        guard let scroll = tallest, let document = scroll.documentView else { return }
+        let end = document.isFlipped ? max(0, document.frame.height - scroll.contentView.bounds.height) : 0
+        scroll.contentView.scroll(to: NSPoint(x: 0, y: end))
+        scroll.reflectScrolledClipView(scroll.contentView)
+    }
+
+    @MainActor
+    func testOverviewReadinessCoversEachSetupState() throws {
+        let ready = OverviewReadiness(inputs: overviewReadinessInputs())
+        XCTAssertTrue(ready.allowsStart)
+        XCTAssertFalse(ready.requiresRelaunch)
+        XCTAssertEqual(ready.headline, "Ready to record")
+        XCTAssertEqual(ready.summary, "Start recording asks for the product context, then the capture area.")
+        XCTAssertEqual(ready.rows.map(\.item), OverviewReadiness.Item.allCases)
+        XCTAssertTrue(ready.rows.allSatisfy { $0.state == .ok && !$0.blocksRecording }, "\(ready.rows)")
+        XCTAssertEqual(ready.rows.flatMap(\.actions), [], "Nothing to do when everything is set up")
+
+        // Screen Recording denied: blocked, with the buttons Settings and the Start alert offer.
+        let denied = OverviewReadiness(inputs: overviewReadinessInputs(.screenDenied))
+        XCTAssertFalse(denied.allowsStart)
+        XCTAssertFalse(denied.requiresRelaunch)
+        XCTAssertEqual(denied.headline, "Recording is blocked")
+        let screen = try XCTUnwrap(denied.row(.screenRecording))
+        XCTAssertEqual(screen.state, .actionNeeded)
+        XCTAssertEqual(screen.status, "Not allowed")
+        XCTAssertEqual(screen.detail, CaptureReadiness.screenDenied.userMessage)
+        XCTAssertEqual(screen.actions, [.askScreenRecording, .openScreenRecordingSettings, .relaunch])
+        XCTAssertEqual(screen.marker, .blocksRecording)
+        XCTAssertEqual(denied.rows.filter(\.blocksRecording).map(\.item), [.screenRecording])
+        XCTAssertEqual(
+            denied.summary,
+            "A recording will not start until Screen Recording is allowed. Nothing else below blocks recording."
+        )
+
+        // A first launch: Screen Recording and the microphone denied, the notice not confirmed. The copy names
+        // the one blocker, the notice is marked as something to do rather than as a blocker, and only the
+        // blocking row offers Relaunch.
+        let firstLaunch = OverviewReadiness(inputs: overviewReadinessInputs(.screenDenied, microphoneStatus: "denied", notice: false))
+        XCTAssertEqual(firstLaunch.summary, denied.summary)
+        XCTAssertEqual(firstLaunch.rows.filter(\.blocksRecording).map(\.item), [.screenRecording])
+        XCTAssertEqual(firstLaunch.row(.screenRecording)?.marker, .blocksRecording)
+        XCTAssertEqual(firstLaunch.row(.meetingNotice)?.state, .actionNeeded)
+        XCTAssertEqual(firstLaunch.row(.meetingNotice)?.marker, .actionNeeded)
+        XCTAssertEqual(firstLaunch.row(.microphone)?.marker, .actionNeeded)
+        XCTAssertEqual(firstLaunch.row(.microphone)?.actions, [.openMicrophoneSettings])
+        XCTAssertEqual(firstLaunch.rows.filter { $0.actions.contains(.relaunch) }.map(\.item), [.screenRecording])
+        XCTAssertEqual(
+            OverviewReadiness(inputs: overviewReadinessInputs(.screenGrantedNeedsRelaunch, microphoneStatus: "restricted"))
+                .rows.filter { $0.actions.contains(.relaunch) }.map(\.item),
+            [.screenRecording]
+        )
+
+        // Every button on the card has its own identifier, and Relaunch appears at most once, in every state.
+        for capture: CaptureReadiness in [.ready, .screenDenied, .screenGrantedNeedsRelaunch, .microphoneDenied] {
+            for enabled in [true, false] {
+                for status in ["allowed", "denied", "restricted", "not asked for this process", "not determined"] {
+                    let all = OverviewReadiness(inputs: overviewReadinessInputs(
+                        capture, microphone: enabled, microphoneStatus: status, accessibility: false,
+                        speechReady: false, service: false, key: false, notice: false
+                    ))
+                    let identifiers = all.rows.flatMap { row in row.actions.map { row.accessibilityIdentifier(for: $0) } }
+                    let name = "\(capture) microphone \(enabled) \(status)"
+                    XCTAssertEqual(Set(identifiers).count, identifiers.count, "\(name): \(identifiers)")
+                    XCTAssertLessThanOrEqual(all.rows.flatMap(\.actions).filter { $0 == .relaunch }.count, 1, name)
+                    XCTAssertTrue(identifiers.allSatisfy { $0.hasPrefix("main.overview.readiness.") }, name)
+                }
+            }
+        }
+        XCTAssertEqual(screen.accessibilityIdentifier(for: .relaunch), "main.overview.readiness.screenRecording.relaunch")
+
+        // Granted after launch: a relaunch is required, and the copy says so.
+        let relaunch = OverviewReadiness(inputs: overviewReadinessInputs(.screenGrantedNeedsRelaunch))
+        XCTAssertFalse(relaunch.allowsStart)
+        XCTAssertTrue(relaunch.requiresRelaunch)
+        XCTAssertEqual(relaunch.headline, "Relaunch ScrumTrace before recording")
+        XCTAssertEqual(
+            relaunch.summary,
+            "Screen Recording is allowed, but a recording will not start until ScrumTrace relaunches. Nothing else below blocks recording."
+        )
+        let granted = try XCTUnwrap(relaunch.row(.screenRecording))
+        XCTAssertEqual(granted.status, "Relaunch required")
+        XCTAssertEqual(granted.detail, CaptureReadiness.screenGrantedNeedsRelaunch.userMessage)
+        XCTAssertEqual(granted.actions, [.relaunch])
+        XCTAssertTrue(granted.blocksRecording)
+        XCTAssertEqual(granted.marker, .blocksRecording)
+
+        // Microphone turned off in Settings: `readiness(requireMicrophone: false)` is ready, and even a denied
+        // microphone is not reported as a problem.
+        let micOff = OverviewReadiness(inputs: overviewReadinessInputs(.ready, microphone: false, microphoneStatus: "denied"))
+        XCTAssertTrue(micOff.allowsStart)
+        let off = try XCTUnwrap(micOff.row(.microphone))
+        XCTAssertEqual(off.state, .optional)
+        XCTAssertEqual(off.status, "Off")
+        XCTAssertFalse(off.blocksRecording)
+        XCTAssertEqual(off.actions, [.openCaptureSettings])
+        XCTAssertFalse(off.detail?.localizedCaseInsensitiveContains("denied") ?? false)
+        XCTAssertFalse(micOff.rows.contains { $0.state == .actionNeeded }, "A microphone turned off in Settings is never a problem")
+
+        // Microphone denied while it is recorded: blocked.
+        let micDenied = OverviewReadiness(inputs: overviewReadinessInputs(.microphoneDenied, microphoneStatus: "denied"))
+        XCTAssertFalse(micDenied.allowsStart)
+        XCTAssertEqual(micDenied.headline, "Recording is blocked")
+        XCTAssertTrue(micDenied.summary.hasPrefix("A recording will not start until microphone access is allowed"), micDenied.summary)
+        XCTAssertEqual(micDenied.row(.screenRecording)?.state, .ok)
+        let microphone = try XCTUnwrap(micDenied.row(.microphone))
+        XCTAssertEqual(microphone.state, .actionNeeded)
+        XCTAssertEqual(microphone.marker, .blocksRecording)
+        XCTAssertTrue(microphone.blocksRecording)
+        XCTAssertEqual(microphone.detail, CaptureReadiness.microphoneDenied.userMessage)
+        XCTAssertEqual(microphone.actions, [.openMicrophoneSettings, .relaunch])
+        let notAsked = OverviewReadiness(inputs: overviewReadinessInputs(microphoneStatus: "not asked for this process"))
+        XCTAssertTrue(notAsked.allowsStart)
+        XCTAssertEqual(notAsked.row(.microphone)?.state, .optional)
+        XCTAssertEqual(notAsked.row(.microphone)?.status, "Not asked yet")
+
+        // No AI service: informational, never blocking.
+        let noService = OverviewReadiness(inputs: overviewReadinessInputs(service: false, key: false))
+        XCTAssertTrue(noService.allowsStart)
+        XCTAssertEqual(noService.headline, "Ready to record")
+        let ai = try XCTUnwrap(noService.row(.aiService))
+        XCTAssertEqual(ai.state, .optional)
+        XCTAssertFalse(ai.blocksRecording)
+        XCTAssertEqual(ai.status, "No service selected")
+        XCTAssertEqual(ai.detail, noService.inputs.aiSummary)
+        XCTAssertEqual(ai.actions, [.openAISettings])
+        XCTAssertEqual(noService.rows.filter { $0.state != .ok }.map(\.item), [.aiService])
+        XCTAssertEqual(OverviewReadiness(inputs: overviewReadinessInputs(key: false)).row(.aiService)?.status, "No saved key")
+        XCTAssertEqual(OverviewReadiness(inputs: overviewReadinessInputs(valid: false)).row(.aiService)?.status, "Check settings")
+
+        // Meeting notice not accepted: something to do, but Start recording asks for it, so it does not block.
+        let notice = OverviewReadiness(inputs: overviewReadinessInputs(notice: false))
+        XCTAssertTrue(notice.allowsStart)
+        XCTAssertEqual(notice.headline, "Ready to record")
+        XCTAssertEqual(notice.summary, "Start recording first asks you to confirm that you will tell participants.")
+        let noticeRow = try XCTUnwrap(notice.row(.meetingNotice))
+        XCTAssertEqual(noticeRow.state, .actionNeeded)
+        XCTAssertEqual(noticeRow.marker, .actionNeeded, "Marked as something to do, not as a blocker")
+        XCTAssertFalse(noticeRow.blocksRecording)
+        XCTAssertEqual(noticeRow.actions, [.openGeneralSettings])
+
+        // Optional rows keep their existing buttons.
+        let optional = OverviewReadiness(inputs: overviewReadinessInputs(accessibility: false, speechReady: false))
+        XCTAssertTrue(optional.allowsStart)
+        XCTAssertEqual(optional.row(.accessibility)?.state, .optional)
+        XCTAssertEqual(optional.row(.accessibility)?.actions, [.openPermissionsSettings])
+        XCTAssertEqual(optional.row(.speechModel)?.status, "Not loaded")
+        XCTAssertEqual(optional.row(.speechModel)?.actions, [.preloadSpeechModel])
+        let loading = OverviewReadiness(inputs: overviewReadinessInputs(speechReady: false, speechLoading: true))
+        XCTAssertEqual(loading.row(.speechModel)?.status, "Loading…")
+        XCTAssertEqual(loading.row(.speechModel)?.actions, [])
+        XCTAssertEqual(OverviewReadiness(inputs: overviewReadinessInputs(speechModel: " ", speechReady: false)).row(.speechModel)?.actions, [.openSpeechSettings])
+
+        XCTAssertEqual(OverviewReadinessAction.allCases.filter(\.needsIdleCapture), [.askScreenRecording, .relaunch, .preloadSpeechModel])
+        XCTAssertEqual(OverviewReadinessAction.openAISettings.settingsTab, .ai)
+        XCTAssertEqual(OverviewReadinessAction.openPermissionsSettings.settingsTab, .permissions)
+        XCTAssertNil(OverviewReadinessAction.askScreenRecording.settingsTab)
+    }
+
+    @MainActor
+    func testOverviewListsUnfinishedRecordingsWithRetryAndNotCompletedOnes() async throws {
+        try await withRecordingsFixture { f in
+            let navigation = MainNavigation()
+            let recorder = CallRecorder()
+            let state = OverviewState()
+            let recordings = makeRecordingsModel(
+                f,
+                navigation: navigation,
+                recorder: recorder,
+                canChange: { state.canChange },
+                activeSessionId: { state.activeSessionId }
+            )
+            let overview = makeOverviewModel(recordings: recordings, state: state, recorder: recorder)
+            let offline = try makeSession(in: f.vault, status: .offlineFailed)
+            await recordings.refresh().value
+            overview.evaluate()
+
+            var attention = overview.attention
+            XCTAssertEqual(attention.unfinished.map(\.sessionId), [offline, f.unfinished], "Newest first")
+            XCTAssertFalse(attention.unfinished.contains { $0.sessionId == f.completed }, "A completed recording needs no attention")
+            XCTAssertEqual(attention.unreadableIds, [f.corrupt])
+            XCTAssertNil(attention.lastError)
+            XCTAssertNil(attention.retentionDays)
+            XCTAssertNil(attention.availableUpdate)
+            XCTAssertEqual(overview.lastRecording?.sessionId, offline, "The newest recording whose manifest was read")
+            for summary in attention.unfinished {
+                XCTAssertTrue(recordings.isEnabled(.retryAnalysis, for: .loaded(summary)), summary.sessionId)
+            }
+            XCTAssertTrue(overview.retryAnalysis(f.unfinished))
+            XCTAssertEqual(recorder.calls, ["retryAnalysis \(f.unfinished)"])
+
+            // While a recording or analysis runs, the session it holds is in progress, not stuck, and Retry waits.
+            state.canChange = false
+            state.activeSessionId = offline.uppercased()
+            overview.syncStartState()
+            recordings.syncCaptureState()
+            attention = overview.attention
+            XCTAssertEqual(attention.unfinished.map(\.sessionId), [f.unfinished])
+            XCTAssertFalse(overview.retryAnalysis(f.unfinished))
+            XCTAssertEqual(recorder.calls.count, 1)
+            state.canChange = true
+            overview.syncStartState()
+            recordings.syncCaptureState()
+            XCTAssertEqual(overview.attention.unfinished.map(\.sessionId), [offline, f.unfinished], "Once idle it is listed again")
+
+            // The last error, retention and an update found by a check that already ran.
+            state.lastError = "Could not encode the Shot PNG."
+            state.retentionDays = 30
+            state.update = .upToDate(current: "1.0.0")
+            overview.evaluate()
+            attention = overview.attention
+            XCTAssertEqual(attention.lastError, "Could not encode the Shot PNG.")
+            XCTAssertEqual(attention.retentionDays, 30)
+            XCTAssertNil(attention.availableUpdate, "A check that found nothing new needs no attention")
+            XCTAssertTrue(OverviewAttention.retentionLine(days: 30).hasPrefix("Completed recordings older than 30 days are deleted"))
+            overview.dismissLastError()
+            XCTAssertNil(overview.attention.lastError)
+            XCTAssertEqual(overview.lastError, "Could not encode the Shot PNG.", "Dismissing leaves the controller's error alone")
+            state.lastError = "Capture ended: the stream stopped."
+            overview.syncControllerState()
+            XCTAssertEqual(overview.attention.lastError, "Capture ended: the stream stopped.", "A different error shows again")
+            // The same text after the controller cleared it, as when the next recording fails the same way.
+            overview.dismissLastError()
+            XCTAssertNil(overview.attention.lastError)
+            state.lastError = nil
+            overview.syncControllerState()
+            XCTAssertNil(overview.attention.lastError)
+            state.lastError = "Capture ended: the stream stopped."
+            overview.syncControllerState()
+            XCTAssertEqual(overview.attention.lastError, "Capture ended: the stream stopped.", "A dismissed error that happens again shows again")
+            state.update = .newerAvailable(current: "1.0.0", latest: "1.2.0")
+            state.retentionDays = 0
+            overview.evaluate()
+            XCTAssertEqual(overview.attention.availableUpdate, .newerAvailable(current: "1.0.0", latest: "1.2.0"))
+            XCTAssertNil(overview.attention.retentionDays, "Keeping recordings forever deletes nothing")
+            XCTAssertTrue(OverviewAttention.make(entries: [], heldSessionId: nil, lastError: "  ", retentionDays: 0, update: nil).isEmpty)
+
+            // Show in Recordings clears a search that hides the row; Show all filters to unfinished recordings.
+            recordings.searchText = f.completed
+            overview.showInRecordings(f.corrupt)
+            XCTAssertEqual(navigation.section, .recordings)
+            XCTAssertEqual(navigation.selectedSessionId, f.corrupt)
+            XCTAssertEqual(recordings.searchText, "")
+            navigation.section = .overview
+            recordings.contextFilter = "ctx-orbit"
+            overview.showUnfinishedInRecordings()
+            XCTAssertEqual(navigation.section, .recordings)
+            XCTAssertEqual(recordings.statusFilter, .unfinished)
+            XCTAssertNil(recordings.contextFilter)
+            XCTAssertEqual(recordings.visibleEntries.map(\.id), [offline, f.unfinished])
+
+            // Storage: the archive total is measured off the main actor once the section appears.
+            navigation.section = .overview
+            overview.sectionDidAppear()
+            XCTAssertFalse(overview.isEvaluationLoopActive, "No readiness loop while the window is not visible")
+            await overview.archiveTotalTask?.value
+            XCTAssertGreaterThan(recordings.library.totalArchiveBytes ?? 0, 0)
+            // Reveal sessions folder… warns first, like Reveal archive… in Recordings.
+            overview.requestRevealSessionsFolder()
+            XCTAssertTrue(overview.isConfirmingSessionsReveal)
+            overview.cancelRevealSessionsFolder()
+            XCTAssertFalse(overview.isConfirmingSessionsReveal)
+            XCTAssertEqual(recorder.calls, ["retryAnalysis \(f.unfinished)"], "Nothing is revealed before the warning is confirmed")
+            overview.requestRevealSessionsFolder()
+            overview.confirmRevealSessionsFolder()
+            XCTAssertFalse(overview.isConfirmingSessionsReveal)
+            overview.openReleasesPage()
+            overview.sectionDidDisappear()
+            XCTAssertEqual(recorder.calls, ["retryAnalysis \(f.unfinished)", "revealSessionsFolder", "openReleasesPage"])
+            XCTAssertEqual(
+                try overviewEventRows(at: f.log).compactMap { $0["event"] },
+                ["main_retry", "main_reveal_sessions", "main_open_releases"]
+            )
+            XCTAssertEqual(try mainEventRows(in: f).first?["session"], f.unfinished)
+        }
+    }
+
+    @MainActor
+    func testOverviewStartButtonWaitsForBusyPausedStartInFlightAndTheContextWindow() throws {
+        try withController { controller, log in
+            let recorder = CallRecorder()
+            let state = OverviewState()
+            let navigation = MainNavigation()
+            defer { controller.setStartInFlightForTesting(false) }
+            let recordings = RecordingsModel(
+                library: SessionLibrary(vault: controller.vault),
+                navigation: navigation,
+                dependencies: .live(controller: controller, startRecording: {})
+            )
+            var dependencies = OverviewDependencies.live(
+                controller: controller,
+                startRecording: {
+                    recorder.record("startRecording")
+                    // The menu's flow opens the recording-context window.
+                    state.preparing = true
+                },
+                isPreparingRecording: { state.preparing }
+            )
+            dependencies.readinessInputs = {
+                state.readinessReads += 1
+                return state.inputs
+            }
+            dependencies.updates = OverviewUpdateSource(lastResult: { nil })
+            UpdateChecker.setRequestForTesting {
+                recorder.record("updateCheck")
+                return .upToDate(current: "1.0.0")
+            }
+            defer { UpdateChecker.setRequestForTesting(nil) }
+            let overview = OverviewModel(
+                recordings: recordings,
+                navigation: navigation,
+                dependencies: dependencies,
+                evaluationInterval: .seconds(30),
+                preparingInterval: .milliseconds(20)
+            )
+            overview.observe(controller: controller)
+            recordings.observe(controller: controller)
+            XCTAssertTrue(overview.canStartRecording)
+            XCTAssertNil(overview.startUnavailableReason)
+
+            // Each state reaches the models only through their controller observers: nothing here syncs by hand.
+            let states: [(name: String, apply: () -> Void)] = [
+                ("busy", { controller.isBusy = true; controller.phase = .transcribing }),
+                ("recording", { controller.phase = .recording }),
+                ("paused", { controller.phase = .paused }),
+                ("start in flight", { controller.setStartInFlightForTesting(true) })
+            ]
+            for state in states {
+                state.apply()
+                XCTAssertTrue(
+                    spinRunLoop(until: { !overview.canStartRecording && !recordings.canChangeSessions }),
+                    "\(state.name): the button follows the controller"
+                )
+                XCTAssertEqual(overview.startUnavailableReason, RecordingsModel.busyReason, state.name)
+                XCTAssertFalse(overview.startRecording(), state.name)
+                controller.setStartInFlightForTesting(false)
+                controller.isBusy = false
+                controller.phase = .idle
+                XCTAssertTrue(
+                    spinRunLoop(until: { overview.canStartRecording && recordings.canChangeSessions }),
+                    "\(state.name): enabled again when idle"
+                )
+            }
+            XCTAssertEqual(recorder.calls, [], "A disabled Start runs nothing")
+
+            // The Start this button runs opens the context window: the button waits for it, at the faster pace.
+            overview.sectionDidAppear()
+            overview.setWindowVisible(true)
+            XCTAssertTrue(overview.isEvaluationLoopActive)
+            let reads = state.readinessReads
+            XCTAssertTrue(overview.startRecording())
+            XCTAssertEqual(recorder.calls, ["startRecording"])
+            XCTAssertTrue(overview.isPreparingRecording, "Disabled at once, not after the next check")
+            XCTAssertFalse(overview.canStartRecording)
+            XCTAssertEqual(overview.startUnavailableReason, OverviewModel.preparingReason)
+            XCTAssertFalse(overview.startRecording(), "A second Start waits for the context window")
+            state.preparing = false
+            XCTAssertTrue(
+                spinRunLoop(until: { overview.canStartRecording }, timeout: 2),
+                "The button follows the context window well inside the 30 s readiness interval"
+            )
+            XCTAssertEqual(state.readinessReads, reads, "Following the context window does not read readiness again")
+
+            overview.setWindowVisible(false)
+            XCTAssertFalse(overview.isEvaluationLoopActive, "A hidden window does no readiness work")
+            // While the window was covered, Screen Recording changed and a Start from the menu opened its
+            // context window. Coming back shows both at once, not after the 30 s interval.
+            state.inputs = overviewReadinessInputs(.screenDenied)
+            state.preparing = true
+            let hiddenReads = state.readinessReads
+            overview.setWindowVisible(true)
+            XCTAssertEqual(state.readinessReads, hiddenReads + 1, "Readiness is read as soon as the window is visible")
+            XCTAssertEqual(overview.readiness?.allowsStart, false)
+            XCTAssertFalse(overview.canStartRecording, "Start waits for the context window opened while hidden")
+            XCTAssertEqual(overview.startUnavailableReason, OverviewModel.preparingReason)
+            XCTAssertTrue(overview.isEvaluationLoopActive)
+            state.preparing = false
+            state.inputs = overviewReadinessInputs()
+            overview.sectionDidDisappear()
+            XCTAssertFalse(overview.isEvaluationLoopActive, "Another section does no readiness work")
+            overview.setWindowVisible(false)
+            let readsWhileElsewhere = state.readinessReads
+            overview.setWindowVisible(true)
+            XCTAssertEqual(state.readinessReads, readsWhileElsewhere, "Another section reads nothing when the window shows")
+            XCTAssertFalse(overview.isEvaluationLoopActive)
+
+            // A dismissed error shows again when the controller clears it and fails the same way, even when both
+            // assignments happen before the main queue runs.
+            controller.lastError = "Could not capture the display."
+            XCTAssertTrue(spinRunLoop(until: { overview.attention.lastError == "Could not capture the display." }))
+            overview.dismissLastError()
+            XCTAssertNil(overview.attention.lastError)
+            controller.lastError = nil
+            controller.lastError = "Could not capture the display."
+            XCTAssertTrue(
+                spinRunLoop(until: { overview.attention.lastError == "Could not capture the display." }),
+                "The repeated failure is shown again"
+            )
+            XCTAssertEqual(recorder.calls, ["startRecording"], "No update check and nothing else ran")
+            let starts = try logRows(at: log).filter { $0["event"] == "main_start" }
+            XCTAssertEqual(starts.count, 1)
+            XCTAssertEqual(starts.first?["section"], MainSection.overview.rawValue)
+        }
+    }
+
+    @MainActor
+    func testOverviewReadinessButtonsDispatchNavigateAndWaitForIdleCapture() async throws {
+        try await withRecordingsFixture { f in
+            let navigation = MainNavigation()
+            let recorder = CallRecorder()
+            let preloads = CallRecorder()
+            let state = OverviewState()
+            state.inputs = overviewReadinessInputs(
+                .screenDenied, microphoneStatus: "denied", accessibility: false, speechReady: false,
+                service: false, key: false, notice: false
+            )
+            let recordings = makeRecordingsModel(f, navigation: navigation, recorder: recorder)
+            let overview = makeOverviewModel(recordings: recordings, state: state, recorder: recorder, preload: { model in
+                preloads.record(model)
+            })
+            XCTAssertFalse(overview.perform(.askScreenRecording), "Nothing runs before the section read readiness")
+            overview.evaluate()
+            XCTAssertEqual(Set(overview.readiness?.rows.flatMap(\.actions) ?? []), [
+                .askScreenRecording, .openScreenRecordingSettings, .relaunch, .openMicrophoneSettings,
+                .openPermissionsSettings, .preloadSpeechModel, .openAISettings, .openGeneralSettings
+            ])
+            XCTAssertFalse(overview.isEnabled(.openCaptureSettings), "Only offered actions run")
+            XCTAssertFalse(overview.perform(.openCaptureSettings))
+
+            // Busy: the Screen Recording request, relaunch and preload wait; System Settings does not.
+            // The app's controller observer syncs this; here the test does.
+            state.canChange = false
+            overview.syncStartState()
+            for action: OverviewReadinessAction in [.askScreenRecording, .relaunch, .preloadSpeechModel] {
+                XCTAssertFalse(overview.isEnabled(action), "\(action)")
+                XCTAssertFalse(overview.perform(action), "\(action)")
+            }
+            XCTAssertTrue(overview.perform(.openScreenRecordingSettings))
+            XCTAssertEqual(recorder.calls, ["openScreenRecordingSettings"])
+            state.canChange = true
+            overview.syncStartState()
+
+            for action: OverviewReadinessAction in [.askScreenRecording, .openMicrophoneSettings, .relaunch] {
+                XCTAssertTrue(overview.perform(action), "\(action)")
+            }
+            XCTAssertEqual(recorder.calls, ["openScreenRecordingSettings", "askForScreenRecording", "openMicrophoneSettings", "relaunch"])
+
+            let tabs: [(OverviewReadinessAction, SettingsTab)] = [
+                (.openPermissionsSettings, .permissions), (.openAISettings, .ai), (.openGeneralSettings, .general)
+            ]
+            for (action, tab) in tabs {
+                navigation.section = .overview
+                XCTAssertTrue(overview.perform(action), "\(action)")
+                XCTAssertEqual(navigation.section, .settings, "\(action)")
+                XCTAssertEqual(navigation.settings.selectedTab, tab, "\(action)")
+            }
+            XCTAssertEqual(recorder.calls.count, 4, "Settings tabs open in the same window")
+
+            navigation.section = .overview
+            XCTAssertTrue(overview.perform(.preloadSpeechModel))
+            XCTAssertTrue(overview.isPreloadingSpeechModel)
+            XCTAssertFalse(overview.perform(.preloadSpeechModel), "One preload at a time")
+            await overview.preloadTask?.value
+            XCTAssertFalse(overview.isPreloadingSpeechModel)
+            XCTAssertEqual(overview.preloadLine, "The selected model is ready. No relaunch is needed.")
+            XCTAssertEqual(preloads.calls, [WhisperTranscriber.defaultStoredModel])
+
+            let failing = makeOverviewModel(recordings: recordings, state: state, recorder: recorder, preload: { _ in
+                throw SettingsValidationError("Choose a speech model before loading it.")
+            })
+            failing.evaluate()
+            XCTAssertTrue(failing.perform(.preloadSpeechModel))
+            await failing.preloadTask?.value
+            XCTAssertFalse(failing.isPreloadingSpeechModel)
+            XCTAssertTrue(failing.preloadLine?.hasPrefix("Could not load Whisper:") == true, failing.preloadLine ?? "")
+
+            XCTAssertEqual(recorder.calls.filter { $0 == "updateCheck" }, [])
+            let rows = try overviewEventRows(at: f.log)
+            XCTAssertEqual(rows.compactMap { $0["event"] }, Array(repeating: "main_readiness", count: 9))
+            XCTAssertEqual(rows.compactMap { $0["action"] }, [
+                "openScreenRecordingSettings", "askScreenRecording", "openMicrophoneSettings", "relaunch",
+                "openPermissionsSettings", "openAISettings", "openGeneralSettings", "preloadSpeechModel", "preloadSpeechModel"
+            ])
+        }
+    }
+
+    @MainActor
+    func testOverviewAppearsWithoutNetworkOrPermissionRequestsAndChecksReadinessOnlyWhileShown() async throws {
+        try await withRecordingsFixture { f in
+            try await withFixtureController(f) { controller in
+                let navigation = MainNavigation()
+                let recorder = CallRecorder()
+                let state = OverviewState()
+                state.inputs = overviewReadinessInputs(.screenDenied, speechReady: false, service: false, key: false, notice: false)
+                state.lastError = "Could not capture the display."
+                state.retentionDays = 30
+                state.update = .newerAvailable(current: "1.0.0", latest: "1.2.0")
+                let recordings = makeRecordingsModel(f, navigation: navigation, recorder: recorder)
+                let overview = makeOverviewModel(recordings: recordings, state: state, recorder: recorder, evaluationInterval: .milliseconds(50))
+                XCTAssertEqual(navigation.section, .overview)
+                // The first frame already has the capture area, folder and retention; permissions wait for the section.
+                XCTAssertEqual(overview.captureAreaSummary, "Entire display")
+                XCTAssertEqual(overview.sessionsFolder, "~/Movies/ScrumTrace/sessions")
+                XCTAssertEqual(overview.retentionDays, 30)
+                XCTAssertNil(overview.readiness)
+                XCTAssertEqual(state.readinessReads, 0, "Creating the model asks macOS nothing")
+                let hosting = NSHostingController(rootView: MainWindowView(
+                    controller: controller,
+                    navigation: navigation,
+                    recordings: recordings,
+                    overview: overview,
+                    settingsView: {
+                        SettingsView(settings: controller.settings, controller: controller, navigation: navigation.settings)
+                    }
+                ))
+                hosting.sizingOptions = []
+                let window = NSWindow(contentViewController: hosting)
+                window.isReleasedWhenClosed = false
+                window.setContentSize(NSSize(width: 960, height: 640))
+                defer { window.close() }
+                window.orderFront(nil)
+                recordings.setWindowVisible(true)
+                overview.setWindowVisible(true)
+                defer {
+                    recordings.setWindowVisible(false)
+                    overview.setWindowVisible(false)
+                }
+
+                let appeared = await waitUntil { overview.readiness != nil && overview.isEvaluationLoopActive }
+                XCTAssertTrue(appeared, "The section appeared and read readiness")
+                let listed = await waitUntil { recordings.library.entries.count == 3 && recordings.library.totalArchiveBytes != nil }
+                XCTAssertTrue(listed, "It lists the sessions and measures the archives")
+                let reads = state.readinessReads
+                let ticked = await waitUntil { state.readinessReads >= reads + 2 }
+                XCTAssertTrue(ticked, "Readiness is checked again while the section is shown")
+                XCTAssertGreaterThan(state.updateReads, 0, "Only the cached update result is read")
+                XCTAssertEqual(overview.attention.availableUpdate, state.update)
+                XCTAssertEqual(recorder.calls, [], "Appearing starts no update check, no Screen Recording request and no recording")
+                XCTAssertNil(UpdateChecker.lastResult, "No check ran anywhere, so none recorded a result")
+                XCTAssertEqual(try logRows(at: f.log).filter { $0["event"] == "screen_request" }.count, 0)
+
+                if ProcessInfo.processInfo.environment["SCRUMTRACE_SNAPSHOT_DIR"] != nil {
+                    spinRunLoop(for: 0.2)
+                    writeSnapshot(of: window, named: "overview-960-top")
+                    scrollToBottom(in: window)
+                    spinRunLoop(for: 0.2)
+                    writeSnapshot(of: window, named: "overview-960-bottom")
+                    window.setContentSize(MainWindowPresenter.minimumContentSize)
+                    spinRunLoop(for: 0.3)
+                    writeSnapshot(of: window, named: "overview-840-top")
+                    scrollToBottom(in: window)
+                    spinRunLoop(for: 0.2)
+                    writeSnapshot(of: window, named: "overview-840-bottom")
+                }
+
+                navigation.section = .settings
+                let stopped = await waitUntil { !overview.isEvaluationLoopActive }
+                XCTAssertTrue(stopped, "Leaving the section stops the readiness checks")
+                let afterLeaving = state.readinessReads
+                try await Task.sleep(for: .milliseconds(200))
+                XCTAssertEqual(state.readinessReads, afterLeaving, "No readiness work while another section is shown")
+                navigation.section = .overview
+                let back = await waitUntil { overview.isEvaluationLoopActive }
+                XCTAssertTrue(back)
+                overview.setWindowVisible(false)
+                XCTAssertFalse(overview.isEvaluationLoopActive, "A hidden window does no readiness work")
+                XCTAssertEqual(recorder.calls, [])
+            }
+        }
+    }
+
+    @MainActor
+    func testOpeningTheWindowOnOverviewListsSessionsAndChecksReadinessOnlyWhileVisible() async throws {
+        try await withRecordingsFixture { f in
+            try await withFixtureController(f) { controller in
+                XCTAssertTrue(RecordingsModel.listsSessions(.overview))
+                XCTAssertTrue(RecordingsModel.listsSessions(.recordings))
+                XCTAssertFalse(RecordingsModel.listsSessions(.contexts))
+                XCTAssertFalse(RecordingsModel.listsSessions(.settings))
+                let checks = CallRecorder()
+                UpdateChecker.setRequestForTesting {
+                    checks.record("updateCheck")
+                    return .upToDate(current: "1.0.0")
+                }
+                defer { UpdateChecker.setRequestForTesting(nil) }
+                // A check from the menu bar or Settings already ran in this launch.
+                UpdateChecker.recordLastResult(.newerAvailable(current: "1.0.0", latest: "1.2.0"))
+                let starts = MainActorBox(0)
+                let preparing = MainActorBox(false)
+                let presenter = MainWindowPresenter(
+                    controller: controller,
+                    frameAutosaveName: nil,
+                    onStartRecording: {
+                        starts.value += 1
+                        preparing.value = true
+                    },
+                    isPreparingRecording: { preparing.value }
+                )
+                defer { presenter.window?.close() }
+                XCTAssertNil(presenter.overview.readiness, "Nothing is read before the window shows the section")
+                XCTAssertFalse(presenter.overview.isWindowVisible)
+
+                presenter.show()
+                let window = try XCTUnwrap(presenter.window)
+                XCTAssertEqual(presenter.navigation.section, .overview)
+                XCTAssertTrue(presenter.overview.isWindowVisible)
+                XCTAssertTrue(presenter.recordings.isPeriodicRefreshActive)
+                let ready = await waitUntil {
+                    presenter.overview.readiness != nil
+                        && presenter.overview.isEvaluationLoopActive
+                        && presenter.recordings.library.entries.count == 3
+                }
+                XCTAssertTrue(ready, "Opening on Overview reads readiness and lists the sessions")
+                XCTAssertEqual(presenter.overview.attention.unfinished.map(\.sessionId), [f.unfinished])
+                XCTAssertEqual(presenter.overview.lastRecording?.sessionId, f.unfinished)
+                XCTAssertEqual(presenter.overview.attention.unreadableIds, [f.corrupt])
+                XCTAssertEqual(
+                    presenter.overview.attention.availableUpdate,
+                    .newerAvailable(current: "1.0.0", latest: "1.2.0"),
+                    "The live source shows the result of the check that already ran"
+                )
+                XCTAssertEqual(checks.calls, [], "Opening the window starts no update check")
+                XCTAssertEqual(UpdateChecker.lastResult, .newerAvailable(current: "1.0.0", latest: "1.2.0"))
+                XCTAssertEqual(try logRows(at: f.log).filter { $0["event"] == "screen_request" }.count, 0, "No Screen Recording request")
+
+                // The presenter hands the app's Start flow and its context-window state to the Overview.
+                XCTAssertTrue(presenter.overview.startRecording())
+                XCTAssertEqual(starts.value, 1)
+                XCTAssertTrue(presenter.overview.isPreparingRecording)
+                XCTAssertFalse(presenter.overview.canStartRecording)
+                preparing.value = false
+                presenter.overview.syncStartState()
+                XCTAssertTrue(presenter.overview.canStartRecording)
+
+                window.miniaturize(nil)
+                XCTAssertTrue(spinRunLoop(until: { !presenter.overview.isEvaluationLoopActive }), "A minimized window does no readiness work")
+                window.deminiaturize(nil)
+                XCTAssertTrue(spinRunLoop(until: { presenter.overview.isEvaluationLoopActive }))
+                window.close()
+                XCTAssertFalse(presenter.overview.isEvaluationLoopActive, "A closed window does no readiness work")
+                XCTAssertFalse(presenter.recordings.isPeriodicRefreshActive)
+
+                // Showing the closed window again brings the section and its readiness checks back.
+                presenter.show()
+                XCTAssertTrue(presenter.window === window, "The same window is reused")
+                XCTAssertTrue(
+                    spinRunLoop(until: { presenter.overview.isSectionShown && presenter.overview.isEvaluationLoopActive }),
+                    "Reopened on Overview, readiness is checked again"
+                )
+                XCTAssertTrue(presenter.recordings.isPeriodicRefreshActive)
+                XCTAssertEqual(checks.calls, [])
+            }
+        }
+    }
+
+    @MainActor
+    func testAnUpdateCheckRecordsItsResultForTheOverviewToRead() async {
+        let checks = CallRecorder()
+        UpdateChecker.setRequestForTesting {
+            checks.record("updateCheck")
+            return .newerAvailable(current: "1.0.0", latest: "1.2.0")
+        }
+        defer { UpdateChecker.setRequestForTesting(nil) }
+        XCTAssertNil(UpdateChecker.lastResult)
+        XCTAssertNil(OverviewUpdateSource.live.lastResult())
+        let result = await UpdateChecker.check()
+        XCTAssertEqual(result, .newerAvailable(current: "1.0.0", latest: "1.2.0"))
+        XCTAssertEqual(checks.calls, ["updateCheck"])
+        XCTAssertEqual(UpdateChecker.lastResult, result, "The check keeps its result for this launch")
+        XCTAssertEqual(OverviewUpdateSource.live.lastResult(), result, "The Overview reads that result")
+    }
+
+    @MainActor
+    func testOverviewMeasuresArchivesOnlyAfterTheFirstScanListedTheSessions() async throws {
+        try await withRecordingsFixture { f in
+            let gate = DispatchGroup()
+            gate.enter()
+            let released = MainActorBox(false)
+            defer { if !released.value { gate.leave() } }
+            let recorder = CallRecorder()
+            let state = OverviewState()
+            let recordings = makeRecordingsModel(f, recorder: recorder, manifestLoadGate: gate)
+            let overview = makeOverviewModel(recordings: recordings, state: state, recorder: recorder)
+            let totals = MainActorBox<[Int?]>([])
+            let subscription = recordings.library.$totalArchiveBytes.dropFirst().sink { value in
+                MainActor.assumeIsolated { totals.value.append(value) }
+            }
+            defer { subscription.cancel() }
+
+            overview.sectionDidAppear()
+            // The first scan is still reading manifests, so nothing is measured and Private archives keeps
+            // saying Measuring… instead of zero bytes.
+            try await Task.sleep(for: .milliseconds(300))
+            XCTAssertTrue(recordings.library.entries.isEmpty)
+            XCTAssertNil(recordings.library.totalArchiveBytes)
+            XCTAssertEqual(totals.value, [])
+
+            gate.leave()
+            released.value = true
+            await overview.archiveTotalTask?.value
+            XCTAssertEqual(recordings.library.entries.count, 3)
+            XCTAssertGreaterThan(recordings.library.totalArchiveBytes ?? 0, 0)
+            XCTAssertFalse(totals.value.contains(0), "No zero total was ever published: \(totals.value)")
+        }
+    }
+
+    @MainActor
+    func testOverviewWaitsForTheRefreshThatReplacedTheFirstScanBeforeMeasuringArchives() async throws {
+        try await withRecordingsFixture { f in
+            let gate = ScanGate()
+            defer { gate.openAll() }
+            let recorder = CallRecorder()
+            let state = OverviewState()
+            let recordings = makeRecordingsModel(f, recorder: recorder, beforeManifestLoad: { gate.wait() })
+            let overview = makeOverviewModel(recordings: recordings, state: state, recorder: recorder)
+            let totals = MainActorBox<[Int?]>([])
+            let subscription = recordings.library.$totalArchiveBytes.dropFirst().sink { value in
+                MainActor.assumeIsolated { totals.value.append(value) }
+            }
+            defer { subscription.cancel() }
+
+            // The window became visible on Overview and started a scan; the section appears and joins it.
+            let first = recordings.refresh()
+            let firstStarted = await waitUntil { gate.firstScanLoads >= 1 }
+            XCTAssertTrue(firstStarted, "The first scan is decoding")
+            overview.sectionDidAppear()
+            // Before it finishes, processing ends or the window is uncovered: a newer refresh replaces that scan.
+            let second = recordings.refresh()
+            let secondStarted = await waitUntil { gate.laterScanLoads >= 1 }
+            XCTAssertTrue(secondStarted, "The newer scan is decoding")
+
+            // The replaced scan finishes and publishes nothing. The total must not measure the empty list.
+            gate.openFirstScan()
+            await first.value
+            try await Task.sleep(for: .milliseconds(300))
+            XCTAssertTrue(recordings.library.isLoading, "No scan has published yet")
+            XCTAssertTrue(recordings.library.entries.isEmpty)
+            XCTAssertNil(recordings.library.totalArchiveBytes, "Private archives keeps saying Measuring…")
+            XCTAssertEqual(totals.value, [])
+
+            gate.openLaterScans()
+            await second.value
+            await overview.archiveTotalTask?.value
+            XCTAssertEqual(recordings.library.entries.count, 3)
+            let measured = try XCTUnwrap(recordings.library.totalArchiveBytes)
+            XCTAssertGreaterThan(measured, 0)
+            XCTAssertEqual(totals.value, [measured], "One total, never zero bytes")
+            overview.sectionDidDisappear()
+            XCTAssertEqual(recorder.calls, [])
+        }
+    }
+
+    @MainActor
+    func testOverviewLastRecordingSkipsACaptureInProgressAndShowAllMatchesTheRecordingsFilter() async throws {
+        try await withRecordingsFixture { f in
+            let navigation = MainNavigation()
+            let recorder = CallRecorder()
+            let state = OverviewState()
+            let recordings = makeRecordingsModel(
+                f,
+                navigation: navigation,
+                recorder: recorder,
+                canChange: { state.canChange },
+                activeSessionId: { state.activeSessionId }
+            )
+            let overview = makeOverviewModel(recordings: recordings, state: state, recorder: recorder)
+            @MainActor func syncCapture() {
+                overview.syncStartState()
+                recordings.syncCaptureState()
+            }
+            XCTAssertEqual(
+                [PipelineStatus.idle, .recording, .paused, .transcribing, .slicing, .evaluating, .synthesizing, .completed, .offlineFailed]
+                    .filter(OverviewModel.isCapturing),
+                [.idle, .recording, .paused]
+            )
+
+            let capturing = try makeSession(in: f.vault, status: .recording)
+            await recordings.refresh().value
+            XCTAssertEqual(overview.lastRecording?.sessionId, capturing, "Idle: a recording that never finished is the newest")
+
+            // Recording: the card keeps the recording before it, as Needs attention leaves the live one out.
+            state.canChange = false
+            state.activeSessionId = capturing.uppercased()
+            syncCapture()
+            XCTAssertEqual(overview.heldSessionId, capturing.uppercased())
+            XCTAssertEqual(overview.lastRecording?.sessionId, f.unfinished)
+            XCTAssertEqual(overview.attention.unfinished.map(\.sessionId), [f.unfinished])
+
+            // Analysis of that recording: the card shows its progress.
+            var manifest = try f.vault.loadManifest(id: capturing)
+            manifest.pipelineStatus = .transcribing
+            try f.vault.write(manifest: &manifest)
+            await recordings.refresh().value
+            XCTAssertEqual(overview.lastRecording?.sessionId, capturing)
+            XCTAssertEqual(overview.lastRecording?.pipelineStatus, .transcribing)
+
+            // Show all counts what the Recordings filter lists, including the recording in progress.
+            for _ in 0..<5 {
+                _ = try makeSession(in: f.vault, status: .offlineFailed)
+            }
+            await recordings.refresh().value
+            XCTAssertEqual(overview.attention.unfinished.count, 6, "Needs attention leaves out the held recording")
+            XCTAssertGreaterThan(overview.attention.unfinished.count, OverviewAttention.unfinishedLimit)
+            XCTAssertEqual(overview.unfinishedInRecordingsCount, 7)
+            overview.showUnfinishedInRecordings()
+            XCTAssertEqual(navigation.section, .recordings)
+            XCTAssertEqual(recordings.visibleEntries.count, overview.unfinishedInRecordingsCount)
+            XCTAssertEqual(recorder.calls, [])
+        }
+    }
+}
+
+/// Readiness inputs for tests: everything set up unless an argument says otherwise.
+private func overviewReadinessInputs(
+    _ capture: CaptureReadiness = .ready,
+    microphone: Bool = true,
+    microphoneStatus: String = "allowed",
+    accessibility: Bool = true,
+    speechModel: String = WhisperTranscriber.defaultStoredModel,
+    speechReady: Bool = true,
+    speechLoading: Bool = false,
+    service: Bool = true,
+    key: Bool = true,
+    valid: Bool = true,
+    notice: Bool = true
+) -> OverviewReadiness.Inputs {
+    let summary: String
+    if !service {
+        summary = "No service selected. Add one to use AI analysis. Recording and local export remain available."
+    } else if !key {
+        summary = "No saved key for this service. Recording and local export remain available."
+    } else {
+        summary = "Configured locally. Key validity and model availability have not been checked online."
+    }
+    return OverviewReadiness.Inputs(
+        capture: capture,
+        microphoneEnabled: microphone,
+        microphoneStatus: microphoneStatus,
+        accessibilityTrusted: accessibility,
+        speechModel: speechModel,
+        speechModelReady: speechReady,
+        speechModelLoading: speechLoading,
+        aiServiceSelected: service,
+        aiKeySaved: key,
+        aiConfigurationValid: valid,
+        aiSummary: summary,
+        meetingNoticeAccepted: notice
+    )
+}
+
+/// What the injected Overview closures read while a test changes it, and how often readiness and the cached
+/// update result were read.
+@MainActor
+private final class OverviewState {
+    var inputs = overviewReadinessInputs()
+    var canChange = true
+    var preparing = false
+    var activeSessionId: String?
+    var lastError: String?
+    var retentionDays = 0
+    var captureArea = "Entire display"
+    var update: UpdateChecker.Result?
+    var readinessReads = 0
+    var updateReads = 0
 }
 
 /// Records calls from injected closures, including the delete that runs off the main actor.
@@ -1755,5 +2712,71 @@ private final class MainActorBox<Value> {
 
     init(_ value: Value) {
         self.value = value
+    }
+}
+
+/// Holds manifest loads per scan: the scan that loads a manifest first waits for `openFirstScan()`, every
+/// other scan for `openLaterScans()`. A scan decodes synchronously on one thread, which tells scans apart.
+private final class ScanGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private let firstScan = DispatchGroup()
+    private let laterScans = DispatchGroup()
+    private var firstThread: pthread_t?
+    private var firstLoads = 0
+    private var laterLoads = 0
+    private var isFirstOpen = false
+    private var areLaterOpen = false
+
+    init() {
+        firstScan.enter()
+        laterScans.enter()
+    }
+
+    var firstScanLoads: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return firstLoads
+    }
+
+    var laterScanLoads: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return laterLoads
+    }
+
+    func wait() {
+        let thread = pthread_self()
+        lock.lock()
+        let first = firstThread ?? thread
+        firstThread = first
+        let isFirst = pthread_equal(first, thread) != 0
+        if isFirst {
+            firstLoads += 1
+        } else {
+            laterLoads += 1
+        }
+        lock.unlock()
+        _ = (isFirst ? firstScan : laterScans).wait(timeout: .now() + 10)
+    }
+
+    func openFirstScan() {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !isFirstOpen else { return }
+        isFirstOpen = true
+        firstScan.leave()
+    }
+
+    func openLaterScans() {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !areLaterOpen else { return }
+        areLaterOpen = true
+        laterScans.leave()
+    }
+
+    func openAll() {
+        openFirstScan()
+        openLaterScans()
     }
 }

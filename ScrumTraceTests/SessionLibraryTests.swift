@@ -727,6 +727,78 @@ final class SessionLibraryTests: XCTestCase {
             XCTAssertFalse(library.isLoading)
         }
     }
+
+    @MainActor
+    func testAnArchiveTotalAskedBeforeAnyScanPublishedWaitsForTheScanThatPublishes() async throws {
+        try await withFixture { f in
+            let gate = FirstLoadGate()
+            defer { gate.open() }
+            let walks = WalkRecorder()
+            let library = SessionLibrary(
+                vault: f.vault,
+                loadManifest: { vault, id in
+                    gate.enter()
+                    return try vault.loadManifest(id: id)
+                },
+                measureArchive: { vault, id in
+                    walks.record(id)
+                    return vault.archiveByteCount(id: id)
+                }
+            )
+            let totals = TotalRecorder()
+            let observation = library.$totalArchiveBytes.dropFirst().sink { totals.record($0) }
+            defer { observation.cancel() }
+            let expected = Data(Self.transcriptJSON.utf8).count + 4_096
+
+            // No scan listed the sessions yet, so zero bytes would be wrong: nothing is measured or published.
+            await library.loadTotalArchiveBytes().value
+            XCTAssertNil(library.totalArchiveBytes)
+            XCTAssertEqual(walks.ids, [])
+
+            // A view asks while the first scan is decoding, and a newer refresh replaces that scan.
+            let older = library.refresh()
+            let started = await waitUntil { gate.calls >= 1 }
+            XCTAssertTrue(started, "The older scan is decoding")
+            let total = library.loadTotalArchiveBytes()
+            let newer = library.refresh()
+            await total.value
+            XCTAssertEqual(library.entries.count, 4, "The total waited for the newer scan")
+            XCTAssertEqual(library.totalArchiveBytes, expected)
+            XCTAssertEqual(walks.ids.sorted(), [f.unfinished, f.completed, f.offline, f.corrupt].sorted())
+            gate.open()
+            await older.value
+            await newer.value
+            XCTAssertEqual(totals.values, [expected], "One total, and never zero bytes before the sessions were listed")
+
+            // A vault without sessions: the scan that publishes still measures the total that was asked for.
+            let emptyRoot = f.base.appendingPathComponent("empty-sessions", isDirectory: true)
+            try FileManager.default.createDirectory(at: emptyRoot, withIntermediateDirectories: true)
+            let empty = SessionLibrary(vault: SessionVault(rootURL: emptyRoot))
+            let scan = empty.refresh()
+            await empty.loadTotalArchiveBytes().value
+            XCTAssertEqual(empty.entries, [])
+            XCTAssertEqual(empty.totalArchiveBytes, 0, "Measured once the empty list was published, not left at Measuring…")
+            await scan.value
+        }
+    }
+}
+
+/// Records every archive total a library published, in order.
+private final class TotalRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var recorded: [Int?] = []
+
+    var values: [Int?] {
+        lock.lock()
+        defer { lock.unlock() }
+        return recorded
+    }
+
+    func record(_ value: Int?) {
+        lock.lock()
+        recorded.append(value)
+        lock.unlock()
+    }
 }
 
 /// Counts manifest loads from background scans.
