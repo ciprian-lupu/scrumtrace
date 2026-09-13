@@ -84,6 +84,7 @@ Linux / cloud agents **cannot** compile ScreenCaptureKit or close Gate 0/1. They
 Linux / cloud (do this after Swift or script edits that the tests cover):
 
 ```bash
+python3 -m pip install -r scripts/requirements.txt   # Pillow for generate_mock_session.py
 bash scripts/run_linux_tests.sh
 python3 scripts/generate_mock_session.py   # only commit if mock *content* changed
 python3 scripts/serve_preview.py --host 127.0.0.1 --port 43147
