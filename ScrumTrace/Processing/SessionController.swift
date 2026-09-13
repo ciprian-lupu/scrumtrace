@@ -37,6 +37,7 @@ final class SessionController: ObservableObject {
     private var pausedByPrivacy = false
     private var lastMetaSignature = ""
     private var terminateRequested = false
+    private let transcriptionReviewPresenter = TranscriptionReviewPresenter()
     let captureFreeze: CaptureFreeze
 
     init(settings: AppSettings, vault: SessionVault = SessionVault()) {
@@ -356,13 +357,8 @@ final class SessionController: ObservableObject {
     /// enter export/ until a timestamped choice is promoted and reprocessed.
     func reviewTranscriptions(sessionId: String) {
         #if os(macOS)
-        let runs = TranscriptionRunStore.load(sessionURL: vault.sessionURL(id: sessionId))
-        guard !runs.isEmpty else { statusLine = "No saved transcription comparisons for this session."; return }
-        let alert = NSAlert()
-        alert.messageText = "Saved transcription results"
-        alert.informativeText = transcriptionReviewText(sessionId: sessionId, runs: runs)
-        alert.addButton(withTitle: "Done")
-        alert.runModal()
+        guard canChangeCaptureSettings else { statusLine = "Wait for recording or analysis to finish."; return }
+        transcriptionReviewPresenter.show(controller: self, sessionID: sessionId)
         #endif
     }
 
@@ -372,7 +368,8 @@ final class SessionController: ObservableObject {
             let transcript = TranscriptionRunStore.loadTranscript(id: run.id, sessionURL: sessionURL)
             let timestamps = transcript?.hasTimedSegments == true ? "timestamps: available" : "timestamps: unavailable (cannot promote)"
             let input = run.inputs.map { "\($0.source) · \($0.transform) · \($0.bytes) bytes" }.joined(separator: "; ")
-            let preview = (transcript?.segments.map(\.text).joined(separator: " ") ?? transcript?.untimedText ?? "").prefix(280)
+            let allText = TranscriptionReviewText.fullText(transcript)
+            let preview = allText.prefix(280)
             return "\(run.configuration.name) · requested \(run.configuration.requestedModel)\nstatus: \(run.status.rawValue) · duration: \(Int(run.processingSeconds ?? 0))s · \(timestamps)\naudio: \(input)\n\(preview)"
         }.joined(separator: "\n\n")
     }
@@ -873,9 +870,10 @@ final class SessionController: ObservableObject {
             // to the normal transcript only for this normal-processing path;
             // explicit comparison never promotes automatically.
             let defaultSpeech = settings.selectedTranscriptionServiceConfiguration()
+            let hasReusablePrimary = processor!.hasValidPrimaryTranscript(sessionId: sessionId)
             let whisperModel: String
             if let speech = defaultSpeech, speech.service.backend == .openAITranscription {
-                if processor!.hasValidPrimaryTranscript(sessionId: sessionId) {
+                if hasReusablePrimary {
                     // Retry Analysis is deterministic with respect to the
                     // selected primary. Do not re-consent or make a new cloud
                     // request merely because a default profile changed.
@@ -892,10 +890,11 @@ final class SessionController: ObservableObject {
                     whisperModel = settings.whisperModel
                 }
             } else if let speech = defaultSpeech {
-                let language = speech.service.language
-                transcriber.setLanguage(language.mode == .single && language.languages.count == 1 ? language.languages[0] : .automatic)
-                try await transcriber.prepare(model: speech.service.model, source: speech.service.whisperSource ?? .standard)
-                whisperModel = speech.service.model
+                whisperModel = try await prepareLocalTranscriptionIfNeeded(
+                    transcriber: transcriber,
+                    service: speech.service,
+                    reusingPrimaryTranscript: hasReusablePrimary
+                )
             } else {
                 transcriber.setLanguage(settings.speechLanguage)
                 whisperModel = settings.whisperModel
@@ -1407,6 +1406,22 @@ final class SessionController: ObservableObject {
     private func stemFrom(_ shotId: String) -> String {
         shotId.replacingOccurrences(of: "shot-", with: "")
     }
+}
+
+/// Retry Analysis reuses the chosen archive transcript before it touches a
+/// local model source. Keeping this small decision at the call site makes it
+/// impossible for a missing custom WhisperKit folder to block analysis only.
+@MainActor
+func prepareLocalTranscriptionIfNeeded(
+    transcriber: WhisperTranscriber,
+    service: SavedTranscriptionService,
+    reusingPrimaryTranscript: Bool
+) async throws -> String {
+    guard !reusingPrimaryTranscript else { return service.model }
+    let language = service.language
+    transcriber.setLanguage(language.mode == .single && language.languages.count == 1 ? language.languages[0] : .automatic)
+    try await transcriber.prepare(model: service.model, source: service.whisperSource ?? .standard)
+    return service.model
 }
 
 #if os(macOS)

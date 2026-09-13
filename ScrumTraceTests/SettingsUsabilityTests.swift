@@ -410,11 +410,11 @@ final class SettingsUsabilityTests: XCTestCase {
         try TranscriptionRunStore.saveTranscript(FullTranscript(sessionId: "", language: "ro", segments: [.init(start: 0, end: 1, text: "Ales", speaker: nil, words: [])]), id: first.id, sessionURL: session)
         let promoted = try TranscriptionRunStore.selectPrimary(id: first.id, sessionURL: session)
         XCTAssertEqual(promoted.segments.first?.text, "Ales")
-        XCTAssertEqual(TranscriptionRunStore.load(sessionURL: session).map(\.id), ["run-one", "run-two"])
+        XCTAssertEqual(try TranscriptionRunStore.load(sessionURL: session).map(\.id), ["run-one", "run-two"])
         XCTAssertEqual(TranscriptionRunStore.loadTranscript(id: first.id, sessionURL: session)?.segments.first?.text, "Ales")
     }
 
-    func testCloudTranscriptionUsesAudioMultipartAndKeepsUntimedTextNonPromotable() async throws {
+    func testCloudTranscriptionDecodesDocumentedDetectedLanguagesAndTimedSegments() async throws {
         let audio = try ExportRel.makePrivateTemporaryURL(prefix: "speech-http-fixture", ext: "m4a")
         defer { ExportRel.removePrivateTemporaryURL(audio) }
         try Data("AUDIO_ONLY_FIXTURE".utf8).write(to: audio)
@@ -429,15 +429,77 @@ final class SettingsUsabilityTests: XCTestCase {
             XCTAssertTrue(text.contains("filename=\"audio.m4a\""))
             XCTAssertTrue(text.contains("AUDIO_ONLY_FIXTURE"))
             XCTAssertTrue(text.contains("name=\"languages[]\""))
+            XCTAssertTrue(text.contains("name=\"response_format\"\r\n\r\nverbose_json"))
+            XCTAssertTrue(text.contains("name=\"timestamp_granularities[]\""))
             XCTAssertFalse(text.contains("session.mp4"))
             XCTAssertFalse(text.contains("name=\"prompt\""))
             let response = HTTPURLResponse(url: try XCTUnwrap(request.url), statusCode: 200, httpVersion: nil, headerFields: nil)!
-            return (Data("{\"text\":\"fără timestamps\",\"languages\":[\"ro\"]}".utf8), response)
+            return (Data("{\"text\":\"Salut. Hello.\",\"languages\":[{\"code\":\"ro\"},{\"code\":\"en\"}],\"segments\":[{\"start\":0,\"end\":1.5,\"text\":\"Salut. Hello.\"}]}".utf8), response)
         }
         let transcript = try await engine.transcribe(audioURL: audio, configuration: .init(service: service, apiKey: "fixture-key"))
-        XCTAssertTrue(transcript.segments.isEmpty)
+        XCTAssertEqual(transcript.detectedLanguages, ["ro", "en"])
+        XCTAssertEqual(transcript.language, "ro")
+        XCTAssertEqual(transcript.segments.count, 1)
+        XCTAssertTrue(transcript.hasTimedSegments)
+    }
+
+    func testCloudTranscriptionKeepsUntimedTextWhenOptionalLanguagesAreAbsent() async throws {
+        let audio = try ExportRel.makePrivateTemporaryURL(prefix: "speech-http-untimed", ext: "m4a")
+        defer { ExportRel.removePrivateTemporaryURL(audio) }
+        try Data("AUDIO_ONLY_FIXTURE".utf8).write(to: audio)
+        let service = SavedTranscriptionService(name: "fixture", backend: .openAITranscription, endpoint: "http://127.0.0.1:9999", model: "gpt-4o-transcribe", credentialID: "fixture")
+        let engine = OpenAITranscriptionEngine { request in
+            let body = String(data: try XCTUnwrap(request.httpBody), encoding: .utf8)!
+            XCTAssertFalse(body.contains("response_format"))
+            XCTAssertFalse(body.contains("timestamp_granularities"))
+            let response = HTTPURLResponse(url: try XCTUnwrap(request.url), statusCode: 200, httpVersion: nil, headerFields: nil)!
+            return (Data("{\"text\":\"fără timestamps\"}".utf8), response)
+        }
+        let transcript = try await engine.transcribe(audioURL: audio, configuration: .init(service: service, apiKey: "fixture-key"))
+        XCTAssertNil(transcript.detectedLanguages)
         XCTAssertEqual(transcript.untimedText, "fără timestamps")
         XCTAssertFalse(transcript.hasTimedSegments)
+    }
+
+    func testCloudTranscriptionReportsMalformedResponseRatherThanSavingEmptySuccess() async throws {
+        let audio = try ExportRel.makePrivateTemporaryURL(prefix: "speech-http-malformed", ext: "m4a")
+        defer { ExportRel.removePrivateTemporaryURL(audio) }
+        try Data("AUDIO_ONLY_FIXTURE".utf8).write(to: audio)
+        let service = SavedTranscriptionService(name: "fixture", backend: .openAITranscription, endpoint: "http://127.0.0.1:9999", model: "gpt-transcribe", credentialID: "fixture")
+        let engine = OpenAITranscriptionEngine { request in
+            let response = HTTPURLResponse(url: try XCTUnwrap(request.url), statusCode: 200, httpVersion: nil, headerFields: nil)!
+            return (Data("{\"text\":\"x\",\"languages\":[{\"wrong\":\"ro\"}]}".utf8), response)
+        }
+        do {
+            _ = try await engine.transcribe(audioURL: audio, configuration: .init(service: service, apiKey: "fixture-key"))
+            XCTFail("Malformed response must not become an empty success")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains("could not be decoded"))
+        }
+    }
+
+    func testCloudModelCapabilityMapDoesNotSendUndocumentedLanguageLists() async throws {
+        let audio = try ExportRel.makePrivateTemporaryURL(prefix: "speech-http-capabilities", ext: "wav")
+        defer { ExportRel.removePrivateTemporaryURL(audio) }
+        try Data("WAV_FIXTURE".utf8).write(to: audio)
+        let language = SpeechLanguageSelection(mode: .expected, languages: [.romanian, .english])
+        for model in ["whisper-1", "gpt-4o-transcribe", "gpt-4o-transcribe-diarize"] {
+            let service = SavedTranscriptionService(name: model, backend: .openAITranscription, endpoint: "http://127.0.0.1:9999", model: model, credentialID: "fixture", language: language)
+            let engine = OpenAITranscriptionEngine { request in
+                let body = String(data: try XCTUnwrap(request.httpBody), encoding: .utf8)!
+                XCTAssertFalse(body.contains("name=\"languages[]\""), "\(model) does not document language lists")
+                if model == "whisper-1" {
+                    XCTAssertTrue(body.contains("verbose_json"))
+                    XCTAssertTrue(body.contains("timestamp_granularities"))
+                } else {
+                    XCTAssertFalse(body.contains("verbose_json"))
+                    XCTAssertFalse(body.contains("timestamp_granularities"))
+                }
+                let response = HTTPURLResponse(url: try XCTUnwrap(request.url), statusCode: 200, httpVersion: nil, headerFields: nil)!
+                return (Data("{\"text\":\"ok\"}".utf8), response)
+            }
+            _ = try await engine.transcribe(audioURL: audio, configuration: .init(service: service, apiKey: "fixture-key"))
+        }
     }
 
     func testUntimedComparisonCannotReplacePrimaryTranscript() throws {
@@ -495,6 +557,125 @@ final class SettingsUsabilityTests: XCTestCase {
             ),
             "Key accepted. deepseek-flash replied “pong” in 0.4s."
         )
+    }
+
+    func testLegacyComparisonIndexLoadsWithHonestTransformAndKeepsHistory() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("legacy-runs-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let vault = SessionVault(rootURL: root)
+        let created = try vault.createSession(product: .empty)
+        let session = vault.sessionURL(id: created.manifest.sessionId)
+        let config = TranscriptionServiceConfiguration.Snapshot(serviceID: "legacy", name: "Legacy", backend: .whisperKit, endpoint: "", requestedModel: "base", language: .automatic, credentialRequired: false)
+        let old = TranscriptionRun(id: "old", createdAt: Date(), status: .succeeded, configuration: config,
+            inputs: [.init(source: "archive/audio.wav", transform: "direct_audio", sha256: "abc", bytes: 42, startMediaSeconds: nil)],
+            resolvedModel: "base", processingSeconds: 1, transcriptPath: TranscriptionRunStore.transcriptPath("old"), diagnostic: nil)
+        var json = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode([old])) as? [[String: Any]])
+        var inputs = try XCTUnwrap(json[0]["inputs"] as? [[String: Any]])
+        inputs[0].removeValue(forKey: "transform")
+        json[0]["inputs"] = inputs
+        try ExportRel.writeContainedData(try JSONSerialization.data(withJSONObject: json), relative: TranscriptionRunStore.indexPath, sessionURL: session)
+        try TranscriptionRunStore.saveTranscript(FullTranscript(sessionId: created.manifest.sessionId, language: "ro", segments: [.init(start: 0, end: 1, text: "istoric", speaker: nil, words: [])]), id: "old", sessionURL: session)
+
+        var loaded = try TranscriptionRunStore.load(sessionURL: session)
+        XCTAssertEqual(loaded.map(\.id), ["old"])
+        XCTAssertEqual(loaded[0].inputs[0].transform, "legacy_unknown")
+        let new = TranscriptionRun(id: "new", createdAt: Date(), status: .failed, configuration: config, inputs: [], resolvedModel: nil, processingSeconds: nil, transcriptPath: nil, diagnostic: "fixture")
+        loaded.append(new)
+        try TranscriptionRunStore.save(loaded, sessionURL: session)
+        XCTAssertEqual(try TranscriptionRunStore.load(sessionURL: session).map(\.id), ["old", "new"])
+        XCTAssertEqual(TranscriptionRunStore.loadTranscript(id: "old", sessionURL: session)?.segments.first?.text, "istoric")
+    }
+
+    func testUnreadableComparisonIndexFailsWithoutOverwritingArchive() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("corrupt-runs-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let vault = SessionVault(rootURL: root)
+        let created = try vault.createSession(product: .empty)
+        let session = vault.sessionURL(id: created.manifest.sessionId)
+        let bytes = Data("{ corrupt history".utf8)
+        try ExportRel.writeContainedData(bytes, relative: TranscriptionRunStore.indexPath, sessionURL: session)
+        XCTAssertThrowsError(try TranscriptionRunStore.load(sessionURL: session)) { error in
+            XCTAssertTrue(error.localizedDescription.contains("unreadable"))
+        }
+        XCTAssertEqual(ExportRel.readContainedData(relative: TranscriptionRunStore.indexPath, sessionURL: session), bytes)
+    }
+
+    func testAbsentComparisonIndexStartsHistoryNormally() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("absent-runs-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let vault = SessionVault(rootURL: root)
+        let created = try vault.createSession(product: .empty)
+        let session = vault.sessionURL(id: created.manifest.sessionId)
+        XCTAssertTrue(try TranscriptionRunStore.load(sessionURL: session).isEmpty)
+        try TranscriptionRunStore.save([], sessionURL: session)
+        XCTAssertTrue(try TranscriptionRunStore.load(sessionURL: session).isEmpty)
+    }
+
+    func testReviewTextIncludesUntimedAndTimedPassages() {
+        let transcript = FullTranscript(sessionId: "review", language: "ro", segments: [.init(start: 0, end: 1, text: "segment", speaker: nil, words: [])], untimedText: "untimed")
+        XCTAssertEqual(TranscriptionReviewText.fullText(transcript), "segment\n\nuntimed")
+        XCTAssertEqual(TranscriptionReviewText.fullText(FullTranscript(sessionId: "review", language: "ro", segments: [], untimedText: "only untimed")), "only untimed")
+    }
+
+    func testLaterPromotionInvalidatesDependentStagesWithoutRerunningComparison() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("promotion-runs-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let vault = SessionVault(rootURL: root)
+        let created = try vault.createSession(product: .empty)
+        let session = vault.sessionURL(id: created.manifest.sessionId)
+        let config = TranscriptionServiceConfiguration.Snapshot(serviceID: "one", name: "One", backend: .whisperKit, endpoint: "", requestedModel: "base", language: .automatic, credentialRequired: false)
+        let run = TranscriptionRun(id: "later", createdAt: Date(), status: .succeeded, configuration: config, inputs: [], resolvedModel: "base", processingSeconds: 1, transcriptPath: TranscriptionRunStore.transcriptPath("later"), diagnostic: nil)
+        try TranscriptionRunStore.save([run], sessionURL: session)
+        try TranscriptionRunStore.saveTranscript(FullTranscript(sessionId: created.manifest.sessionId, language: "ro", segments: [.init(start: 0, end: 1, text: "chosen later", speaker: nil, words: [])]), id: run.id, sessionURL: session)
+        var manifest = try vault.loadManifest(id: created.manifest.sessionId)
+        manifest.completedStages = [.transcribing, .slicing, .evaluating, .synthesizing, .completed]
+        manifest.slices = [.init(sliceId: "old", startMedia: 0, endMedia: 1, trigger: .pin, associatedShotId: nil, clipPath: "media/old.mp4", stills: [], analysisStatus: .success, score: 1)]
+        try vault.write(manifest: &manifest)
+
+        _ = try SessionProcessor(vault: vault, transcriber: WhisperTranscriber()).selectPrimaryTranscription(sessionId: created.manifest.sessionId, runID: run.id)
+        let reloaded = try vault.loadManifest(id: created.manifest.sessionId)
+        XCTAssertTrue(reloaded.slices.isEmpty)
+        XCTAssertTrue(reloaded.hasCompleted(.transcribing))
+        XCTAssertFalse(reloaded.hasCompleted(.slicing))
+        XCTAssertEqual(try TranscriptionRunStore.load(sessionURL: session).map(\.id), ["later"])
+    }
+
+    func testProcessorReusesSavedPrimaryWithoutTouchingLocalLoader() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("retry-primary-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let vault = SessionVault(rootURL: root)
+        let created = try vault.createSession(product: .empty)
+        let session = vault.sessionURL(id: created.manifest.sessionId)
+        let primary = FullTranscript(sessionId: created.manifest.sessionId, language: "ro", segments: [.init(start: 0, end: 1, text: "keep exactly this", speaker: nil, words: [])])
+        try SpeakerTimeline.save(primary, sessionURL: session)
+        let original = try XCTUnwrap(ExportRel.readContainedData(relative: ScrumTracePath.fullTranscript, sessionURL: session))
+        let loader = ModelLoader()
+        await loader.failNextLoad()
+        let processor = SessionProcessor(vault: vault, transcriber: WhisperTranscriber(loadModel: { try await loader.load($0) }))
+        let localOnly = AIProviderConfiguration(kind: .openaiCompatible, baseURL: "https://example.invalid", model: "unused", apiKey: "", acceptsText: true, acceptsImages: false, acceptsVideo: false)
+
+        _ = try await processor.process(sessionId: created.manifest.sessionId, pinTimes: [], configuration: localOnly, whisperModel: "missing", identifySpeakers: false) { _, _ in }
+        let loaderCalls = await loader.models
+        XCTAssertTrue(loaderCalls.isEmpty)
+        XCTAssertEqual(ExportRel.readContainedData(relative: ScrumTracePath.fullTranscript, sessionURL: session), original)
+    }
+
+    @MainActor
+    func testRetryAnalysisDoesNotLoadUnavailableLocalModelWhenPrimaryIsValid() async throws {
+        let loader = ModelLoader()
+        await loader.failNextLoad()
+        let transcriber = WhisperTranscriber(loadModel: { try await loader.load($0) })
+        let service = SavedTranscriptionService(name: "unavailable folder", backend: .whisperKit, model: "missing", whisperSource: .folder("/definitely/unavailable"))
+        let reused = try await prepareLocalTranscriptionIfNeeded(transcriber: transcriber, service: service, reusingPrimaryTranscript: true)
+        let callsWhileReusing = await loader.models
+        XCTAssertEqual(reused, "missing")
+        XCTAssertTrue(callsWhileReusing.isEmpty)
+
+        let recoveryService = SavedTranscriptionService(name: "loader failure", backend: .whisperKit, model: "missing")
+        do {
+            _ = try await prepareLocalTranscriptionIfNeeded(transcriber: transcriber, service: recoveryService, reusingPrimaryTranscript: false)
+            XCTFail("An invalid primary must not skip recovery preparation")
+        } catch { }
     }
 }
 

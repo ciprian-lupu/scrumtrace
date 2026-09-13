@@ -107,7 +107,7 @@ private struct SpeechServiceEditor: View {
                         }))
                     }
                 }
-                Text(draft.service.language.explanation).font(.caption).foregroundStyle(.secondary)
+                Text(languageExplanation).font(.caption).foregroundStyle(.secondary)
             }
             if !error.isEmpty { Text(error).foregroundStyle(.red).font(.caption) }
             HStack { Button("Cancel", role: .cancel) { dismiss() }; Spacer(); Button("Save") {
@@ -140,5 +140,14 @@ private struct SpeechServiceEditor: View {
             case .folder(let value): whisperSourceKind = "folder"; whisperSourceValue = value
             }
         }
+    }
+
+    private var languageExplanation: String {
+        guard draft.service.backend == .openAITranscription,
+              draft.service.language.mode == .expected,
+              draft.service.model != "gpt-transcribe" else {
+            return draft.service.language.explanation
+        }
+        return "This model does not document support for several expected-language hints. ScrumTrace will not send a hidden first-language substitute; it will use normal language detection without translation."
     }
 }

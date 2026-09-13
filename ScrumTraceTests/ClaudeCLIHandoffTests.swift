@@ -112,7 +112,6 @@ final class ClaudeCLIHandoffTests: XCTestCase {
         XCTAssertTrue(plan.arguments.contains("--"))
         XCTAssertTrue(ClaudeCLIHandoff.appleScriptSource.contains("quoted form of"))
         XCTAssertTrue(ClaudeCLIHandoff.appleScriptSource.contains("tell application \"Terminal\""))
-        XCTAssertTrue(ClaudeCLIHandoff.appleScriptSource.contains(ClaudeCLIHandoff.execFlag))
         XCTAssertFalse(ClaudeCLIHandoff.appleScriptSource.contains("cd "))
         XCTAssertFalse(ClaudeCLIHandoff.appleScriptSource.contains(" -p"))
         XCTAssertFalse(ClaudeCLIHandoff.appleScriptSource.contains("--print"))

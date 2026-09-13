@@ -172,10 +172,30 @@ enum TranscriptionRunStatus: String, Codable, Sendable { case pending, running, 
 
 struct TranscriptionInputFingerprint: Codable, Equatable, Sendable {
     var source: String
-    var transform: String = "direct_audio"
+    /// Values written before audio preparation provenance existed decode as
+    /// `legacy_unknown`, never as a claim that the input was direct audio.
+    var transform: String
     var sha256: String
     var bytes: Int
     var startMediaSeconds: TimeInterval?
+
+    init(source: String, transform: String, sha256: String, bytes: Int, startMediaSeconds: TimeInterval?) {
+        self.source = source
+        self.transform = transform
+        self.sha256 = sha256
+        self.bytes = bytes
+        self.startMediaSeconds = startMediaSeconds
+    }
+
+    enum CodingKeys: String, CodingKey { case source, transform, sha256, bytes, startMediaSeconds }
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        source = try values.decode(String.self, forKey: .source)
+        transform = try values.decodeIfPresent(String.self, forKey: .transform) ?? "legacy_unknown"
+        sha256 = try values.decode(String.self, forKey: .sha256)
+        bytes = try values.decode(Int.self, forKey: .bytes)
+        startMediaSeconds = try values.decodeIfPresent(TimeInterval.self, forKey: .startMediaSeconds)
+    }
 }
 
 /// Each run is immutable evidence of one audio/configuration pair. The text
@@ -199,9 +219,30 @@ enum TranscriptionRunStore {
     static let priorPrimaryDirectory = "archive/transcription-runs/previous-primary"
     static func transcriptPath(_ id: String) -> String { "archive/transcription-runs/\(id).json" }
 
-    static func load(sessionURL: URL) -> [TranscriptionRun] {
-        guard let data = ExportRel.readContainedData(relative: indexPath, sessionURL: sessionURL) else { return [] }
-        return (try? JSONDecoder().decode([TranscriptionRun].self, from: data)) ?? []
+    enum IndexState { case absent, valid([TranscriptionRun]), unreadable }
+
+    static func indexState(sessionURL: URL) -> IndexState {
+        let index = sessionURL.appendingPathComponent(indexPath)
+        guard ExportRel.isUsableSessionRoot(sessionURL) else { return .unreadable }
+        guard !ExportRel.containsSymlinkComponent(indexPath, sessionURL: sessionURL) else { return .unreadable }
+        guard let values = try? index.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey]) else {
+            return .absent
+        }
+        guard values.isSymbolicLink != true, values.isRegularFile == true else { return .unreadable }
+        guard let data = ExportRel.readContainedData(relative: indexPath, sessionURL: sessionURL),
+              let runs = try? JSONDecoder().decode([TranscriptionRun].self, from: data) else {
+            return .unreadable
+        }
+        return .valid(runs)
+    }
+
+    static func load(sessionURL: URL) throws -> [TranscriptionRun] {
+        switch indexState(sessionURL: sessionURL) {
+        case .absent: return []
+        case .valid(let runs): return runs
+        case .unreadable:
+            throw SettingsValidationError("Saved transcription comparison history is unreadable. It was left unchanged; repair or recover the archive before starting another comparison.")
+        }
     }
     static func save(_ runs: [TranscriptionRun], sessionURL: URL) throws {
         let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -335,7 +376,7 @@ final class TranscriptionComparisonRunner: @unchecked Sendable {
         guard !configurations.isEmpty else { throw SettingsValidationError("Select at least one transcription service for comparison.") }
         let inputs = try await TranscriptionInputPreparer.prepare(sessionURL: sessionURL, transcriber: transcriber)
         defer { inputs.forEach { ExportRel.removePrivateTemporaryURL($0.audioURL) } }
-        var runs = TranscriptionRunStore.load(sessionURL: sessionURL)
+        var runs = try TranscriptionRunStore.load(sessionURL: sessionURL)
         var created: [TranscriptionRun] = []
         for configuration in configurations {
             try configuration.service.language.validated()
@@ -374,6 +415,27 @@ final class TranscriptionComparisonRunner: @unchecked Sendable {
 }
 
 struct OpenAITranscriptionEngine: TranscriptionEngine {
+    /// Deliberately small map of the documented `/audio/transcriptions`
+    /// model families. Unknown custom model IDs get only the common multipart
+    /// fields; we never guess that they accept language lists or timestamps.
+    private struct Capabilities {
+        var supportsLanguageList: Bool
+        var supportsVerboseJSON: Bool
+        var supportsTimestampGranularities: Bool
+
+        static func forModel(_ model: String) -> Capabilities {
+            switch model {
+            case "gpt-transcribe": return .init(supportsLanguageList: true, supportsVerboseJSON: true, supportsTimestampGranularities: true)
+            case "whisper-1": return .init(supportsLanguageList: false, supportsVerboseJSON: true, supportsTimestampGranularities: true)
+            case "gpt-4o-transcribe", "gpt-4o-mini-transcribe", "gpt-4o-mini-transcribe-2025-12-15":
+                return .init(supportsLanguageList: false, supportsVerboseJSON: false, supportsTimestampGranularities: false)
+            case "gpt-4o-transcribe-diarize":
+                return .init(supportsLanguageList: false, supportsVerboseJSON: false, supportsTimestampGranularities: false)
+            default: return .init(supportsLanguageList: false, supportsVerboseJSON: false, supportsTimestampGranularities: false)
+            }
+        }
+    }
+
     typealias Transport = @Sendable (URLRequest) async throws -> (Data, URLResponse)
     private let transport: Transport
     init(transport: @escaping Transport = { request in try await URLSession.shared.data(for: request) }) { self.transport = transport }
@@ -389,11 +451,12 @@ struct OpenAITranscriptionEngine: TranscriptionEngine {
         var body = Data()
         func field(_ name: String, _ value: String) { body.append("--\(boundary)\r\nContent-Disposition: form-data; name=\"\(name)\"\r\n\r\n\(value)\r\n".data(using: .utf8)!) }
         field("model", configuration.service.model)
+        let capabilities = Capabilities.forModel(configuration.service.model)
         if let hint = configuration.service.language.singleEngineHint { field("language", hint) }
-        if configuration.service.language.mode == .expected {
+        if configuration.service.language.mode == .expected, capabilities.supportsLanguageList {
             for language in configuration.service.language.languages { field("languages[]", language.code ?? language.rawValue) }
         }
-        if configuration.service.model == "whisper-1" {
+        if capabilities.supportsVerboseJSON && capabilities.supportsTimestampGranularities {
             field("response_format", "verbose_json")
             field("timestamp_granularities[]", "segment")
         }
@@ -407,14 +470,26 @@ struct OpenAITranscriptionEngine: TranscriptionEngine {
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
             throw SettingsValidationError("OpenAI transcription failed (HTTP \((response as? HTTPURLResponse)?.statusCode ?? 0)).")
         }
-        let decoded = try JSONDecoder().decode(OpenAIResponse.self, from: data)
+        let decoded: OpenAIResponse
+        do { decoded = try JSONDecoder().decode(OpenAIResponse.self, from: data) }
+        catch { throw SettingsValidationError("OpenAI transcription response could not be decoded: \(error.localizedDescription)") }
         let segments = decoded.segments?.compactMap { item -> TranscriptSegment? in
             guard let start = item.start, let end = item.end, end > start else { return nil }
             return TranscriptSegment(start: start, end: end, text: item.text, speaker: nil, words: [])
         } ?? []
         let untimed = segments.isEmpty ? decoded.text.trimmingCharacters(in: .whitespacesAndNewlines) : nil
-        return FullTranscript(sessionId: "", language: decoded.language ?? decoded.languages?.first ?? configuration.service.language.singleEngineHint ?? "und", segments: segments, transcriptionAnalysis: [.init(source: "cloud", status: segments.isEmpty ? (untimed?.isEmpty == false ? "untimed" : "unrecognized") : "transcribed")], sources: ["cloud"], untimedText: untimed?.isEmpty == false ? untimed : nil)
+        let detected = decoded.languages?.map(\.code).filter { !$0.isEmpty }
+        return FullTranscript(sessionId: "", language: decoded.language ?? detected?.first ?? configuration.service.language.singleEngineHint ?? "und", detectedLanguages: detected?.isEmpty == false ? detected : nil, segments: segments, transcriptionAnalysis: [.init(source: "cloud", status: segments.isEmpty ? (untimed?.isEmpty == false ? "untimed" : "unrecognized") : "transcribed")], sources: ["cloud"], untimedText: untimed?.isEmpty == false ? untimed : nil)
     }
-    private struct OpenAIResponse: Decodable { struct Segment: Decodable { var start: TimeInterval?; var end: TimeInterval?; var text: String }; var text: String; var language: String?; var languages: [String]?; var segments: [Segment]? }
+    private struct OpenAIResponse: Decodable {
+        struct Language: Decodable { var code: String }
+        struct Segment: Decodable { var start: TimeInterval?; var end: TimeInterval?; var text: String }
+        var text: String
+        /// verbose_json from whisper-1 can include this singular language;
+        /// gpt-transcribe reports its detected set through `languages`.
+        var language: String?
+        var languages: [Language]?
+        var segments: [Segment]?
+    }
     private func mime(for url: URL) -> String { ["wav": "audio/wav", "m4a": "audio/mp4", "mp3": "audio/mpeg", "webm": "audio/webm", "mp4": "audio/mp4", "ogg": "audio/ogg", "flac": "audio/flac" ][url.pathExtension.lowercased()] ?? "application/octet-stream" }
 }

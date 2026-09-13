@@ -2579,6 +2579,9 @@ struct TranscriptionAnalysis: Codable, Sendable, Hashable {
 struct FullTranscript: Codable, Sendable {
     var sessionId: String
     var language: String
+    /// All languages reported by the transcription engine. `language` remains
+    /// a compatibility/display hint; never discard the detected list.
+    var detectedLanguages: [String]? = nil
     var segments: [TranscriptSegment]
     var speakers: [SessionSpeaker]? = nil
     var speakerAnalysis: [SpeakerAnalysis]? = nil
@@ -2609,6 +2612,7 @@ struct FullTranscript: Codable, Sendable {
     enum CodingKeys: String, CodingKey {
         case sessionId = "session_id"
         case language
+        case detectedLanguages = "detected_languages"
         case segments
         case sources
         case speakers

@@ -395,10 +395,14 @@ enum TranscriptQuery {
         var labeled: [TranscriptSegment] = []
         var language = "und"
         var languageWeight = 0
+        var detectedLanguages: [String] = []
         var analysis: [TranscriptionAnalysis] = []
         var sources: [String] = []
         for pass in passes {
             let code = pass.transcript.language
+            for detected in pass.transcript.detectedLanguages ?? [code] where !detected.isEmpty && detected != "und" && !detectedLanguages.contains(detected) {
+                detectedLanguages.append(detected)
+            }
             let weight = pass.transcript.segments.reduce(0) { $0 + $1.text.count }
             if !code.isEmpty, code != "und", weight > languageWeight {
                 language = code
@@ -438,6 +442,7 @@ enum TranscriptQuery {
         return FullTranscript(
             sessionId: sessionId,
             language: language,
+            detectedLanguages: detectedLanguages.isEmpty ? nil : detectedLanguages,
             segments: collapseDuplicates(labeled),
             transcriptionAnalysis: analysis,
             sources: uniqueSources

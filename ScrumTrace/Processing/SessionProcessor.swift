@@ -110,6 +110,16 @@ final class SessionProcessor: @unchecked Sendable {
         }
 
         var timing = PipelineTiming.load(sessionURL: sessionURL) ?? PipelineTiming()
+        // A selected primary is a complete, timestamped archive artifact.
+        // Retry Analysis must be able to resume from it even if an older
+        // manifest was interrupted before recording the transcribing stage.
+        if !manifest.hasCompleted(.transcribing),
+           let primary = SpeakerTimeline.load(sessionURL: sessionURL),
+           primary.hasTimedSegments, !primary.needsTranscriptionRetry {
+            manifest.markCompleted(.transcribing)
+            manifest.pipelineStatus = .transcribing
+            try vault.write(manifest: &manifest)
+        }
         if manifest.hasCompleted(.transcribing),
            let archived = SpeakerTimeline.load(sessionURL: sessionURL), archived.needsTranscriptionRetry {
             manifest.completedStages.removeAll { $0 == .transcribing || $0 == .slicing || $0 == .evaluating || $0 == .synthesizing || $0 == .completed }
