@@ -83,12 +83,7 @@ enum AIConnectionTest {
         _ configuration: AIProviderConfiguration,
         key: String
     ) async throws -> String {
-        let root = try ProviderEndpoint.requireHTTPSOrLocal(configuration.baseURL)
-            .absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        let versionedRoot = root.hasSuffix("/v1") ? root : "\(root)/v1"
-        guard let url = URL(string: "\(versionedRoot)/chat/completions") else {
-            throw AIProviderError.invalidURL(configuration.baseURL)
-        }
+        let url = try OpenAICompatibleClient.chatCompletionsURL(baseURL: configuration.baseURL)
         var body: [String: Any] = [
             "model": configuration.model,
             "temperature": 0,

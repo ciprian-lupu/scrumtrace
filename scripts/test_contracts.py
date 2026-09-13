@@ -82,6 +82,9 @@ def test_json_schema_uses_standard_types() -> None:
     assert "json_schema" in client
     assert "EvaluationJSONSchema.openaiStructured" in client
     assert "isDeepSeekEndpoint" in client
+    assert "isHiveEndpoint" in client
+    assert "chatCompletionsURL" in client
+    assert "/api/v3" in client
     assert '"type": "json_object"' in client
     assert '["type": "disabled"]' in client
     openai_schema = schema.split("static let openaiStructured")[1].split("private static let quote")[0]
@@ -1562,6 +1565,7 @@ def test_agent_log_covers_debug_events() -> None:
     ping = (ROOT / "ScrumTrace" / "AI" / "AIConnectionTest.swift").read_text()
     assert 'static let prompt = "Reply with the single word pong."' in ping
     assert "isDeepSeekEndpoint" in ping
+    assert "chatCompletionsURL" in ping
     assert '["type": "disabled"]' in ping
     assert "userMessage(for" in ping
     app = (ROOT / "ScrumTrace" / "App" / "AppDelegate.swift").read_text()

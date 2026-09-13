@@ -2801,6 +2801,26 @@ final class ContractTests: XCTestCase {
         XCTAssertFalse(OpenAICompatibleClient.isDeepSeekEndpoint("https://generativelanguage.googleapis.com"))
     }
 
+    func testHiveChatCompletionsUsesApiV3() throws {
+        XCTAssertTrue(OpenAICompatibleClient.isHiveEndpoint("https://api.thehive.ai"))
+        XCTAssertTrue(OpenAICompatibleClient.isHiveEndpoint("https://api.thehive.ai/api/v3"))
+        XCTAssertTrue(OpenAICompatibleClient.isHiveEndpoint("https://api-va1.thehive.ai"))
+        XCTAssertFalse(OpenAICompatibleClient.isHiveEndpoint("https://api.openai.com"))
+        XCTAssertFalse(OpenAICompatibleClient.isHiveEndpoint("https://docs.thehive.ai"))
+        XCTAssertEqual(
+            try OpenAICompatibleClient.chatCompletionsURL(baseURL: "https://api.thehive.ai").absoluteString,
+            "https://api.thehive.ai/api/v3/chat/completions"
+        )
+        XCTAssertEqual(
+            try OpenAICompatibleClient.chatCompletionsURL(baseURL: "https://api.thehive.ai/api/v3").absoluteString,
+            "https://api.thehive.ai/api/v3/chat/completions"
+        )
+        XCTAssertEqual(
+            try OpenAICompatibleClient.chatCompletionsURL(baseURL: "https://api.openai.com").absoluteString,
+            "https://api.openai.com/v1/chat/completions"
+        )
+    }
+
     func testProjectClearsStaleExportArtifacts() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("scrumtrace-export-reset-\(UUID().uuidString)")
         let archive = root.appendingPathComponent("archive")

@@ -299,7 +299,7 @@ struct SettingsView: View {
                 }
                 TextField("Endpoint", text: $settings.baseURL)
                 TextField("Model", text: $settings.model)
-                Text("Each provider remembers its endpoint and model. Enter an API root; OpenAI-compatible and Anthropic endpoints may end in /v1.")
+                Text("Each provider remembers its endpoint and model. Enter an API root; OpenAI-compatible and Anthropic endpoints may end in /v1. Hive: https://api.thehive.ai and a Playground / Service V3 secret key (not a V2 project token).")
                     .font(.caption).foregroundStyle(.secondary)
                 HStack {
                     Button("Validate configuration") {

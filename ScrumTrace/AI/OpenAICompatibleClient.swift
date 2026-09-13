@@ -12,12 +12,7 @@ struct OpenAICompatibleClient: AIProvider {
         }
         let key = configuration.apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !key.isEmpty else { throw AIProviderError.missingAPIKey }
-        let root = try ProviderEndpoint.requireHTTPSOrLocal(configuration.baseURL)
-            .absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        let versionedRoot = root.hasSuffix("/v1") ? root : "\(root)/v1"
-        guard let url = URL(string: "\(versionedRoot)/chat/completions") else {
-            throw AIProviderError.invalidURL(configuration.baseURL)
-        }
+        let url = try Self.chatCompletionsURL(baseURL: configuration.baseURL)
 
         var content: [[String: Any]] = [
             ["type": "text", "text": PromptTemplates.evaluationUserPrompt(
@@ -85,6 +80,33 @@ struct OpenAICompatibleClient: AIProvider {
             return host == "api.deepseek.com" || host.hasSuffix(".deepseek.com")
         }
         return lowered.contains("api.deepseek.com")
+    }
+
+    /// Hive chat completions live at `/api/v3`, not `/v1`.
+    static func isHiveEndpoint(_ baseURL: String) -> Bool {
+        guard let host = URL(string: baseURL)?.host?.lowercased() else {
+            return false
+        }
+        return host == "api.thehive.ai" || (host.hasPrefix("api-") && host.hasSuffix(".thehive.ai"))
+    }
+
+    static func chatCompletionsURL(baseURL: String) throws -> URL {
+        let root = try ProviderEndpoint.requireHTTPSOrLocal(baseURL)
+            .absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let versionedRoot: String
+        if isHiveEndpoint(baseURL) || isHiveEndpoint(root) {
+            if root.hasSuffix("/api/v3") || root.hasSuffix("/v3") {
+                versionedRoot = root
+            } else {
+                versionedRoot = "\(root)/api/v3"
+            }
+        } else {
+            versionedRoot = root.hasSuffix("/v1") ? root : "\(root)/v1"
+        }
+        guard let url = URL(string: "\(versionedRoot)/chat/completions") else {
+            throw AIProviderError.invalidURL(baseURL)
+        }
+        return url
     }
 }
 
