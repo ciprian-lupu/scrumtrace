@@ -21,8 +21,12 @@ struct ScrumTraceApp: App {
                     .keyboardShortcut("n", modifiers: .command)
             }
             CommandGroup(replacing: .appSettings) {
-                Button("Settings…") { appDelegate.showSettingsWindow(nil) }
+                Button("Settings…") { appDelegate.showSettingsFromCommand() }
                     .keyboardShortcut(",", modifiers: .command)
+            }
+            CommandGroup(after: .textEditing) {
+                Button("Find Recordings…") { appDelegate.findRecordings(nil) }
+                    .keyboardShortcut("f", modifiers: .command)
             }
             CommandGroup(after: .sidebar) {
                 ForEach(MainSection.allCases) { section in

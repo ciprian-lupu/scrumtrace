@@ -473,6 +473,11 @@ struct SettingsView: View {
                     value: Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "—"
                 )
                 LabeledContent("Bundle", value: Bundle.main.bundleIdentifier ?? "com.str8minds.ScrumTrace")
+                Toggle("Show ScrumTrace in the Dock while its window is open", isOn: $settings.showInDockWhileWindowOpen)
+                    .accessibilityIdentifier("main.settings.showInDock")
+                Text("Adds a Dock icon and a Command-Tab entry while the ScrumTrace window is open. Closing the window returns ScrumTrace to the menu bar.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 Button("Show first-run permissions") {
                     AgentLog.event("settings_action", ["action": "onboarding"])
                     OnboardingWindow.present()

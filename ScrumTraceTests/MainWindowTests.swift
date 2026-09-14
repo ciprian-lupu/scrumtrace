@@ -1545,17 +1545,13 @@ final class MainWindowTests: XCTestCase {
                 let presenter = MainWindowPresenter(controller: controller, frameAutosaveName: nil)
                 defer { presenter.window?.close() }
                 let model = presenter.recordings
-                // Overview lists sessions too, so open on a section that lists none.
+                // Open on a section without the table. The sidebar badge needs the index there too.
                 presenter.show(section: .settings)
                 let window = try XCTUnwrap(presenter.window)
                 XCTAssertTrue(model.isPeriodicRefreshActive)
-                XCTAssertFalse(model.library.isLoading, "Opening the window on Settings scans nothing")
-                spinRunLoop(for: 0.05)
-                XCTAssertEqual(model.library.entries, [])
-
-                // Rows listed earlier, as if Recordings had been shown before.
-                await model.refresh().value
-                XCTAssertEqual(model.library.entries.count, 3)
+                XCTAssertTrue(model.library.isLoading, "Opening the window on Settings scans at once for the sidebar badge")
+                let loaded = await waitUntil { model.hasLoaded && model.library.entries.count == 3 }
+                XCTAssertTrue(loaded)
                 let added = try makeSession(in: f.vault, status: .completed)
                 presenter.navigation.section = .recordings
                 // Well inside the 5 s timer, so only the section appearing can list the new row this soon.
@@ -1567,20 +1563,37 @@ final class MainWindowTests: XCTestCase {
     }
 
     @MainActor
-    func testOpeningOnRecordingsScansOnceAndOtherSectionsScanNothing() async throws {
+    func testOpeningTheWindowScansInEverySectionAndRecordingsJoinsThatScan() async throws {
         try await withRecordingsFixture { f in
+            // Command-comma on a closed window shows Settings. The sidebar's Recordings badge counts unfinished
+            // recordings from the index, so Settings scans at once and keeps following the vault.
+            let settingsNavigation = MainNavigation()
+            settingsNavigation.section = .settings
+            let settingsLoads = CallRecorder()
+            let settingsModel = makeRecordingsModel(
+                f,
+                navigation: settingsNavigation,
+                recorder: CallRecorder(),
+                manifestLoads: settingsLoads,
+                refreshInterval: .milliseconds(50)
+            )
+            settingsModel.setWindowVisible(true)
+            XCTAssertTrue(settingsModel.isPeriodicRefreshActive)
+            XCTAssertTrue(settingsModel.library.isLoading, "Becoming visible on Settings scans at once")
+            let listedOnSettings = await waitUntil { settingsModel.library.entries.count == 3 }
+            XCTAssertTrue(listedOnSettings)
+            let crashed = try makeSession(in: f.vault, status: .paused)
+            let followed = await waitUntil(timeout: 2) { settingsModel.library.entries.contains { $0.id == crashed } }
+            XCTAssertTrue(followed, "While Settings stays on screen the index keeps refreshing")
+            XCTAssertEqual(settingsNavigation.section, .settings)
+            settingsModel.setWindowVisible(false)
+            XCTAssertFalse(settingsModel.isPeriodicRefreshActive)
+            XCTAssertGreaterThanOrEqual(settingsLoads.calls.count, 4)
+            try FileManager.default.removeItem(at: f.vault.sessionURL(id: crashed))
+
             let navigation = MainNavigation()
-            navigation.section = .settings
             let loads = CallRecorder()
             let model = makeRecordingsModel(f, navigation: navigation, recorder: CallRecorder(), manifestLoads: loads)
-
-            // Command-comma on a closed window shows Settings: nothing to list.
-            model.setWindowVisible(true)
-            XCTAssertTrue(model.isPeriodicRefreshActive)
-            XCTAssertFalse(model.library.isLoading, "Becoming visible on another section scans nothing")
-            model.setWindowVisible(false)
-            await drainMainQueue()
-            XCTAssertEqual(loads.calls, [])
 
             // The window opens on Recordings, then RecordingsView appears: one scan, each manifest decoded once.
             navigation.section = .recordings
@@ -2398,10 +2411,6 @@ final class MainWindowTests: XCTestCase {
     func testOpeningTheWindowOnOverviewListsSessionsAndChecksReadinessOnlyWhileVisible() async throws {
         try await withRecordingsFixture { f in
             try await withFixtureController(f) { controller in
-                XCTAssertTrue(RecordingsModel.listsSessions(.overview))
-                XCTAssertTrue(RecordingsModel.listsSessions(.recordings))
-                XCTAssertTrue(RecordingsModel.listsSessions(.contexts))
-                XCTAssertFalse(RecordingsModel.listsSessions(.settings))
                 let checks = CallRecorder()
                 UpdateChecker.setRequestForTesting {
                     checks.record("updateCheck")
@@ -2791,4 +2800,926 @@ private final class ScanGate: @unchecked Sendable {
         openFirstScan()
         openLaterScans()
     }
+}
+
+// MARK: - Dock presence, keyboard and window state
+
+extension MainWindowTests {
+    /// Rows of the listed events. Beyond the fields every row carries, each carries only the fields listed for it.
+    private func technicalRows(
+        at log: URL,
+        allowing fields: [String: Set<String>],
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) throws -> [[String: String]] {
+        AgentLog.event("dock_test_baseline", [:])
+        let rows = try logRows(at: log)
+        let baseline = try XCTUnwrap(rows.last { $0["event"] == "dock_test_baseline" }, file: file, line: line)
+        let common = Set(baseline.keys)
+        let listed = rows.filter { fields[$0["event"] ?? ""] != nil }
+        for row in listed {
+            let event = row["event"] ?? ""
+            let extra = Set(row.keys).subtracting(common)
+            XCTAssertTrue(extra.isSubset(of: fields[event] ?? []), "\(event) carries \(extra)", file: file, line: line)
+        }
+        return listed
+    }
+
+    @MainActor
+    private func mainMenuItems() throws -> [NSMenuItem] {
+        func items(in menu: NSMenu) -> [NSMenuItem] {
+            menu.items.flatMap { item in [item] + (item.submenu.map { items(in: $0) } ?? []) }
+        }
+        return items(in: try XCTUnwrap(NSApp.mainMenu))
+    }
+
+    @MainActor
+    func testDockTileShowsWhileTheWindowIsOpenAndFollowsThePreference() throws {
+        try withController { controller, log in
+            let settings = controller.settings
+            XCTAssertTrue(settings.showInDockWhileWindowOpen, "On by default")
+            let fake = FakeActivation()
+            let presenter = MainWindowPresenter(controller: controller, frameAutosaveName: nil, activation: fake.seam)
+            defer {
+                // No app to give focus back to, so nothing runs after the test.
+                fake.frontmost = nil
+                presenter.window?.close()
+            }
+            XCTAssertEqual(fake.policyChanges, [], "Creating the presenter changes nothing")
+
+            presenter.show()
+            let window = try XCTUnwrap(presenter.window)
+            XCTAssertTrue(presenter.isWindowOpen)
+            XCTAssertEqual(fake.policy, .regular, "An open window gives ScrumTrace a Dock tile and a place in Command-Tab")
+            // The first-run order, the main window before the permissions window, is checked on the launch code in
+            // testHotkeysAndTheHUDNeverOpenOrActivateTheMainWindow.
+
+            presenter.show(section: .recordings)
+            presenter.show(tab: .general)
+            XCTAssertEqual(fake.policyChanges, [.regular], "Showing an open window again changes nothing")
+
+            window.miniaturize(nil)
+            XCTAssertTrue(spinRunLoop(until: { window.isMiniaturized }))
+            XCTAssertEqual(fake.policy, .regular, "A minimized window is still open")
+            window.deminiaturize(nil)
+            XCTAssertTrue(spinRunLoop(until: { !window.isMiniaturized }))
+
+            // The Settings toggle applies at once while the window is open.
+            settings.showInDockWhileWindowOpen = false
+            XCTAssertEqual(fake.policy, .accessory)
+            settings.showInDockWhileWindowOpen = true
+            XCTAssertEqual(fake.policy, .regular)
+
+            window.close()
+            XCTAssertFalse(presenter.isWindowOpen)
+            XCTAssertEqual(fake.policy, .accessory, "Closing returns ScrumTrace to the menu bar")
+            XCTAssertEqual(fake.policyChanges, [.regular, .accessory, .regular, .accessory])
+
+            // While the window is closed, the preference waits for the next show.
+            settings.showInDockWhileWindowOpen = false
+            settings.showInDockWhileWindowOpen = true
+            settings.showInDockWhileWindowOpen = false
+            XCTAssertEqual(fake.policyChanges.count, 4)
+
+            // Off: ScrumTrace stays an accessory throughout.
+            presenter.show(section: .settings)
+            XCTAssertTrue(window.isVisible)
+            XCTAssertEqual(fake.policy, .accessory)
+            window.miniaturize(nil)
+            XCTAssertTrue(spinRunLoop(until: { window.isMiniaturized }))
+            presenter.show()
+            XCTAssertFalse(window.isMiniaturized)
+            window.close()
+            XCTAssertEqual(fake.policy, .accessory)
+            XCTAssertEqual(fake.policyChanges.count, 4, "With the preference off the policy never changes")
+
+            let policies = try technicalRows(at: log, allowing: ["main_dock": ["policy"]]).compactMap { $0["policy"] }
+            XCTAssertEqual(policies, ["regular", "accessory", "regular", "accessory"])
+        }
+    }
+
+    @MainActor
+    func testShowInDockPreferenceIsStoredUnderItsKey() throws {
+        let suite = "ScrumTrace.MainWindowTests.Dock.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = AppSettings(defaults: defaults, keyStore: .empty)
+        XCTAssertTrue(settings.showInDockWhileWindowOpen)
+        XCTAssertNil(defaults.object(forKey: "scrumtrace.showInDock"))
+        settings.showInDockWhileWindowOpen = false
+        XCTAssertEqual(defaults.object(forKey: "scrumtrace.showInDock") as? Bool, false)
+        XCTAssertFalse(AppSettings(defaults: defaults, keyStore: .empty).showInDockWhileWindowOpen)
+    }
+
+    @MainActor
+    func testClosingTheWindowGivesFocusBackToTheAppThatWasInFront() throws {
+        try withController { controller, log in
+            let fake = FakeActivation()
+            fake.frontmost = 111
+            let presenter = MainWindowPresenter(controller: controller, frameAutosaveName: nil, activation: fake.seam)
+            defer {
+                fake.frontmost = nil
+                presenter.window?.close()
+            }
+            let own = FakeActivation.ownProcessIdentifier
+
+            XCTAssertEqual(fake.followerCount, 1, "App switches are followed from the moment the presenter exists")
+            presenter.show()
+            let window = try XCTUnwrap(presenter.window)
+            XCTAssertEqual(presenter.focusReturnProcessIdentifier, 111)
+            fake.appDidActivate(own)
+            presenter.show(section: .contexts)
+            XCTAssertEqual(presenter.focusReturnProcessIdentifier, 111, "ScrumTrace itself is never the app to go back to")
+            XCTAssertEqual(fake.followerCount, 1)
+
+            window.close()
+            XCTAssertEqual(fake.followerCount, 1, "App switches are still followed with the window closed")
+            XCTAssertTrue(
+                spinRunLoop(until: { fake.activated == [111] }),
+                "ScrumTrace was still in front after the switch, so the previous app gets focus back"
+            )
+            XCTAssertNil(presenter.pendingFocusReturn)
+
+            // The last other app activated while the window was open is the one to go back to.
+            fake.appDidActivate(own)
+            presenter.show()
+            XCTAssertEqual(presenter.focusReturnProcessIdentifier, 111, "Shown while ScrumTrace was in front: the app before it")
+            fake.appDidActivate(222)
+            fake.appDidActivate(own)
+            XCTAssertEqual(presenter.focusReturnProcessIdentifier, 222)
+            window.close()
+            XCTAssertTrue(spinRunLoop(until: { fake.activated == [111, 222] }))
+
+            // Closed while another app is in front: nothing to give back.
+            fake.frontmost = 333
+            presenter.show()
+            window.close()
+            XCTAssertTrue(spinRunLoop(until: { presenter.pendingFocusReturn == nil }))
+            XCTAssertEqual(fake.activated, [111, 222])
+
+            // Another ScrumTrace window, such as the first-run permissions window, keeps the keyboard.
+            presenter.show()
+            fake.appDidActivate(own)
+            fake.anotherWindowIsKey = true
+            window.close()
+            XCTAssertTrue(spinRunLoop(until: { presenter.pendingFocusReturn == nil }))
+            XCTAssertEqual(fake.activated, [111, 222])
+            fake.anotherWindowIsKey = false
+
+            // With the Dock tile turned off, focus still goes back.
+            controller.settings.showInDockWhileWindowOpen = false
+            fake.frontmost = 444
+            presenter.show()
+            fake.appDidActivate(own)
+            window.close()
+            XCTAssertTrue(spinRunLoop(until: { fake.activated == [111, 222, 444] }))
+
+            // The previous app quit meanwhile.
+            fake.frontmost = 555
+            presenter.show()
+            fake.appDidActivate(own)
+            fake.canActivate = false
+            window.close()
+            XCTAssertTrue(spinRunLoop(until: { presenter.pendingFocusReturn == nil }))
+            XCTAssertEqual(fake.activated, [111, 222, 444])
+
+            let returns = try technicalRows(at: log, allowing: ["main_dock": ["policy"], "main_focus_return": ["activated"]])
+                .filter { $0["event"] == "main_focus_return" }
+                .compactMap { $0["activated"] }
+            XCTAssertEqual(returns, ["1", "1", "1", "0"])
+        }
+    }
+
+    @MainActor
+    func testShowingTheWindowAgainCancelsAPendingFocusReturn() throws {
+        try withController { controller, _ in
+            let fake = FakeActivation()
+            fake.frontmost = 111
+            fake.focusReturnDelay = .milliseconds(300)
+            let presenter = MainWindowPresenter(controller: controller, frameAutosaveName: nil, activation: fake.seam)
+            defer {
+                fake.frontmost = nil
+                presenter.window?.close()
+            }
+            presenter.show()
+            let window = try XCTUnwrap(presenter.window)
+            fake.appDidActivate(FakeActivation.ownProcessIdentifier)
+            window.close()
+            let pending = try XCTUnwrap(presenter.pendingFocusReturn, "The focus return first waits for AppKit")
+            presenter.show()
+            XCTAssertNil(presenter.pendingFocusReturn)
+            XCTAssertTrue(pending.isCancelled)
+            spinRunLoop(for: 0.5)
+            XCTAssertEqual(fake.activated, [], "Reopening within the delay keeps ScrumTrace in front")
+            XCTAssertEqual(fake.policy, .regular)
+            XCTAssertTrue(window.isVisible)
+        }
+    }
+
+    @MainActor
+    func testSectionSelectionSearchAndFiltersSurviveClosingAndReopeningTheWindow() async throws {
+        try await withRecordingsFixture { f in
+            try await withFixtureController(f) { controller in
+                let presenter = MainWindowPresenter(controller: controller, frameAutosaveName: nil)
+                defer { presenter.window?.close() }
+                let model = presenter.recordings
+                presenter.show(sessionId: f.completed)
+                let window = try XCTUnwrap(presenter.window)
+                let listed = await waitUntil { self.recordingsTable(in: window)?.numberOfRows == 3 }
+                XCTAssertTrue(listed)
+                model.searchText = "Orbit"
+                model.statusFilter = .completed
+                model.contextFilter = "ctx-orbit"
+                let filtered = await waitUntil {
+                    let table = self.recordingsTable(in: window)
+                    return table?.numberOfRows == 1 && table?.selectedRow == 0
+                }
+                XCTAssertTrue(filtered)
+
+                @MainActor
+                func assertKept(_ step: String) async {
+                    XCTAssertEqual(presenter.navigation.section, .recordings, step)
+                    XCTAssertEqual(presenter.navigation.selectedSessionId, f.completed, step)
+                    XCTAssertEqual(model.searchText, "Orbit", step)
+                    XCTAssertEqual(model.statusFilter, .completed, step)
+                    XCTAssertEqual(model.contextFilter, "ctx-orbit", step)
+                    let restored = await waitUntil {
+                        let table = self.recordingsTable(in: window)
+                        return table?.numberOfRows == 1 && table?.selectedRow == 0
+                            && MainWindowPresenter.searchToolbarItem(in: window)?.searchField.stringValue == "Orbit"
+                    }
+                    XCTAssertTrue(restored, "\(step): the table is still filtered, with the same row selected")
+                }
+
+                window.close()
+                spinRunLoop(for: 0.2)
+                XCTAssertFalse(window.isVisible)
+                presenter.show()
+                XCTAssertTrue(presenter.window === window)
+                await assertKept("Closed and reopened")
+
+                // Another section in between, then the icon and Command-2.
+                presenter.show(section: .contexts)
+                spinRunLoop(for: 0.1)
+                window.close()
+                presenter.show()
+                XCTAssertEqual(presenter.navigation.section, .contexts)
+                presenter.show(section: .recordings)
+                await assertKept("Reopened on Contexts, then Recordings")
+            }
+        }
+    }
+
+    @MainActor
+    func testRecordingsBadgeCountsUnfinishedRecordingsThatNeedAttention() async throws {
+        try await withRecordingsFixture { f in
+            let library = SessionLibrary(vault: f.vault)
+            await library.refresh().value
+            let entries = library.entries
+            XCTAssertEqual(entries.count, 3)
+            // The transcribing recording counts; the completed one and the unreadable manifest do not.
+            XCTAssertEqual(MainSidebarBadge.unfinishedCount(entries: entries, canChangeSessions: true, activeSessionId: nil), 1)
+            XCTAssertEqual(
+                MainSidebarBadge.unfinishedCount(entries: entries, canChangeSessions: false, activeSessionId: f.unfinished.uppercased()),
+                0,
+                "The recording a running capture or analysis holds is in progress, not waiting"
+            )
+            XCTAssertEqual(
+                MainSidebarBadge.unfinishedCount(entries: entries, canChangeSessions: true, activeSessionId: f.unfinished),
+                1,
+                "Once capture and analysis end, the controller's last recording counts again"
+            )
+
+            let offline = try makeSession(in: f.vault, status: .offlineFailed)
+            _ = try makeSession(in: f.vault, status: .paused)
+            _ = try makeSession(in: f.vault, status: .completed)
+            await library.refresh().value
+            let more = library.entries
+            XCTAssertEqual(more.count, 6)
+            XCTAssertEqual(MainSidebarBadge.unfinishedCount(entries: more, canChangeSessions: true, activeSessionId: nil), 3)
+            XCTAssertEqual(MainSidebarBadge.unfinishedCount(entries: more, canChangeSessions: false, activeSessionId: offline), 2)
+            XCTAssertEqual(
+                MainSidebarBadge.unfinishedCount(entries: more, canChangeSessions: true, activeSessionId: nil),
+                OverviewAttention.make(entries: more, heldSessionId: nil, lastError: "Failed", retentionDays: 30, update: nil).unfinished.count,
+                "The badge counts what Overview lists under Needs attention"
+            )
+
+            XCTAssertEqual(MainSidebarBadge.help(unfinishedCount: 0), "")
+            XCTAssertEqual(MainSidebarBadge.help(unfinishedCount: 1), "1 unfinished recording")
+            XCTAssertEqual(MainSidebarBadge.help(unfinishedCount: 4), "4 unfinished recordings")
+        }
+    }
+
+    func testHotkeysAndTheHUDNeverOpenOrActivateTheMainWindow() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        func source(_ path: String) throws -> String {
+            try String(contentsOf: root.appendingPathComponent(path), encoding: .utf8)
+        }
+        for path in ["ScrumTrace/UI/HotkeyManager.swift", "ScrumTrace/UI/RecordingHUDWindow.swift"] {
+            let text = try source(path)
+            let forbidden = [
+                "MainWindowPresenter", "mainPresenter", "showMainWindow", "showSettingsWindow", "showSettingsFromCommand", "showAgentLogWindow",
+                "findRecordings", "showRecordingsSearch", "applicationShouldHandleReopen", "AppDelegate", "NSApp.delegate",
+                "NSApp.activate", "setActivationPolicy"
+            ]
+            for forbidden in forbidden {
+                XCTAssertFalse(text.contains(forbidden), "\(path) must not use \(forbidden)")
+            }
+        }
+
+        let app = try source("ScrumTrace/App/AppDelegate.swift")
+        XCTAssertTrue(app.contains("activation: .live"), "The app's presenter manages the Dock tile")
+        XCTAssertEqual(app.components(separatedBy: "NSApp.activate(").count - 1, 1, "One place activates ScrumTrace")
+        let show = try XCTUnwrap(app.range(of: "    func show() {"))
+        let afterShow = app[show.upperBound...]
+        let showBody = afterShow[..<(afterShow.range(of: "\n    }\n")?.lowerBound ?? afterShow.endIndex)]
+        XCTAssertTrue(showBody.contains("NSApp.activate("), "It is the presenter's show()")
+        XCTAssertFalse(try source("ScrumTrace/UI/MainWindow.swift").contains("NSApp.activate("))
+
+        let launch = try XCTUnwrap(app.components(separatedBy: "func applicationDidFinishLaunching").last?
+            .components(separatedBy: "func applicationWillTerminate").first)
+        XCTAssertTrue(launch.contains("NSApp.setActivationPolicy(.accessory)"), "Launch still starts as a menu-bar accessory")
+        let launchWindow = try XCTUnwrap(launch.range(of: "showMainWindow(source: .launch)"))
+        let onboarding = try XCTUnwrap(launch.range(of: "OnboardingWindow.presentIfNeeded()"))
+        XCTAssertLessThan(launchWindow.lowerBound, onboarding.lowerBound, "First run: the main window opens behind the permissions window")
+    }
+
+    @MainActor
+    func testRecordingsKeyboardRevealsDeletesAndClearsTheSearch() async throws {
+        try await withRecordingsFixture { f in
+            try await withFixtureController(f) { controller in
+                let navigation = MainNavigation()
+                navigation.section = .recordings
+                let recorder = CallRecorder()
+                let recordings = makeRecordingsModel(f, navigation: navigation, recorder: recorder)
+                let hosting = NSHostingController(rootView: MainWindowView(
+                    controller: controller,
+                    navigation: navigation,
+                    recordings: recordings,
+                    overview: OverviewModel(
+                        recordings: recordings,
+                        navigation: navigation,
+                        dependencies: .live(controller: controller, startRecording: {}, isPreparingRecording: { false })
+                    ),
+                    contexts: ContextsModel(
+                        settings: controller.settings,
+                        recordings: recordings,
+                        dependencies: .live(controller: controller, startRecording: {}, isPreparingRecording: { false })
+                    ),
+                    settingsView: {
+                        SettingsView(settings: controller.settings, controller: controller, navigation: navigation.settings)
+                    }
+                ))
+                hosting.sizingOptions = []
+                hosting.sceneBridgingOptions = [.toolbars]
+                let window = KeyWindowForTesting(
+                    contentRect: NSRect(x: 0, y: 0, width: 960, height: 640),
+                    styleMask: [.titled, .closable, .miniaturizable, .resizable],
+                    backing: .buffered,
+                    defer: false
+                )
+                window.contentViewController = hosting
+                window.isReleasedWhenClosed = false
+                window.setContentSize(NSSize(width: 960, height: 640))
+                defer { window.close() }
+                window.makeKeyAndOrderFront(nil)
+                await recordings.refresh().value
+                navigation.selectedSessionId = f.completed
+                let selected = await waitUntil { (self.recordingsTable(in: window)?.selectedRow ?? -1) >= 0 }
+                XCTAssertTrue(selected)
+                let windowNumber = window.windowNumber
+                func key(_ characters: String, keyCode: UInt16, modifiers: NSEvent.ModifierFlags = []) throws -> NSEvent {
+                    try XCTUnwrap(NSEvent.keyEvent(
+                        with: .keyDown,
+                        location: .zero,
+                        modifierFlags: modifiers,
+                        timestamp: ProcessInfo.processInfo.systemUptime,
+                        windowNumber: windowNumber,
+                        context: nil,
+                        characters: characters,
+                        charactersIgnoringModifiers: characters,
+                        isARepeat: false,
+                        keyCode: keyCode
+                    ))
+                }
+
+                // Command-R reveals the selected recording's export folder.
+                NSApp.sendEvent(try key("r", keyCode: 15, modifiers: .command))
+                let revealed = await waitUntil { recorder.calls == ["revealExport \(f.completed)"] }
+                XCTAssertTrue(revealed, "Command-R: \(recorder.calls)")
+
+                // Delete in the table asks first.
+                let table = try XCTUnwrap(recordingsTable(in: window))
+                XCTAssertTrue(window.makeFirstResponder(table))
+                // SwiftUI follows the first responder on its next pass.
+                spinRunLoop(for: 0.3)
+                NSApp.sendEvent(try key("\u{7F}", keyCode: 51))
+                let asked = await waitUntil { recordings.pendingDelete == f.completed }
+                XCTAssertTrue(asked, "Delete asks to confirm deleting the selected recording")
+                XCTAssertFalse(recorder.calls.contains { $0.hasPrefix("deleteSession") }, "Nothing is deleted before confirming")
+                recordings.cancelDelete()
+                spinRunLoop(for: 0.3)
+
+                // Escape in the table clears the search and keeps the filters.
+                recordings.statusFilter = .completed
+                recordings.searchText = "Orbit"
+                let filtered = await waitUntil { self.recordingsTable(in: window)?.numberOfRows == 1 }
+                XCTAssertTrue(filtered)
+                XCTAssertTrue(window.makeFirstResponder(try XCTUnwrap(recordingsTable(in: window))))
+                spinRunLoop(for: 0.3)
+                NSApp.sendEvent(try key("\u{1B}", keyCode: 53))
+                let cleared = await waitUntil { recordings.searchText.isEmpty }
+                XCTAssertTrue(cleared, "Escape in the table clears the search")
+                XCTAssertEqual(recordings.statusFilter, .completed, "Escape keeps the status filter")
+
+                // Escape in the search field clears it too.
+                let item = try XCTUnwrap(MainWindowPresenter.searchToolbarItem(in: window))
+                recordings.searchText = "Orbit"
+                spinRunLoop(for: 0.2)
+                XCTAssertTrue(window.makeFirstResponder(item.searchField))
+                XCTAssertTrue(MainWindowPresenter.isEditingSearch(item, in: window))
+                spinRunLoop(for: 0.2)
+                NSApp.sendEvent(try key("\u{1B}", keyCode: 53))
+                let clearedInField = await waitUntil { recordings.searchText.isEmpty }
+                XCTAssertTrue(clearedInField, "Escape in the search field clears the search")
+            }
+        }
+    }
+
+    @MainActor
+    func testFindRecordingsShowsRecordingsWithTheSearchFieldFocused() async throws {
+        try await withRecordingsFixture { f in
+            try await withFixtureController(f) { controller in
+                let find = try mainMenuItems().filter {
+                    $0.keyEquivalent == "f" && $0.keyEquivalentModifierMask.intersection(.deviceIndependentFlagsMask) == .command
+                }
+                XCTAssertEqual(find.map(\.title), ["Find Recordings…"], "Command-F is in the Edit menu")
+
+                let presenter = MainWindowPresenter(controller: controller, frameAutosaveName: nil)
+                defer { presenter.window?.close() }
+                let delegate = AppDelegate()
+                delegate.setMainPresenterForTesting(presenter)
+                // The hosted test app is never active; Command-F arrives while ScrumTrace is, from its main window.
+                delegate.isActiveApp = { true }
+                delegate.currentKeyWindow = { presenter.window }
+                presenter.show(section: .overview)
+                let window = try XCTUnwrap(presenter.window)
+
+                delegate.findRecordings(nil)
+                XCTAssertEqual(presenter.navigation.section, .recordings)
+                XCTAssertTrue(window.isVisible)
+                let focused = await waitUntil {
+                    MainWindowPresenter.searchToolbarItem(in: window).map { MainWindowPresenter.isEditingSearch($0, in: window) } ?? false
+                }
+                XCTAssertTrue(focused, "Typing goes to the recordings search")
+                let opens = try logRows(at: f.log).filter { $0["event"] == "main_open" }
+                XCTAssertEqual(opens.last?["source"], "command")
+                XCTAssertEqual(opens.last?["section"], "recordings")
+
+                // A sheet keeps its section and the keyboard.
+                presenter.show(tab: .general)
+                let sheet = NSWindow(
+                    contentRect: NSRect(x: 0, y: 0, width: 320, height: 200),
+                    styleMask: [.titled],
+                    backing: .buffered,
+                    defer: false
+                )
+                sheet.isReleasedWhenClosed = false
+                window.beginSheet(sheet, completionHandler: nil)
+                defer { if window.attachedSheet != nil { window.endSheet(sheet) } }
+                XCTAssertTrue(spinRunLoop(until: { window.attachedSheet === sheet }))
+                presenter.showRecordingsSearch()
+                spinRunLoop(for: 0.2)
+                XCTAssertEqual(presenter.navigation.section, .settings)
+                window.endSheet(sheet)
+            }
+        }
+    }
+
+    @MainActor
+    func testMainMenuCommandsWaitForScrumTraceToBeActiveAndFindStaysWithTheWindowInFront() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        let app = try String(contentsOf: root.appendingPathComponent("ScrumTrace/App/ScrumTraceApp.swift"), encoding: .utf8)
+        XCTAssertTrue(app.contains("appDelegate.showSettingsFromCommand()"), "Command-comma goes through the command check")
+        XCTAssertFalse(app.contains("showSettingsWindow("), "Command-comma never opens Settings directly")
+        XCTAssertTrue(app.contains("appDelegate.findRecordings(nil)"))
+        XCTAssertTrue(app.contains("appDelegate.showMainWindow(section: section, source: .command)"))
+
+        try withController { controller, log in
+            let presenter = MainWindowPresenter(controller: controller, frameAutosaveName: nil)
+            defer { presenter.window?.close() }
+            let delegate = AppDelegate()
+            delegate.setMainPresenterForTesting(presenter)
+            let focus = FakeCommandFocus()
+            delegate.isActiveApp = { focus.isActive }
+            delegate.currentKeyWindow = { focus.keyWindow }
+            // Stands in for the Shot note: a non-activating panel that has the keyboard while another app is active.
+            let shotNote = NSPanel(
+                contentRect: NSRect(x: 0, y: 0, width: 320, height: 200),
+                styleMask: [.titled, .nonactivatingPanel],
+                backing: .buffered,
+                defer: true
+            )
+            shotNote.isReleasedWhenClosed = false
+            defer { shotNote.close() }
+
+            @MainActor
+            func typeEveryCommand() {
+                delegate.showSettingsFromCommand()
+                delegate.findRecordings(nil)
+                for section in MainSection.allCases {
+                    delegate.showMainWindow(section: section, source: .command)
+                }
+            }
+
+            // A presentation is in front and the Shot note has the keyboard.
+            focus.keyWindow = shotNote
+            typeEveryCommand()
+            XCTAssertNil(presenter.window, "No command opens the window while another app is active")
+
+            // The menu bar item does not activate ScrumTrace first and still opens the window.
+            delegate.showMainWindow(source: .menu)
+            let window = try XCTUnwrap(presenter.window)
+            XCTAssertTrue(window.isVisible)
+            typeEveryCommand()
+            XCTAssertEqual(presenter.navigation.section, .overview, "An open window keeps its section too")
+            window.close()
+            typeEveryCommand()
+            XCTAssertFalse(window.isVisible, "A closed window stays closed")
+
+            // ScrumTrace is active, but another of its windows has the keyboard: Find belongs to that window.
+            focus.isActive = true
+            delegate.findRecordings(nil)
+            XCTAssertFalse(window.isVisible)
+            XCTAssertEqual(presenter.navigation.section, .overview)
+
+            // Typing in the Settings → Logs filter keeps Command-F there.
+            delegate.showMainWindow(section: .settings, source: .command)
+            XCTAssertTrue(window.isVisible)
+            presenter.show(tab: .logs)
+            focus.keyWindow = window
+            @MainActor
+            func filterField() -> NSTextField? {
+                @MainActor
+                func fields(in view: NSView) -> [NSTextField] {
+                    let own = (view as? NSTextField).map { [$0] } ?? []
+                    return own + view.subviews.flatMap { fields(in: $0) }
+                }
+                return window.contentView.flatMap { fields(in: $0).first { $0.placeholderString == "Filter log entries" } }
+            }
+            XCTAssertTrue(spinRunLoop(until: { filterField() != nil }), "Settings → Logs shows its filter field")
+            XCTAssertTrue(window.makeFirstResponder(try XCTUnwrap(filterField())))
+            XCTAssertTrue(spinRunLoop(until: { (window.firstResponder as? NSTextView)?.isEditable == true }))
+            XCTAssertFalse(presenter.acceptsFindCommand(keyWindow: window))
+            delegate.findRecordings(nil)
+            spinRunLoop(for: 0.2)
+            XCTAssertEqual(presenter.navigation.section, .settings, "The field being typed in keeps Command-F")
+            XCTAssertEqual(presenter.navigation.settings.selectedTab, .logs)
+
+            // A sheet on the main window has the keyboard: nothing changes.
+            window.makeFirstResponder(nil)
+            let sheet = NSWindow(
+                contentRect: NSRect(x: 0, y: 0, width: 320, height: 200),
+                styleMask: [.titled],
+                backing: .buffered,
+                defer: false
+            )
+            sheet.isReleasedWhenClosed = false
+            window.beginSheet(sheet, completionHandler: nil)
+            defer { if window.attachedSheet != nil { window.endSheet(sheet) } }
+            XCTAssertTrue(spinRunLoop(until: { window.attachedSheet === sheet }))
+            XCTAssertFalse(presenter.acceptsFindCommand(keyWindow: sheet))
+            XCTAssertFalse(presenter.acceptsFindCommand(keyWindow: window), "A sheet on the main window keeps Command-F")
+            window.endSheet(sheet)
+            XCTAssertTrue(spinRunLoop(until: { window.attachedSheet == nil }))
+
+            // Nothing typed in the main window: Command-F goes to the recordings search, and pressing it again there
+            // keeps the search.
+            delegate.findRecordings(nil)
+            XCTAssertEqual(presenter.navigation.section, .recordings)
+            @MainActor
+            func editingSearch() -> Bool {
+                MainWindowPresenter.searchToolbarItem(in: window).map { MainWindowPresenter.isEditingSearch($0, in: window) } ?? false
+            }
+            XCTAssertTrue(spinRunLoop(until: { editingSearch() }), "Typing goes to the recordings search")
+            XCTAssertTrue(presenter.acceptsFindCommand(keyWindow: window))
+            delegate.findRecordings(nil)
+            XCTAssertTrue(spinRunLoop(until: { editingSearch() }))
+            focus.keyWindow = nil
+            XCTAssertTrue(presenter.acceptsFindCommand(keyWindow: nil), "With no ScrumTrace window key, Find opens Recordings")
+
+            let opens = try logRows(at: log).filter { $0["event"] == "main_open" }.map { $0["source"] ?? "" }
+            XCTAssertEqual(opens, ["menu", "command", "command", "command"], "Ignored commands log nothing")
+        }
+    }
+
+    @MainActor
+    func testOpeningFromTheAppIconGivesFocusBackToTheAppTheUserCameFrom() throws {
+        try withController { controller, log in
+            let fake = FakeActivation()
+            let own = FakeActivation.ownProcessIdentifier
+            let loginWindow: pid_t = 900
+            let spotlight: pid_t = 901
+            fake.withoutDockTile = [loginWindow, spotlight]
+            // The icon, Finder and Spotlight activate ScrumTrace before they ask it to reopen, and that reopen can
+            // create the presenter. An active accessory leaves the previous app's menu bar on screen.
+            fake.frontmost = own
+            fake.menuBarOwner = 777
+            let presenter = MainWindowPresenter(controller: controller, frameAutosaveName: nil, activation: fake.seam)
+            defer {
+                fake.frontmost = nil
+                presenter.window?.close()
+            }
+            let delegate = AppDelegate()
+            delegate.setMainPresenterForTesting(presenter)
+
+            XCTAssertTrue(delegate.applicationShouldHandleReopen(NSApplication.shared, hasVisibleWindows: false))
+            let window = try XCTUnwrap(presenter.window)
+            XCTAssertEqual(presenter.focusReturnProcessIdentifier, 777, "Nothing followed yet: the app whose menu bar is on screen")
+            window.close()
+            XCTAssertTrue(spinRunLoop(until: { fake.activated == [777] }))
+
+            // With the window closed the user works in another app, then clicks the ScrumTrace icon.
+            fake.appDidActivate(111)
+            fake.appDidActivate(own)
+            XCTAssertTrue(delegate.applicationShouldHandleReopen(NSApplication.shared, hasVisibleWindows: false))
+            XCTAssertEqual(presenter.focusReturnProcessIdentifier, 111, "ScrumTrace was already in front; the app before it gets focus back")
+
+            // The screen locks and unlocks while the window is open.
+            fake.appDidActivate(loginWindow)
+            fake.appDidActivate(own)
+            XCTAssertEqual(presenter.focusReturnProcessIdentifier, 111, "loginwindow has no Dock tile")
+            window.close()
+            XCTAssertTrue(spinRunLoop(until: { fake.activated == [777, 111] }))
+
+            // Opened from Spotlight, whose panel is still frontmost when the window shows.
+            fake.appDidActivate(222)
+            fake.frontmost = spotlight
+            presenter.show()
+            XCTAssertEqual(presenter.focusReturnProcessIdentifier, 222, "Spotlight has no Dock tile")
+            fake.appDidActivate(own)
+            window.close()
+            XCTAssertTrue(spinRunLoop(until: { fake.activated == [777, 111, 222] }))
+
+            let returns = try technicalRows(
+                at: log,
+                allowing: ["main_dock": ["policy"], "main_focus_return": ["activated"], "main_open": ["source"]]
+            )
+            .filter { $0["event"] == "main_focus_return" }
+            .compactMap { $0["activated"] }
+            XCTAssertEqual(returns, ["1", "1", "1"])
+        }
+    }
+
+    @MainActor
+    func testTheDockTileStaysUntilTheLastScrumTraceWindowCloses() throws {
+        try withController { controller, _ in
+            let fake = FakeActivation()
+            let own = FakeActivation.ownProcessIdentifier
+            fake.frontmost = 111
+            let presenter = MainWindowPresenter(controller: controller, frameAutosaveName: nil, activation: fake.seam)
+            defer {
+                fake.frontmost = nil
+                fake.anotherWindowIsOpen = false
+                presenter.window?.close()
+            }
+            // Stand-ins for other ScrumTrace windows. Never shown, only passed to the close followers.
+            @MainActor
+            func standIn() -> NSWindow {
+                let window = NSWindow(
+                    contentRect: NSRect(x: 0, y: 0, width: 200, height: 120),
+                    styleMask: [.titled],
+                    backing: .buffered,
+                    defer: true
+                )
+                window.isReleasedWhenClosed = false
+                return window
+            }
+            let permissions = standIn()
+            let hud = standIn()
+
+            presenter.show()
+            let window = try XCTUnwrap(presenter.window)
+            fake.appDidActivate(own)
+            XCTAssertEqual(fake.policy, .regular)
+
+            // First run: the permissions window is still open, with the keyboard, when the main window closes.
+            fake.anotherWindowIsOpen = true
+            fake.anotherWindowIsKey = true
+            window.close()
+            XCTAssertFalse(presenter.isWindowOpen)
+            XCTAssertTrue(presenter.isWaitingForOtherWindows)
+            XCTAssertEqual(fake.closeFollowerCount, 1)
+            XCTAssertEqual(fake.policy, .regular, "The permissions window keeps the Dock tile and its Command-Tab entry")
+            XCTAssertNil(presenter.pendingFocusReturn, "Focus stays with the permissions window")
+
+            // A panel closing while the permissions window stays changes nothing.
+            fake.windowWillClose(hud)
+            XCTAssertTrue(presenter.isWaitingForOtherWindows)
+            XCTAssertEqual(fake.policy, .regular)
+
+            // The last one closes: back to the menu bar, and the previous app gets focus back.
+            fake.anotherWindowIsOpen = false
+            fake.anotherWindowIsKey = false
+            fake.windowWillClose(permissions)
+            XCTAssertFalse(presenter.isWaitingForOtherWindows)
+            XCTAssertEqual(fake.closeFollowerCount, 0)
+            XCTAssertEqual(fake.policy, .accessory)
+            XCTAssertTrue(spinRunLoop(until: { fake.activated == [111] }))
+
+            // Showing the window again ends a wait and keeps the tile.
+            presenter.show()
+            fake.appDidActivate(own)
+            fake.anotherWindowIsOpen = true
+            window.close()
+            XCTAssertTrue(presenter.isWaitingForOtherWindows)
+            presenter.show()
+            XCTAssertFalse(presenter.isWaitingForOtherWindows)
+            XCTAssertEqual(fake.closeFollowerCount, 0)
+            XCTAssertEqual(fake.policy, .regular)
+
+            // With the preference off the policy stays, and focus still waits for the last window.
+            controller.settings.showInDockWhileWindowOpen = false
+            XCTAssertEqual(fake.policy, .accessory)
+            window.close()
+            XCTAssertTrue(presenter.isWaitingForOtherWindows)
+            spinRunLoop(for: 0.1)
+            XCTAssertEqual(fake.activated, [111])
+            fake.anotherWindowIsOpen = false
+            fake.windowWillClose(permissions)
+            XCTAssertTrue(spinRunLoop(until: { fake.activated == [111, 111] }))
+            XCTAssertEqual(fake.policyChanges, [.regular, .accessory, .regular, .accessory])
+        }
+    }
+
+    @MainActor
+    func testLiveActivationGivesFocusOnlyToAppsWithADockTileAndCountsOnlyTitledWindows() throws {
+        let live = MainWindowActivation.live
+        XCTAssertEqual(live.ownProcessIdentifier, ProcessInfo.processInfo.processIdentifier)
+        XCTAssertFalse(live.canReceiveFocus(-1), "No such process")
+        for bundle in ["com.apple.loginwindow", "com.apple.dock"] {
+            if let app = NSRunningApplication.runningApplications(withBundleIdentifier: bundle).first {
+                XCTAssertFalse(live.canReceiveFocus(app.processIdentifier), "\(bundle) has no Dock tile")
+            }
+        }
+        if let finder = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.finder").first {
+            XCTAssertTrue(live.canReceiveFocus(finder.processIdentifier))
+        }
+
+        let baseline = live.anotherWindowIsOpen(nil)
+        let frame = NSRect(x: 0, y: 0, width: 200, height: 120)
+        let panel = NSPanel(contentRect: frame, styleMask: [.titled, .nonactivatingPanel], backing: .buffered, defer: false)
+        let overlay = NSWindow(contentRect: frame, styleMask: .borderless, backing: .buffered, defer: false)
+        let titled = NSWindow(contentRect: frame, styleMask: [.titled, .closable], backing: .buffered, defer: false)
+        let windows = [panel, overlay, titled]
+        windows.forEach { $0.isReleasedWhenClosed = false }
+        defer { windows.forEach { $0.close() } }
+        panel.orderFront(nil)
+        overlay.orderFront(nil)
+        XCTAssertTrue(panel.isVisible && overlay.isVisible)
+        XCTAssertEqual(live.anotherWindowIsOpen(nil), baseline, "Panels such as the HUD and borderless overlays do not count")
+        titled.orderFront(nil)
+        XCTAssertTrue(live.anotherWindowIsOpen(nil), "A titled window such as the permissions window counts")
+        XCTAssertEqual(live.anotherWindowIsOpen(titled), baseline, "The window that is closing does not count")
+    }
+
+    /// PNG bytes of the Recordings row in the sidebar, as drawn.
+    @MainActor
+    private func recordingsSidebarRow(in window: NSWindow) -> Data? {
+        guard let content = window.contentView,
+              let row = MainSection.allCases.firstIndex(of: .recordings) else { return nil }
+        content.layoutSubtreeIfNeeded()
+        func tables(in view: NSView) -> [NSTableView] {
+            if let table = view as? NSTableView { return [table] }
+            return view.subviews.flatMap { tables(in: $0) }
+        }
+        guard let sidebar = tables(in: content).first(where: {
+            $0.numberOfRows == MainSection.allCases.count && $0.convert($0.bounds, to: nil).minX < 100
+        }) else { return nil }
+        let rect = sidebar.rect(ofRow: row)
+        guard !rect.isEmpty, let bitmap = sidebar.bitmapImageRepForCachingDisplay(in: rect) else { return nil }
+        sidebar.cacheDisplay(in: rect, to: bitmap)
+        return bitmap.representation(using: .png, properties: [:])
+    }
+
+    @MainActor
+    func testRecordingsSidebarRowShowsTheUnfinishedCountInEverySection() throws {
+        try withController { controller, _ in
+            let presenter = MainWindowPresenter(controller: controller, frameAutosaveName: nil)
+            defer { presenter.window?.close() }
+            let recordings = presenter.recordings
+            // Command-comma in a new launch: the window has not shown Recordings, Overview or Contexts yet.
+            presenter.show(section: .settings)
+            let window = try XCTUnwrap(presenter.window)
+            XCTAssertTrue(spinRunLoop(until: { recordings.hasLoaded }), "Opening on Settings scans the index")
+            spinRunLoop(for: 0.3)
+            let noBadge = try XCTUnwrap(recordingsSidebarRow(in: window))
+
+            window.close()
+            let unfinished = try makeSession(in: controller.vault, status: .transcribing)
+            presenter.show(section: .settings)
+            XCTAssertTrue(spinRunLoop(until: { recordings.library.entries.count == 1 }), "Reopening on Settings scans again")
+            XCTAssertTrue(
+                spinRunLoop(until: { self.recordingsSidebarRow(in: window).map { $0 != noBadge } ?? false }),
+                "The Recordings row shows the unfinished recording without visiting Recordings"
+            )
+            spinRunLoop(for: 0.3)
+            XCTAssertNotEqual(recordingsSidebarRow(in: window), noBadge, "The badge stays")
+            XCTAssertEqual(presenter.navigation.section, .settings)
+
+            // Analysis finishes, so nothing is unfinished and the badge goes.
+            var manifest = try controller.vault.loadManifest(id: unfinished)
+            manifest.pipelineStatus = .completed
+            try controller.vault.write(manifest: &manifest)
+            recordings.refresh()
+            XCTAssertTrue(
+                spinRunLoop(until: { self.recordingsSidebarRow(in: window) == noBadge }),
+                "Without unfinished recordings the row has no badge"
+            )
+        }
+    }
+}
+
+/// Stands in for `NSApp`, `NSWorkspace` and other apps, so nothing reaches the test host's activation policy
+/// or another running app.
+@MainActor
+private final class FakeActivation {
+    static let ownProcessIdentifier: pid_t = 4_242
+
+    var policy: NSApplication.ActivationPolicy = .accessory
+    private(set) var policyChanges: [NSApplication.ActivationPolicy] = []
+    var frontmost: pid_t?
+    var menuBarOwner: pid_t?
+    /// Apps without a Dock tile, such as loginwindow or a keychain prompt.
+    var withoutDockTile: Set<pid_t> = []
+    var anotherWindowIsKey = false
+    var anotherWindowIsOpen = false
+    var canActivate = true
+    private(set) var activated: [pid_t] = []
+    var focusReturnDelay: Duration = .zero
+    private var followers: [Int: @MainActor (pid_t) -> Void] = [:]
+    private var closeFollowers: [Int: @MainActor (NSWindow) -> Void] = [:]
+    private var nextFollower = 0
+
+    var followerCount: Int { followers.count }
+    var closeFollowerCount: Int { closeFollowers.count }
+
+    /// Another app, or ScrumTrace under its own id, became active.
+    func appDidActivate(_ pid: pid_t) {
+        frontmost = pid
+        for follower in followers.values { follower(pid) }
+    }
+
+    /// A ScrumTrace window is about to close.
+    func windowWillClose(_ window: NSWindow) {
+        for follower in closeFollowers.values { follower(window) }
+    }
+
+    var seam: MainWindowActivation {
+        MainWindowActivation(
+            ownProcessIdentifier: Self.ownProcessIdentifier,
+            activationPolicy: { self.policy },
+            setActivationPolicy: { policy in
+                self.policy = policy
+                self.policyChanges.append(policy)
+            },
+            frontmostProcessIdentifier: { self.frontmost },
+            menuBarOwnerProcessIdentifier: { self.menuBarOwner },
+            canReceiveFocus: { !self.withoutDockTile.contains($0) },
+            anotherWindowIsKey: { _ in self.anotherWindowIsKey },
+            anotherWindowIsOpen: { _ in self.anotherWindowIsOpen },
+            activateApplication: { pid in
+                guard self.canActivate else { return false }
+                self.activated.append(pid)
+                self.appDidActivate(pid)
+                return true
+            },
+            followActivations: { follower in
+                let id = self.nextFollower
+                self.nextFollower += 1
+                self.followers[id] = follower
+                return { self.followers[id] = nil }
+            },
+            followWindowCloses: { follower in
+                let id = self.nextFollower
+                self.nextFollower += 1
+                self.closeFollowers[id] = follower
+                return { self.closeFollowers[id] = nil }
+            },
+            focusReturnDelay: focusReturnDelay
+        )
+    }
+}
+
+/// Whether ScrumTrace is active and which window has the keyboard, as the app delegate's command checks see them.
+@MainActor
+private final class FakeCommandFocus {
+    var isActive = false
+    var keyWindow: NSWindow?
+}
+
+/// SwiftUI sends keyboard shortcuts only to the key window, and the hosted test app is never active, so this
+/// window reports itself key.
+private final class KeyWindowForTesting: NSWindow {
+    override var isKeyWindow: Bool { true }
 }

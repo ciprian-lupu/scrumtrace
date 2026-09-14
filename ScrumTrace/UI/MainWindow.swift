@@ -57,6 +57,119 @@ enum MainWindowOpenSource: String {
     case command
 }
 
+/// Switches ScrumTrace between a menu-bar accessory and a regular app with a Dock tile, and gives focus back to
+/// another app after the main window closes. Other apps pass through it as process ids only, so no name reaches
+/// a log. Injected: hosted tests pass a fake or none, so the test host never gets a Dock tile or activates
+/// another app.
+struct MainWindowActivation {
+    /// ScrumTrace's own process id.
+    var ownProcessIdentifier: pid_t
+    var activationPolicy: @MainActor () -> NSApplication.ActivationPolicy
+    var setActivationPolicy: @MainActor (NSApplication.ActivationPolicy) -> Void
+    /// The frontmost application's process id, or nil when there is none.
+    var frontmostProcessIdentifier: @MainActor () -> pid_t?
+    /// The application whose menu bar is on screen. An active accessory has no menu bar of its own, so while the
+    /// app icon, Finder or Spotlight has just activated ScrumTrace this is still the app the user came from.
+    var menuBarOwnerProcessIdentifier: @MainActor () -> pid_t?
+    /// True for a running app with a Dock tile, the only kind that gets focus back. Not loginwindow, a keychain
+    /// prompt or another app's menu-bar panel.
+    var canReceiveFocus: @MainActor (pid_t) -> Bool
+    /// True when a ScrumTrace window other than `closing` has the keyboard, such as the first-run permissions window.
+    var anotherWindowIsKey: @MainActor (_ closing: NSWindow?) -> Bool
+    /// True when a titled ScrumTrace window other than `closing` is on screen, such as the first-run permissions
+    /// window or the recording-context window. Panels such as the HUD, sheets and full-screen overlays do not count.
+    var anotherWindowIsOpen: @MainActor (_ closing: NSWindow?) -> Bool
+    /// Activates another running application. False when it has quit or did not come forward.
+    var activateApplication: @MainActor (pid_t) -> Bool
+    /// Calls `handler` with the process id of every application that becomes active, until the returned call stops it.
+    var followActivations: @MainActor (_ handler: @escaping @MainActor (pid_t) -> Void) -> @MainActor () -> Void
+    /// Calls `handler` with every ScrumTrace window that is about to close, until the returned call stops it.
+    var followWindowCloses: @MainActor (_ handler: @escaping @MainActor (NSWindow) -> Void) -> @MainActor () -> Void
+    /// How long closing waits before it checks whether ScrumTrace is still frontmost, so a switch AppKit
+    /// makes by itself is not overridden.
+    var focusReturnDelay: Duration
+
+    /// The running app: `NSApp`, `NSWorkspace` and `NSRunningApplication`.
+    static var live: MainWindowActivation {
+        MainWindowActivation(
+            ownProcessIdentifier: ProcessInfo.processInfo.processIdentifier,
+            activationPolicy: { NSApp.activationPolicy() },
+            setActivationPolicy: { _ = NSApp.setActivationPolicy($0) },
+            frontmostProcessIdentifier: { NSWorkspace.shared.frontmostApplication?.processIdentifier },
+            menuBarOwnerProcessIdentifier: { NSWorkspace.shared.menuBarOwningApplication?.processIdentifier },
+            canReceiveFocus: { pid in
+                guard let app = NSRunningApplication(processIdentifier: pid), !app.isTerminated else { return false }
+                return app.activationPolicy == .regular
+            },
+            anotherWindowIsKey: { closing in
+                guard let key = NSApp.keyWindow else { return false }
+                return key !== closing && key.isVisible
+            },
+            anotherWindowIsOpen: { closing in
+                NSApp.windows.contains { window in
+                    window !== closing && window.isVisible && window.styleMask.contains(.titled)
+                        && !(window is NSPanel) && window.sheetParent == nil
+                }
+            },
+            activateApplication: { pid in
+                guard let app = NSRunningApplication(processIdentifier: pid), !app.isTerminated,
+                      app.activationPolicy == .regular else { return false }
+                return app.activate(options: [])
+            },
+            followActivations: { handler in
+                let center = NSWorkspace.shared.notificationCenter
+                let token = center.addObserver(
+                    forName: NSWorkspace.didActivateApplicationNotification,
+                    object: nil,
+                    queue: .main
+                ) { notification in
+                    guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else { return }
+                    let pid = app.processIdentifier
+                    MainActor.assumeIsolated { handler(pid) }
+                }
+                return { center.removeObserver(token) }
+            },
+            followWindowCloses: { handler in
+                // No queue: AppKit posts this on the main thread, before the window leaves the screen.
+                let token = NotificationCenter.default.addObserver(
+                    forName: NSWindow.willCloseNotification,
+                    object: nil,
+                    queue: nil
+                ) { notification in
+                    guard let window = notification.object as? NSWindow else { return }
+                    MainActor.assumeIsolated { handler(window) }
+                }
+                return { NotificationCenter.default.removeObserver(token) }
+            },
+            focusReturnDelay: .milliseconds(150)
+        )
+    }
+}
+
+/// The number on the Recordings sidebar row.
+enum MainSidebarBadge {
+    /// Unfinished recordings that need attention, the ones Overview lists under Needs attention. The recording a
+    /// running capture or analysis holds is in progress, so it is not counted.
+    static func unfinishedCount(entries: [SessionEntry], canChangeSessions: Bool, activeSessionId: String?) -> Int {
+        OverviewAttention.make(
+            entries: entries,
+            heldSessionId: canChangeSessions ? nil : activeSessionId,
+            lastError: nil,
+            retentionDays: 0,
+            update: nil
+        ).unfinished.count
+    }
+
+    /// The row's help tag. Empty without a badge.
+    static func help(unfinishedCount count: Int) -> String {
+        switch count {
+        case 0: return ""
+        case 1: return "1 unfinished recording"
+        default: return "\(count) unfinished recordings"
+        }
+    }
+}
+
 /// Launch-time decision, kept pure so it is unit-tested without AppKit.
 enum MainWindowLaunchPolicy {
     /// Passed by the LaunchAgent log loop so it never pops a window.
@@ -92,9 +205,15 @@ struct MainWindowView: View {
             // the selected row cannot leave the sidebar without a highlighted section.
             List(selection: $navigation.section) {
                 ForEach(MainSection.allCases) { section in
-                    Label(section.title, systemImage: section.systemImage)
-                        .tag(section)
-                        .accessibilityIdentifier("main.sidebar.\(section.rawValue)")
+                    Group {
+                        if section == .recordings {
+                            RecordingsSidebarLabel(model: recordings, library: recordings.library)
+                        } else {
+                            Label(section.title, systemImage: section.systemImage)
+                        }
+                    }
+                    .tag(section)
+                    .accessibilityIdentifier("main.sidebar.\(section.rawValue)")
                 }
             }
             .listStyle(.sidebar)
@@ -136,6 +255,23 @@ struct MainWindowView: View {
         case .settings:
             settingsView()
         }
+    }
+}
+
+/// The Recordings sidebar row, badged with the unfinished recordings that need attention.
+private struct RecordingsSidebarLabel: View {
+    @ObservedObject var model: RecordingsModel
+    @ObservedObject var library: SessionLibrary
+
+    var body: some View {
+        let count = MainSidebarBadge.unfinishedCount(
+            entries: library.entries,
+            canChangeSessions: model.canChangeSessions,
+            activeSessionId: model.activeSessionId
+        )
+        Label(MainSection.recordings.title, systemImage: MainSection.recordings.systemImage)
+            .badge(count)
+            .help(MainSidebarBadge.help(unfinishedCount: count))
     }
 }
 

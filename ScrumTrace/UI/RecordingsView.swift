@@ -642,33 +642,23 @@ final class RecordingsModel: ObservableObject {
         return runningRefresh ?? refresh()
     }
 
-    /// Sections that show rows from the session index: Recordings, the Overview's unfinished recordings,
-    /// last recording and storage line, and the recording counts and lists of Contexts.
-    nonisolated static func listsSessions(_ section: MainSection) -> Bool {
-        section == .recordings || section == .overview || section == .contexts
-    }
-
-    /// The presenter reports whether the window is on screen. Becoming visible on a section that lists
-    /// sessions refreshes at once; another section refreshes nothing, and a listing section refreshes when it
-    /// appears. While the window stays visible, those sections refresh every `refreshInterval`. A hidden
-    /// window does no periodic work.
+    /// The presenter reports whether the window is on screen. Becoming visible refreshes at once, and while the
+    /// window stays visible it refreshes every `refreshInterval`, whatever the section: besides Recordings,
+    /// Overview and Contexts, the sidebar's Recordings badge counts unfinished recordings from the index in every
+    /// section, Settings included. A hidden window does no periodic work.
     func setWindowVisible(_ visible: Bool) {
         guard visible != isWindowVisible else { return }
         isWindowVisible = visible
         periodicRefresh?.cancel()
         periodicRefresh = nil
         guard visible else { return }
-        if Self.listsSessions(navigation.section) {
-            refresh()
-        }
+        refresh()
         let interval = refreshInterval
         periodicRefresh = Task { @MainActor [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(for: interval)
                 guard !Task.isCancelled, let self else { return }
-                if Self.listsSessions(self.navigation.section) {
-                    await self.refresh().value
-                }
+                await self.refresh().value
             }
         }
     }
@@ -688,6 +678,11 @@ final class RecordingsModel: ObservableObject {
     /// True when the search and filters keep `entry` in the table.
     func isListed(_ entry: SessionEntry) -> Bool {
         ![entry].filtered(search: searchText, status: statusFilter, contextID: contextFilter).isEmpty
+    }
+
+    /// Escape while the table has the keyboard. The status and context filters stay.
+    func clearSearch() {
+        if !searchText.isEmpty { searchText = "" }
     }
 
     func clearFilters() {
@@ -1379,6 +1374,8 @@ struct RecordingsTable: View {
             }
         }
         .onDeleteCommand { model.performOnSelection(.delete) }
+        // The search field clears itself on Escape; this covers Escape while the table has the keyboard.
+        .onExitCommand { model.clearSearch() }
         .accessibilityIdentifier("main.recordings.table")
     }
 }
