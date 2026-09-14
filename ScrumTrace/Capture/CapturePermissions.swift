@@ -266,11 +266,14 @@ enum CapturePermissions {
     }
 
     #if os(macOS)
-    static func relaunchRunningApp() {
-        AgentLog.event("relaunch_requested", [:])
+    /// Opens a new instance with `arguments`, then quits this one. `SessionController.relaunchForPermissions()`
+    /// passes `--background` unless the main window is open.
+    static func relaunchRunningApp(arguments: [String]) {
+        AgentLog.event("relaunch_requested", ["background": arguments.contains(MainWindowLaunchPolicy.backgroundArgument) ? "1" : "0"])
         let url = Bundle.main.bundleURL
         let configuration = NSWorkspace.OpenConfiguration()
         configuration.createsNewApplicationInstance = true
+        configuration.arguments = arguments
         NSWorkspace.shared.openApplication(at: url, configuration: configuration) { _, error in
             guard error == nil else { return }
             DispatchQueue.main.async {

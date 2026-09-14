@@ -30,7 +30,31 @@ enum UpdateChecker {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0.0"
     }
 
+    /// What the last `check()` in this launch returned. The main window's Overview shows it and never
+    /// starts a check itself, so no network request comes from opening the window.
+    @MainActor static private(set) var lastResult: Result?
+
+    /// Tests replace the GitHub request so they can count checks without going online. Nil in the app.
+    @MainActor private static var requestForTesting: (@Sendable () async -> Result)?
+
+    @MainActor static func recordLastResult(_ result: Result) {
+        lastResult = result
+    }
+
+    /// Replaces the request made by `check()` and clears `lastResult`. Pass nil to restore both.
+    @MainActor static func setRequestForTesting(_ request: (@Sendable () async -> Result)?) {
+        requestForTesting = request
+        lastResult = nil
+    }
+
     static func check() async -> Result {
+        let request = await requestForTesting
+        let result = await (request ?? fetchLatest)()
+        await recordLastResult(result)
+        return result
+    }
+
+    private static func fetchLatest() async -> Result {
         var request = URLRequest(url: latestAPI)
         request.setValue("ScrumTrace/\(currentVersion)", forHTTPHeaderField: "User-Agent")
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")

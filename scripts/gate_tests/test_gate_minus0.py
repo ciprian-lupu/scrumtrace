@@ -77,12 +77,11 @@ def _run(
         str(session / "archive" / "session.mp4"): 30.0,
         str(session / "archive" / "audio.wav"): 30.0,
     }
-    normalized_durations = {str(Path(path).resolve()): duration for path, duration in durations.items()}
+    # The inspector resolves --session; on macOS /var/folders -> /private/var/folders.
+    resolved = {str(Path(key).resolve()): value for key, value in durations.items()}
 
     def fake_duration(path: Path, _probe: str) -> float | None:
-        # macOS resolves /tmp through /private; key on the canonical file so
-        # this pure inspector test never falls through to a fake media file.
-        return normalized_durations.get(str(path.resolve()))
+        return resolved.get(str(Path(path).resolve()))
 
     argv = [
         "inspect_gate_minus0.py",

@@ -146,6 +146,12 @@ final class AppSettings: ObservableObject {
         didSet { defaults.set(includeMicrophone, forKey: Keys.includeMicrophone) }
     }
 
+    /// While the main window is open, ScrumTrace has a Dock tile and a place in Command-Tab. Closing the window
+    /// returns it to a menu-bar accessory either way.
+    @Published var showInDockWhileWindowOpen: Bool {
+        didSet { defaults.set(showInDockWhileWindowOpen, forKey: Keys.showInDock) }
+    }
+
     @Published var apiKeyDraft: String
 
     var productContext: ProductContext {
@@ -212,6 +218,7 @@ final class AppSettings: ObservableObject {
         }
         self.showCursor = defaults.object(forKey: Keys.showCursor) as? Bool ?? true
         self.includeMicrophone = defaults.object(forKey: Keys.includeMicrophone) as? Bool ?? true
+        self.showInDockWhileWindowOpen = defaults.object(forKey: Keys.showInDock) as? Bool ?? true
         self.apiKeyDraft = ""
         let loaded = AIConnectionLibrary.load(from: defaults)
         self.connectionLibraryIssue = loaded.issue
@@ -706,6 +713,7 @@ final class AppSettings: ObservableObject {
         static let captureArea = "scrumtrace.captureArea"
         static let showCursor = "scrumtrace.showCursor"
         static let includeMicrophone = "scrumtrace.includeMicrophone"
+        static let showInDock = "scrumtrace.showInDock"
     }
 }
 

@@ -11,6 +11,7 @@ final class MenuBarController: NSObject {
     let menu = NSMenu()
     private let openSettings: () -> Void
     private let openLogs: () -> Void
+    private let openMain: () -> Void
     private var isMenuOpen = false
     private var checkingUpdates = false
     private var hud: RecordingHUDWindow?
@@ -19,18 +20,22 @@ final class MenuBarController: NSObject {
     private var hudObserver: NSObjectProtocol?
     private var lastStartEnabled: Bool?
     private let contextPresenter = RecordingContextPresenter()
-    private var isPreparingRecording = false
+    /// True while the recording-context window or the capture-area overlay of a Start is up.
+    /// The main window reads it to disable its own Start recording button.
+    private(set) var isPreparingRecording = false
 
     init(
         controller: SessionController,
         hud: RecordingHUDWindow? = nil,
         openSettings: @escaping () -> Void,
-        openLogs: @escaping () -> Void
+        openLogs: @escaping () -> Void,
+        openMain: @escaping () -> Void = {}
     ) {
         self.controller = controller
         self.hud = hud
         self.openSettings = openSettings
         self.openLogs = openLogs
+        self.openMain = openMain
         item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         super.init()
         menu.autoenablesItems = false
@@ -242,6 +247,8 @@ final class MenuBarController: NSObject {
         recent.submenu = recentMenu
         menu.addItem(recent)
         menu.addItem(.separator())
+        // Enabled in every state: opening the window never changes capture.
+        menu.addItem(actionItem("Open ScrumTrace…", #selector(openMainWindow)))
         let settingsRoot = NSMenuItem(title: "Settings", action: nil, keyEquivalent: "")
         let settingsMenu = NSMenu()
         settingsMenu.autoenablesItems = false
@@ -251,7 +258,7 @@ final class MenuBarController: NSObject {
         settingsMenu.addItem(actionItem("Log permission probe", #selector(probePermissions)))
         settingsMenu.addItem(actionItem("Reveal agent log", #selector(revealLog)))
         settingsMenu.addItem(actionItem("Export diagnostic bundle", #selector(exportDiagnostics)))
-        settingsMenu.addItem(actionItem("Reveal sessions folder", #selector(revealSessions)))
+        settingsMenu.addItem(actionItem("Reveal recordings folder", #selector(revealSessions)))
         settingsMenu.addItem(.separator())
         settingsMenu.addItem(actionItem("Ask for Screen Recording", #selector(askScreen)))
         settingsMenu.addItem(actionItem("Open Screen Recording settings", #selector(openScreenSettings)))
@@ -293,11 +300,25 @@ final class MenuBarController: NSObject {
         rebuild()
     }
 
-    func requestStart() { start() }
+    /// A Start from the main window, which logs `main_start` itself. Logs no start row of its own.
+    func requestStart() { runStartFlow(logging: nil) }
 
+    /// New Recording… (Command-N) in the app menu.
+    func startFromCommand() { runStartFlow(logging: "command_start") }
+
+    /// Start recording in the status-bar menu, the only Start that logs `menu_start`.
     @objc private func start() {
+        runStartFlow(logging: "menu_start")
+    }
+
+    /// Asks whether the user will tell participants. Tests replace it so the Start flow stops there without an alert.
+    var askMeetingNotice: @MainActor () -> Bool = MenuBarController.runMeetingNoticeAlert
+
+    /// Meeting notice, readiness, recording context, then the capture-area picker. `event` names the start row
+    /// written once the flow begins; nil when the caller already logged one.
+    private func runStartFlow(logging event: String?) {
         guard controller.canChangeCaptureSettings, !isPreparingRecording else { return }
-        AgentLog.event("menu_start", [:])
+        if let event { AgentLog.event(event, [:]) }
         if !controller.settings.meetingNoticeAccepted {
             if !presentMeetingNotice() {
                 return
@@ -339,18 +360,23 @@ final class MenuBarController: NSObject {
 
     @discardableResult
     private func presentMeetingNotice() -> Bool {
+        let accepted = askMeetingNotice()
+        AgentLog.event("meeting_notice", ["accepted": accepted ? "1" : "0"])
+        if accepted {
+            controller.settings.meetingNoticeAccepted = true
+        }
+        return accepted
+    }
+
+    /// The meeting-notice alert. True when the user will tell participants.
+    private static func runMeetingNoticeAlert() -> Bool {
         let alert = NSAlert()
         alert.messageText = "This Mac will record the meeting"
         alert.informativeText = "Screen, system audio, and microphone are captured locally. Tell other participants before you press Record. See docs/PARTICIPANT_NOTICE.md."
         alert.addButton(withTitle: "I will tell participants")
         alert.addButton(withTitle: "Cancel")
         NSApp.activate(ignoringOtherApps: true)
-        let accepted = alert.runModal() == .alertFirstButtonReturn
-        AgentLog.event("meeting_notice", ["accepted": accepted ? "1" : "0"])
-        if accepted {
-            controller.settings.meetingNoticeAccepted = true
-        }
-        return accepted
+        return alert.runModal() == .alertFirstButtonReturn
     }
 
     private func presentStartBlocked(_ readiness: CaptureReadiness) {
@@ -451,6 +477,10 @@ final class MenuBarController: NSObject {
         AgentLog.event("menu_probe", [:])
         CapturePermissions.probeAndLog()
         controller.statusLine = "Permission probe written to agent log"
+    }
+    @objc private func openMainWindow() {
+        AgentLog.event("menu_open_main", [:])
+        openMain()
     }
     @objc private func settings() {
         AgentLog.event("menu_settings", [:])

@@ -2,7 +2,7 @@
 
 Read this before changing product code, gates, remotes, or TCC/signing. The working spec is [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md). Mac debug loop: [AGENT_DEBUG.md](AGENT_DEBUG.md). Hardware results: [samples/GATE_LOG.md](samples/GATE_LOG.md) (empty until a Mac run).
 
-Snapshot date: **2026-09-13** (audit TASK-01–17 plus leftover *code* items closed; all-gate inspectors: `inspect_all_gates.py` / `mac_all_gates.sh`). Hardware gates still open. Update the snapshot when status in this file changes.
+Snapshot date: **2026-09-14** (audit TASK-01–17 plus leftover *code* items closed; all-gate inspectors: `inspect_all_gates.py` / `mac_all_gates.sh`; user-approved main window and its review fixes recorded; user-approved multi-provider comparison recorded). Hardware gates still open. Update the snapshot when status in this file changes.
 
 ## What this is
 
@@ -13,7 +13,7 @@ Native **macOS menu-bar recorder** (`com.str8minds.ScrumTrace`, App Sandbox **OF
 
 Primary consumer is a filesystem-aware coding agent (Cursor / Claude Code) that reads `export/`. Web chat and `SESSION_BRIEF.html` are secondary.
 
-Direction is approved. The spec is **not locked** and **not production-ready**. No new product surface until contracts C1–C5 are gated on a Mac.
+Direction is approved. The spec is **not locked** and **not production-ready**. No new product surface until contracts C1–C5 are gated on a Mac, except the user-approved exceptions listed under Honest status.
 
 ## Remotes and branches
 
@@ -55,26 +55,37 @@ Speaker review, Settings and menu stabilization were explicitly requested by the
 
 The user approved multi-provider comparison on 2026-09-13. Selected services evaluate identical prompt/JPEG/transcript inputs serially, with per-pair destination and SHA-256 provenance. Comparison excludes video. Retry preserves unchanged successes and refuses changed inputs. Live provider and hardware acceptance remain open.
 
+The main window was explicitly requested by the user on 2026-09-13 and is an approved exception of the same class ([MAIN_WINDOW_PLAN.md](MAIN_WINDOW_PLAN.md), tasks H01–H07). Opening ScrumTrace from Finder, Launchpad, Spotlight or the Dock, clicking its icon or choosing **Open ScrumTrace…** in the menu opens one window with four sections: **Overview** (readiness, Start recording, needs attention, last recording, storage), **Recordings** (a metadata-only session table with search, filters, details and the Recent-menu actions), **Contexts** (saved contexts with usage counts and Record with this context…) and **Settings** (the existing six tabs). A Login Item launch, the agent loop (`--background`) and **Relaunch ScrumTrace** with the window closed keep ScrumTrace in the menu bar. While the window is open, ScrumTrace has a Dock tile and a ⌘-Tab entry, unless *Show ScrumTrace in the Dock while its window is open* is off in Settings → General. After the window closes, the tile stays until no other titled ScrumTrace window (such as the first-run permissions window) is open. The window does not change capture, pause, clock, Whisper, slicing, provider or export behaviour. Outside `App/`, `UI/` and the new `Storage/SessionLibrary.swift`, the branch adds only a read-only `recording.lock` reader in `Capture/AgentLog.swift`, a read-only `activeSessionId`, `forgetSession(id:newestRemaining:)` for a session the window deletes, and test hooks in `Processing/SessionController.swift`, and makes `listedSessionIds` internal in `Storage/SessionVault.swift`. The main window is not gate evidence: Xcode tests and Linux contracts pass, but none of its Mac checks (item 6 under *Next work*: Keynote focus with the window open, the focus hand-back after closing it, the real sidebar and toolbar) has been run.
+
 ## Where to work
 
 ```text
 IMPLEMENTATION_PLAN.md     working spec (C1–C5, phases, disk, pause math)
+MAIN_WINDOW_PLAN.md        main window tasks H01–H07 and implementation notes
 AGENTS.md                  this file — remotes, status, next work
 AGENT_DEBUG.md             JSONL loop, rebuild policy, log triage
 README.md                  human runbook
 samples/GATE_LOG.md        fill on a Mac; Linux green ≠ gate pass
 samples/mock-session/      Phase -1 export pack + HANDOFF_LOG.md
 ScrumTrace/                Swift app (sandbox off)
-  App/                     settings, delegate, entry
+  App/                     settings, delegate + MainWindowPresenter, entry
   UI/                      menu bar, HUD, Shot, hotkeys, settings
+    MainWindow.swift       sections, split view, live banner, Dock seam
+    OverviewView.swift     readiness, Start recording, needs attention
+    RecordingsView.swift   session table, detail, actions, export/ drag
+    ContextsView.swift     saved contexts, usage, Record with context
   Capture/                 SCKit, clock, pause, permissions, AgentLog
   Storage/                 vault, manifest models
+    SessionLibrary.swift   metadata-only session index, delete, sizes
   Speech/                  WhisperKit
   Slicing/                 windows + clip export
   AI/                      providers, schema, evidence
   Export/                  projector, zip, brief, AGENT_CONTEXT
   Processing/              stop → transcribe → slice → evaluate → pack
 ScrumTraceTests/           Xcode tests (Mac)
+  MainWindowTests.swift    window, sections, Dock, focus, keyboard
+  SessionLibraryTests.swift  session index, privacy allow-list, delete
+  MainWindowSnapshotTests.swift  layout PNGs for a visual review; skipped unless SCRUMTRACE_SNAPSHOT_DIR is set
 scripts/                   Linux tests, mock pack, Mac build, gate inspect
 .cursor/environment.json   Linux: regenerate mock pack, preview :43147
 ```
@@ -86,6 +97,8 @@ Linux / cloud agents **cannot** compile ScreenCaptureKit or close Gate 0/1. They
 Linux / cloud (do this after Swift or script edits that the tests cover):
 
 ```bash
+python3 -m pip install -r scripts/requirements.txt   # Pillow for generate_mock_session.py
+# test_evidence.py also needs ffprobe on PATH (apt/brew install ffmpeg)
 bash scripts/run_linux_tests.sh
 python3 scripts/generate_mock_session.py   # only commit if mock *content* changed
 python3 scripts/serve_preview.py --host 127.0.0.1 --port 43147
@@ -102,6 +115,8 @@ open ~/Applications/ScrumTrace.app
 ```
 
 That copies a Debug build to `~/Applications/ScrumTrace.app` and signs it with a local **ScrumTrace Debug** identity. Open **that** copy. Enable Screen Recording and Microphone for it, then **Relaunch**. A grant never applies to the already-running process. Accessibility is optional.
+
+Xcode tests: `bash scripts/mac_xcode_test.sh`. For a visual layout review, `TEST_RUNNER_SCRUMTRACE_SNAPSHOT_DIR=/absolute/dir bash scripts/mac_xcode_test.sh` also writes PNGs of the main window (xcodebuild passes `TEST_RUNNER_` variables to the test process without the prefix). `ScrumTraceTests/MainWindowSnapshotTests.swift` renders every section over a fixture vault as `<section>-<variant>-<light|dark>.png`, and some `MainWindowTests` and `ProductContextTests` add `main-*.png`. Without the variable the two snapshot tests are skipped and the others write nothing. Nothing is asserted about pixels. On macOS 26 `NSView.cacheDisplay` cannot draw Liquid Glass, so the sidebar and, in the dark appearance, the toolbar items and the Settings tab strip come out blank: check those areas in the real window, not in the PNGs. Details: [MAIN_WINDOW_PLAN.md](MAIN_WINDOW_PLAN.md) §7.
 
 Xcode resolves WhisperKit **0.11.0** from the committed `Package.resolved`. First WhisperKit launch downloads `openai_whisper-large-v3-v20240930_turbo_632MB`. HUD: Loading Whisper model… then Transcribing. Archive capture is 3840×2160 at 4 fps / 16 Mbps.
 
@@ -143,7 +158,7 @@ Until Record stays up, do not start the 20-minute Gate 1 run.
 
 The app writes `~/Library/Logs/ScrumTrace/agent.jsonl` (technical fields only: no titles, URLs, notes, transcripts, or keys). Live session: `recording.lock` (ignored if its pid is dead).
 
-Useful events: `launch`, `permission_probe`, `start_control_state`, `menu_start`, `capture_area_picker`, `start_*`, `recorder_sckit_*`, `mic_*`, `stop_requested`, `halt`, `terminate`, `claude_handoff`, `claude_handoff_fail`, `chatgpt_handoff`, `chatgpt_handoff_fail`.
+Useful events: `launch`, `permission_probe`, `start_control_state`, `menu_start` (the status-bar menu; the window logs `main_start` and ⌘N `command_start`), `capture_area_picker`, `start_*`, `recorder_sckit_*`, `mic_*`, `stop_requested`, `halt`, `terminate`, `claude_handoff`, `claude_handoff_fail`, `chatgpt_handoff`, `chatgpt_handoff_fail`. Main window: `main_open` (source and section only), `main_dock` (policy), `main_focus_return` (activated), and `main_*` actions that carry at most a session id or one small enum (`section`, `action`, `kind`).
 
 Cloud read:
 
@@ -171,7 +186,7 @@ C4 wire truth today: Google may upload a size-capped inline MP4. OpenAI-compatib
 
 ## Next work (priority)
 
-The user-approved 2026-09-12 speaker/Settings/menu work, saved product contexts with selection before recording, and usable session briefs with transcript recovery and multi-provider comparison are exceptions to the product-surface deferral. Keep other new surfaces deferred. Prefer work that can be verified in this environment.
+The user-approved 2026-09-12 speaker/Settings/menu work, the 2026-09-13 main window (Overview, Recordings, Contexts, Settings), saved product contexts with selection before recording, and usable session briefs with transcript recovery and multi-provider comparison are exceptions to the product-surface deferral. Keep other new surfaces deferred. Prefer work that can be verified in this environment.
 
 ### On a Mac (blocks “done”)
 
@@ -180,6 +195,7 @@ The user-approved 2026-09-12 speaker/Settings/menu work, saved product contexts 
 3. Gate 0: Keynote full-screen; Shot / Pin / Pause must not steal focus. Watch `ShotNoteWindow.canBecomeKey` — it is `true` today and can steal focus.
 4. Gate 1: ≥ 20 min, three pauses, token `ST-G1-PAUSE-TOKEN-9F3C`, passphrase `orchid lantern seven`. Fill [samples/GATE_LOG.md](samples/GATE_LOG.md).
 5. Only then treat Whisper / slicer / AI as gateable (Gates 3–6). Re-run `inspect_all_gates.py --strict` on that folder.
+6. Main window walkthrough (not a gate; never write it into `GATE_LOG.md`): §7 and *Manual checks still open* in §8 of [MAIN_WINDOW_PLAN.md](MAIN_WINDOW_PLAN.md). None has been run. The ones that matter most: the switch to a Dock app when the window opens and the focus hand-back when it closes, on macOS 14 and on macOS 26; Gate 0 in Keynote full screen with the window closed and with it open behind the presentation, Shot included; what the older `NSApp.activate` calls (meeting notice, Cannot start recording, update result, capture-area picker, recording-context window, upload consent, Recording did not start, first-run permissions window, transcription review window) do while the window is open, because each may bring the window forward with it; the real sidebar, toolbar and Settings tab strip, which the snapshot PNGs leave blank in places; and the cost of the visible window's refresh with hundreds of recordings.
 
 ### In Swift (Linux-testable; do not call them “gated”)
 
@@ -189,7 +205,9 @@ Product contexts are a saved library in General. Start/⌘N confirms one (or No 
 
 AI keys are a saved library of named services in Settings → AI. The active service controls editing/test; explicitly checked services supply provider, endpoint, model, and key for comparison. The previous single provider setting migrates once. Keys stay on the service id, not the endpoint host. Never log keys.
 
-Settings is a six-tab window (Speech, Capture, Logs, Permissions, AI, General). Start recording opens a macOS-style overlay (dashed rectangle, move/resize, Record / Entire Display / Cancel; Return confirms the key display) and does not request Screen Recording from that click. Capture can turn the pointer and microphone off for the next session.
+Settings is a six-tab section of the main window (Speech, Capture, Logs, Permissions, AI, General), not a window of its own; see the next paragraph. Start recording opens a macOS-style overlay (dashed rectangle, move/resize, Record / Entire Display / Cancel; Return confirms the key display) and does not request Screen Recording from that click. Capture can turn the pointer and microphone off for the next session.
+
+The main window is one retained window owned by `MainWindowPresenter` in `AppDelegate.swift`; Settings is its fourth section, so ⌘, and the menu's Settings items open that section. The app icon (`applicationShouldHandleReopen`) shows this window, never a Settings-only window. The main window activates ScrumTrace only in `MainWindowPresenter.show()`, after an explicit user action. This rule covers the main window's code only: onboarding, the capture-area picker, the recording-context window, the menu's alerts (meeting notice, readiness, updates) and the processing alerts (upload consent, a failed start) keep their own `NSApp.activate` calls. While the main window is open ScrumTrace is a regular app, so those calls may bring the window forward with their alert or panel; that is an open Mac check, not verified behaviour. Hotkeys, the HUD, recording start and stop, processing and timers never open or front the main window, and main-menu commands act only while ScrumTrace is already active. `SessionLibrary.swift` indexes manifest metadata only: no transcript text, Shot notes, task titles, window titles, URLs or provider responses in lists, search or AgentLog. Thumbnails come from `export/shots/` only, and `archive/` is revealed only after a warning. `scripts/test_contracts.py` pins these rules. `mac_agent_loop.sh` opens the app with `--args --background`, so the loop never shows the window. A Login Item launch stays in the menu bar too, and **Relaunch ScrumTrace** passes `--background` on unless the window is open, and always when this instance was started with it (`MainWindowLaunchPolicy`).
 
 ### Plan-deferred (leave alone)
 

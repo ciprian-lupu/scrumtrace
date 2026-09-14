@@ -7,6 +7,7 @@ The working spec is [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) (contracts 
 ## What exists in this tree
 
 - Native Swift menu-bar app (`com.str8minds.ScrumTrace`, sandbox off)
+- A ScrumTrace window with **Overview**, **Recordings**, **Contexts** and **Settings**, opened from the app icon or **Open ScrumTrace…** in the menu
 - Pause gate shared by screen, system audio, microphone, metadata, Shot, and Hold-to-Talk
 - WhisperKit transcribes the room-mic WAV **and** system audio in `archive/session.mp4`, then merges on `t_media`
 - Local speaker estimates for room and call audio, with session names, manual corrections and synchronized transcript/video review (macOS 15+)
@@ -47,7 +48,7 @@ Xcode resolves WhisperKit **0.11.0** from the committed `Package.resolved`. Firs
 
 Archive capture is **3840×2160 at 4 fps, 16 Mbps H.264 High** (keyframe every second). Export clips stay 720p / 1.2 Mbps.
 
-Menu → Settings (also ⌘,) has **Speech**, **Capture**, **Logs**, **Permissions**, **AI**, and **General**. Capture shows the shipped 3840×2160 / 4 fps / 16 Mbps (24 Mbps cap) budget, plus pointer and microphone toggles. Start recording opens a selection overlay like macOS screen recording (lasting box, move, resize, then Record or Return on that display). Logs can export a diagnostic bundle (no `archive/`).
+Settings (⌘, or menu → Settings → Settings Window…) is a section of the ScrumTrace window with **Speech**, **Capture**, **Logs**, **Permissions**, **AI**, and **General**. Capture shows the shipped 3840×2160 / 4 fps / 16 Mbps (24 Mbps cap) budget, plus pointer and microphone toggles. Start recording opens a selection overlay like macOS screen recording (lasting box, move, resize, then Record or Return on that display). Logs can export a diagnostic bundle (no `archive/`).
 
 Inspect every gate that has artifacts (Phase −1 mock, −0, 0, 1, Shot-pause log, 3–6). ASCII / JSON checks are required and still do not replace a Keynote focus check or a manual media scrub. The helpers never write `samples/GATE_LOG.md`:
 
@@ -71,9 +72,20 @@ python3 scripts/inspect_all_gates.py --session /path/to/session \
 Gate 0 only: `python3 scripts/inspect_gate0_log.py --log ~/Library/Logs/ScrumTrace/agent.jsonl`  
 Gate 1 only: `python3 scripts/inspect_gate1_session.py --session /path/to/session --token 'ST-G1-PAUSE-TOKEN-9F3C' --passphrase 'orchid lantern seven'`
 
+## Main window
+
+Opening ScrumTrace from Finder, Launchpad, Spotlight or the Dock shows the **ScrumTrace** window on Overview. Launched as a Login Item or by the Mac agent loop, ScrumTrace stays in the menu bar. **Relaunch ScrumTrace** brings the window back only if it was open, and never when ScrumTrace was started with `--background` (by the agent loop, or by an earlier relaunch with the window closed). Clicking the app icon again, or choosing **Open ScrumTrace…** in the menu-bar menu, brings the same window forward on the section you left. ⌘1 to ⌘4 switch sections and ⌘, opens Settings. Hotkeys, starting or stopping a recording, processing and timers never open the window or bring it forward on their own. An alert that needs an answer, such as upload consent during processing or a failed start, still activates ScrumTrace; while the window is open it may bring the window forward too (not yet checked on a Mac). While a recording runs, a banner with Pause and Stop sits above every section.
+
+- **Overview** — *Ready to record?* lists Screen Recording, Microphone, Accessibility, the speech model, the AI service and the meeting notice, each with the button that fixes it and a note when a relaunch is needed. **Start recording** uses the same flow as the menu. *Needs attention* lists unfinished recordings (with Retry analysis), unreadable manifests, the last error, the retention period and an update that a check already found; the window itself makes no network request. *Last recording* and *Storage* (Recordings folder, recording count, private archive size and retention) follow.
+- **Recordings** — every session, newest first, with date, context / product, recorded time, status, Shots, tasks and pack size. Search (⌘F) matches the session id, date, context and product names only, never transcripts, Shot notes or task titles; Escape clears it. Filter by status or context. The detail pane shows processing stages, upload consent, export files and Shot thumbnails from `export/shots/`. Actions: Reveal export/ (⌘R), Open in Claude, Open in ChatGPT, Open brief, Copy export path, Retry analysis, Review speakers…, Reveal archive… (after a warning) and Delete… (Delete key; asks first, removes `archive/` and `export/`). Session-changing actions wait while a recording or analysis runs. Drag a row to drop its `export/` folder into Cursor, Terminal or Finder; only `export/` is offered. A session whose manifest cannot be read is listed as **Unreadable manifest** with Reveal folder… and Delete… only.
+- **Contexts** — saved contexts with how many recordings used each one and when. New, Edit, Duplicate, Delete, Set as default and **Record with this context…**, which still asks you to confirm the context before the capture-area picker. Deleting a context never changes existing recordings.
+- **Settings** — the six tabs described above.
+
+While the window is open, ScrumTrace has a Dock icon and a ⌘-Tab entry. Turn this off in **Settings → General** (*Show ScrumTrace in the Dock while its window is open*). Closing the window returns ScrumTrace to the menu bar once no other ScrumTrace window, such as the first-run permissions window, is still open. Closing it is also meant to give focus back to the app you used before; that hand-back has not been checked on a Mac yet. The Mac agent loop opens the app with `--args --background`, so it never shows the window.
+
 ## Contexts, Settings and speaker review
 
-In **Settings → General → Product contexts**, create a saved context for each product or type of call. Contexts have a name plus optional product name, repository and tech stack. You can edit, duplicate or delete them. The old single product setting is imported once into this library.
+In **Settings → General → Product contexts** or the window's **Contexts** section, create a saved context for each product or type of call. Contexts have a name plus optional product name, repository and tech stack. You can edit, duplicate or delete them. The old single product setting is imported once into this library.
 
 **New Recording…** (⌘N) or **Start recording** first asks you to confirm the context, then opens the capture-area picker. The previous selection is offered again; you can switch from ScrumTrace to GIB or choose **No context**. You can also create or edit a context directly from this step. Cancelling either step starts no recording.
 
@@ -88,7 +100,7 @@ To compare an existing recording, check at least one profile and choose **Menu �
 
 Speaker identification is enabled by default on new installations and runs locally after transcription. It requires macOS 15+ and downloads the FluidAudio 0.15.7 speaker models on first use; **Preload speaker models** prepares them in advance. Room-microphone and call-audio speakers have separate anonymous IDs. Audio and voice embeddings are not uploaded for this analysis, and embeddings are not saved. This does not recognize people's names or link identities between meetings.
 
-Use **Review and name speakers…** to select a session and click a transcript passage to play its video with room and call audio. Enter names for that session, use **Correct** on a passage to change its speaker, then **Save names and corrections**. Saving refreshes the local transcript, brief and session pack without another AI-provider request. **Discard edits** restores the saved version. Older sessions can use **Analyze speakers locally…**; reanalysis replaces names and corrections for sources it successfully analyzes.
+Use **Review and name speakers…** (Settings → Speech, or **Review speakers…** on a recording in the window) to select a session and click a transcript passage to play its video with room and call audio. Enter names for that session, use **Correct** on a passage to change its speaker, then **Save names and corrections**. Saving refreshes the local transcript, brief and session pack without another AI-provider request. **Discard edits** restores the saved version. Older sessions can use **Analyze speakers locally…**; reanalysis replaces names and corrections for sources it successfully analyzes.
 
 The exported brief opens review items when there are no confirmed findings. Processing status distinguishes unavailable transcription, speaker estimates, and AI analysis skipped without upload consent. The overview groups confirmed findings into highlights, decisions, actions and explicitly unresolved questions, with evidence links; it does not invent conclusions, owners or deadlines. Export actions link only existing, included files. If full-transcript export is enabled, the brief also offers a readable full transcript; only selected clips have playable video.
 
@@ -110,7 +122,7 @@ In **AI**, save each provider as a named service (Hive, DeepSeek, OpenAI, and so
 
 Give the agent **`export/`** only. Never drop the session root or `archive/` (master `session.mp4`, `audio.wav`, full transcript, raw events). Paths inside the pack are relative to that folder (`shots/…`, `media/…`).
 
-**Open last session in Claude** and **Open last session in ChatGPT** (also under Recent) start an interactive local coding CLI in Terminal with the working directory bound to that session’s `export/`. Claude uses the `claude` command (Claude Max login). ChatGPT uses the `codex` command (ChatGPT login). Neither sends the archive, calls `claude -p` / `codex exec`, nor uses a ScrumTrace API key. Install the CLI and confirm it runs in Terminal first. If it is missing, the status line says so.
+**Open last session in Claude** and **Open last session in ChatGPT** in the menu (and **Open in Claude** / **Open in ChatGPT** for any recording in the window's Recordings section) start an interactive local coding CLI in Terminal with the working directory bound to that session’s `export/`. Claude uses the `claude` command (Claude Max login). ChatGPT uses the `codex` command (ChatGPT login). Neither sends the archive, calls `claude -p` / `codex exec`, nor uses a ScrumTrace API key. Install the CLI and confirm it runs in Terminal first. If it is missing, the status line says so.
 
 Phase -1 mock pack (open in a browser or drop into Cursor):
 

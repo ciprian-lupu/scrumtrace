@@ -39,6 +39,15 @@ final class SessionController: ObservableObject {
     private var terminateRequested = false
     private let transcriptionReviewPresenter = TranscriptionReviewPresenter()
     let captureFreeze: CaptureFreeze
+    #if os(macOS)
+    /// True while the main window is open, minimized included. The main window's presenter connects it, so
+    /// Relaunch ScrumTrace brings the window back only when it was open.
+    var isMainWindowOpen: @MainActor () -> Bool = { false }
+    /// Opens a new ScrumTrace with these arguments and quits this one. Tests replace it.
+    var relaunchApplication: @MainActor ([String]) -> Void = { CapturePermissions.relaunchRunningApp(arguments: $0) }
+    #endif
+    /// Tests only. Answers the upload consent question in place of the modal alert, which would block the test.
+    var uploadConsentPromptForTesting: (@MainActor () -> UploadConsent)?
 
     init(settings: AppSettings, vault: SessionVault = SessionVault()) {
         self.settings = settings
@@ -86,6 +95,35 @@ final class SessionController: ObservableObject {
 
     var canChangeCaptureSettings: Bool {
         !isRecording && !isBusy && !startInFlight
+    }
+
+    /// The session this controller holds in memory: the one being recorded or processed, and afterwards
+    /// the last one it recorded or processed (retries included), until another recording starts, another
+    /// session is retried, `forgetSession(id:)` drops it, or the app relaunches. Read-only. The main window
+    /// treats it as held only while recording or analysis runs; once both finish, it can be deleted.
+    var activeSessionId: String? {
+        manifest?.sessionId
+    }
+
+    /// The main window is deleting this session, or deleted it, so nothing may point at its folder any more. The
+    /// in-memory manifest and the capture folder are dropped when they name it (in any spelling), so a later Retry
+    /// Analysis cannot write the manifest back into a new folder. When the menu's last session names it, the menu moves
+    /// to `newestRemaining`, the newest recording the window still lists besides it, or to none when nil: the
+    /// last-session items stay usable while other recordings remain. Other sessions are left alone.
+    ///
+    /// While recording, analysis or a start runs it changes nothing and returns false: a Retry Analysis of the
+    /// same session may have started while the folder was being removed, and a run keeps its session until it
+    /// ends. The caller asks again once the controller is idle.
+    @discardableResult
+    func forgetSession(id: String, newestRemaining: String? = nil) -> Bool {
+        guard canChangeCaptureSettings else { return false }
+        func names(_ other: String?) -> Bool {
+            other.map { $0.caseInsensitiveCompare(id) == .orderedSame } ?? false
+        }
+        if names(manifest?.sessionId) { manifest = nil }
+        if names(sessionURL?.lastPathComponent) { sessionURL = nil }
+        if names(lastSessionId) { lastSessionId = names(newestRemaining) ? nil : newestRemaining }
+        return true
     }
 
     var hudShouldShow: Bool {
@@ -260,8 +298,14 @@ final class SessionController: ObservableObject {
         }
         isBusy = true
         AgentLog.event("retry_begin", ["session": sessionId])
+        let retry = RetryOrigin(lastSessionId: lastSessionId)
         lastSessionId = sessionId
-        Task { await runProcessor(sessionId: sessionId) }
+        Task { await runProcessor(sessionId: sessionId, retry: retry) }
+    }
+
+    /// A Retry Analysis run, with the last session the controller named before the retry started.
+    private struct RetryOrigin {
+        let lastSessionId: String?
     }
 
     /// This is intentionally separate from Retry Analysis: it runs only the
@@ -815,14 +859,34 @@ final class SessionController: ObservableObject {
         try outcome.get()
     }
 
-    private func runProcessor(sessionId: String) async {
+    /// True while anything sits at the session folder's path, a link included: `lstat`, never following it.
+    private static func sessionFolderExists(_ url: URL) -> Bool {
+        (try? FileManager.default.attributesOfItem(atPath: url.path)) != nil
+    }
+
+    private func runProcessor(sessionId: String, retry: RetryOrigin? = nil) async {
         isBusy = true
         defer {
             AgentLog.clearSessionContext(matching: sessionId)
         }
+        // The main window deleted this session while a Retry Analysis of it started, from a menu item built before the
+        // delete. Nothing is left to analyse, and writing the manifest held in memory would recreate the folder and list
+        // a recording with no archive or export. The retry is ignored: nothing is written, the controller goes back to
+        // idle without an offline-failed state, the menu's status line says why, and the menu names the session it named
+        // before. True when the retry was ignored.
+        func ignoreRetryOfMissingSession() -> Bool {
+            guard let retry, !Self.sessionFolderExists(vault.sessionURL(id: sessionId)) else { return false }
+            AgentLog.event("retry_ignored", ["reason": "session_missing", "session": sessionId])
+            statusLine = "Recording was deleted — nothing to retry"
+            if lastSessionId == sessionId { lastSessionId = retry.lastSessionId }
+            isBusy = false
+            return true
+        }
+        let diskManifest = try? vault.loadManifest(id: sessionId)
+        if diskManifest == nil, ignoreRetryOfMissingSession() { return }
         AgentLog.event("processor_begin", ["session": sessionId])
         do {
-            var local = try? vault.loadManifest(id: sessionId)
+            var local = diskManifest
             if let memory = manifest, memory.sessionId == sessionId {
                 if let disk = local {
                     local = Self.mergeLiveCatalog(disk: disk, memory: memory)
@@ -845,7 +909,7 @@ final class SessionController: ObservableObject {
                 } else if !local.uploadConsent.approved || local.uploadConsent.needsReprompt(destinations: destinations) {
                     let previous = local.uploadConsent
                     let askedBefore = !previous.destinations.isEmpty || !previous.provider.isEmpty
-                    local.uploadConsent = requestUploadConsent(destinations: destinations)
+                    local.uploadConsent = uploadConsentPromptForTesting?() ?? requestUploadConsent(destinations: destinations)
                     if local.uploadConsent.approved && askedBefore && (previous.needsReprompt(destinations: destinations)
                         || previous.includesClipVideo != local.uploadConsent.includesClipVideo) {
                         local.completedStages.removeAll {
@@ -859,6 +923,9 @@ final class SessionController: ObservableObject {
                         }
                     }
                 }
+                // The upload consent alert above can stay open while the window's delete removes the folder, and writing
+                // the manifest would create the folder again, so a retry looks for it once more right before the write.
+                if ignoreRetryOfMissingSession() { return }
                 try vault.write(manifest: &local)
                 manifest = local
             }
@@ -1355,12 +1422,17 @@ final class SessionController: ObservableObject {
         SystemPrivacySettings.openMicrophone()
     }
 
+    /// The new instance returns to the menu bar unless the main window is open now, so Relaunch from the menu
+    /// with the window closed, or from the agent loop's `--background` instance, shows no window.
     func relaunchForPermissions() {
         guard canChangeCaptureSettings else {
             AgentLog.event("relaunch_ignored", ["reason": "session_active"])
             return
         }
-        CapturePermissions.relaunchRunningApp()
+        relaunchApplication(MainWindowLaunchPolicy.relaunchArguments(
+            currentArguments: ProcessInfo.processInfo.arguments,
+            windowOpen: isMainWindowOpen()
+        ))
     }
     #endif
 
@@ -1521,4 +1593,21 @@ enum ScreenSnap {
 /// Carries `stop()` failure off `Task.detached` onto MainActor halt (C2).
 private final class HaltStopBox: @unchecked Sendable {
     var message: String?
+}
+
+extension SessionController {
+    /// Tests only. `startRecording` sets `startInFlight` after Screen Recording passes and then starts a
+    /// real capture, so tests of views that follow the flag set it here.
+    func setStartInFlightForTesting(_ value: Bool) {
+        startInFlight = value
+    }
+
+    /// Tests only. Leaves the controller as `runProcessor` leaves it when a recording or a retry finishes:
+    /// the processed manifest stays in memory and names the last session. Running the real processor would
+    /// transcribe the fixture.
+    func holdProcessedSessionForTesting(_ processed: SessionManifest) {
+        manifest = processed
+        lastSessionId = processed.sessionId
+        phase = processed.pipelineStatus
+    }
 }

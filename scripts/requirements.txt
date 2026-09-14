@@ -1,0 +1,3 @@
+# Third-party packages for scripts/. CI installs these before run_linux_tests.sh.
+# Pillow: generate_mock_session.py (loaded by test_contracts.py).
+pillow==12.3.0

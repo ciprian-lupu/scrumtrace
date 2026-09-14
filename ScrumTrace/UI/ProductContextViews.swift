@@ -1,7 +1,8 @@
 import AppKit
 import SwiftUI
 
-private struct ContextEditRequest: Identifiable {
+/// Opens `ProductContextEditor` for a new, duplicated or existing context.
+struct ContextEditRequest: Identifiable {
     var profile: SavedProductContext
     var isNew: Bool
     var id: String { profile.id }
@@ -21,7 +22,7 @@ struct ProductContextsSettingsView: View {
 
     var body: some View {
         Section("Product contexts") {
-            Text("Save a context for each product or type of call. You will confirm one before every recording; changes here apply to future sessions.")
+            Text("Save a context for each product or type of call. You will confirm one before every recording; changes here apply to future recordings.")
                 .font(.caption).foregroundStyle(.secondary)
             if let issue = settings.contextLibraryIssue {
                 Text(issue).foregroundStyle(.red)
@@ -78,17 +79,30 @@ struct ProductContextsSettingsView: View {
     }
 
     private func duplicate() {
-        guard var copy = selected else { return }
+        guard let selected else { return }
+        let copy = ProductContextNaming.duplicate(of: selected, existing: settings.contextLibrary.profiles)
+        editor = ContextEditRequest(profile: copy, isNew: true)
+    }
+}
+
+/// Names a copy of a saved context for Settings → General and the Contexts section of the main window.
+enum ProductContextNaming {
+    /// `profile`'s details under a new id and the first free name of "<name> copy", "<name> copy 2",
+    /// "<name> copy 3"… Names compare as `AppSettings.saveProductContext` compares them, ignoring case and
+    /// diacritics, so Save accepts the suggested name. The base keeps 65 characters, leaving room for the
+    /// suffix within the 80-character limit.
+    static func duplicate(of profile: SavedProductContext, existing: [SavedProductContext]) -> SavedProductContext {
+        var copy = profile
         copy.id = UUID().uuidString
         let base = String(copy.name.prefix(65))
         var number = 1
         var name = "\(base) copy"
-        while settings.contextLibrary.profiles.contains(where: { $0.name.localizedCaseInsensitiveCompare(name) == .orderedSame }) {
+        while existing.contains(where: { $0.name.compare(name, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame }) {
             number += 1
             name = "\(base) copy \(number)"
         }
         copy.name = name
-        editor = ContextEditRequest(profile: copy, isNew: true)
+        return copy
     }
 }
 
@@ -106,12 +120,20 @@ struct ProductContextSummary: View {
     }
 }
 
-private struct ProductContextEditor: View {
+/// The sheet that creates or edits a saved context. `onSave` throws to keep the sheet open with its message.
+struct ProductContextEditor: View {
     @Environment(\.dismiss) private var dismiss
     @State var profile: SavedProductContext
     let isNew: Bool
     let onSave: (SavedProductContext) throws -> Void
     @State private var message = ""
+
+    /// The memberwise initializer is file-private because of the private state, so other files use this one.
+    init(profile: SavedProductContext, isNew: Bool, onSave: @escaping (SavedProductContext) throws -> Void) {
+        _profile = State(initialValue: profile)
+        self.isNew = isNew
+        self.onSave = onSave
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {

@@ -17,6 +17,9 @@ struct SettingsView: View {
     @State private var removingKey = false
     @State private var showAdvancedSpeech = false
     @State private var showSpeakerReview = false
+    /// True once a manifest in the vault decodes, so the speaker review has a session to list. The answer is kept on
+    /// `navigation`, which outlives this view, so it stays while the next check runs and a test can wait for it.
+    private var hasReviewableSession: Bool { navigation.hasReviewableSession == true }
     @State private var preloadingSpeakers = false
     @State private var speakerModelLine = ""
 
@@ -41,6 +44,14 @@ struct SettingsView: View {
         }
         .frame(minWidth: 620, minHeight: 560)
         .padding()
+        // Whether Review and name speakers… has a session to list. The vault is read off the main actor when Settings
+        // appears and when recording or analysis starts or ends, never in the Speech tab, which is redrawn every second.
+        .task(id: controller.canChangeCaptureSettings ? (controller.lastSessionId ?? "") : nil) {
+            let vault = controller.vault
+            let reviewable = await Task.detached(priority: .userInitiated) { SpeakerReviewLoader.hasReviewableSession(in: vault) }.value
+            guard !Task.isCancelled else { return }
+            navigation.hasReviewableSession = reviewable
+        }
         .sheet(isPresented: $showSpeakerReview) {
             SpeakerReviewView(controller: controller)
         }
@@ -139,7 +150,8 @@ struct SettingsView: View {
                     }
                     .disabled(preloadingSpeakers || !controller.canChangeCaptureSettings)
                     Button("Review and name speakers…") { showSpeakerReview = true }
-                        .disabled(!controller.canChangeCaptureSettings || controller.vault.recentSessions(limit: 1).isEmpty)
+                        .disabled(!controller.canChangeCaptureSettings || !hasReviewableSession)
+                        .help(reviewSpeakersHelp)
                 }
                 if !speakerModelLine.isEmpty { Text(speakerModelLine).font(.caption).textSelection(.enabled) }
                 Text("Requires macOS 15+. First use downloads FluidAudio's public models. Meeting audio stays on this Mac; no voice profile is saved for future meetings.")
@@ -163,6 +175,12 @@ struct SettingsView: View {
 
     private var speechControlsDisabled: Bool {
         preloadingWhisper || controller.transcriber.isPreparing || !controller.canChangeCaptureSettings
+    }
+
+    private var reviewSpeakersHelp: String {
+        if !controller.canChangeCaptureSettings { return RecordingsModel.busyReason }
+        if !hasReviewableSession { return "No saved recording to review yet." }
+        return "Name the speakers of a saved recording and correct passages."
     }
 
     private var captureTab: some View {
@@ -215,9 +233,9 @@ struct SettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            Section("Sessions") {
+            Section("Recordings") {
                 LabeledContent("Folder", value: CapturePermissions.scrubHome(controller.vault.rootURL.path))
-                Button("Reveal sessions folder") {
+                Button("Reveal recordings folder") {
                     AgentLog.event("settings_action", ["action": "reveal_sessions"])
                     controller.vault.revealRootInFinder()
                 }
@@ -234,7 +252,8 @@ struct SettingsView: View {
         Form {
             Section("This process") {
                 LabeledContent("Screen Recording", value: screenRecordingLabel)
-                LabeledContent("Microphone", value: CapturePermissions.microphoneStatus())
+                // The words Overview's readiness card uses, lower case like the Screen Recording value above.
+                LabeledContent("Microphone", value: OverviewReadiness.microphoneStatus(CapturePermissions.microphoneStatus()).lowercased())
                 LabeledContent("App path", value: CapturePermissions.runningAppPath())
                 Text(CapturePermissions.readiness(requireMicrophone: settings.includeMicrophone).userMessage)
                     .font(.caption)
@@ -275,7 +294,7 @@ struct SettingsView: View {
             Section("Accessibility") {
                 LabeledContent(
                     "Window titles / URLs",
-                    value: MetadataSampler.requestTrust(prompt: false) ? "trusted" : "not trusted"
+                    value: OverviewReadiness.accessibilityStatus(trusted: MetadataSampler.requestTrust(prompt: false)).lowercased()
                 )
                 Button("Enable browser URL metadata (Accessibility)") {
                     AgentLog.event("settings_action", ["action": "ax_prompt"])
@@ -409,13 +428,13 @@ struct SettingsView: View {
         Form {
             ProductContextsSettingsView(settings: settings, controller: controller)
             Section("Retention") {
-                Picker("Keep sessions", selection: $settings.retentionDays) {
+                Picker("Keep recordings", selection: $settings.retentionDays) {
                     Text("Forever").tag(0)
                     Text("7 days").tag(7)
                     Text("30 days").tag(30)
                     Text("90 days").tag(90)
                 }
-                Text("On the next app launch, completed sessions older than this limit are permanently removed, including their archive and export. Unfinished sessions are kept. Choose Forever to manage deletion yourself.")
+                Text("On the next app launch, completed recordings older than this limit are permanently removed, including their archive and export. Unfinished recordings are kept. Choose Forever to manage deletion yourself.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -468,6 +487,11 @@ struct SettingsView: View {
                     value: Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "—"
                 )
                 LabeledContent("Bundle", value: Bundle.main.bundleIdentifier ?? "com.str8minds.ScrumTrace")
+                Toggle("Show ScrumTrace in the Dock while its window is open", isOn: $settings.showInDockWhileWindowOpen)
+                    .accessibilityIdentifier("main.settings.showInDock")
+                Text("Adds a Dock icon and a Command-Tab entry while the ScrumTrace window is open. Closing the window returns ScrumTrace to the menu bar.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 Button("Show first-run permissions") {
                     AgentLog.event("settings_action", ["action": "onboarding"])
                     OnboardingWindow.present()
@@ -556,6 +580,10 @@ struct SettingsView: View {
 @MainActor
 final class SettingsNavigation: ObservableObject {
     @Published var selectedTab = SettingsTab.speech
+    /// Whether Settings found a saved recording that Review and name speakers… can list, or nil until its first check
+    /// landed. Settings reads the vault off the main actor when it appears and when recording or analysis starts or
+    /// ends; the presenter keeps this object, so the last answer survives Settings being rebuilt.
+    @Published var hasReviewableSession: Bool?
 }
 
 enum SettingsTab: Hashable, CaseIterable {
@@ -656,7 +684,7 @@ struct AgentLogPane: View {
                     CapturePermissions.probeAndLog()
                     reload()
                 }
-                Button("Reveal sessions folder") {
+                Button("Reveal recordings folder") {
                     AgentLog.event("settings_action", ["action": "reveal_sessions"])
                     controller.vault.revealRootInFinder()
                 }
