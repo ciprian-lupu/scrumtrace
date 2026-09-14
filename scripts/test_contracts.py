@@ -3402,6 +3402,40 @@ def test_main_window_routing_and_private_index() -> None:
     assert "brings the window back only if it was open, and never when ScrumTrace was started with `--background`" in readme
 
 
+def test_session_detail_facts_keep_only_upload_consent() -> None:
+    # C2: the Recordings detail pane decodes the selected manifest a second time. SessionDetailFacts keeps only
+    # upload consent from it: never task titles, Shot notes, window titles, URLs or transcript text.
+    recordings_view = (ROOT / "ScrumTrace" / "UI" / "RecordingsView.swift").read_text()
+    assert recordings_view.count("struct SessionDetailFacts:") == 1
+    facts = recordings_view.split("struct SessionDetailFacts:")[1].split("\nstruct SessionStageStep")[0]
+    assert "static func load(vault: SessionVault, id: String) -> SessionDetailFacts" in facts
+    assert "extension SessionDetailFacts.Consent" in facts
+    assert "init(_ consent: UploadConsent)" in facts
+    code = "\n".join(line for line in facts.splitlines() if not line.lstrip().startswith("//"))
+    # The only manifest decode in RecordingsView.swift, and the only manifest field read from it.
+    assert recordings_view.count("loadManifest(") == 1, "RecordingsView.swift decodes a manifest outside SessionDetailFacts"
+    assert "(try? vault.loadManifest(id: id)).map { Consent($0.uploadConsent) }" in code
+    closure_reads = set(re.findall(r"\$0\s*\.\s*(\w+)", code))
+    assert closure_reads == {"uploadConsent"}, closure_reads
+    assert not re.search(r"\bmanifest\s*\.\s*\w+", code), "SessionDetailFacts reads a manifest field"
+    consent_reads = set(re.findall(r"\bconsent\s*\.\s*(\w+)", code))
+    assert consent_reads <= {"approved", "provider", "model", "includesClipAudio", "includesClipVideo"}, consent_reads
+    folded = code.lower()
+    for word in (
+        "transcript", "note", "title", "observed", "stated", "inferred", "quote", "agentinstructions",
+        "evidence", "speaker", "segment", "candidate", "payload", "task", "window",
+    ):
+        assert word not in folded, ("SessionDetailFacts", word)
+    captured_member = re.search(r"\.\s*(?:url|urls|windowTitle|text|segments|words|endpoint)\b", code)
+    assert not captured_member, ("SessionDetailFacts", captured_member and captured_member.group(0))
+    # The other window views decode no manifest.
+    for name in ("MainWindow.swift", "OverviewView.swift", "ContextsView.swift"):
+        assert "loadManifest(" not in (ROOT / "ScrumTrace" / "UI" / name).read_text(), name
+    # An XCTest pins the stored fields by Mirror.
+    tests = (ROOT / "ScrumTraceTests" / "MainWindowTests.swift").read_text()
+    assert "func testDetailFactsStoreOnlyAllowListedFields()" in tests
+
+
 def main() -> None:
     test_export_has_no_archive_and_no_tokens()
     test_agent_context_uses_export_relative_paths()
@@ -3425,6 +3459,7 @@ def main() -> None:
     test_ai_connection_library()
     test_sanitize_untrusted_strips_whitespace_breakout()
     test_main_window_routing_and_private_index()
+    test_session_detail_facts_keep_only_upload_consent()
     print("contract tests ok")
 
 

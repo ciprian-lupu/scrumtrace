@@ -307,7 +307,9 @@ no existing menu, hotkey or HUD behaviour changed.
      `SessionVaultError.writeFailed("session is live")` when `recording.lock` names a live pid
      for that id. `AgentLog` only writes the lock today (`setRecording`); add a small reader next
      to it that parses session id + pid and treats a dead pid as stale, the way
-     `mac_agent_loop.sh` does. The caller also refuses the controller’s active session id.
+     `mac_agent_loop.sh` does. The caller holds the controller’s active session only while
+     recording or analysis runs, and afterwards has the controller forget a session it deleted
+     (see the H03 implementation notes).
 4. `SessionLibrary: ObservableObject` (`@MainActor`): `@Published entries`, `@Published isLoading`,
    `refresh()` with the stat-cache described in §3, `filtered(search:status:contextID:)` as a
    pure function on `[SessionEntry]`, `totalArchiveBytes` computed lazily.
@@ -370,8 +372,9 @@ text, and a corrupt manifest is a row, not a crash or a silent omission.
    `export/` exists and passes `ExportRel.unfollowedDirectoryURL`.
 5. Unreadable rows render with Reveal folder and Delete… only.
 6. Every action logs a `main_*` event with `["session": id]` and nothing else.
-7. Disabled state: all mutating actions and Delete follow `controller.canChangeCaptureSettings`;
-   Delete also refuses the active session id.
+7. Disabled state: all mutating actions and Delete follow `controller.canChangeCaptureSettings`, so
+   the active session is held only while recording or analysis runs. After a delete,
+   `controller.forgetSession(id:)` drops the controller’s references to that session.
 
 **Tests**
 
@@ -712,7 +715,17 @@ task kept the contract pins in §1.5 and passed `scripts/test_contracts.py`.
   there. Filters may overlap.
 - The `recording.lock` reader sits in `AgentLog.swift` right after `setRecording`; it refuses
   symlinked locks and never deletes the lock. `SessionVault.swift` changed only
-  `private func listedSessionIds` to internal.
+  `private func listedSessionIds` to internal. A lock counts as live only while its pid runs an
+  executable named ScrumTrace (`proc_pidpath`), so a pid the system reused after a crash mid-recording
+  never blocks Delete….
+- A scan leaves out a folder removed between listing and reading, and a new folder that has no
+  `session.manifest.json` yet (a recording `createSession` is still writing). The library's first scan
+  counts as following a scan that listed nothing, so this also holds when the window first opens. If the
+  manifest is still missing on the next scan, the folder is listed as `not readable`, so one that never
+  gets a manifest can still be revealed and deleted (launch already prunes abandoned starts, so such a
+  folder is rare). A manifest that exists but cannot be read or decoded and a folder an earlier scan
+  already listed (such as what a failed delete puts back) are listed at once, and so is every folder in
+  `sessionEntries()`, a one-off listing with no next scan.
 - `deleteSession(id:recordingLockURL:)` also throws for a folder that does not exist and confirms
   the folder is gone afterwards.
 - Archive totals are cached per session stamp (manifest plus `archive/` lstat); only changed
@@ -735,10 +748,21 @@ task kept the contract pins in §1.5 and passed `scripts/test_contracts.py`.
   disabled while recording or processing, because the folder contains `archive/`.
 - The consent line's provider, model and clip audio/video flags are not in `SessionSummary`. The
   detail pane decodes the selected manifest off the main actor and keeps only `UploadConsent`
-  fields (provider and model only when approved).
+  fields (provider and model only when approved). `scripts/test_contracts.py` pins that
+  `SessionDetailFacts` reads only `uploadConsent`, and a `Mirror` allow-list test pins its fields.
 - The row drag checks `export/` at drag time on the main actor (a lazy provider would advertise a
   file URL before the check). `SpeakerReviewView` still decodes up to 100 recent manifests on the
   main actor, as it did before.
+- Delete… waits only while recording or analysis runs, like the other session-changing actions.
+  The session the controller last recorded or retried can be deleted once both finish. After the
+  delete, `SessionController.forgetSession(id:)` drops the in-memory manifest and `lastSessionId`
+  when they name that session, so the menu's last-session items and Retry Analysis stop pointing
+  at the removed folder. If recording, analysis or a start runs when the delete finishes (a Retry
+  Analysis of that session from the menu, say), `forgetSession(id:)` changes nothing and returns false,
+  and the window asks again once the controller is idle, so a run never loses its session part way.
+- Detail facts load only for the selected row. Selecting another row cancels every other row's
+  load (the thumbnail loop stops before its next still) and drops its result, and the eight-entry
+  detail cache never evicts the selected row's facts.
 
 ### H04 — Overview
 

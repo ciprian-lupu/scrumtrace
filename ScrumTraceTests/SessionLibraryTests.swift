@@ -531,6 +531,207 @@ final class SessionLibraryTests: XCTestCase {
         XCTAssertNil(AgentLog.liveRecordingLock(at: linked), "A symlinked lock is not followed")
     }
 
+    @MainActor
+    func testARecordingLockWhosePidRunsAnotherProgramIsStaleAndNeverBlocksDelete() async throws {
+        try await withFixture { f in
+            // ScrumTrace crashed while recording and the system gave its pid to another program.
+            let other = Process()
+            other.executableURL = URL(fileURLWithPath: "/bin/sleep")
+            other.arguments = ["30"]
+            try other.run()
+            defer {
+                other.terminate()
+                other.waitUntilExit()
+            }
+            let pid = other.processIdentifier
+            XCTAssertTrue(AgentLog.isProcessAlive(pid))
+            XCTAssertFalse(AgentLog.isScrumTraceProcess(pid))
+            XCTAssertFalse(AgentLog.isRecordingProcess(pid))
+            XCTAssertTrue(AgentLog.isRecordingProcess(ProcessInfo.processInfo.processIdentifier), "The test host runs ScrumTrace")
+            XCTAssertFalse(AgentLog.isRecordingProcess(1), "launchd is alive but is not ScrumTrace")
+            XCTAssertFalse(AgentLog.isScrumTraceProcess(2_000_000_000))
+
+            try "\(f.offline)\n\(pid)\n".write(to: f.lockURL, atomically: true, encoding: .utf8)
+            XCTAssertNil(AgentLog.liveRecordingLock(at: f.lockURL), "A live pid that is not ScrumTrace leaves a stale lock")
+            try "\(f.offline)\n1\n".write(to: f.lockURL, atomically: true, encoding: .utf8)
+            XCTAssertNil(AgentLog.liveRecordingLock(at: f.lockURL))
+
+            try "\(f.offline)\n\(pid)\n".write(to: f.lockURL, atomically: true, encoding: .utf8)
+            try f.vault.deleteSession(id: f.offline, recordingLockURL: f.lockURL)
+            XCTAssertFalse(FileManager.default.fileExists(atPath: f.vault.sessionURL(id: f.offline).path))
+            XCTAssertTrue(FileManager.default.fileExists(atPath: f.lockURL.path), "The reader never deletes the lock")
+        }
+    }
+
+    // MARK: Search cost
+
+    @MainActor
+    func testAnEmptySearchBuildsNoSearchFieldsAndASearchBuildsThemOncePerRow() async throws {
+        try await withFixture { f in
+            let entries = f.vault.sessionEntries()
+            let builds = LoadCounter()
+            let fields: (SessionSummary) -> [String] = { summary in
+                builds.increment()
+                return summary.searchableFields
+            }
+            XCTAssertEqual(entries.filtered(search: "", status: nil, contextID: nil, searchableFields: fields).count, 4)
+            XCTAssertEqual(entries.filtered(search: " \n ", status: nil, contextID: nil, searchableFields: fields).count, 4)
+            XCTAssertEqual(
+                entries.filtered(search: "", status: .unfinished, contextID: nil, searchableFields: fields).map(\.id),
+                [f.unfinished, f.offline]
+            )
+            XCTAssertEqual(builds.value, 0, "An empty search formats no date")
+
+            XCTAssertEqual(
+                entries.filtered(search: "orbit web", status: nil, contextID: nil, searchableFields: fields).map(\.id),
+                [f.unfinished, f.completed]
+            )
+            XCTAssertEqual(builds.value, 3, "Two words over three readable rows build each row's fields once")
+            XCTAssertEqual(
+                entries.filtered(search: "orbit", status: .completed, contextID: nil, searchableFields: fields).map(\.id),
+                [f.completed]
+            )
+            XCTAssertEqual(builds.value, 4, "A row the status filter hides builds nothing")
+        }
+    }
+
+    // MARK: Missing manifests
+
+    @MainActor
+    func testANewFolderWithoutAManifestWaitsOnePassButAnUnusableManifestIsListedAtOnce() async throws {
+        try await withFixture { f in
+            final class Removal: @unchecked Sendable {
+                private let lock = NSLock()
+                private var armed = false
+                var isArmed: Bool {
+                    lock.lock()
+                    defer { lock.unlock() }
+                    return armed
+                }
+                func arm() {
+                    lock.lock()
+                    armed = true
+                    lock.unlock()
+                }
+            }
+            let removal = Removal()
+            let removed = f.completed
+            let library = SessionLibrary(vault: f.vault, loadManifest: { vault, id in
+                // Finder removes this folder after the scan listed it and before its manifest is read.
+                if id == removed, removal.isArmed { try? FileManager.default.removeItem(at: vault.sessionURL(id: id)) }
+                return try vault.loadManifest(id: id)
+            })
+            await library.refresh().value
+            XCTAssertEqual(library.entries.map(\.id), [f.unfinished, f.completed, f.offline, f.corrupt])
+
+            // The removed folder's manifest changes, so the next pass reads it again.
+            var rewritten = try f.vault.loadManifest(id: removed)
+            rewritten.pauses.append(PauseInterval(pauseWall: 50, resumeWall: 60))
+            try f.vault.write(manifest: &rewritten)
+            removal.arm()
+            // A folder the last pass listed loses its manifest, as a delete that could not remove every file leaves it.
+            try FileManager.default.removeItem(
+                at: f.vault.sessionURL(id: f.offline).appendingPathComponent(ScrumTracePath.manifest)
+            )
+            // A recording whose folders exist but whose manifest createSession has not written yet.
+            let creating = "\(folderStamp(Date()))-new001"
+            try FileManager.default.createDirectory(
+                at: f.vault.sessionURL(id: creating).appendingPathComponent(ScrumTracePath.archive, isDirectory: true),
+                withIntermediateDirectories: true
+            )
+            // A folder that never gets a manifest, and one with a link in the manifest's place.
+            let empty = "2020-02-02-0000-empty1"
+            try FileManager.default.createDirectory(at: f.vault.sessionURL(id: empty), withIntermediateDirectories: false)
+            let linked = "2020-02-03-0000-link01"
+            try FileManager.default.createDirectory(at: f.vault.sessionURL(id: linked), withIntermediateDirectories: false)
+            try FileManager.default.createSymbolicLink(
+                at: f.vault.sessionURL(id: linked).appendingPathComponent(ScrumTracePath.manifest),
+                withDestinationURL: f.vault.sessionURL(id: f.unfinished).appendingPathComponent(ScrumTracePath.manifest)
+            )
+
+            await library.refresh().value
+            let listed = library.entries.map(\.id)
+            XCTAssertFalse(listed.contains(creating), "A recording being created is not an unreadable manifest")
+            XCTAssertFalse(listed.contains(removed), "A folder removed between listing and reading is not listed")
+            XCTAssertFalse(listed.contains(empty), "A new folder without a manifest waits one pass")
+            XCTAssertEqual(
+                library.entries.first { $0.id == f.corrupt },
+                .unreadable(id: f.corrupt, reason: SessionEntry.decodingFailed),
+                "A manifest that does not decode is listed at once"
+            )
+            XCTAssertEqual(
+                library.entries.first { $0.id == linked },
+                .unreadable(id: linked, reason: SessionEntry.notReadable),
+                "A link in the manifest's place is listed at once"
+            )
+            XCTAssertEqual(
+                library.entries.first { $0.id == f.offline },
+                .unreadable(id: f.offline, reason: SessionEntry.notReadable),
+                "A folder the last pass listed stays listed when its manifest goes missing"
+            )
+            XCTAssertEqual(
+                f.vault.sessionEntries().first { $0.id == empty },
+                .unreadable(id: empty, reason: SessionEntry.notReadable),
+                "With no earlier pass to compare, a folder without a manifest is listed at once"
+            )
+
+            // createSession writes the manifest before the next pass.
+            var manifest = SessionManifest.makeNew(sessionId: creating, product: .empty)
+            try f.vault.write(manifest: &manifest)
+            await library.refresh().value
+            XCTAssertEqual(library.entries.first { $0.id == creating }?.summary?.sessionId, creating)
+            XCTAssertFalse(library.entries.contains { $0.id == removed })
+            XCTAssertEqual(
+                library.entries.first { $0.id == empty },
+                .unreadable(id: empty, reason: SessionEntry.notReadable),
+                "Still missing on the next pass: listed, so it can be revealed or deleted"
+            )
+            await library.refresh().value
+            XCTAssertEqual(library.entries.first { $0.id == empty }, .unreadable(id: empty, reason: SessionEntry.notReadable))
+        }
+    }
+
+    @MainActor
+    func testALibrarysFirstScanAlsoWaitsOnePassForAFolderWithoutAManifest() async throws {
+        try await withFixture { f in
+            // The window opens while createSession has made a recording's folders but not written its manifest yet.
+            let creating = "\(folderStamp(Date()))-new002"
+            try FileManager.default.createDirectory(
+                at: f.vault.sessionURL(id: creating).appendingPathComponent(ScrumTracePath.archive, isDirectory: true),
+                withIntermediateDirectories: true
+            )
+            let empty = "2020-02-02-0000-empty2"
+            try FileManager.default.createDirectory(at: f.vault.sessionURL(id: empty), withIntermediateDirectories: false)
+
+            let library = SessionLibrary(vault: f.vault)
+            await library.refresh().value
+            XCTAssertEqual(
+                library.entries.map(\.id), [f.unfinished, f.completed, f.offline, f.corrupt],
+                "The first scan lists neither folder without a manifest"
+            )
+            XCTAssertEqual(
+                library.entries.last, .unreadable(id: f.corrupt, reason: SessionEntry.decodingFailed),
+                "A manifest that does not decode is listed on the first scan"
+            )
+            XCTAssertEqual(
+                f.vault.sessionEntries().first { $0.id == empty },
+                .unreadable(id: empty, reason: SessionEntry.notReadable),
+                "A one-off listing has no next pass, so it lists the folder at once"
+            )
+
+            // createSession writes the manifest before the next scan; the other folder never gets one.
+            var manifest = SessionManifest.makeNew(sessionId: creating, product: .empty)
+            try f.vault.write(manifest: &manifest)
+            await library.refresh().value
+            XCTAssertEqual(library.entries.first?.summary?.sessionId, creating)
+            XCTAssertEqual(
+                library.entries.first { $0.id == empty },
+                .unreadable(id: empty, reason: SessionEntry.notReadable),
+                "Still missing on the second scan: listed, so it can be revealed or deleted"
+            )
+        }
+    }
+
     // MARK: Sizes
 
     @MainActor

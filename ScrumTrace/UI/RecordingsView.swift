@@ -254,6 +254,7 @@ enum SessionThumbnailLoader {
 
     /// Up to `limit` thumbnails, one per Shot. A still that is empty, too large or not an image falls
     /// back to the Shot's next candidate, and a Shot with none usable leaves room for a later Shot.
+    /// A cancelled task stops before the next still, because each still is decoded at full size.
     static func thumbnails(
         sessionURL: URL,
         limit: Int = SessionThumbnailLoader.limit,
@@ -263,7 +264,7 @@ enum SessionThumbnailLoader {
         var attempts = 0
         for candidates in shotCandidates(sessionURL: sessionURL) where loaded.count < limit {
             for relative in candidates {
-                guard attempts < maxAttempts else { return loaded }
+                guard !Task.isCancelled, attempts < maxAttempts else { return loaded }
                 attempts += 1
                 if let thumbnail = loadThumbnail(relative: relative, sessionURL: sessionURL, read: read) {
                     loaded.append(thumbnail)
@@ -406,6 +407,10 @@ struct RecordingsDependencies {
     var revealFolder: @MainActor (String) -> Bool
     /// Runs off the main actor.
     var deleteSession: @Sendable (String) throws -> Void
+    /// After a delete removed the folder: the controller stops naming the session, so the menu's last-session
+    /// items and Retry Analysis no longer point at it. False while the controller is busy; the model asks again
+    /// once it is idle.
+    var forgetSession: @MainActor (String) -> Bool
     /// Runs off the main actor.
     var loadDetail: @Sendable (String) -> SessionDetailFacts
     var startRecording: @MainActor () -> Void
@@ -451,6 +456,7 @@ struct RecordingsDependencies {
                 return true
             },
             deleteSession: { try vault.deleteSession(id: $0) },
+            forgetSession: { controller.forgetSession(id: $0) },
             loadDetail: { SessionDetailFacts.load(vault: vault, id: $0) },
             startRecording: startRecording,
             isPreparingRecording: isPreparingRecording
@@ -484,12 +490,9 @@ final class RecordingsModel: ObservableObject {
     nonisolated static let refreshInterval: Duration = .seconds(5)
     nonisolated static let detailCacheLimit = 8
 
-    /// Shown while recording or analysis runs, for every action that waits for them.
+    /// Shown while recording or analysis runs, for every action that waits for them. The session being
+    /// recorded or analysed is held only that long: once both finish it can be deleted like any other.
     nonisolated static let busyReason = "Wait until recording and analysis finish."
-    /// Shown for Delete on the session the controller still holds.
-    /// Starting a recording moves the hold to the new session, but Delete waits for that recording and its
-    /// analysis. A retry of another recording moves the hold too; relaunching clears it.
-    nonisolated static let heldSessionReason = "ScrumTrace still holds this recording from its last recording or analysis. You can delete it after another recording, or a retry of another recording, has finished, or after you quit and reopen ScrumTrace."
     nonisolated static let unlistedReason = "This recording is no longer listed."
 
     /// One load of a session's detail facts: the index row it was loaded for, and how many times an action
@@ -504,9 +507,13 @@ final class RecordingsModel: ObservableObject {
         let facts: SessionDetailFacts
     }
 
+    /// A running load. `token` tells it apart from a later load of the same row and key. `work` is the detached
+    /// load itself, cancelled directly, because a detached task does not inherit its caller's cancellation.
     private struct DetailRequest {
         let key: DetailKey
+        let token: Int
         let task: Task<Void, Never>
+        let work: Task<SessionDetailFacts, Never>
     }
 
     let library: SessionLibrary
@@ -542,6 +549,9 @@ final class RecordingsModel: ObservableObject {
     private var navigationObservations: Set<AnyCancellable> = []
     private var detailOrder: [String] = []
     private var detailRequests: [String: DetailRequest] = [:]
+    private var detailRequestCount = 0
+    /// Deleted sessions the controller refused to forget because it was busy. Nothing on screen shows them.
+    private var sessionsToForget: [String] = []
     private var reviewedSessionId: String?
     /// The refresh this model started last, until it finishes. The section appearing joins it.
     private var runningRefresh: Task<Void, Never>?
@@ -575,6 +585,14 @@ final class RecordingsModel: ObservableObject {
             MainActor.assumeIsolated { self?.messageContextDidChange() }
         }
         .store(in: &navigationObservations)
+        // The emitted value is the new selection; the property still holds the old one while this runs.
+        navigation.$selectedSessionId
+            .removeDuplicates()
+            .dropFirst()
+            .sink { [weak self] selected in
+                MainActor.assumeIsolated { self?.cancelDetailLoads(except: selected) }
+            }
+            .store(in: &navigationObservations)
     }
 
     /// A line under the table belongs to the row and section it was shown for.
@@ -618,8 +636,22 @@ final class RecordingsModel: ObservableObject {
     func syncCaptureState() {
         let canChange = dependencies.canChangeSessions()
         if canChange != canChangeSessions { canChangeSessions = canChange }
+        // A delete that finished while recording, analysis or a start ran is forgotten once they end.
+        if canChange, !sessionsToForget.isEmpty {
+            let waiting = sessionsToForget
+            sessionsToForget = waiting.filter { !dependencies.forgetSession($0) }
+        }
         let active = dependencies.activeSessionId()
         if active != activeSessionId { activeSessionId = active }
+    }
+
+    /// The controller stops naming a session this model deleted. A controller that is busy refuses; the id then
+    /// waits in `sessionsToForget` until `syncCaptureState` sees it idle, so a running analysis keeps its session.
+    private func forgetDeletedSession(_ id: String) {
+        if !dependencies.forgetSession(id), !sessionsToForget.contains(id) {
+            sessionsToForget.append(id)
+        }
+        syncCaptureState()
     }
 
     /// Scans the vault again. Mutating actions and processing that ends always start a new scan.
@@ -749,8 +781,6 @@ final class RecordingsModel: ObservableObject {
         guard actions(for: entry).contains(action) else { return nil }
         if action.needsIdleCapture && !canChangeSessions { return Self.busyReason }
         switch action {
-        case .delete:
-            return isActiveSession(entry.id) ? Self.heldSessionReason : nil
         case .openBrief:
             return entry.summary?.hasBrief == true ? nil : "This recording has no brief yet."
         case .openInClaude, .openInChatGPT:
@@ -758,6 +788,10 @@ final class RecordingsModel: ObservableObject {
             return entry.summary?.hasExportContext == true ? nil : "This recording has no export to hand to an agent yet."
         case .reviewSpeakers:
             return entry.summary?.hasFullTranscriptArchive == true ? nil : "This recording has no transcript to review yet."
+        case .delete:
+            // The session being recorded or analysed is held only as long as that runs, which the busy check covers.
+            // The vault still refuses a folder a live recording.lock names.
+            return nil
         case .revealExport, .copyExportPath, .retryAnalysis, .revealArchive, .revealFolder:
             return nil
         }
@@ -894,6 +928,8 @@ final class RecordingsModel: ObservableObject {
             case .deleted:
                 if self.navigation.selectedSessionId == id { self.navigation.selectedSessionId = nil }
                 self.forgetDetail(id)
+                // The controller may still hold the session as its last one; nothing may point at the folder now.
+                self.forgetDeletedSession(id)
             case .live:
                 AgentLog.event("main_delete_refused", ["session": id])
                 if self.actionGeneration == generation { self.message = Self.liveDeleteLine(id) }
@@ -978,12 +1014,6 @@ final class RecordingsModel: ObservableObject {
         dependencies.startRecording()
     }
 
-    /// True for the session the controller holds, in any spelling of its id.
-    func isActiveSession(_ id: String) -> Bool {
-        guard let activeSessionId else { return false }
-        return activeSessionId.caseInsensitiveCompare(id) == .orderedSame
-    }
-
     // MARK: Detail
 
     func detailKey(for summary: SessionSummary) -> DetailKey {
@@ -1000,35 +1030,58 @@ final class RecordingsModel: ObservableObject {
         details[summary.sessionId]?.key == detailKey(for: summary)
     }
 
-    /// Loads the facts for this row off the main actor unless they are current. A load already running
-    /// for the same row and generation is returned instead of starting another.
+    /// Loads the facts for the selected row off the main actor unless they are current. A load already
+    /// running for the same row and generation is returned instead of starting another. Nothing loads for a
+    /// row that is not selected: the pane shows only the selection, and each load decodes up to eight stills.
     @discardableResult
     func loadDetail(for summary: SessionSummary) -> Task<Void, Never>? {
         let key = detailKey(for: summary)
         let id = summary.sessionId
-        if details[id]?.key == key { return nil }
+        guard navigation.selectedSessionId == id, details[id]?.key != key else { return nil }
         if let running = detailRequests[id], running.key == key { return running.task }
+        cancelDetailLoad(id)
+        detailRequestCount += 1
+        let token = detailRequestCount
         let load = dependencies.loadDetail
+        let work = Task.detached(priority: .utility) { load(id) }
         let task = Task { @MainActor [weak self] in
-            let facts = await Task.detached(priority: .utility) { load(id) }.value
-            guard let self, self.detailRequests[id]?.key == key else { return }
+            let facts = await work.value
+            guard let self, self.detailRequests[id]?.token == token else { return }
             self.detailRequests[id] = nil
+            // A cancelled load may have stopped part way, and a row that lost the selection is not on screen.
+            guard !work.isCancelled, self.navigation.selectedSessionId == id else { return }
             self.storeDetail(CachedDetail(key: key, facts: facts))
         }
-        detailRequests[id] = DetailRequest(key: key, task: task)
+        detailRequests[id] = DetailRequest(key: key, token: token, task: task, work: work)
         return task
     }
 
+    /// Stores the facts, then drops the oldest facts beyond `detailCacheLimit`, never the selected row's.
     private func storeDetail(_ detail: CachedDetail) {
         let id = detail.key.summary.sessionId
         detailOrder.removeAll { $0 == id }
         detailOrder.append(id)
         var updated = details
         updated[id] = detail
-        while detailOrder.count > Self.detailCacheLimit {
-            updated[detailOrder.removeFirst()] = nil
+        let selected = navigation.selectedSessionId
+        while detailOrder.count > Self.detailCacheLimit,
+              let oldest = detailOrder.firstIndex(where: { $0 != selected }) {
+            updated[detailOrder.remove(at: oldest)] = nil
         }
         details = updated
+    }
+
+    /// The selection moved to `selected`: every other row's load stops, and its facts are never stored.
+    private func cancelDetailLoads(except selected: String?) {
+        for id in detailRequests.keys where id != selected {
+            cancelDetailLoad(id)
+        }
+    }
+
+    private func cancelDetailLoad(_ id: String) {
+        guard let request = detailRequests.removeValue(forKey: id) else { return }
+        request.work.cancel()
+        request.task.cancel()
     }
 
     /// After an action that may rewrite `export/` without changing the index row. The facts shown stay; the
@@ -1043,7 +1096,7 @@ final class RecordingsModel: ObservableObject {
     /// After a delete: nothing about the session is kept.
     private func forgetDetail(_ id: String) {
         detailOrder.removeAll { $0 == id }
-        detailRequests[id] = nil
+        cancelDetailLoad(id)
         if detailGenerations[id] != nil { detailGenerations[id] = nil }
         if details[id] != nil { details[id] = nil }
     }
@@ -1496,11 +1549,6 @@ struct SessionDetailView: View {
                     if summary.pipelineStatus == .offlineFailed {
                         Text("Analysis could not finish online. The local export is kept; Retry analysis tries again.")
                             .font(.caption).foregroundStyle(.secondary)
-                    }
-                    if model.canChangeSessions, model.isActiveSession(summary.sessionId) {
-                        Text(RecordingsModel.heldSessionReason)
-                            .font(.caption).foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
                 LazyVGrid(columns: Self.columns, alignment: .leading, spacing: 12) {

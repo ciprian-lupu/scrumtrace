@@ -96,9 +96,30 @@ final class SessionController: ObservableObject {
 
     /// The session this controller holds in memory: the one being recorded or processed, and afterwards
     /// the last one it recorded or processed (retries included), until another recording starts, another
-    /// session is retried, or the app relaunches. Read-only; the main window refuses to delete it.
+    /// session is retried, `forgetSession(id:)` drops it, or the app relaunches. Read-only. The main window
+    /// treats it as held only while recording or analysis runs; once both finish, it can be deleted.
     var activeSessionId: String? {
         manifest?.sessionId
+    }
+
+    /// The main window deleted this session, so nothing may point at its folder any more. The in-memory
+    /// manifest, the capture folder and the menu's last session are dropped when they name it (in any
+    /// spelling): the menu rebuilds without its last-session items, and a later Retry Analysis cannot write
+    /// the manifest back into a new folder. Other sessions are left alone.
+    ///
+    /// While recording, analysis or a start runs it changes nothing and returns false: a Retry Analysis of the
+    /// same session may have started while the folder was being removed, and a run keeps its session until it
+    /// ends. The caller asks again once the controller is idle.
+    @discardableResult
+    func forgetSession(id: String) -> Bool {
+        guard canChangeCaptureSettings else { return false }
+        func names(_ other: String?) -> Bool {
+            other.map { $0.caseInsensitiveCompare(id) == .orderedSame } ?? false
+        }
+        if names(manifest?.sessionId) { manifest = nil }
+        if names(sessionURL?.lastPathComponent) { sessionURL = nil }
+        if names(lastSessionId) { lastSessionId = nil }
+        return true
     }
 
     var hudShouldShow: Bool {
@@ -1389,5 +1410,14 @@ extension SessionController {
     /// real capture, so tests of views that follow the flag set it here.
     func setStartInFlightForTesting(_ value: Bool) {
         startInFlight = value
+    }
+
+    /// Tests only. Leaves the controller as `runProcessor` leaves it when a recording or a retry finishes:
+    /// the processed manifest stays in memory and names the last session. Running the real processor would
+    /// transcribe the fixture.
+    func holdProcessedSessionForTesting(_ processed: SessionManifest) {
+        manifest = processed
+        lastSessionId = processed.sessionId
+        phase = processed.pipelineStatus
     }
 }

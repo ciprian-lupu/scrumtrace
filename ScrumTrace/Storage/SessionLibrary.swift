@@ -222,15 +222,22 @@ enum SessionStatusFilter: String, CaseIterable, Identifiable, Sendable {
 extension Array where Element == SessionEntry {
     /// Every whitespace-separated search word must match `SessionSummary.searchableFields`, case and
     /// diacritics ignored. Unreadable rows match by folder name only and are hidden by any status or
-    /// context filter.
-    func filtered(search: String, status: SessionStatusFilter?, contextID: String?) -> [SessionEntry] {
+    /// context filter. Views filter on every render, so an empty search formats no date, and a search
+    /// builds each row's fields once. Tests pass `searchableFields` to count those builds.
+    func filtered(
+        search: String,
+        status: SessionStatusFilter?,
+        contextID: String?,
+        searchableFields: (SessionSummary) -> [String] = { $0.searchableFields }
+    ) -> [SessionEntry] {
         let words = search.split(whereSeparator: \.isWhitespace).map(String.init)
         return filter { entry in
             switch entry {
             case .loaded(let summary):
                 if let status, !status.matches(summary) { return false }
                 if let contextID, summary.contextID != contextID { return false }
-                let fields = summary.searchableFields
+                guard !words.isEmpty else { return true }
+                let fields = searchableFields(summary)
                 return words.allSatisfy { word in
                     fields.contains { $0.localizedStandardContains(word) }
                 }
@@ -252,6 +259,16 @@ private func lstatInfo(_ url: URL) -> stat? {
         return Darwin.lstat(ptr, &info)
     }
     return status == 0 ? info : nil
+}
+
+/// True when `lstat` finds nothing at all: the path, or a folder on the way to it, does not exist.
+private func isMissingEntry(_ url: URL) -> Bool {
+    url.withUnsafeFileSystemRepresentation { ptr -> Bool in
+        guard let ptr else { return false }
+        var info = stat()
+        guard Darwin.lstat(ptr, &info) != 0 else { return false }
+        return errno == ENOENT || errno == ENOTDIR
+    }
 }
 
 /// Loads one manifest for the index. Tests inject a counting loader.
@@ -289,6 +306,14 @@ struct SessionIndexCache: Sendable {
     }
 
     var items: [String: Item] = [:]
+    /// Every folder the last pass listed. A pass leaves out a folder that is not in this set and has no
+    /// manifest file, because `createSession` may still be writing it. Nil for a one-off listing with no next
+    /// pass, such as `sessionEntries()`, which lists every folder at once.
+    var seenIds: Set<String>?
+
+    /// Where a library starts: as if a pass had listed no folder, so its first scan also waits one pass for a
+    /// folder without a manifest.
+    static let beforeFirstScan = SessionIndexCache(seenIds: [])
 }
 
 /// One listing pass: rows newest first, and the cache the next pass reuses.
@@ -386,21 +411,37 @@ extension SessionVault {
 
     /// `sessionEntries()` with a cache. A manifest whose size and modification time match the previous
     /// scan is not decoded again. Export availability is probed on every pass.
+    ///
+    /// A folder whose manifest file is missing is left out when the folder is gone too (removed after it
+    /// was listed), or when the previous pass did not list the folder, because `createSession` makes the
+    /// folders before it writes the manifest. A library's first pass reuses `beforeFirstScan`, so it waits
+    /// too. The next pass lists the folder as unreadable if the manifest is still missing. A manifest that
+    /// exists but cannot be used and a folder the previous pass listed are listed at once, and so is every
+    /// folder when `previous.seenIds` is nil (a one-off listing with no next pass).
     func scanSessionIndex(
         reusing previous: SessionIndexCache,
         loadManifest: SessionManifestLoader
     ) -> SessionIndexScan {
+        let ids = listedSessionIds()
         var cache = SessionIndexCache()
+        cache.seenIds = Set(ids)
         var entries: [SessionEntry] = []
-        for id in listedSessionIds() {
+        for id in ids {
             let session = sessionURL(id: id)
             // Stat before decoding: a manifest replaced in between gets a newer stamp next time.
             let stamp = SessionManifestStamp.read(sessionURL: session)
+            let manifestURL = session.appendingPathComponent(ScrumTracePath.manifest)
+            // A link or a folder in the manifest's place is not missing; it is unreadable.
+            let missingAtStat = stamp == nil && isMissingEntry(manifestURL)
             let row: SessionIndexCache.Row
             if let stamp, let cached = previous.items[id], cached.stamp == stamp {
                 row = cached.row
             } else {
                 row = indexRow(id: id, loadManifest: loadManifest)
+                if row == .unreadable(reason: SessionEntry.notReadable), missingAtStat || isMissingEntry(manifestURL) {
+                    if isMissingEntry(session) { continue }
+                    if let seen = previous.seenIds, !seen.contains(id) { continue }
+                }
             }
             switch row {
             case .summary(let summary):
@@ -598,7 +639,7 @@ final class SessionLibrary: ObservableObject {
     let vault: SessionVault
     private let loadManifest: SessionManifestLoader
     private let measureArchive: SessionArchiveMeasure
-    private var cache = SessionIndexCache()
+    private var cache = SessionIndexCache.beforeFirstScan
     private var archiveSizes = SessionArchiveSizeCache()
     private var hasPublishedScan = false
     private var refreshGeneration = 0

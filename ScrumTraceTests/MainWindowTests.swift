@@ -844,8 +844,10 @@ final class MainWindowTests: XCTestCase {
         navigation: MainNavigation? = nil,
         recorder: CallRecorder,
         detailLoads: CallRecorder? = nil,
+        detailLoadGate: DetailLoadGate? = nil,
         canChange: @escaping @MainActor () -> Bool = { true },
         activeSessionId: @escaping @MainActor () -> String? = { nil },
+        forgotten: CallRecorder? = nil,
         handoffFailure: @escaping @MainActor () -> String? = { nil },
         manifestLoads: CallRecorder? = nil,
         manifestLoadGate: DispatchGroup? = nil,
@@ -890,8 +892,13 @@ final class MainWindowTests: XCTestCase {
                 recorder.record("deleteSession \(id)")
                 try vault.deleteSession(id: id, recordingLockURL: lockURL)
             },
+            forgetSession: { id in
+                forgotten?.record(id)
+                return true
+            },
             loadDetail: { id in
                 detailLoads?.record(id)
+                detailLoadGate?.pass(id)
                 return SessionDetailFacts.load(vault: vault, id: id)
             },
             startRecording: { recorder.record("startRecording") },
@@ -1160,33 +1167,46 @@ final class MainWindowTests: XCTestCase {
     }
 
     @MainActor
-    func testDeleteRefusesTheActiveSessionAndALiveRecordingLock() async throws {
+    func testDeleteWaitsForRecordingAndAnalysisAndRefusesAnUnlistedRowAndALiveRecordingLock() async throws {
         try await withRecordingsFixture { f in
             let navigation = MainNavigation()
             let recorder = CallRecorder()
+            let forgotten = CallRecorder()
+            let busy = MainActorBox(true)
             let active = ActiveSessionBox(f.completed.uppercased())
-            let model = makeRecordingsModel(f, navigation: navigation, recorder: recorder, activeSessionId: { active.id })
+            let model = makeRecordingsModel(
+                f, navigation: navigation, recorder: recorder,
+                canChange: { !busy.value }, activeSessionId: { active.id }, forgotten: forgotten
+            )
             await model.refresh().value
             navigation.selectedSessionId = f.completed
 
-            XCTAssertFalse(model.isEnabled(.delete), "The controller's session, in any spelling")
-            XCTAssertEqual(model.unavailableReason(.delete), RecordingsModel.heldSessionReason, "The disabled Delete says why")
-            XCTAssertTrue(model.isEnabled(.retryAnalysis))
+            // The controller records or analyses this session, named in another spelling.
+            XCTAssertFalse(model.isEnabled(.delete))
+            XCTAssertEqual(model.unavailableReason(.delete), RecordingsModel.busyReason, "The disabled Delete says why")
             XCTAssertFalse(model.performOnSelection(.delete))
             XCTAssertNil(model.pendingDelete)
             XCTAssertNil(model.confirmDelete(f.completed), "Confirming cannot bypass the check")
-            XCTAssertEqual(model.message, RecordingsModel.heldSessionReason)
+            XCTAssertEqual(model.message, RecordingsModel.busyReason)
             XCTAssertEqual(recorder.calls, [])
 
-            // The session became the controller's while the dialog was open.
-            active.id = nil
+            // Once recording and analysis finish, the session the controller still holds in memory can be deleted.
+            busy.value = false
+            model.syncCaptureState()
+            XCTAssertEqual(model.activeSessionId, f.completed.uppercased())
+            XCTAssertTrue(model.isEnabled(.delete), "The last recorded or retried session is not held once idle")
+            XCTAssertNil(model.unavailableReason(.delete))
+            XCTAssertTrue(model.isEnabled(.retryAnalysis))
+
+            // Recording started while the dialog was open.
             XCTAssertTrue(model.performOnSelection(.delete))
-            active.id = f.completed
+            busy.value = true
             XCTAssertNil(model.confirmDelete(f.completed))
             XCTAssertNil(model.pendingDelete)
-            XCTAssertEqual(model.message, RecordingsModel.heldSessionReason)
+            XCTAssertEqual(model.message, RecordingsModel.busyReason)
             XCTAssertEqual(recorder.calls, [])
             XCTAssertTrue(FileManager.default.fileExists(atPath: f.vault.sessionURL(id: f.completed).path))
+            busy.value = false
 
             // A row that left the list is refused with its own reason.
             XCTAssertNil(model.confirmDelete("2026-01-01-0000-absent"))
@@ -1206,6 +1226,134 @@ final class MainWindowTests: XCTestCase {
             XCTAssertEqual(model.library.entries.map(\.id), [f.unfinished, f.completed, f.corrupt])
             XCTAssertEqual(navigation.selectedSessionId, f.corrupt)
             XCTAssertTrue(try mainEventRows(in: f).contains { $0["event"] == "main_delete_refused" && $0["session"] == f.unfinished })
+            XCTAssertEqual(forgotten.calls, [], "A refused delete forgets nothing")
+        }
+    }
+
+    @MainActor
+    func testTheLastRecordedOrRetriedSessionCanBeDeletedOnceIdleAndTheControllerForgetsIt() async throws {
+        try await withRecordingsFixture { f in
+            try await withFixtureController(f) { controller in
+                let navigation = MainNavigation()
+                let model = RecordingsModel(
+                    library: SessionLibrary(vault: f.vault),
+                    navigation: navigation,
+                    dependencies: .live(controller: controller, startRecording: {})
+                )
+                model.observe(controller: controller)
+                await model.refresh().value
+                navigation.selectedSessionId = f.completed
+                let folder = f.vault.sessionURL(id: f.completed)
+
+                // Processing of this recording, or a retry of it, finished: the controller keeps its manifest in memory.
+                controller.holdProcessedSessionForTesting(try f.vault.loadManifest(id: f.completed))
+                XCTAssertEqual(controller.activeSessionId, f.completed)
+                XCTAssertEqual(controller.lastSessionId, f.completed)
+                let settled = await waitUntil { model.activeSessionId == f.completed && model.canChangeSessions }
+                XCTAssertTrue(settled)
+
+                // Delete still waits while analysis or a recording runs.
+                let states: [(name: String, apply: () -> Void)] = [
+                    ("analysis", { controller.isBusy = true; controller.phase = .transcribing }),
+                    ("recording", { controller.isBusy = false; controller.phase = .recording })
+                ]
+                for state in states {
+                    state.apply()
+                    let followed = await waitUntil { !model.canChangeSessions }
+                    XCTAssertTrue(followed, state.name)
+                    XCTAssertFalse(model.isEnabled(.delete), state.name)
+                    XCTAssertEqual(model.unavailableReason(.delete), RecordingsModel.busyReason, state.name)
+                    XCTAssertFalse(model.performOnSelection(.delete), state.name)
+                    XCTAssertNil(model.confirmDelete(f.completed), state.name)
+                    XCTAssertEqual(model.message, RecordingsModel.busyReason, state.name)
+                }
+                XCTAssertTrue(FileManager.default.fileExists(atPath: folder.path))
+                XCTAssertEqual(controller.lastSessionId, f.completed)
+
+                // Once both finish, it deletes like any other recording.
+                controller.phase = .completed
+                let idle = await waitUntil { model.canChangeSessions }
+                XCTAssertTrue(idle)
+                XCTAssertEqual(controller.activeSessionId, f.completed, "The controller still holds the manifest in memory")
+                XCTAssertTrue(model.isEnabled(.delete), "The last recorded or retried session is not held once idle")
+                XCTAssertNil(model.unavailableReason(.delete))
+                XCTAssertTrue(model.performOnSelection(.delete))
+                let deletion = try XCTUnwrap(model.confirmDelete(f.completed))
+                await deletion.value
+                XCTAssertFalse(FileManager.default.fileExists(atPath: folder.path))
+                XCTAssertNil(model.message)
+                XCTAssertEqual(model.library.entries.map(\.id), [f.unfinished, f.corrupt])
+
+                // The controller no longer names the deleted session, so the menu rebuilds without it.
+                XCTAssertNil(controller.activeSessionId)
+                XCTAssertNil(controller.lastSessionId, "The menu's last-session items no longer point at the removed folder")
+                XCTAssertNil(model.activeSessionId)
+
+                // The menu's Retry Analysis has nothing to retry and does not write the manifest back.
+                controller.retryAnalysis()
+                XCTAssertFalse(controller.isBusy)
+                XCTAssertFalse(FileManager.default.fileExists(atPath: folder.path))
+                XCTAssertTrue(try logRows(at: f.log).contains { $0["event"] == "retry_ignored" && $0["reason"] == "no_session" })
+            }
+        }
+    }
+
+    @MainActor
+    func testADeleteThatFinishesWhileTheControllerIsBusyLeavesItsSessionAloneUntilTheRunEnds() async throws {
+        try await withRecordingsFixture { f in
+            try await withFixtureController(f) { controller in
+                let navigation = MainNavigation()
+                let model = RecordingsModel(
+                    library: SessionLibrary(vault: f.vault),
+                    navigation: navigation,
+                    dependencies: .live(controller: controller, startRecording: {})
+                )
+                model.observe(controller: controller)
+                await model.refresh().value
+                navigation.selectedSessionId = f.completed
+                let folder = f.vault.sessionURL(id: f.completed)
+                controller.holdProcessedSessionForTesting(try f.vault.loadManifest(id: f.completed))
+                let settled = await waitUntil { model.activeSessionId == f.completed && model.canChangeSessions }
+                XCTAssertTrue(settled)
+
+                // The delete starts while idle. Before it finishes, Retry Analysis of the same session starts from the menu.
+                let deletion = try XCTUnwrap(model.confirmDelete(f.completed))
+                controller.isBusy = true
+                controller.phase = .transcribing
+                await deletion.value
+                XCTAssertFalse(FileManager.default.fileExists(atPath: folder.path))
+                XCTAssertFalse(model.library.entries.contains { $0.id == f.completed })
+
+                // The running analysis keeps the session it works on.
+                XCTAssertEqual(controller.activeSessionId, f.completed)
+                XCTAssertEqual(controller.lastSessionId, f.completed)
+                XCTAssertTrue(controller.isBusy)
+                XCTAssertEqual(controller.phase, .transcribing)
+                XCTAssertFalse(controller.forgetSession(id: f.completed), "Nothing is forgotten while analysis runs")
+                XCTAssertEqual(controller.lastSessionId, f.completed)
+
+                // The analysis fails on the removed folder and ends; the window forgets the session then.
+                controller.phase = .offlineFailed
+                controller.isBusy = false
+                let forgotten = await waitUntil { controller.lastSessionId == nil }
+                XCTAssertTrue(forgotten, "The deleted session is forgotten once the controller is idle")
+                XCTAssertNil(controller.activeSessionId)
+                let followed = await waitUntil { model.activeSessionId == nil }
+                XCTAssertTrue(followed)
+
+                controller.retryAnalysis()
+                XCTAssertFalse(controller.isBusy)
+                XCTAssertFalse(FileManager.default.fileExists(atPath: folder.path), "The in-memory manifest is not written back")
+                XCTAssertTrue(try logRows(at: f.log).contains { $0["event"] == "retry_ignored" && $0["reason"] == "no_session" })
+
+                // Forgotten once: a session the controller holds afterwards is left alone.
+                controller.holdProcessedSessionForTesting(try f.vault.loadManifest(id: f.unfinished))
+                controller.isBusy = true
+                controller.isBusy = false
+                let synced = await waitUntil { model.activeSessionId == f.unfinished && model.canChangeSessions }
+                XCTAssertTrue(synced)
+                XCTAssertEqual(controller.lastSessionId, f.unfinished)
+            }
         }
     }
 
@@ -1409,6 +1557,123 @@ final class MainWindowTests: XCTestCase {
             await first.value
             XCTAssertTrue(model.isDetailCurrent(for: changed))
             XCTAssertEqual(loads.calls.count, 4, "A second request for the same row did not read again")
+        }
+    }
+
+    @MainActor
+    func testDetailLoadsForRowsThatLostTheSelectionStopAndNeverEvictTheSelectedRow() async throws {
+        try await withRecordingsFixture { f in
+            // More rows than the detail cache keeps, each passed over while its load is still running.
+            var passed: [String] = []
+            for _ in 0..<RecordingsModel.detailCacheLimit {
+                passed.append(try makeSession(in: f.vault, status: .completed))
+            }
+            let navigation = MainNavigation()
+            let recorder = CallRecorder()
+            let loads = CallRecorder()
+            let gate = DetailLoadGate(holding: Set(passed))
+            defer { gate.release() }
+            let model = makeRecordingsModel(f, navigation: navigation, recorder: recorder, detailLoads: loads, detailLoadGate: gate)
+            await model.refresh().value
+            @MainActor func summary(_ id: String) throws -> SessionSummary {
+                try XCTUnwrap(model.entry(id: id)?.summary, id)
+            }
+
+            // The row the user comes back to loaded first.
+            navigation.selectedSessionId = f.completed
+            let selected = try summary(f.completed)
+            await model.loadDetail(for: selected)?.value
+            XCTAssertTrue(model.isDetailCurrent(for: selected))
+
+            // Arrowing through other rows starts a load for each; moving on cancels it.
+            var running: [Task<Void, Never>] = []
+            for id in passed {
+                navigation.selectedSessionId = id
+                running.append(try XCTUnwrap(model.loadDetail(for: try summary(id))))
+            }
+            navigation.selectedSessionId = f.completed
+            XCTAssertNil(model.loadDetail(for: selected), "The selected row's facts are still current")
+
+            gate.release()
+            for task in running { await task.value }
+            XCTAssertTrue(model.isDetailCurrent(for: selected), "Loads for rows that lost the selection never evict the selected row")
+            XCTAssertEqual(
+                model.detail(for: selected)?.exportFiles.map(\.name),
+                ["AGENT_CONTEXT.md", "SESSION_BRIEF.html", "session-pack.zip"]
+            )
+            for id in passed {
+                XCTAssertNil(model.detail(for: try summary(id)), "A row that lost the selection keeps no facts")
+            }
+            XCTAssertEqual(Set(gate.cancelled), Set(passed), "Every load for a row that lost the selection was cancelled")
+
+            // Selecting a row again starts a fresh load instead of joining the cancelled one.
+            let revisited = try summary(passed[0])
+            navigation.selectedSessionId = revisited.sessionId
+            let fresh = try XCTUnwrap(model.loadDetail(for: revisited))
+            await fresh.value
+            XCTAssertTrue(model.isDetailCurrent(for: revisited))
+            XCTAssertEqual(loads.calls.filter { $0 == revisited.sessionId }.count, 2)
+            XCTAssertEqual(Set(gate.cancelled), Set(passed), "The fresh load was not cancelled")
+
+            // Only the selected row loads.
+            XCTAssertNil(model.loadDetail(for: try summary(passed[1])))
+            XCTAssertEqual(loads.calls.filter { $0 == passed[1] }.count, 1)
+        }
+    }
+
+    @MainActor
+    func testACancelledThumbnailLoadStopsBeforeTheNextStill() async throws {
+        try await withRecordingsFixture { f in
+            let session = f.vault.sessionURL(id: f.completed)
+            let png = try pngData()
+            for index in 1...10 {
+                try writeFile(png, to: String(format: "export/shots/%03d.png", index), in: session)
+            }
+            let reads = CallRecorder()
+            let proceed = DispatchSemaphore(value: 0)
+            let loading = Task.detached { () -> Int in
+                SessionThumbnailLoader.thumbnails(sessionURL: session, read: { relative, sessionURL in
+                    reads.record(relative)
+                    if reads.calls.count == 1 { proceed.wait() }
+                    return SessionThumbnailLoader.containedRead(relative, sessionURL)
+                }).count
+            }
+            let started = await waitUntil { reads.calls.count == 1 }
+            XCTAssertTrue(started)
+            loading.cancel()
+            proceed.signal()
+            let loaded = await loading.value
+            XCTAssertEqual(loaded, 1, "The still being read finishes")
+            XCTAssertEqual(reads.calls, ["export/shots/001.png"], "No further still is read once the load is cancelled")
+            XCTAssertEqual(SessionThumbnailLoader.thumbnails(sessionURL: session).count, SessionThumbnailLoader.limit)
+        }
+    }
+
+    @MainActor
+    func testDetailFactsStoreOnlyAllowListedFields() async throws {
+        try await withRecordingsFixture { f in
+            try writeFile(try pngData(), to: "export/shots/001.png", in: f.vault.sessionURL(id: f.completed))
+            let facts = SessionDetailFacts.load(vault: f.vault, id: f.completed)
+            let review = "A new detail field needs a privacy review (C2): of the manifest the pane keeps upload consent only"
+            let stored = Mirror(reflecting: facts).children
+            XCTAssertEqual(stored.compactMap(\.label), ["exportFiles", "consent", "thumbnails"], review)
+            XCTAssertTrue(stored.first { $0.label == "exportFiles" }?.value is [SessionDetailFacts.ExportFile])
+            XCTAssertTrue(stored.first { $0.label == "consent" }?.value is SessionDetailFacts.Consent?)
+            XCTAssertTrue(stored.first { $0.label == "thumbnails" }?.value is [SessionThumbnail])
+
+            let consent = Mirror(reflecting: try XCTUnwrap(facts.consent)).children
+            XCTAssertEqual(
+                consent.compactMap(\.label), ["approved", "provider", "model", "includesClipAudio", "includesClipVideo"], review
+            )
+            XCTAssertEqual(consent.filter { $0.value is String? }.compactMap(\.label), ["provider", "model"], "Only the service is text")
+            XCTAssertEqual(consent.filter { $0.value is Bool }.compactMap(\.label), ["approved", "includesClipAudio", "includesClipVideo"])
+
+            let file = try XCTUnwrap(facts.exportFiles.first)
+            XCTAssertEqual(Mirror(reflecting: file).children.compactMap(\.label), ["path", "bytes"], review)
+            XCTAssertTrue(facts.exportFiles.allSatisfy { $0.path.hasPrefix("\(ScrumTracePath.export)/") })
+            let thumbnail = try XCTUnwrap(facts.thumbnails.first)
+            XCTAssertEqual(Mirror(reflecting: thumbnail).children.compactMap(\.label), ["id", "image"], review)
+            XCTAssertTrue(facts.thumbnails.allSatisfy { SessionThumbnailLoader.isShotPath($0.id) })
         }
     }
 
@@ -2936,6 +3201,44 @@ private final class CallRecorder: @unchecked Sendable {
         lock.lock()
         recorded.append(call)
         lock.unlock()
+    }
+}
+
+/// Holds detail loads for chosen rows, off the main actor, until `release()`, and records which of them had been
+/// cancelled by the time they were let through.
+private final class DetailLoadGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private let held: Set<String>
+    private let group = DispatchGroup()
+    private var isHolding = true
+    private var cancelledIds: [String] = []
+
+    init(holding ids: Set<String>) {
+        held = ids
+        group.enter()
+    }
+
+    var cancelled: [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        return cancelledIds
+    }
+
+    func pass(_ id: String) {
+        guard held.contains(id) else { return }
+        group.wait()
+        guard Task.isCancelled else { return }
+        lock.lock()
+        cancelledIds.append(id)
+        lock.unlock()
+    }
+
+    func release() {
+        lock.lock()
+        defer { lock.unlock() }
+        guard isHolding else { return }
+        isHolding = false
+        group.leave()
     }
 }
 
