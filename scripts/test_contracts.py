@@ -3254,6 +3254,118 @@ def test_sanitize_untrusted_strips_whitespace_breakout() -> None:
     assert wrapped.count("untrusted_meeting_data") == 2
 
 
+def test_main_window_routing_and_private_index() -> None:
+    app = (ROOT / "ScrumTrace" / "App" / "AppDelegate.swift").read_text()
+    for pinned in (
+        "height: 640",
+        "SettingsView(settings:",
+        "settings_open",
+        "OnboardingWindow.presentIfNeeded",
+        "snapshotLaunchState",
+        "sweepPrivateTemporaryOrphans",
+        'AgentLog.eventSync("launch"',
+        'AgentLog.eventSync("terminate"',
+        "haltCaptureForTermination",
+        "captureFreeze: controller.captureFreeze",
+        "applicationWillFinishLaunching",
+        "tryExecFromArguments",
+        "requestTrust(prompt: false)",
+    ):
+        assert pinned in app, pinned
+    assert "requestTrust(prompt: true)" not in app
+
+    # The app icon fronts the main window. It must never route back to a Settings-only window.
+    reopen = app.split("func applicationShouldHandleReopen")[1].split("\n    }\n")[0]
+    assert "mainPresenter.show(" in reopen
+    assert "showSettingsWindow" not in reopen
+    assert "show(section: .settings)" not in reopen
+    assert "show(tab:" not in reopen
+    # Nor through a section assignment or a showMainWindow call that names Settings.
+    assert "settings" not in reopen.lower(), "applicationShouldHandleReopen routes to Settings"
+
+    # Gate 0: only the presenter's show path activates ScrumTrace, after an explicit user action.
+    # Every spelling that activates ScrumTrace itself counts; activating another app's
+    # NSRunningApplication (the focus hand-back in MainWindow.swift) does not.
+    self_activation = re.compile(
+        r"\b(?:NSApp|NSApplication\s*\.\s*shared|NSRunningApplication\s*\.\s*current)\s*[?!]?\s*\.\s*activate\b"
+        r"|\bactivate\s*\(\s*ignoringOtherApps\b"
+    )
+    # The split drops the newline after the last method's closing brace; put it back.
+    presenter = app.split("final class MainWindowPresenter")[1].split("\n}\n")[0] + "\n"
+    show_bodies = []
+    for declaration in re.finditer(r"\n    func show\(", presenter):
+        end = presenter.find("\n    }\n", declaration.start())
+        assert end > declaration.start()
+        show_bodies.append((declaration.start(), end))
+    assert show_bodies
+    activations = [found.start() for found in self_activation.finditer(presenter)]
+    assert "NSApp.activate(" in presenter
+    assert activations, "MainWindowPresenter.show() must activate ScrumTrace"
+    for offset in activations:
+        assert any(start < offset < end for start, end in show_bodies), "activation outside func show("
+    assert len(self_activation.findall(app)) == len(activations), "activation outside MainWindowPresenter"
+    for name in ("HotkeyManager.swift", "RecordingHUDWindow.swift"):
+        source = (ROOT / "ScrumTrace" / "UI" / name).read_text()
+        for reference in ("MainWindowPresenter", "mainPresenter", "showMainWindow"):
+            assert reference not in source, (name, reference)
+        assert not self_activation.search(source), (name, "activates ScrumTrace")
+    for name in ("MainWindow.swift", "RecordingsView.swift", "OverviewView.swift", "ContextsView.swift"):
+        source = (ROOT / "ScrumTrace" / "UI" / name).read_text()
+        assert "requestTrust(prompt: true)" not in source, name
+        assert "CGRequestScreenCaptureAccess" not in source, name
+        assert "NSApp.activate(" not in source, name
+        assert not self_activation.search(source), (name, "activates ScrumTrace")
+    window = (ROOT / "ScrumTrace" / "UI" / "MainWindow.swift").read_text()
+    assert 'backgroundArgument = "--background"' in window
+    loop = (ROOT / "scripts" / "mac_agent_loop.sh").read_text()
+    assert 'open "$STABLE" --args --background' in loop
+
+    # C2: the session index maps manifest metadata only, never captured text.
+    library = (ROOT / "ScrumTrace" / "Storage" / "SessionLibrary.swift").read_text()
+    summary = library.split("struct SessionSummary:")[1].split("\n}\n")[0]
+    assert "init(manifest: SessionManifest, exportProbe: SessionExportProbe)" in summary
+    # Doc comments may name archive files. The code may not read them.
+    code = "\n".join(line for line in summary.splitlines() if not line.lstrip().startswith("//"))
+    # hasFullTranscriptArchive is the export probe's existence flag (plan H02), not transcript text.
+    folded = code.replace("hasFullTranscriptArchive", "").lower()
+    for word in ("transcript", "note", "title", "url", "observed", "stated", "inferred", "quote", "agentInstructions"):
+        assert word not in code, word
+        assert word.lower() not in folded, word
+
+    # The same rule for the whole file: task counts, export probes, the search filter and any helper.
+    library_code = "\n".join(line for line in library.splitlines() if not line.lstrip().startswith("//"))
+    # Allowed: the existence flag and the size-only probes of export files, never their contents.
+    probed = library_code
+    for allowed in (
+        "hasFullTranscriptArchive",
+        "bytes(ScrumTracePath.fullTranscript)",
+        'ScrumTracePath.export + "/full_transcript.json"',
+    ):
+        probed = probed.replace(allowed, "")
+    probed = probed.lower()
+    for word in (
+        "transcript", "note", "title", "observed", "stated", "inferred", "quote", "agentinstructions",
+        "evidence", "speaker", "segment", "candidate", "payload",
+    ):
+        assert word not in probed, ("SessionLibrary.swift", word)
+    # "url" names file locations in this file, so check member reads of captured text instead.
+    captured_member = re.search(r"\.\s*(?:url|urls|windowTitle|text|segments|words)\b", library_code)
+    assert not captured_member, ("SessionLibrary.swift", captured_member and captured_member.group(0))
+    manifest_fields = set(re.findall(r"\bmanifest\s*\.\s*(\w+)", library_code))
+    assert "sessionId" in manifest_fields
+    assert manifest_fields <= {
+        "sessionId", "createdAt", "pipelineStatus", "completedStages", "duration", "pauses",
+        "productContext", "shots", "slices", "tasks", "uploadConsent", "omitted",
+    }, manifest_fields
+
+    agents = (ROOT / "AGENTS.md").read_text()
+    assert "2026-09-13" in agents
+    assert "The main window is not gate evidence" in agents
+    readme = (ROOT / "README.md").read_text()
+    assert "Open ScrumTrace…" in readme
+    assert "--args --background" in readme
+
+
 def main() -> None:
     test_export_has_no_archive_and_no_tokens()
     test_agent_context_uses_export_relative_paths()
@@ -3276,6 +3388,7 @@ def main() -> None:
     test_claude_cli_handoff()
     test_ai_connection_library()
     test_sanitize_untrusted_strips_whitespace_breakout()
+    test_main_window_routing_and_private_index()
     print("contract tests ok")
 
 
