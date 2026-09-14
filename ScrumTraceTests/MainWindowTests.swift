@@ -83,7 +83,7 @@ final class MainWindowTests: XCTestCase {
     @MainActor
     func testReopenShowsTheMainWindowAndReusesIt() throws {
         try withController { controller, log in
-            let presenter = MainWindowPresenter(controller: controller, frameAutosaveName: nil)
+            let presenter = MainWindowPresenter(controller: controller, frameAutosaveName: nil, isWindowOnScreen: ignoringOcclusion)
             defer { presenter.window?.close() }
             let delegate = AppDelegate()
             delegate.setMainPresenterForTesting(presenter)
@@ -124,7 +124,7 @@ final class MainWindowTests: XCTestCase {
     @MainActor
     func testShowTabSelectsSettingsInTheSameWindow() throws {
         try withController { controller, _ in
-            let presenter = MainWindowPresenter(controller: controller, frameAutosaveName: nil)
+            let presenter = MainWindowPresenter(controller: controller, frameAutosaveName: nil, isWindowOnScreen: ignoringOcclusion)
             defer { presenter.window?.close() }
             presenter.show()
             let window = try XCTUnwrap(presenter.window)
@@ -144,7 +144,7 @@ final class MainWindowTests: XCTestCase {
     @MainActor
     func testShowSessionSelectsRecordings() throws {
         try withController { controller, _ in
-            let presenter = MainWindowPresenter(controller: controller, frameAutosaveName: nil)
+            let presenter = MainWindowPresenter(controller: controller, frameAutosaveName: nil, isWindowOnScreen: ignoringOcclusion)
             defer { presenter.window?.close() }
             presenter.show(sessionId: "2026-09-13_10-00-00")
             let window = try XCTUnwrap(presenter.window)
@@ -163,7 +163,7 @@ final class MainWindowTests: XCTestCase {
     @MainActor
     func testShowDeminiaturizesTheWindowAndKeepsTheSection() throws {
         try withController { controller, _ in
-            let presenter = MainWindowPresenter(controller: controller, frameAutosaveName: nil)
+            let presenter = MainWindowPresenter(controller: controller, frameAutosaveName: nil, isWindowOnScreen: ignoringOcclusion)
             defer { presenter.window?.close() }
             presenter.show(section: .recordings)
             let window = try XCTUnwrap(presenter.window)
@@ -229,13 +229,199 @@ final class MainWindowTests: XCTestCase {
 
     func testLaunchPolicySkipsBackgroundLaunchesAndTestHosts() {
         let executable = "/Applications/ScrumTrace.app/Contents/MacOS/ScrumTrace"
-        XCTAssertTrue(MainWindowLaunchPolicy.shouldShowOnLaunch(arguments: [executable], environment: [:]))
-        XCTAssertTrue(MainWindowLaunchPolicy.shouldShowOnLaunch(arguments: [executable, "-NSDocumentRevisionsDebugMode", "YES"], environment: [:]))
-        XCTAssertFalse(MainWindowLaunchPolicy.shouldShowOnLaunch(arguments: [executable, "--background"], environment: [:]))
+        XCTAssertTrue(MainWindowLaunchPolicy.shouldShowOnLaunch(arguments: [executable], environment: [:], launchedAsLoginItem: false))
+        XCTAssertTrue(MainWindowLaunchPolicy.shouldShowOnLaunch(
+            arguments: [executable, "-NSDocumentRevisionsDebugMode", "YES"],
+            environment: [:],
+            launchedAsLoginItem: false
+        ))
+        XCTAssertFalse(MainWindowLaunchPolicy.shouldShowOnLaunch(arguments: [executable, "--background"], environment: [:], launchedAsLoginItem: false))
         XCTAssertFalse(MainWindowLaunchPolicy.shouldShowOnLaunch(
             arguments: [executable],
-            environment: ["XCTestConfigurationFilePath": "/tmp/ScrumTrace.xctestconfiguration"]
+            environment: ["XCTestConfigurationFilePath": "/tmp/ScrumTrace.xctestconfiguration"],
+            launchedAsLoginItem: false
         ))
+    }
+
+    func testLoginItemLaunchesStayInTheMenuBar() {
+        let executable = "/Applications/ScrumTrace.app/Contents/MacOS/ScrumTrace"
+        XCTAssertFalse(
+            MainWindowLaunchPolicy.shouldShowOnLaunch(arguments: [executable], environment: [:], launchedAsLoginItem: true),
+            "A Login Item launch opens no window"
+        )
+
+        func launchEvent(_ eventID: AEEventID, property: OSType?) -> NSAppleEventDescriptor {
+            let event = NSAppleEventDescriptor.appleEvent(
+                withEventClass: kCoreEventClass,
+                eventID: eventID,
+                targetDescriptor: nil,
+                returnID: AEReturnID(kAutoGenerateReturnID),
+                transactionID: AETransactionID(kAnyTransactionID)
+            )
+            if let property {
+                event.setParam(NSAppleEventDescriptor(enumCode: property), forKeyword: keyAEPropData)
+            }
+            return event
+        }
+        XCTAssertTrue(MainWindowLaunchPolicy.isLoginItemLaunch(launchEvent(kAEOpenApplication, property: keyAELaunchedAsLogInItem)))
+        // The launch event may carry the property as a type code rather than an enumerated value.
+        let typed = launchEvent(kAEOpenApplication, property: nil)
+        typed.setParam(NSAppleEventDescriptor(typeCode: keyAELaunchedAsLogInItem), forKeyword: keyAEPropData)
+        XCTAssertTrue(MainWindowLaunchPolicy.isLoginItemLaunch(typed), "The login property as a type code")
+        XCTAssertFalse(
+            MainWindowLaunchPolicy.isLoginItemLaunch(launchEvent(kAEOpenApplication, property: nil)),
+            "Finder, Launchpad, Spotlight, the Dock and open send the launch event without the login property"
+        )
+        XCTAssertFalse(MainWindowLaunchPolicy.isLoginItemLaunch(launchEvent(kAEOpenApplication, property: kAEOpenApplication)))
+        XCTAssertFalse(
+            MainWindowLaunchPolicy.isLoginItemLaunch(launchEvent(kAEReopenApplication, property: keyAELaunchedAsLogInItem)),
+            "Only the launch event counts"
+        )
+        XCTAssertFalse(MainWindowLaunchPolicy.isLoginItemLaunch(nil), "No Apple event")
+    }
+
+    func testRelaunchForwardsBackgroundUnlessTheWindowIsOpen() {
+        let executable = "/Applications/ScrumTrace.app/Contents/MacOS/ScrumTrace"
+        let background = MainWindowLaunchPolicy.backgroundArgument
+        XCTAssertEqual(MainWindowLaunchPolicy.relaunchArguments(currentArguments: [executable], windowOpen: false), [background])
+        XCTAssertEqual(MainWindowLaunchPolicy.relaunchArguments(currentArguments: [executable], windowOpen: true), [])
+        XCTAssertEqual(MainWindowLaunchPolicy.relaunchArguments(currentArguments: [executable, background], windowOpen: false), [background])
+        XCTAssertEqual(
+            MainWindowLaunchPolicy.relaunchArguments(currentArguments: [executable, background], windowOpen: true),
+            [background],
+            "The agent loop's instance keeps --background"
+        )
+        // What the relaunched instance then decides.
+        for windowOpen in [false, true] {
+            let arguments = [executable] + MainWindowLaunchPolicy.relaunchArguments(currentArguments: [executable], windowOpen: windowOpen)
+            XCTAssertEqual(
+                MainWindowLaunchPolicy.shouldShowOnLaunch(arguments: arguments, environment: [:], launchedAsLoginItem: false),
+                windowOpen
+            )
+        }
+    }
+
+    @MainActor
+    func testRelaunchBringsTheWindowBackOnlyWhenItWasOpen() throws {
+        try withController { controller, log in
+            XCTAssertFalse(ProcessInfo.processInfo.arguments.contains(MainWindowLaunchPolicy.backgroundArgument))
+            var relaunches: [[String]] = []
+            controller.relaunchApplication = { relaunches.append($0) }
+            controller.relaunchForPermissions()
+            XCTAssertEqual(relaunches, [["--background"]], "Before any window, the new instance stays in the menu bar")
+
+            let presenter = MainWindowPresenter(controller: controller, frameAutosaveName: nil, isWindowOnScreen: ignoringOcclusion)
+            defer { presenter.window?.close() }
+            controller.relaunchForPermissions()
+            XCTAssertEqual(relaunches, [["--background"], ["--background"]], "A window that never opened")
+
+            presenter.show()
+            controller.relaunchForPermissions()
+            XCTAssertEqual(relaunches, [["--background"], ["--background"], []], "An open window opens again after the relaunch")
+
+            let window = try XCTUnwrap(presenter.window)
+            window.close()
+            controller.relaunchForPermissions()
+            XCTAssertEqual(
+                relaunches,
+                [["--background"], ["--background"], [], ["--background"]],
+                "A window closed before Relaunch stays closed"
+            )
+
+            controller.isBusy = true
+            controller.relaunchForPermissions()
+            XCTAssertEqual(relaunches.count, 4, "No relaunch while recording or analysis runs")
+            XCTAssertEqual(try logRows(at: log).filter { $0["event"] == "relaunch_ignored" }.count, 1)
+        }
+    }
+
+    @MainActor
+    func testWindowStartsLogMainStartOnceAndOnlyTheStatusBarMenuLogsMenuStart() throws {
+        try withController { controller, log in
+            let menuBar = MenuBarController(controller: controller, openSettings: {}, openLogs: {})
+            var notices = 0
+            // Declining the meeting notice ends each Start before an alert, a window or the capture-area overlay.
+            menuBar.askMeetingNotice = {
+                notices += 1
+                return false
+            }
+            let presenter = MainWindowPresenter(
+                controller: controller,
+                frameAutosaveName: nil,
+                isWindowOnScreen: ignoringOcclusion,
+                onStartRecording: { menuBar.requestStart() },
+                isPreparingRecording: { menuBar.isPreparingRecording }
+            )
+            let context = SavedProductContext(name: "Orbit")
+            try controller.settings.saveProductContext(context, isNew: true)
+            let startEvents: Set<String> = ["menu_start", "main_start", "command_start"]
+            func starts() throws -> [String] {
+                try logRows(at: log).compactMap { row in row["event"].flatMap { startEvents.contains($0) ? $0 : nil } }
+            }
+
+            XCTAssertTrue(presenter.overview.startRecording())
+            presenter.recordings.startRecording()
+            try presenter.contexts.recordWithContext(id: context.id)
+            XCTAssertEqual(notices, 3, "Each window Start ran the app's Start flow")
+            XCTAssertEqual(try starts(), ["main_start", "main_start", "main_start"], "A window Start logs main_start once and no menu_start")
+
+            let menu = menuBar.menu
+            let item = try XCTUnwrap(menu.items.first { $0.title.hasPrefix("Start recording") })
+            XCTAssertTrue(item.isEnabled)
+            menu.performActionForItem(at: menu.index(of: item))
+            menuBar.startFromCommand()
+            XCTAssertEqual(notices, 5)
+            XCTAssertEqual(try starts(), ["main_start", "main_start", "main_start", "menu_start", "command_start"])
+            XCTAssertEqual(try logRows(at: log).filter { $0["event"] == "meeting_notice" }.count, 5)
+        }
+    }
+
+    @MainActor
+    func testCoveringTheWindowStopsItsLoopsAndUncoveringItRefreshesAtOnce() async throws {
+        try await withRecordingsFixture { f in
+            try await withFixtureController(f) { controller in
+                let onScreen = MainActorBox(true)
+                let presenter = MainWindowPresenter(
+                    controller: controller,
+                    frameAutosaveName: nil,
+                    isWindowOnScreen: { $0.isVisible && !$0.isMiniaturized && onScreen.value }
+                )
+                defer { presenter.window?.close() }
+                presenter.show(section: .overview)
+                let window = try XCTUnwrap(presenter.window)
+                let running = await waitUntil {
+                    presenter.overview.isEvaluationLoopActive && presenter.recordings.library.entries.count == 3
+                }
+                XCTAssertTrue(running)
+                XCTAssertTrue(presenter.recordings.isPeriodicRefreshActive)
+                let changed = Notification(name: NSWindow.didChangeOcclusionStateNotification, object: window)
+
+                onScreen.value = false
+                presenter.windowDidChangeOcclusionState(changed)
+                XCTAssertTrue(window.isVisible, "Covered by other windows, not closed")
+                XCTAssertFalse(presenter.recordings.isWindowVisible)
+                XCTAssertFalse(presenter.recordings.isPeriodicRefreshActive, "A covered window does no periodic refresh")
+                XCTAssertFalse(presenter.overview.isWindowVisible)
+                XCTAssertFalse(presenter.overview.isEvaluationLoopActive, "A covered window does no readiness work")
+                XCTAssertFalse(presenter.contexts.isWindowVisible)
+
+                // A recording added while the window stays covered is not listed by any loop.
+                await presenter.recordings.refresh().value
+                let added = try makeSession(in: f.vault, status: .completed)
+                presenter.windowDidChangeOcclusionState(changed)
+                XCTAssertFalse(presenter.recordings.isPeriodicRefreshActive)
+
+                onScreen.value = true
+                presenter.windowDidChangeOcclusionState(changed)
+                XCTAssertTrue(presenter.recordings.isWindowVisible)
+                XCTAssertTrue(presenter.recordings.isPeriodicRefreshActive, "Uncovered, the periodic refresh runs again")
+                XCTAssertTrue(presenter.overview.isEvaluationLoopActive, "Uncovered, readiness is checked again")
+                XCTAssertTrue(presenter.contexts.isWindowVisible)
+                // Well inside the 5 s timer, so only the refresh that uncovering starts can list the new row this soon.
+                let listed = await waitUntil(timeout: 2) { presenter.recordings.library.entries.contains { $0.id == added } }
+                XCTAssertTrue(listed, "Uncovering the window refreshes the list at once")
+            }
+        }
     }
 
     @MainActor
@@ -279,7 +465,7 @@ final class MainWindowTests: XCTestCase {
     @MainActor
     func testWindowStaysStableWhileSectionsAndTheBannerChange() throws {
         try withController { controller, _ in
-            let presenter = MainWindowPresenter(controller: controller, frameAutosaveName: nil)
+            let presenter = MainWindowPresenter(controller: controller, frameAutosaveName: nil, isWindowOnScreen: ignoringOcclusion)
             defer { presenter.window?.close() }
             presenter.show()
             let window = try XCTUnwrap(presenter.window)
@@ -326,7 +512,7 @@ final class MainWindowTests: XCTestCase {
             )
             small.isReleasedWhenClosed = false
             UserDefaults.standard.set(small.frameDescriptor, forKey: key)
-            let presenter = MainWindowPresenter(controller: controller, frameAutosaveName: name)
+            let presenter = MainWindowPresenter(controller: controller, frameAutosaveName: name, isWindowOnScreen: ignoringOcclusion)
             defer {
                 presenter.window?.close()
                 presenter.window?.setFrameAutosaveName("")
@@ -344,7 +530,7 @@ final class MainWindowTests: XCTestCase {
     @MainActor
     func testNavigationWaitsWhileASheetIsOpen() throws {
         try withController { controller, _ in
-            let presenter = MainWindowPresenter(controller: controller, frameAutosaveName: nil)
+            let presenter = MainWindowPresenter(controller: controller, frameAutosaveName: nil, isWindowOnScreen: ignoringOcclusion)
             defer { presenter.window?.close() }
             presenter.show(tab: .general)
             let window = try XCTUnwrap(presenter.window)
@@ -397,7 +583,7 @@ final class MainWindowTests: XCTestCase {
     @MainActor
     func testSettingsStayPinnedBelowTheBannerAtTheMinimumSize() throws {
         try withController { controller, _ in
-            let presenter = MainWindowPresenter(controller: controller, frameAutosaveName: nil)
+            let presenter = MainWindowPresenter(controller: controller, frameAutosaveName: nil, isWindowOnScreen: ignoringOcclusion)
             defer { presenter.window?.close() }
             presenter.show(tab: .speech)
             let window = try XCTUnwrap(presenter.window)
@@ -427,7 +613,7 @@ final class MainWindowTests: XCTestCase {
     @MainActor
     func testSidebarAlwaysKeepsASectionSelected() throws {
         try withController { controller, _ in
-            let presenter = MainWindowPresenter(controller: controller, frameAutosaveName: nil)
+            let presenter = MainWindowPresenter(controller: controller, frameAutosaveName: nil, isWindowOnScreen: ignoringOcclusion)
             defer { presenter.window?.close() }
             presenter.show(section: .recordings)
             let window = try XCTUnwrap(presenter.window)
@@ -664,7 +850,8 @@ final class MainWindowTests: XCTestCase {
         manifestLoads: CallRecorder? = nil,
         manifestLoadGate: DispatchGroup? = nil,
         beforeManifestLoad: (@Sendable () -> Void)? = nil,
-        refreshInterval: Duration = RecordingsModel.refreshInterval
+        refreshInterval: Duration = RecordingsModel.refreshInterval,
+        isPreparingRecording: @escaping @MainActor () -> Bool = { false }
     ) -> RecordingsModel {
         let vault = f.vault
         let lockURL = f.lockURL
@@ -707,7 +894,8 @@ final class MainWindowTests: XCTestCase {
                 detailLoads?.record(id)
                 return SessionDetailFacts.load(vault: vault, id: id)
             },
-            startRecording: { recorder.record("startRecording") }
+            startRecording: { recorder.record("startRecording") },
+            isPreparingRecording: isPreparingRecording
         )
         return RecordingsModel(
             library: SessionLibrary(vault: vault, loadManifest: { vault, id in
@@ -843,6 +1031,40 @@ final class MainWindowTests: XCTestCase {
                 rows.map { $0["session"] ?? "" },
                 Array(repeating: f.completed, count: 8) + [f.unfinished, ""]
             )
+        }
+    }
+
+    @MainActor
+    func testRecordingsStartLogsMainStartOnlyWhenTheStartFlowWouldRun() async throws {
+        try await withRecordingsFixture { f in
+            let recorder = CallRecorder()
+            let canChange = MainActorBox(true)
+            let preparing = MainActorBox(true)
+            let model = makeRecordingsModel(
+                f,
+                recorder: recorder,
+                canChange: { canChange.value },
+                isPreparingRecording: { preparing.value }
+            )
+            func starts() throws -> [String] {
+                try mainEventRows(in: f).compactMap { $0["event"] }.filter { $0 == "main_start" }
+            }
+
+            // The empty state's button stays enabled while another Start shows its context window.
+            model.startRecording()
+            XCTAssertEqual(recorder.calls, [], "The Start flow would refuse a second Start")
+            XCTAssertEqual(try starts(), [], "A refused Start logs no main_start for the Gate 0 overlay check")
+
+            preparing.value = false
+            canChange.value = false
+            model.startRecording()
+            XCTAssertEqual(recorder.calls, [], "No Start while recording or analysis runs")
+            XCTAssertEqual(try starts(), [])
+
+            canChange.value = true
+            model.startRecording()
+            XCTAssertEqual(recorder.calls, ["startRecording"])
+            XCTAssertEqual(try starts(), ["main_start"])
         }
     }
 
@@ -1387,7 +1609,7 @@ final class MainWindowTests: XCTestCase {
     func testShowSessionSelectsItsRowInTheRecordingsTable() async throws {
         try await withRecordingsFixture { f in
             try await withFixtureController(f) { controller in
-                let presenter = MainWindowPresenter(controller: controller, frameAutosaveName: nil)
+                let presenter = MainWindowPresenter(controller: controller, frameAutosaveName: nil, isWindowOnScreen: ignoringOcclusion)
                 defer { presenter.window?.close() }
                 XCTAssertFalse(presenter.recordings.isWindowVisible)
 
@@ -1494,7 +1716,7 @@ final class MainWindowTests: XCTestCase {
     func testRecordingsRefreshesNeverCreateOrShowTheWindow() async throws {
         try await withRecordingsFixture { f in
             try await withFixtureController(f) { controller in
-                let presenter = MainWindowPresenter(controller: controller, frameAutosaveName: nil)
+                let presenter = MainWindowPresenter(controller: controller, frameAutosaveName: nil, isWindowOnScreen: ignoringOcclusion)
                 defer { presenter.window?.close() }
                 let model = presenter.recordings
 
@@ -1542,7 +1764,7 @@ final class MainWindowTests: XCTestCase {
     func testSwitchingToRecordingsInAnOpenWindowRefreshesAtOnce() async throws {
         try await withRecordingsFixture { f in
             try await withFixtureController(f) { controller in
-                let presenter = MainWindowPresenter(controller: controller, frameAutosaveName: nil)
+                let presenter = MainWindowPresenter(controller: controller, frameAutosaveName: nil, isWindowOnScreen: ignoringOcclusion)
                 defer { presenter.window?.close() }
                 let model = presenter.recordings
                 // Open on a section without the table. The sidebar badge needs the index there too.
@@ -2424,6 +2646,7 @@ final class MainWindowTests: XCTestCase {
                 let presenter = MainWindowPresenter(
                     controller: controller,
                     frameAutosaveName: nil,
+                    isWindowOnScreen: ignoringOcclusion,
                     onStartRecording: {
                         starts.value += 1
                         preparing.value = true
@@ -2839,7 +3062,7 @@ extension MainWindowTests {
             let settings = controller.settings
             XCTAssertTrue(settings.showInDockWhileWindowOpen, "On by default")
             let fake = FakeActivation()
-            let presenter = MainWindowPresenter(controller: controller, frameAutosaveName: nil, activation: fake.seam)
+            let presenter = MainWindowPresenter(controller: controller, frameAutosaveName: nil, isWindowOnScreen: ignoringOcclusion, activation: fake.seam)
             defer {
                 // No app to give focus back to, so nothing runs after the test.
                 fake.frontmost = nil
@@ -2916,7 +3139,7 @@ extension MainWindowTests {
         try withController { controller, log in
             let fake = FakeActivation()
             fake.frontmost = 111
-            let presenter = MainWindowPresenter(controller: controller, frameAutosaveName: nil, activation: fake.seam)
+            let presenter = MainWindowPresenter(controller: controller, frameAutosaveName: nil, isWindowOnScreen: ignoringOcclusion, activation: fake.seam)
             defer {
                 fake.frontmost = nil
                 presenter.window?.close()
@@ -2996,7 +3219,7 @@ extension MainWindowTests {
             let fake = FakeActivation()
             fake.frontmost = 111
             fake.focusReturnDelay = .milliseconds(300)
-            let presenter = MainWindowPresenter(controller: controller, frameAutosaveName: nil, activation: fake.seam)
+            let presenter = MainWindowPresenter(controller: controller, frameAutosaveName: nil, isWindowOnScreen: ignoringOcclusion, activation: fake.seam)
             defer {
                 fake.frontmost = nil
                 presenter.window?.close()
@@ -3020,7 +3243,7 @@ extension MainWindowTests {
     func testSectionSelectionSearchAndFiltersSurviveClosingAndReopeningTheWindow() async throws {
         try await withRecordingsFixture { f in
             try await withFixtureController(f) { controller in
-                let presenter = MainWindowPresenter(controller: controller, frameAutosaveName: nil)
+                let presenter = MainWindowPresenter(controller: controller, frameAutosaveName: nil, isWindowOnScreen: ignoringOcclusion)
                 defer { presenter.window?.close() }
                 let model = presenter.recordings
                 presenter.show(sessionId: f.completed)
@@ -3255,7 +3478,7 @@ extension MainWindowTests {
                 }
                 XCTAssertEqual(find.map(\.title), ["Find Recordings…"], "Command-F is in the Edit menu")
 
-                let presenter = MainWindowPresenter(controller: controller, frameAutosaveName: nil)
+                let presenter = MainWindowPresenter(controller: controller, frameAutosaveName: nil, isWindowOnScreen: ignoringOcclusion)
                 defer { presenter.window?.close() }
                 let delegate = AppDelegate()
                 delegate.setMainPresenterForTesting(presenter)
@@ -3306,7 +3529,7 @@ extension MainWindowTests {
         XCTAssertTrue(app.contains("appDelegate.showMainWindow(section: section, source: .command)"))
 
         try withController { controller, log in
-            let presenter = MainWindowPresenter(controller: controller, frameAutosaveName: nil)
+            let presenter = MainWindowPresenter(controller: controller, frameAutosaveName: nil, isWindowOnScreen: ignoringOcclusion)
             defer { presenter.window?.close() }
             let delegate = AppDelegate()
             delegate.setMainPresenterForTesting(presenter)
@@ -3425,7 +3648,7 @@ extension MainWindowTests {
             // create the presenter. An active accessory leaves the previous app's menu bar on screen.
             fake.frontmost = own
             fake.menuBarOwner = 777
-            let presenter = MainWindowPresenter(controller: controller, frameAutosaveName: nil, activation: fake.seam)
+            let presenter = MainWindowPresenter(controller: controller, frameAutosaveName: nil, isWindowOnScreen: ignoringOcclusion, activation: fake.seam)
             defer {
                 fake.frontmost = nil
                 presenter.window?.close()
@@ -3477,7 +3700,7 @@ extension MainWindowTests {
             let fake = FakeActivation()
             let own = FakeActivation.ownProcessIdentifier
             fake.frontmost = 111
-            let presenter = MainWindowPresenter(controller: controller, frameAutosaveName: nil, activation: fake.seam)
+            let presenter = MainWindowPresenter(controller: controller, frameAutosaveName: nil, isWindowOnScreen: ignoringOcclusion, activation: fake.seam)
             defer {
                 fake.frontmost = nil
                 fake.anotherWindowIsOpen = false
@@ -3605,7 +3828,7 @@ extension MainWindowTests {
     @MainActor
     func testRecordingsSidebarRowShowsTheUnfinishedCountInEverySection() throws {
         try withController { controller, _ in
-            let presenter = MainWindowPresenter(controller: controller, frameAutosaveName: nil)
+            let presenter = MainWindowPresenter(controller: controller, frameAutosaveName: nil, isWindowOnScreen: ignoringOcclusion)
             defer { presenter.window?.close() }
             let recordings = presenter.recordings
             // Command-comma in a new launch: the window has not shown Recordings, Overview or Contexts yet.
@@ -3722,4 +3945,11 @@ private final class FakeCommandFocus {
 /// window reports itself key.
 private final class KeyWindowForTesting: NSWindow {
     override var isKeyWindow: Bool { true }
+}
+
+/// Hosted tests follow whether the window is shown and not minimized, not whether other apps cover it, so their
+/// refresh and readiness loops do not depend on what else is on the test Mac's screen.
+@MainActor
+private func ignoringOcclusion(_ window: NSWindow) -> Bool {
+    window.isVisible && !window.isMiniaturized
 }

@@ -77,9 +77,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         MetadataSampler.requestTrust(prompt: false)
         controller.vault.pruneCompletedOlderThan(days: controller.settings.retentionDays)
         // Open the window first so a first-run permissions window stays in front of it.
+        // A Login Item launch stays in the menu bar. AppKit still handles the launch event here, so it is readable.
         if MainWindowLaunchPolicy.shouldShowOnLaunch(
             arguments: ProcessInfo.processInfo.arguments,
-            environment: ProcessInfo.processInfo.environment
+            environment: ProcessInfo.processInfo.environment,
+            launchedAsLoginItem: MainWindowLaunchPolicy.isLoginItemLaunch(NSAppleEventManager.shared().currentAppleEvent)
         ) {
             showMainWindow(source: .launch)
         }
@@ -98,8 +100,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// New Recording… (Command-N).
     @objc func startRecording(_ sender: Any?) {
-        menuBar?.requestStart()
+        menuBar?.startFromCommand()
     }
 
     @objc func showSettingsWindow(_ sender: Any?) {
@@ -182,6 +185,8 @@ final class MainWindowPresenter: NSObject, NSWindowDelegate {
     private let autosaveName: String?
     /// Nil leaves the activation policy and other apps alone.
     private let activation: MainWindowActivation?
+    /// Whether the window is on screen after AppKit reports an occlusion change.
+    private let isWindowOnScreen: @MainActor (NSWindow) -> Bool
     private(set) var window: NSWindow?
     /// True from `show()` until the window closes, while it is minimized too. The Dock tile follows it.
     private(set) var isWindowOpen = false
@@ -200,9 +205,14 @@ final class MainWindowPresenter: NSObject, NSWindowDelegate {
 
     /// Tests pass `nil` so window frames never reach the app's real defaults, and leave `activation` nil so the
     /// test host never gets a Dock tile or activates another app. The app delegate passes `.live`.
+    /// `isWindowOnScreen` defaults to the live read, visible, not minimized and not covered by other windows. Hosted
+    /// tests ignore occlusion so what else is on the test Mac's screen cannot stop the window's periodic work.
     init(
         controller: SessionController,
         frameAutosaveName: String? = MainWindowPresenter.frameAutosaveName,
+        isWindowOnScreen: @escaping @MainActor (NSWindow) -> Bool = {
+            $0.isVisible && !$0.isMiniaturized && $0.occlusionState.contains(.visible)
+        },
         activation: MainWindowActivation? = nil,
         onStartRecording: @escaping @MainActor () -> Void = {},
         isPreparingRecording: @escaping @MainActor () -> Bool = { false }
@@ -211,11 +221,12 @@ final class MainWindowPresenter: NSObject, NSWindowDelegate {
         self.navigation = navigation
         self.controller = controller
         self.autosaveName = frameAutosaveName
+        self.isWindowOnScreen = isWindowOnScreen
         self.activation = activation
         let recordings = RecordingsModel(
             library: SessionLibrary(vault: controller.vault),
             navigation: navigation,
-            dependencies: .live(controller: controller, startRecording: onStartRecording)
+            dependencies: .live(controller: controller, startRecording: onStartRecording, isPreparingRecording: isPreparingRecording)
         )
         self.recordings = recordings
         self.overview = OverviewModel(
@@ -237,6 +248,8 @@ final class MainWindowPresenter: NSObject, NSWindowDelegate {
             )
         )
         super.init()
+        // Relaunch ScrumTrace brings the window back only when it is open.
+        controller.isMainWindowOpen = { [weak self] in self?.isWindowOpen ?? false }
         recordings.observe(controller: controller)
         overview.observe(controller: controller)
         contexts.observe(controller: controller)
@@ -472,9 +485,10 @@ final class MainWindowPresenter: NSObject, NSWindowDelegate {
         setWindowVisible(true)
     }
 
+    /// Fully covered by other windows counts as hidden: no periodic work until the window is uncovered.
     func windowDidChangeOcclusionState(_ notification: Notification) {
         guard let window else { return }
-        setWindowVisible(window.isVisible && !window.isMiniaturized && window.occlusionState.contains(.visible))
+        setWindowVisible(isWindowOnScreen(window))
     }
 
     /// Keeps the window at least 840×580 points of content, for user resizes and for a

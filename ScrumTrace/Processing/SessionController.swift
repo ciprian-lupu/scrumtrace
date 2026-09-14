@@ -38,6 +38,13 @@ final class SessionController: ObservableObject {
     private var lastMetaSignature = ""
     private var terminateRequested = false
     let captureFreeze: CaptureFreeze
+    #if os(macOS)
+    /// True while the main window is open, minimized included. The main window's presenter connects it, so
+    /// Relaunch ScrumTrace brings the window back only when it was open.
+    var isMainWindowOpen: @MainActor () -> Bool = { false }
+    /// Opens a new ScrumTrace with these arguments and quits this one. Tests replace it.
+    var relaunchApplication: @MainActor ([String]) -> Void = { CapturePermissions.relaunchRunningApp(arguments: $0) }
+    #endif
 
     init(settings: AppSettings, vault: SessionVault = SessionVault()) {
         self.settings = settings
@@ -1220,12 +1227,17 @@ final class SessionController: ObservableObject {
         SystemPrivacySettings.openMicrophone()
     }
 
+    /// The new instance returns to the menu bar unless the main window is open now, so Relaunch from the menu
+    /// with the window closed, or from the agent loop's `--background` instance, shows no window.
     func relaunchForPermissions() {
         guard canChangeCaptureSettings else {
             AgentLog.event("relaunch_ignored", ["reason": "session_active"])
             return
         }
-        CapturePermissions.relaunchRunningApp()
+        relaunchApplication(MainWindowLaunchPolicy.relaunchArguments(
+            currentArguments: ProcessInfo.processInfo.arguments,
+            windowOpen: isMainWindowOpen()
+        ))
     }
     #endif
 

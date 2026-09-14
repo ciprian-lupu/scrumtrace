@@ -812,6 +812,8 @@ final class ProductContextTests: XCTestCase {
             let presenter = MainWindowPresenter(
                 controller: controller,
                 frameAutosaveName: nil,
+                // Other apps covering the test window must not stop the loops this test waits for.
+                isWindowOnScreen: { $0.isVisible && !$0.isMiniaturized },
                 onStartRecording: {
                     state.starts.append(settings.contextLibrary.selectedID)
                     // The app's flow opens the recording-context window.

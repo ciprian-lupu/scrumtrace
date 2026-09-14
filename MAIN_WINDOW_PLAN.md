@@ -148,6 +148,8 @@ The existing `SettingsView` with its six tabs, unchanged. ⌘, and the menu’s
 | Trigger | Result |
 |---|---|
 | Launch from Finder / Launchpad / Spotlight | Window opens on Overview. Skipped when launched with `--background` (the LaunchAgent loop) or when the first-run onboarding window is showing on top — it still opens behind it. |
+| Launch as a Login Item | Menu bar only. The launch event says `keyAELaunchedAsLogInItem`. |
+| Relaunch ScrumTrace | The new instance gets `--background` unless the window was open, and always when this instance had it. |
 | Icon click while running (reopen) | Window fronted, section unchanged. No longer opens Settings. |
 | Menu bar → **Open ScrumTrace…** | Same as reopen. New item placed directly above *Settings*. |
 | ⌘, / *Settings Window…* / *Agent Log…* | Window on Settings, tab selected. |
@@ -684,6 +686,15 @@ task kept the contract pins in §1.5 and passed `scripts/test_contracts.py`.
 - Launch shows the window first, then `OnboardingWindow.presentIfNeeded()`, so the first-run
   permissions window stays on top. `MainWindowLaunchPolicy.shouldShowOnLaunch` returns false for
   `--background` and for hosted XCTest runs.
+- A Login Item launch stays in the menu bar too: `applicationDidFinishLaunching` passes
+  `MainWindowLaunchPolicy.isLoginItemLaunch(NSAppleEventManager.shared().currentAppleEvent)`, true when the
+  launch event's `keyAEPropData` is `keyAELaunchedAsLogInItem`. macOS may not mark a relaunch by Resume at
+  login that way, so such a launch can still show the window (not checked on a Mac).
+- Relaunch ScrumTrace opens the new instance with `MainWindowLaunchPolicy.relaunchArguments`: `--background`
+  unless the main window is open (minimized counts), and always when this instance was started with it. The
+  presenter tells `SessionController.isMainWindowOpen` whether its window is open. A relaunch with the window
+  closed therefore passes `--background` on: a later Relaunch from that instance stays in the menu bar even if
+  the window was opened in between (manual check 6).
 - The detail pane is clipped so the banner and the Settings tab strip stay visible at the minimum
   size. The banner samples whether Resume is allowed every 0.5 s, and only while paused.
 
@@ -735,6 +746,15 @@ task kept the contract pins in §1.5 and passed `scripts/test_contracts.py`.
   Contexts), so a window reopened there does not show stale rows. This touched `RecordingsView.swift`.
 - `MenuBarController.isPreparingRecording` became `private(set)`; `UpdateChecker` gained a static
   `lastResult` written by `check()`. The window never makes a network request.
+- A window Start logs `main_start` once, then calls `requestStart()`, which logs no start row. Only the
+  status-bar menu's Start logs `menu_start`, and ⌘N logs `command_start`. `scripts/inspect_gate0_log.py`
+  checks the capture-area overlay after any of the three. Tests replace `askMeetingNotice` so a Start stops
+  at the notice without an alert. Overview, Recordings and Contexts check what the flow checks (recording or
+  analysis idle, no Start showing its context window) before they log `main_start`, so a refused Start logs
+  no start row.
+- The presenter's `isWindowOnScreen` decides visibility after an occlusion change. The app uses the live
+  read (visible, not minimized, not covered); hosted tests ignore occlusion so the test Mac's screen cannot
+  stop the loops they wait for.
 - The meeting-notice row is marked as needing action but never blocks recording, because Start
   asks for the notice itself. Only the Screen Recording and microphone rows block.
 - The update line appears only when a check that already ran found a newer release.
@@ -810,3 +830,8 @@ have not been run on a Mac:
 4. First run: close the main window while the permissions window is open; the permissions window
    keeps its Dock tile and focus.
 5. Turn *Show ScrumTrace in the Dock while its window is open* off while the window has focus.
+6. Login Item and Relaunch: add ScrumTrace in System Settings → General → Login Items, log out and in;
+   ScrumTrace stays in the menu bar with no window and no Dock tile. The unit test builds the launch event
+   itself, so this also confirms that `currentAppleEvent` holds the launch event in
+   `applicationDidFinishLaunching` under the SwiftUI app delegate adaptor. Then choose Relaunch ScrumTrace
+   with the window closed (menu bar only) and with it open (the window returns).

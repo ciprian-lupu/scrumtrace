@@ -121,6 +121,8 @@ def main() -> int:
     picker_confirm = 0
     picker_cancel = 0
     menu_start = 0
+    main_start = 0
+    command_start = 0
     start_requested = 0
     start_without_overlay = 0
     awaiting_overlay = False
@@ -160,8 +162,14 @@ def main() -> int:
             pause_ok += 1
         elif name == "pin_ok":
             pin_ok += 1
-        elif name == "menu_start":
-            menu_start += 1
+        elif name in {"menu_start", "main_start", "command_start"}:
+            # The status-bar menu, the main window and Command-N each log their own start row.
+            if name == "menu_start":
+                menu_start += 1
+            elif name == "main_start":
+                main_start += 1
+            else:
+                command_start += 1
             awaiting_overlay = True
             saw_open = False
             saw_confirm = False
@@ -204,6 +212,8 @@ def main() -> int:
             "pause_ok": pause_ok,
             "pin_ok": pin_ok,
             "menu_start": menu_start,
+            "main_start": main_start,
+            "command_start": command_start,
             "picker_open": picker_open,
             "picker_confirm": picker_confirm,
             "picker_cancel": picker_cancel,

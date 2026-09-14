@@ -151,7 +151,7 @@ Until Record stays up, do not start the 20-minute Gate 1 run.
 
 The app writes `~/Library/Logs/ScrumTrace/agent.jsonl` (technical fields only: no titles, URLs, notes, transcripts, or keys). Live session: `recording.lock` (ignored if its pid is dead).
 
-Useful events: `launch`, `permission_probe`, `start_control_state`, `menu_start`, `capture_area_picker`, `start_*`, `recorder_sckit_*`, `mic_*`, `stop_requested`, `halt`, `terminate`, `claude_handoff`, `claude_handoff_fail`, `chatgpt_handoff`, `chatgpt_handoff_fail`. Main window: `main_open` (source and section only), `main_dock` (policy), `main_focus_return` (activated), and `main_*` actions that carry at most a session id or one small enum (`section`, `action`, `kind`).
+Useful events: `launch`, `permission_probe`, `start_control_state`, `menu_start` (the status-bar menu; the window logs `main_start` and ⌘N `command_start`), `capture_area_picker`, `start_*`, `recorder_sckit_*`, `mic_*`, `stop_requested`, `halt`, `terminate`, `claude_handoff`, `claude_handoff_fail`, `chatgpt_handoff`, `chatgpt_handoff_fail`. Main window: `main_open` (source and section only), `main_dock` (policy), `main_focus_return` (activated), and `main_*` actions that carry at most a session id or one small enum (`section`, `action`, `kind`).
 
 Cloud read:
 

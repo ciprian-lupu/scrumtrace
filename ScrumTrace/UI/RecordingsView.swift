@@ -409,11 +409,14 @@ struct RecordingsDependencies {
     /// Runs off the main actor.
     var loadDetail: @Sendable (String) -> SessionDetailFacts
     var startRecording: @MainActor () -> Void
+    /// True while a Start already shows its recording-context window, when the Start flow refuses another Start.
+    var isPreparingRecording: @MainActor () -> Bool
 
     @MainActor
     static func live(
         controller: SessionController,
-        startRecording: @escaping @MainActor () -> Void
+        startRecording: @escaping @MainActor () -> Void,
+        isPreparingRecording: @escaping @MainActor () -> Bool = { false }
     ) -> RecordingsDependencies {
         let vault = controller.vault
         return RecordingsDependencies(
@@ -449,7 +452,8 @@ struct RecordingsDependencies {
             },
             deleteSession: { try vault.deleteSession(id: $0) },
             loadDetail: { SessionDetailFacts.load(vault: vault, id: $0) },
-            startRecording: startRecording
+            startRecording: startRecording,
+            isPreparingRecording: isPreparingRecording
         )
     }
 }
@@ -965,9 +969,11 @@ final class RecordingsModel: ObservableObject {
         return NSItemProvider(object: folder as NSURL)
     }
 
+    /// Runs the menu's Start flow. Checks what the flow checks first, so a Start it would refuse (recording, analysis
+    /// or a start running, or a Start already showing its context window) logs no `main_start`.
     func startRecording() {
         syncCaptureState()
-        guard canChangeSessions else { return }
+        guard canChangeSessions, !dependencies.isPreparingRecording() else { return }
         AgentLog.event("main_start", [:])
         dependencies.startRecording()
     }

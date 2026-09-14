@@ -170,16 +170,36 @@ enum MainSidebarBadge {
     }
 }
 
-/// Launch-time decision, kept pure so it is unit-tested without AppKit.
+/// Launch-time decisions, kept pure so they are unit-tested without AppKit.
 enum MainWindowLaunchPolicy {
-    /// Passed by the LaunchAgent log loop so it never pops a window.
+    /// Passed by the LaunchAgent log loop so it never pops a window, and by Relaunch ScrumTrace unless the window
+    /// was open.
     static let backgroundArgument = "--background"
 
-    static func shouldShowOnLaunch(arguments: [String], environment: [String: String]) -> Bool {
+    /// True only for a launch the user opened: Finder, Launchpad, Spotlight, the Dock or `open` without
+    /// `--background`. A Login Item launch stays in the menu bar, and so does a relaunch that forwarded
+    /// `--background`.
+    static func shouldShowOnLaunch(arguments: [String], environment: [String: String], launchedAsLoginItem: Bool) -> Bool {
         if arguments.contains(backgroundArgument) { return false }
+        if launchedAsLoginItem { return false }
         // Hosted XCTest runs never open windows at launch.
         if environment["XCTestConfigurationFilePath"] != nil { return false }
         return true
+    }
+
+    /// True when `event` is the open-application event macOS sends to a Login Item at login. The app delegate
+    /// passes `NSAppleEventManager.shared().currentAppleEvent`, which holds that event only while AppKit handles
+    /// the launch.
+    static func isLoginItemLaunch(_ event: NSAppleEventDescriptor?) -> Bool {
+        guard let event, event.eventClass == kCoreEventClass, event.eventID == kAEOpenApplication else { return false }
+        return event.paramDescriptor(forKeyword: keyAEPropData)?.enumCodeValue == keyAELaunchedAsLogInItem
+    }
+
+    /// Arguments for Relaunch ScrumTrace. The new instance shows the window only when it was open, and a process
+    /// started with `--background` keeps the flag, so the agent loop's instance never shows the window.
+    static func relaunchArguments(currentArguments: [String], windowOpen: Bool) -> [String] {
+        if currentArguments.contains(backgroundArgument) || !windowOpen { return [backgroundArgument] }
+        return []
     }
 }
 

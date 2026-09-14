@@ -3365,6 +3365,42 @@ def test_main_window_routing_and_private_index() -> None:
     assert "Open ScrumTrace…" in readme
     assert "--args --background" in readme
 
+    # A Login Item launch, and Relaunch ScrumTrace unless the window was open, stay in the menu bar.
+    assert (
+        "launchedAsLoginItem: MainWindowLaunchPolicy.isLoginItemLaunch(NSAppleEventManager.shared().currentAppleEvent)"
+        in app
+    )
+    assert "keyAELaunchedAsLogInItem" in window
+    permissions = (ROOT / "ScrumTrace" / "Capture" / "CapturePermissions.swift").read_text()
+    relaunch_app = permissions.split("static func relaunchRunningApp(arguments: [String])")[1].split("\n    }\n")[0]
+    assert "configuration.arguments = arguments" in relaunch_app
+    session_controller = (ROOT / "ScrumTrace" / "Processing" / "SessionController.swift").read_text()
+    relaunch = session_controller.split("func relaunchForPermissions()")[1].split("\n    }\n")[0]
+    assert "MainWindowLaunchPolicy.relaunchArguments(" in relaunch
+    assert "isMainWindowOpen()" in relaunch
+
+    # menu_start is the status-bar menu's Start only. The window logs main_start and Command-N command_start,
+    # and the Gate 0 inspector checks the capture-area overlay after any of the three.
+    menu_bar = (ROOT / "ScrumTrace" / "UI" / "MenuBarController.swift").read_text()
+    assert menu_bar.count('"menu_start"') == 1
+    assert 'runStartFlow(logging: "menu_start")' in menu_bar.split("func start()")[1].split("\n    }\n")[0]
+    assert "runStartFlow(logging: nil)" in menu_bar.split("func requestStart()")[1].split("\n")[0]
+    assert "menuBar?.startFromCommand()" in app.split("func startRecording(_ sender: Any?)")[1].split("\n    }\n")[0]
+    gate0 = (ROOT / "scripts" / "inspect_gate0_log.py").read_text()
+    assert '{"menu_start", "main_start", "command_start"}' in gate0
+
+    # Recordings checks what the Start flow checks before it logs main_start, like Overview and Contexts.
+    assert (
+        ".live(controller: controller, startRecording: onStartRecording, isPreparingRecording: isPreparingRecording)"
+        in app
+    )
+    recordings_view = (ROOT / "ScrumTrace" / "UI" / "RecordingsView.swift").read_text()
+    recordings_start = recordings_view.split("\n    func startRecording() {")[1].split("\n    }\n")[0]
+    assert "!dependencies.isPreparingRecording()" in recordings_start
+    assert recordings_start.index("!dependencies.isPreparingRecording()") < recordings_start.index('"main_start"')
+    # The README states the relaunch rule with its --background exception.
+    assert "brings the window back only if it was open, and never when ScrumTrace was started with `--background`" in readme
+
 
 def main() -> None:
     test_export_has_no_archive_and_no_tokens()
