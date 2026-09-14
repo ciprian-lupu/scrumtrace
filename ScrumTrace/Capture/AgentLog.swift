@@ -137,6 +137,65 @@ enum AgentLog {
         }
     }
 
+    /// `recording.lock` as `setRecording` writes it: "<sessionId>\n<pid>\n".
+    struct RecordingLock: Equatable, Sendable {
+        let sessionId: String
+        let pid: Int32
+    }
+
+    /// Nil unless the text has a session line followed by a positive pid line.
+    static func parseRecordingLock(_ text: String) -> RecordingLock? {
+        let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
+        guard lines.count >= 2,
+              let pid = Int32(lines[1].trimmingCharacters(in: .whitespacesAndNewlines)),
+              pid > 0 else { return nil }
+        return RecordingLock(sessionId: lines[0].trimmingCharacters(in: .whitespacesAndNewlines), pid: pid)
+    }
+
+    /// The lock of a live recording. Nil when the file is missing, a symlink or malformed, or
+    /// when its pid is not a running ScrumTrace: a dead pid is stale, as `mac_agent_loop.sh` treats
+    /// it, and so is a pid the system handed to another program after ScrumTrace crashed while
+    /// recording. Read-only on purpose, because a recording that is starting may be replacing the file.
+    static func liveRecordingLock(
+        at url: URL = AgentLog.recordingLockURL,
+        isAlive: (Int32) -> Bool = AgentLog.isRecordingProcess
+    ) -> RecordingLock? {
+        guard let text = ExportRel.unfollowedUTF8Text(url, maxBytes: 4_096),
+              let lock = parseRecordingLock(text),
+              isAlive(lock.pid) else { return nil }
+        return lock
+    }
+
+    /// `kill(pid, 0)` sends no signal. EPERM means the process exists but belongs to another user.
+    static func isProcessAlive(_ pid: Int32) -> Bool {
+        guard pid > 0 else { return false }
+        if kill(pid, 0) == 0 { return true }
+        return errno == EPERM
+    }
+
+    /// A running process whose executable is ScrumTrace, the only program that writes `recording.lock`.
+    static func isRecordingProcess(_ pid: Int32) -> Bool {
+        isProcessAlive(pid) && isScrumTraceProcess(pid)
+    }
+
+    /// True when the executable `proc_pidpath` reports for `pid` has ScrumTrace's name, as an installed
+    /// copy and a development build both do. False when the path cannot be read.
+    static func isScrumTraceProcess(_ pid: Int32) -> Bool {
+        guard pid > 0 else { return false }
+        #if canImport(Darwin)
+        var buffer = [CChar](repeating: 0, count: Int(MAXPATHLEN) * 4)
+        let length = proc_pidpath(pid, &buffer, UInt32(buffer.count))
+        guard length > 0 else { return false }
+        let executable = (String(cString: buffer) as NSString).lastPathComponent
+        return executable == scrumTraceExecutableName
+            || executable == Bundle.main.executableURL?.lastPathComponent
+        #else
+        return true
+        #endif
+    }
+
+    static let scrumTraceExecutableName = "ScrumTrace"
+
     static func readTail(maxLines: Int = 250, runID: String? = nil, query: String = "", newestFirst: Bool = false) -> String {
         guard FileManager.default.fileExists(atPath: fileURL.path),
               let data = try? Data(contentsOf: fileURL),

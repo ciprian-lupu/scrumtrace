@@ -3254,6 +3254,535 @@ def test_sanitize_untrusted_strips_whitespace_breakout() -> None:
     assert wrapped.count("untrusted_meeting_data") == 2
 
 
+def test_main_window_routing_and_private_index() -> None:
+    app = (ROOT / "ScrumTrace" / "App" / "AppDelegate.swift").read_text()
+    for pinned in (
+        "height: 640",
+        "SettingsView(settings:",
+        "settings_open",
+        "OnboardingWindow.presentIfNeeded",
+        "snapshotLaunchState",
+        "sweepPrivateTemporaryOrphans",
+        'AgentLog.eventSync("launch"',
+        'AgentLog.eventSync("terminate"',
+        "haltCaptureForTermination",
+        "captureFreeze: controller.captureFreeze",
+        "applicationWillFinishLaunching",
+        "tryExecFromArguments",
+        "requestTrust(prompt: false)",
+    ):
+        assert pinned in app, pinned
+    assert "requestTrust(prompt: true)" not in app
+
+    # The app icon fronts the main window. It must never route back to a Settings-only window.
+    reopen = app.split("func applicationShouldHandleReopen")[1].split("\n    }\n")[0]
+    assert "mainPresenter.show(" in reopen
+    assert "showSettingsWindow" not in reopen
+    assert "show(section: .settings)" not in reopen
+    assert "show(tab:" not in reopen
+    # Nor through a section assignment or a showMainWindow call that names Settings.
+    assert "settings" not in reopen.lower(), "applicationShouldHandleReopen routes to Settings"
+
+    # Gate 0: only the presenter's show path activates ScrumTrace, after an explicit user action.
+    # Every spelling that activates ScrumTrace itself counts; activating another app's
+    # NSRunningApplication (the focus hand-back in MainWindow.swift) does not.
+    self_activation = re.compile(
+        r"\b(?:NSApp|NSApplication\s*\.\s*shared|NSRunningApplication\s*\.\s*current)\s*[?!]?\s*\.\s*activate\b"
+        r"|\bactivate\s*\(\s*ignoringOtherApps\b"
+    )
+    # The split drops the newline after the last method's closing brace; put it back.
+    presenter = app.split("final class MainWindowPresenter")[1].split("\n}\n")[0] + "\n"
+    show_bodies = []
+    for declaration in re.finditer(r"\n    func show\(", presenter):
+        end = presenter.find("\n    }\n", declaration.start())
+        assert end > declaration.start()
+        show_bodies.append((declaration.start(), end))
+    assert show_bodies
+    activations = [found.start() for found in self_activation.finditer(presenter)]
+    assert "NSApp.activate(" in presenter
+    assert activations, "MainWindowPresenter.show() must activate ScrumTrace"
+    for offset in activations:
+        assert any(start < offset < end for start, end in show_bodies), "activation outside func show("
+    assert len(self_activation.findall(app)) == len(activations), "activation outside MainWindowPresenter"
+    for name in ("HotkeyManager.swift", "RecordingHUDWindow.swift"):
+        source = (ROOT / "ScrumTrace" / "UI" / name).read_text()
+        for reference in ("MainWindowPresenter", "mainPresenter", "showMainWindow"):
+            assert reference not in source, (name, reference)
+        assert not self_activation.search(source), (name, "activates ScrumTrace")
+    for name in ("MainWindow.swift", "RecordingsView.swift", "OverviewView.swift", "ContextsView.swift"):
+        source = (ROOT / "ScrumTrace" / "UI" / name).read_text()
+        assert "requestTrust(prompt: true)" not in source, name
+        assert "CGRequestScreenCaptureAccess" not in source, name
+        assert "NSApp.activate(" not in source, name
+        assert not self_activation.search(source), (name, "activates ScrumTrace")
+    window = (ROOT / "ScrumTrace" / "UI" / "MainWindow.swift").read_text()
+    assert 'backgroundArgument = "--background"' in window
+    loop = (ROOT / "scripts" / "mac_agent_loop.sh").read_text()
+    assert 'open "$STABLE" --args --background' in loop
+
+    # C2: the session index maps manifest metadata only, never captured text.
+    library = (ROOT / "ScrumTrace" / "Storage" / "SessionLibrary.swift").read_text()
+    summary = library.split("struct SessionSummary:")[1].split("\n}\n")[0]
+    assert "init(manifest: SessionManifest, exportProbe: SessionExportProbe)" in summary
+    # Doc comments may name archive files. The code may not read them.
+    code = "\n".join(line for line in summary.splitlines() if not line.lstrip().startswith("//"))
+    # hasFullTranscriptArchive is the export probe's existence flag (plan H02), not transcript text.
+    folded = code.replace("hasFullTranscriptArchive", "").lower()
+    for word in ("transcript", "note", "title", "url", "observed", "stated", "inferred", "quote", "agentInstructions"):
+        assert word not in code, word
+        assert word.lower() not in folded, word
+
+    # The same rule for the whole file: task counts, export probes, the search filter and any helper.
+    library_code = "\n".join(line for line in library.splitlines() if not line.lstrip().startswith("//"))
+    # Allowed: the existence flag and the size-only probes of export files, never their contents.
+    probed = library_code
+    for allowed in (
+        "hasFullTranscriptArchive",
+        "bytes(ScrumTracePath.fullTranscript)",
+        'ScrumTracePath.export + "/full_transcript.json"',
+    ):
+        probed = probed.replace(allowed, "")
+    probed = probed.lower()
+    for word in (
+        "transcript", "note", "title", "observed", "stated", "inferred", "quote", "agentinstructions",
+        "evidence", "speaker", "segment", "candidate", "payload",
+    ):
+        assert word not in probed, ("SessionLibrary.swift", word)
+    # "url" names file locations in this file, so check member reads of captured text instead.
+    captured_member = re.search(r"\.\s*(?:url|urls|windowTitle|text|segments|words)\b", library_code)
+    assert not captured_member, ("SessionLibrary.swift", captured_member and captured_member.group(0))
+    manifest_fields = set(re.findall(r"\bmanifest\s*\.\s*(\w+)", library_code))
+    assert "sessionId" in manifest_fields
+    assert manifest_fields <= {
+        "sessionId", "createdAt", "pipelineStatus", "completedStages", "duration", "pauses",
+        "productContext", "shots", "slices", "tasks", "uploadConsent", "omitted",
+    }, manifest_fields
+
+    agents = (ROOT / "AGENTS.md").read_text()
+    assert "2026-09-13" in agents
+    assert "The main window is not gate evidence" in agents
+    readme = (ROOT / "README.md").read_text()
+    assert "Open ScrumTrace…" in readme
+    assert "--args --background" in readme
+
+    # A Login Item launch, and Relaunch ScrumTrace unless the window was open, stay in the menu bar.
+    assert (
+        "launchedAsLoginItem: MainWindowLaunchPolicy.isLoginItemLaunch(NSAppleEventManager.shared().currentAppleEvent)"
+        in app
+    )
+    assert "keyAELaunchedAsLogInItem" in window
+    permissions = (ROOT / "ScrumTrace" / "Capture" / "CapturePermissions.swift").read_text()
+    relaunch_app = permissions.split("static func relaunchRunningApp(arguments: [String])")[1].split("\n    }\n")[0]
+    assert "configuration.arguments = arguments" in relaunch_app
+    session_controller = (ROOT / "ScrumTrace" / "Processing" / "SessionController.swift").read_text()
+    relaunch = session_controller.split("func relaunchForPermissions()")[1].split("\n    }\n")[0]
+    assert "MainWindowLaunchPolicy.relaunchArguments(" in relaunch
+    assert "isMainWindowOpen()" in relaunch
+
+    # menu_start is the status-bar menu's Start only. The window logs main_start and Command-N command_start,
+    # and the Gate 0 inspector checks the capture-area overlay after any of the three.
+    menu_bar = (ROOT / "ScrumTrace" / "UI" / "MenuBarController.swift").read_text()
+    assert menu_bar.count('"menu_start"') == 1
+    assert 'runStartFlow(logging: "menu_start")' in menu_bar.split("func start()")[1].split("\n    }\n")[0]
+    assert "runStartFlow(logging: nil)" in menu_bar.split("func requestStart()")[1].split("\n")[0]
+    assert "menuBar?.startFromCommand()" in app.split("func startRecording(_ sender: Any?)")[1].split("\n    }\n")[0]
+    gate0 = (ROOT / "scripts" / "inspect_gate0_log.py").read_text()
+    assert '{"menu_start", "main_start", "command_start"}' in gate0
+
+    # Recordings checks what the Start flow checks before it logs main_start, like Overview and Contexts.
+    assert (
+        ".live(controller: controller, startRecording: onStartRecording, isPreparingRecording: isPreparingRecording)"
+        in app
+    )
+    recordings_view = (ROOT / "ScrumTrace" / "UI" / "RecordingsView.swift").read_text()
+    recordings_start = recordings_view.split("\n    func startRecording() {")[1].split("\n    }\n")[0]
+    assert "!dependencies.isPreparingRecording()" in recordings_start
+    assert recordings_start.index("!dependencies.isPreparingRecording()") < recordings_start.index('"main_start"')
+    # The README states the relaunch rule with its --background exception.
+    assert "brings the window back only if it was open, and never when ScrumTrace was started with `--background`" in readme
+
+
+def test_session_detail_facts_keep_only_upload_consent() -> None:
+    # C2: the Recordings detail pane decodes the selected manifest a second time. SessionDetailFacts keeps only
+    # upload consent from it: never task titles, Shot notes, window titles, URLs or transcript text.
+    recordings_view = (ROOT / "ScrumTrace" / "UI" / "RecordingsView.swift").read_text()
+    assert recordings_view.count("struct SessionDetailFacts:") == 1
+    facts = recordings_view.split("struct SessionDetailFacts:")[1].split("\nstruct SessionStageStep")[0]
+    assert "static func load(vault: SessionVault, id: String) -> SessionDetailFacts" in facts
+    assert "extension SessionDetailFacts.Consent" in facts
+    assert "init(_ consent: UploadConsent)" in facts
+    code = "\n".join(line for line in facts.splitlines() if not line.lstrip().startswith("//"))
+    # The only manifest decode in RecordingsView.swift, and the only manifest field read from it.
+    assert recordings_view.count("loadManifest(") == 1, "RecordingsView.swift decodes a manifest outside SessionDetailFacts"
+    assert "(try? vault.loadManifest(id: id)).map { Consent($0.uploadConsent) }" in code
+    closure_reads = set(re.findall(r"\$0\s*\.\s*(\w+)", code))
+    assert closure_reads == {"uploadConsent"}, closure_reads
+    assert not re.search(r"\bmanifest\s*\.\s*\w+", code), "SessionDetailFacts reads a manifest field"
+    consent_reads = set(re.findall(r"\bconsent\s*\.\s*(\w+)", code))
+    assert consent_reads <= {"approved", "provider", "model", "includesClipAudio", "includesClipVideo"}, consent_reads
+    folded = code.lower()
+    for word in (
+        "transcript", "note", "title", "observed", "stated", "inferred", "quote", "agentinstructions",
+        "evidence", "speaker", "segment", "candidate", "payload", "task", "window",
+    ):
+        assert word not in folded, ("SessionDetailFacts", word)
+    captured_member = re.search(r"\.\s*(?:url|urls|windowTitle|text|segments|words|endpoint)\b", code)
+    assert not captured_member, ("SessionDetailFacts", captured_member and captured_member.group(0))
+    # The other window views decode no manifest.
+    for name in ("MainWindow.swift", "OverviewView.swift", "ContextsView.swift"):
+        assert "loadManifest(" not in (ROOT / "ScrumTrace" / "UI" / name).read_text(), name
+    # An XCTest pins the stored fields by Mirror.
+    tests = (ROOT / "ScrumTraceTests" / "MainWindowTests.swift").read_text()
+    assert "func testDetailFactsStoreOnlyAllowListedFields()" in tests
+
+
+def test_recordings_start_copy_and_speaker_review_loading() -> None:
+    recordings_view = (ROOT / "ScrumTrace" / "UI" / "RecordingsView.swift").read_text()
+    overview_view = (ROOT / "ScrumTrace" / "UI" / "OverviewView.swift").read_text()
+
+    # The Recordings empty state's Start follows Overview's enabled rule and help text, the context window included.
+    empty = recordings_view.split("private var emptyState: some View {")[1].split("\n    }\n")[0]
+    assert ".disabled(!model.canStartRecording)" in empty
+    assert ".help(model.startUnavailableReason ?? OverviewModel.startHelp)" in empty
+    assert "canChangeSessions" not in empty
+    assert ".help(model.startUnavailableReason ?? OverviewModel.startHelp)" in overview_view
+    for source in (recordings_view, overview_view):
+        assert "var canStartRecording: Bool { canChangeSessions && !isPreparingRecording }" in source
+    assert (
+        "OverviewModel.startUnavailableReason(canChangeSessions: canChangeSessions, isPreparingRecording: isPreparingRecording)"
+        in recordings_view
+    )
+    sync = recordings_view.split("\n    func syncCaptureState() {")[1].split("\n    }\n")[0]
+    assert "dependencies.isPreparingRecording()" in sync
+    assert "updatePreparingFollow()" in sync
+
+    # Status cells carry the full label as a help tag; an unreadable row shows plain words, never the technical reason.
+    status_cell = recordings_view.split("private struct RecordingStatusCell: View {")[1].split("\nprivate struct ")[0]
+    assert ".help(label)" in status_cell
+    assert "RecordingRowText.unreadableStatus(reason)" in status_cell
+    assert "Text(reason)" not in status_cell
+    unreadable_detail = recordings_view.split("private struct UnreadableSessionDetailView: View {")[1]
+    assert "RecordingRowText.unreadableExplanation(reason)" in unreadable_detail
+    assert "(\\(reason))" not in unreadable_detail
+
+    # Delete… names the row the command came from by date and context, and the message names its id.
+    dialog = recordings_view.split(".confirmationDialog(")[1].split(".background {")[0]
+    assert "RecordingRowText.deleteTitle(model.pendingDelete.flatMap { model.entry(id: $0) })" in dialog
+    assert "presenting: model.pendingDelete" in dialog
+    assert 'Button("Delete recording", role: .destructive) { model.confirmDelete(id) }' in dialog
+    assert "Text(RecordingRowText.deleteMessage(id))" in dialog
+    menu = recordings_view.split(".contextMenu(forSelectionType: String.self) { ids in")[1].split(".onDeleteCommand")[0]
+    assert "if let id = ids.first, let entry = model.entry(id: id)" in menu
+    items = recordings_view.split("struct RecordingActionMenuItems: View {")[1].split("\n}\n")[0]
+    assert "model.perform(action, on: entry.id)" in items
+
+    # The speaker review reads the vault only in detached tasks, through its loader.
+    speaker = (ROOT / "ScrumTrace" / "UI" / "SpeakerReviewView.swift").read_text()
+    view = speaker.split("struct SpeakerReviewView: View {")[1].split("\n}\n")[0]
+    code = "\n".join(line for line in view.splitlines() if not line.lstrip().startswith("//"))
+    for read in ("vault.recentSessions(", "vault.loadManifest(", "SpeakerTimeline.load("):
+        assert read not in code, ("SpeakerReviewView", read)
+    for detached in (
+        "Task.detached(priority: .userInitiated) { loader.manifest(vault, requested) }",
+        "Task.detached(priority: .utility) { await loader.recentSessions(vault) }",
+        "Task.detached(priority: .userInitiated) { loader.transcript(url) }",
+    ):
+        assert detached in code, detached
+    settings = (ROOT / "ScrumTrace" / "UI" / "SettingsView.swift").read_text()
+    assert "vault.recentSessions(" not in settings, "Settings decodes manifests each time the Speech tab redraws"
+
+    tests = (ROOT / "ScrumTraceTests" / "MainWindowTests.swift").read_text()
+    for name in (
+        "testRecordingsEmptyStateStartWaitsLikeOverviewAndFollowsTheContextWindow",
+        "testTheStatusColumnFitsEveryStatusAtTheDefaultWindowSize",
+        "testUnreadableRowsShowPlainWordsForTheirReason",
+        "testDeleteConfirmationNamesTheRowItCameFromByDateAndContext",
+    ):
+        assert f"func {name}()" in tests, name
+    speaker_tests = (ROOT / "ScrumTraceTests" / "SpeakerTests.swift").read_text()
+    assert "func testSpeakerReviewReadsTheVaultOffTheMainActorAndOpensTheRequestedSessionFirst()" in speaker_tests
+
+    # While the window is visible the capture state is read on a timer, so a context window opened from the status-bar
+    # menu or Cmd-N, which publishes nothing on the controller, still disables the empty state's Start.
+    follow = recordings_view.split("private func updatePreparingFollow() {")[1].split("\n    }\n")[0]
+    assert "isWindowVisible" in follow
+    assert "startStateInterval" in follow
+    assert "startStateInterval: Duration = OverviewModel.evaluationInterval" in recordings_view
+    assert "func testTheDateAndContextColumnsFitAtTheDefaultWindowSize()" in tests
+
+    # Settings asks whether a manifest decodes off the main actor, never in the body the Speech tab redraws each second.
+    assert "Task.detached(priority: .userInitiated) { SpeakerReviewLoader.hasReviewableSession(in: vault) }" in settings
+    assert ".disabled(!controller.canChangeCaptureSettings || !hasReviewableSession)" in settings
+    assert "vault.listedSessionIds()" not in settings
+    assert "func testReviewSpeakersIsOfferedOnceAManifestDecodes()" in speaker_tests
+    speech_tab = settings.split("private var speechTab: some View {")[1].split("private var speechControlsDisabled")[0]
+    assert "hasReviewableSession(in:" not in speech_tab, "The Speech tab redraws every second; the check runs outside it"
+    assert "SpeakerReviewLoader.hasReviewableSession(in: vault)" in settings.split("var body: some View {")[1].split("private var speechTab")[0]
+
+
+def test_overview_card_and_window_wording() -> None:
+    overview_view = (ROOT / "ScrumTrace" / "UI" / "OverviewView.swift").read_text()
+    settings = (ROOT / "ScrumTrace" / "UI" / "SettingsView.swift").read_text()
+    recordings_view = (ROOT / "ScrumTrace" / "UI" / "RecordingsView.swift").read_text()
+    window = (ROOT / "ScrumTrace" / "UI" / "MainWindow.swift").read_text()
+    contexts_view = (ROOT / "ScrumTrace" / "UI" / "ContextsView.swift").read_text()
+
+    # Overview's Start waits while readiness blocks recording, with the blocking reason as its help tag. While
+    # recording or analysis runs, the card names that instead of readiness, and a waiting row button says why.
+    start_row = overview_view.split("private var startRow: some View {")[1].split("\n    }\n")[0]
+    assert ".disabled(!model.isStartButtonEnabled)" in start_row
+    assert ".help(model.startUnavailableReason ?? OverviewModel.startHelp)" in start_row
+    assert "model.startCard" in start_row
+    assert "readiness?.headline" not in start_row
+    assert "?? readinessStartBlock" in overview_view
+    row_view = overview_view.split("private struct OverviewReadinessRowView: View {")[1].split("\n}\n")[0]
+    assert ".help(model.unavailableReason(action) ?? action.title)" in row_view
+    # The banner's Resume says why it waits.
+    banner = window.split("struct MainLiveBanner: View {")[1].split("\n}\n")[0]
+    assert ".help(state.pauseHelp)" in banner
+
+    # One noun for the user, recordings, and the same permission words in Overview and Settings.
+    storage = overview_view.split("private var storageSection: some View {")[1].split("\n    }\n")[0]
+    assert 'LabeledContent("Keep recordings"' in storage
+    assert "sessions folder" not in storage.lower()
+    assert "Private archives is" not in overview_view
+    assert 'Picker("Keep recordings"' in settings
+    for drift in ("Keep sessions", "completed sessions", "Unfinished sessions", '"trusted"', '"not trusted"'):
+        assert drift not in settings, drift
+    assert "OverviewReadiness.accessibilityStatus(trusted:" in settings
+    assert "OverviewReadiness.microphoneStatus(" in settings
+    assert "after you stop a session" not in recordings_view
+    # The status-bar menu and the Contexts caption use the same noun.
+    menu_bar = (ROOT / "ScrumTrace" / "UI" / "MenuBarController.swift").read_text()
+    assert 'actionItem("Reveal recordings folder", #selector(revealSessions))' in menu_bar
+    assert "Reveal sessions folder" not in menu_bar
+    assert '"menu_reveal_sessions"' in menu_bar
+    product_context_views = (ROOT / "ScrumTrace" / "UI" / "ProductContextViews.swift").read_text()
+    assert "changes here apply to future recordings." in product_context_views
+    assert "future sessions" not in product_context_views
+
+    # A recording ScrumTrace stopped during reads as interrupted, above the stage bar, not as unfinished analysis.
+    assert "RecordingRowText.unfinishedNote(summary)" in overview_view
+    assert "Analysis did not finish." not in overview_view
+    detail = recordings_view.split("struct SessionDetailView: View {")[1].split("\n    private var header")[0]
+    assert detail.index("model.isInterrupted(summary)") < detail.index("SessionStageProgress(")
+
+    # Settings keeps its sides beside the widest sidebar; the Contexts table leaves Tech stack to the detail pane.
+    assert "max: Self.sidebarMaximumWidth" in window
+    table = contexts_view.split("struct ContextsTable: View {")[1].split("\n}\n")[0]
+    assert 'TableColumn("Tech stack")' not in table
+    assert "truncation: .middle" in table
+
+    tests = (ROOT / "ScrumTraceTests" / "MainWindowTests.swift").read_text()
+    for name in (
+        "testOverviewStartCardNamesRecordingOrAnalysisAndWaitsForReadiness",
+        "testInterruptedRecordingsReadAsInterruptedNotAsUnfinishedAnalysis",
+        "testSettingsKeepsItsSidesAndFooterBesideTheWidestSidebarAtTheMinimumSize",
+    ):
+        assert f"func {name}()" in tests, name
+    context_tests = (ROOT / "ScrumTraceTests" / "ProductContextTests.swift").read_text()
+    assert "func testTheContextsTableShowsProductAndRepositoryInFullAtTheDefaultWindowSize()" in context_tests
+
+
+def test_main_window_docs_match_the_build() -> None:
+    agents = (ROOT / "AGENTS.md").read_text()
+    readme = (ROOT / "README.md").read_text()
+    plan = (ROOT / "MAIN_WINDOW_PLAN.md").read_text()
+    app = (ROOT / "ScrumTrace" / "App" / "AppDelegate.swift").read_text()
+    window = (ROOT / "ScrumTrace" / "UI" / "MainWindow.swift").read_text()
+    snapshots = (ROOT / "ScrumTraceTests" / "MainWindowSnapshotTests.swift").read_text()
+
+    # Settings is a section of the main window in every doc, never a window of its own.
+    assert "Settings is a six-tab window" not in agents
+    assert "Settings is a six-tab section of the main window" in agents
+    assert "is a section of the ScrumTrace window" in readme
+
+    # The snapshot renders are documented where the next agent looks: the file, the variable the tests read and how
+    # xcodebuild passes it, that no pixel is asserted, and what cacheDisplay cannot draw. The test keeps its own note.
+    variable = re.search(r'environment\["(SCRUMTRACE_\w+)"\]', snapshots)
+    assert variable, "MainWindowSnapshotTests.swift reads no SCRUMTRACE_ variable"
+    spelled = f"TEST_RUNNER_{variable.group(1)}"
+    skip = re.search(r'XCTSkip\(\s*"([^"]*)"', snapshots)
+    assert skip and spelled in skip.group(1), "The skip message names the xcodebuild spelling"
+    assert "cacheDisplay` cannot draw Liquid Glass" in snapshots
+    assert "MainWindowSnapshotTests.swift" in agents.split("## Where to work")[1].split("## Commands")[0]
+    assert "MainWindowSnapshotTests.swift" in plan.split("## 3. Architecture")[1].split("Data flow:")[0]
+    for name, doc in (("AGENTS.md", agents), ("MAIN_WINDOW_PLAN.md", plan)):
+        for phrase in (f"{spelled}=", "Nothing is asserted about pixels", "cacheDisplay", "Liquid Glass"):
+            assert phrase in doc, (name, phrase)
+
+    # The plan states the minimum size and sidebar maximum the code enforces, the Contexts columns the table shows,
+    # and the window's current wording. The spec (§2, task H01, §6) states only current values; the §8 notes must
+    # carry the current statement but may still name an earlier value as history.
+    size = re.search(r"static let minimumContentSize = NSSize\(width: (\d+), height: (\d+)\)", app)
+    assert size, "MainWindowPresenter.minimumContentSize"
+    minimum = (size.group(1), size.group(2))
+    target = plan.split("## 2. Target experience")[1].split("## 3. Architecture")[0]
+    task_h01 = plan.split("### TASK H01")[1].split("### TASK H02")[0]
+    risks = plan.split("## 6. Risks")[1].split("## 7. Verification summary")[0]
+    note_h01 = plan.split("### H01 — window shell")[1].split("### H02")[0]
+    assert "by default, minimum {}×{}".format(*minimum) in target.split("###")[0]
+    assert "`contentMinSize` {}×{}".format(*minimum) in task_h01
+    assert "The {}×{} minimum (`MainWindowPresenter.minimumContentSize`)".format(*minimum) in note_h01
+    stated_minimum = re.compile(r"(?:minimum|contentMinSize`?)\s+(\d+)×(\d+)|(\d+)×(\d+)\s+minimum")
+    for name, section in (("§2", target), ("TASK H01", task_h01), ("§6", risks)):
+        for found in stated_minimum.finditer(section):
+            assert tuple(group for group in found.groups() if group) == minimum, (name, found.group(0))
+    sidebar = re.search(r"static let sidebarMaximumWidth: CGFloat = (\d+)", window)
+    assert sidebar, "MainWindowView.sidebarMaximumWidth"
+    assert f"at most {sidebar.group(1)} pt" in note_h01
+    assert "Tech stack ·" not in plan.split("### Contexts")[1].split("### Settings")[0]
+    assert "Reveal sessions folder" not in plan.split("## 2. Target experience")[1].split("## 5. Other suggestions")[0]
+
+    # README: the window opens from Finder, Launchpad, Spotlight or the Dock; a Login Item launch, the agent loop and
+    # Relaunch with the window closed keep ScrumTrace in the menu bar.
+    launch = readme.split("## Main window")[1].split("\n- **Overview**")[0]
+    for phrase in ("Finder, Launchpad, Spotlight or the Dock", "Login Item", "agent loop", "Relaunch ScrumTrace"):
+        assert phrase in launch, phrase
+
+    # The Mac checks still open carry the review's top risks and the older NSApp.activate calls, each in its own check.
+    items = re.split(r"\n(?=\d+\. )", plan.split("### Manual checks still open")[1])
+
+    def has_check(*needles: str) -> bool:
+        return any(all(needle in item for needle in needles) for item in items)
+
+    assert has_check("NSRunningApplication.activate(options: [])", "macOS 14", "macOS 26"), "focus hand-back on 14 and 26"
+    assert has_check("Keynote", "open behind the presentation", "Shot"), "Gate 0 with the window open, Shot included"
+    assert has_check("NSApp.activate", "Keynote"), "older activations with the window open"
+    assert has_check("snapshot PNGs", "sidebar", "dark", "macOS 26"), "the real sidebar and dark toolbar"
+    assert has_check("hundreds of recordings", "Recordings folder"), "refresh cost, in the window's folder name"
+    walkthrough = agents.split("### On a Mac")[1].split("### In Swift")[0].split("\n6. ")[1]
+    for risk in ("macOS 14", "macOS 26", "Keynote", "Shot", "NSApp.activate", "sidebar", "hundreds of recordings"):
+        assert risk in walkthrough, ("AGENTS.md", risk)
+
+    # Every call that activates ScrumTrace outside AppDelegate.swift (where the routing test allows only
+    # MainWindowPresenter.show()) is named in the plan's check for older activations and in the AGENTS.md walkthrough,
+    # so a new one cannot skip its Mac check. The pattern is the routing test's.
+    older_activations = {
+        ("MenuBarController.swift", "runMeetingNoticeAlert"): "meeting notice",
+        ("MenuBarController.swift", "presentStartBlocked"): "Cannot start recording",
+        ("MenuBarController.swift", "checkUpdates"): "update result",
+        ("CaptureAreaPicker.swift", "begin"): "capture-area picker",
+        ("ProductContextViews.swift", "present"): "recording-context window",
+        ("SessionController.swift", "requestUploadConsent"): "upload consent",
+        ("SessionController.swift", "presentStartFailureAlert"): "Recording did not start",
+        ("OnboardingWindow.swift", "focus"): "first-run permissions window",
+    }
+    self_activation = re.compile(
+        r"\b(?:NSApp|NSApplication\s*\.\s*shared|NSRunningApplication\s*\.\s*current)\s*[?!]?\s*\.\s*activate\b"
+        r"|\bactivate\s*\(\s*ignoringOtherApps\b"
+    )
+    activation_sites = set()
+    for path in sorted((ROOT / "ScrumTrace").rglob("*.swift")):
+        if path.name == "AppDelegate.swift":
+            continue
+        source = path.read_text()
+        for found in self_activation.finditer(source):
+            functions = re.findall(r"\bfunc\s+(\w+)", source[: found.start()])
+            activation_sites.add((path.name, functions[-1] if functions else ""))
+    assert activation_sites == set(older_activations), sorted(activation_sites ^ set(older_activations))
+    older_checks = [" ".join(item.split()) for item in items if "NSApp.activate" in item and "Keynote" in item]
+    assert len(older_checks) == 1, "one check for older activations with the window open"
+    for phrase in older_activations.values():
+        assert phrase in older_checks[0], ("MAIN_WINDOW_PLAN.md", phrase)
+        assert phrase in walkthrough, ("AGENTS.md", phrase)
+
+
+def test_delete_retry_race_and_closing_dialog() -> None:
+    controller = (ROOT / "ScrumTrace" / "Processing" / "SessionController.swift").read_text()
+    recordings_view = (ROOT / "ScrumTrace" / "UI" / "RecordingsView.swift").read_text()
+    tests = (ROOT / "ScrumTraceTests" / "MainWindowTests.swift").read_text()
+    snapshots = (ROOT / "ScrumTraceTests" / "MainWindowSnapshotTests.swift").read_text()
+
+    # A retry whose manifest and folder are gone is ignored before the in-memory manifest could be written back.
+    run = controller.split("private func runProcessor(")[1].split("private func requestUploadConsent")[0]
+    assert '"reason": "session_missing"' in run
+    assert run.index('"session_missing"') < run.index("local = memory")
+    assert run.index('"session_missing"') < run.index('AgentLog.event("processor_begin"')
+    assert "await runProcessor(sessionId: sessionId, retry: retry)" in controller
+
+    # The window forgets a deleted session before its folder is removed and again after; the menu's last session moves
+    # to the newest recording still listed instead of turning off.
+    confirm = recordings_view.split("func confirmDelete(_ id: String)")[1].split("nonisolated static func liveDeleteLine")[0]
+    assert confirm.index("askControllerToForget(id)") < confirm.index("try delete(id)")
+    assert "self.forgetDeletedSession(id)" in confirm
+    assert "lastSessionId = names(newestRemaining) ? nil : newestRemaining" in controller
+    assert "forgetSession: { controller.forgetSession(id: $0, newestRemaining: $1) }" in recordings_view
+
+    # The Delete… dialog keeps naming its row while it animates away.
+    dialog = recordings_view.split(".confirmationDialog(")[1].split(".background {")[0]
+    assert "model.closingDeleteTitle" in dialog
+
+    # Snapshot renders ignore occlusion like the hosted window tests and wait on readiness, never a fixed sleep.
+    assert "Task.sleep(for: .seconds(" not in snapshots
+    assert snapshots.count("MainWindowPresenter(controller:") == snapshots.count("isWindowOnScreen: Self.ignoringOcclusion")
+    settings = (ROOT / "ScrumTrace" / "UI" / "SettingsView.swift").read_text()
+    assert "navigation.hasReviewableSession = reviewable" in settings
+    assert "presenter.navigation.settings.hasReviewableSession == true" in snapshots
+
+    for name in (
+        "testTheLastRecordedOrRetriedSessionCanBeDeletedOnceIdleAndTheControllerForgetsIt",
+        "testARetryOfASessionDeletedMeanwhileWritesNothingBackAndLeavesTheControllerIdle",
+        "testConfirmingADeleteForgetsTheSessionBeforeTheRemovalAndAgainAfterIt",
+        "testTheDeleteConfirmationKeepsNamingItsRowWhileItCloses",
+    ):
+        assert f"func {name}()" in tests, name
+
+    # The upload consent alert can stay open while the delete removes the folder, so a retry looks for the folder again
+    # right before writing the manifest, and the menu's status line says why nothing ran.
+    write_at = run.index("try vault.write(manifest: &local)")
+    assert run.rindex("ignoreRetryOfMissingSession()", 0, write_at) > run.index("requestUploadConsent()")
+    assert "Recording was deleted" in run
+    assert "func testARetryWhoseFolderIsDeletedWhileTheUploadConsentAlertIsOpenWritesNothingBack()" in tests
+
+
+def test_macos26_sdk_apis_are_compiler_guarded() -> None:
+    """CI builds with Xcode 16.4 (macOS 15.5 SDK). Symbols that exist only in the macOS 26 SDK
+    must sit inside `#if compiler(>=6.2)`; `if #available` is a run-time check and does not stop
+    an older compiler from rejecting an unknown member."""
+    import re
+
+    sdk26_only = (
+        "sharedBackgroundVisibility",
+        "glassEffect",
+        "GlassEffectContainer",
+        "NSGlassEffectView",
+        "ToolbarSpacer",
+        "backgroundExtensionEffect",
+        "scrollEdgeEffectStyle",
+        ".glassProminent",
+        "buttonStyle(.glass)",
+    )
+    compiler_guard = re.compile(r"compiler\(\s*>=\s*(?:6\.(?:[2-9]|\d{2,})|[7-9]|\d{2,})")
+    checked = 0
+    for path in sorted((ROOT / "ScrumTrace").rglob("*.swift")):
+        stack: list[list[bool]] = []  # [is the #if a Swift 6.2+ compiler guard, now in its #else]
+        for number, line in enumerate(path.read_text().splitlines(), start=1):
+            stripped = line.strip()
+            if stripped.startswith("#if"):
+                stack.append([bool(compiler_guard.search(stripped)), False])
+                continue
+            if stripped.startswith("#elseif") or stripped.startswith("#else"):
+                if stack:
+                    stack[-1][1] = True
+                continue
+            if stripped.startswith("#endif"):
+                if stack:
+                    stack.pop()
+                continue
+            if stripped.startswith("//"):
+                continue
+            for symbol in sdk26_only:
+                if symbol in line:
+                    checked += 1
+                    guarded = any(is_guard and not in_else for is_guard, in_else in stack)
+                    assert guarded, (
+                        f"{path.relative_to(ROOT)}:{number} uses macOS 26 SDK-only `{symbol}` "
+                        "outside `#if compiler(>=6.2)`"
+                    )
+    assert checked >= 1, "expected at least the StableWindowToolbar sharedBackgroundVisibility call"
+
+
 def main() -> None:
     test_export_has_no_archive_and_no_tokens()
     test_agent_context_uses_export_relative_paths()
@@ -3276,6 +3805,13 @@ def main() -> None:
     test_claude_cli_handoff()
     test_ai_connection_library()
     test_sanitize_untrusted_strips_whitespace_breakout()
+    test_main_window_routing_and_private_index()
+    test_session_detail_facts_keep_only_upload_consent()
+    test_macos26_sdk_apis_are_compiler_guarded()
+    test_recordings_start_copy_and_speaker_review_loading()
+    test_overview_card_and_window_wording()
+    test_main_window_docs_match_the_build()
+    test_delete_retry_race_and_closing_dialog()
     print("contract tests ok")
 
 

@@ -173,6 +173,25 @@ def test_start_without_record_overlay_fails() -> None:
     assert report["checks"]["overlay_sequence_ok"] is False
 
 
+def test_window_and_command_starts_arm_the_overlay_check() -> None:
+    """The main window logs main_start and Command-N command_start instead of menu_start."""
+    for marker in ("main_start", "command_start"):
+        rows = [row for row in _good_rows() if row.get("event") != "menu_start"]
+        rows.insert(0, {"event": marker})
+        result = _run(_write(rows))
+        assert result.returncode == 0, result.stdout + result.stderr
+        report = json.loads(result.stdout)
+        assert report["checks"]["counts"][marker] == 1, marker
+        assert report["checks"]["counts"]["menu_start"] == 0, marker
+
+        skipped = [row for row in rows if row.get("event") != "capture_area_picker"]
+        result = _run(_write(skipped))
+        assert result.returncode == 1, result.stdout + result.stderr
+        report = json.loads(result.stdout)
+        assert report["start_without_overlay"] == 1, marker
+        assert report["checks"]["overlay_sequence_ok"] is False, marker
+
+
 def test_requires_log_start_line() -> None:
     result = subprocess.run(
         [sys.executable, str(SCRIPT), "--log", "/tmp/x"],
@@ -191,6 +210,7 @@ def main() -> None:
     test_app_active_fails()
     test_missing_shot_window_key_fails()
     test_start_without_record_overlay_fails()
+    test_window_and_command_starts_arm_the_overlay_check()
     test_requires_log_start_line()
     print("test_gate0 ok")
 

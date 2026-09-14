@@ -90,7 +90,7 @@ else
 fi
 
 if ! pgrep -x ScrumTrace >/dev/null 2>&1; then
-  open "$STABLE"
+  open "$STABLE" --args --background
   log_status "opened $STABLE"
   sleep 3
 else
