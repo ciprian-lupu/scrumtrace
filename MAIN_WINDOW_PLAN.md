@@ -376,8 +376,8 @@ text, and a corrupt manifest is a row, not a crash or a silent omission.
 5. Unreadable rows render with Reveal folder and Delete… only.
 6. Every action logs a `main_*` event with `["session": id]` and nothing else.
 7. Disabled state: all mutating actions and Delete follow `controller.canChangeCaptureSettings`, so
-   the active session is held only while recording or analysis runs. After a delete,
-   `controller.forgetSession(id:)` drops the controller’s references to that session.
+   the active session is held only while recording or analysis runs. Before and after a delete,
+   `controller.forgetSession(id:newestRemaining:)` drops the controller’s references to that session (§8).
 
 **Tests**
 
@@ -800,7 +800,8 @@ task kept the contract pins in §1.5 and passed `scripts/test_contracts.py`.
   Settings → Speech enables *Review and name speakers…* once a manifest decodes, as before, but that tab
   is redrawn every second, so the check runs off the main actor, only when Settings appears and when
   recording or analysis starts or ends. It tries the newest folders first and usually decodes one
-  manifest. The disabled button has a help tag.
+  manifest. The disabled button has a help tag. The answer is kept on `SettingsNavigation` (nil until the
+  first check lands), which outlives the rebuilt Settings view, so the snapshot test waits for it instead of sleeping.
 - The empty state's Start recording follows Overview's rule and help text: it waits while recording,
   analysis or a start runs, and while a Start shows its recording-context window. Opening that window
   from the status-bar menu or ⌘N, and cancelling it, publishes nothing on the controller, so while the
@@ -818,14 +819,24 @@ task kept the contract pins in §1.5 and passed `scripts/test_contracts.py`.
 - The Delete… confirmation names the recording as its row does, by date and context (*Unreadable
   manifest* for an unreadable row), and its message names the folder id. It deletes the row the command
   came from, so Delete… in the context menu of a row that is not selected deletes that row and leaves the
-  selection alone.
+  selection alone. While the dialog animates away after Cancel or Delete recording it keeps that title
+  (`RecordingsModel.closingDeleteTitle`) instead of flipping to the generic *Delete this recording?*.
 - Delete… waits only while recording or analysis runs, like the other session-changing actions.
-  The session the controller last recorded or retried can be deleted once both finish. After the
-  delete, `SessionController.forgetSession(id:)` drops the in-memory manifest and `lastSessionId`
-  when they name that session, so the menu's last-session items and Retry Analysis stop pointing
-  at the removed folder. If recording, analysis or a start runs when the delete finishes (a Retry
-  Analysis of that session from the menu, say), `forgetSession(id:)` changes nothing and returns false,
-  and the window asks again once the controller is idle, so a run never loses its session part way.
+  The session the controller last recorded or retried can be deleted once both finish. Just before the
+  folder is removed, and again after, `SessionController.forgetSession(id:newestRemaining:)` drops the
+  in-memory manifest when it names that session and moves `lastSessionId` from it to the newest readable
+  recording the window still lists that no delete is removing, or to none. So the menu's last-session items
+  stay usable while other recordings remain, and neither they nor Retry Analysis point at a folder being
+  removed. If recording, analysis or a start runs when the delete finishes (a Retry Analysis of that session
+  from the menu, say), `forgetSession` changes nothing and returns false, and the window asks again once the
+  controller is idle, so a run never loses its session part way. A Retry Analysis that finds neither the
+  manifest nor the folder (started from a menu built before the delete) logs `retry_ignored` with reason
+  `session_missing`, writes nothing, ends idle without an offline-failed state, sets the menu's status line
+  to *Recording was deleted — nothing to retry* and puts back the menu's previous last session. It checks the
+  folder again just before writing the manifest, because the upload consent alert can stay open while the
+  delete removes it. A delete the vault refuses (a live `recording.lock`) or that fails part way is not
+  undone: the row stays listed, and the menu stays on the recording it moved to rather than on one another
+  capture holds or that is partly wiped.
 - Detail facts load only for the selected row. Selecting another row cancels every other row's
   load (the thumbnail loop stops before its next still) and drops its result, and the eight-entry
   detail cache never evicts the selected row's facts.
@@ -944,7 +955,7 @@ task kept the contract pins in §1.5 and passed `scripts/test_contracts.py`.
     start row per Start and the occlusion seam (H04).
   - `fix: let finished recordings be deleted and drop stale detail loads`: `recording.lock` pid
     ownership, new folders without a manifest and a cheaper search (H02); the held-session rule for
-    Delete…, `forgetSession(id:)`, stale detail loads and the detail pane's C2 pin (H03).
+    Delete…, `forgetSession`, stale detail loads and the detail pane's C2 pin (H03).
   - `fix: clarify Recordings states and load speaker review off the main thread`: speaker review
     loading, the empty state's Start, column widths, plain words for unreadable rows and the Delete…
     confirmation (H03).

@@ -3688,6 +3688,54 @@ def test_main_window_docs_match_the_build() -> None:
         assert phrase in walkthrough, ("AGENTS.md", phrase)
 
 
+def test_delete_retry_race_and_closing_dialog() -> None:
+    controller = (ROOT / "ScrumTrace" / "Processing" / "SessionController.swift").read_text()
+    recordings_view = (ROOT / "ScrumTrace" / "UI" / "RecordingsView.swift").read_text()
+    tests = (ROOT / "ScrumTraceTests" / "MainWindowTests.swift").read_text()
+    snapshots = (ROOT / "ScrumTraceTests" / "MainWindowSnapshotTests.swift").read_text()
+
+    # A retry whose manifest and folder are gone is ignored before the in-memory manifest could be written back.
+    run = controller.split("private func runProcessor(")[1].split("private func requestUploadConsent")[0]
+    assert '"reason": "session_missing"' in run
+    assert run.index('"session_missing"') < run.index("local = memory")
+    assert run.index('"session_missing"') < run.index('AgentLog.event("processor_begin"')
+    assert "await runProcessor(sessionId: sessionId, retry: retry)" in controller
+
+    # The window forgets a deleted session before its folder is removed and again after; the menu's last session moves
+    # to the newest recording still listed instead of turning off.
+    confirm = recordings_view.split("func confirmDelete(_ id: String)")[1].split("nonisolated static func liveDeleteLine")[0]
+    assert confirm.index("askControllerToForget(id)") < confirm.index("try delete(id)")
+    assert "self.forgetDeletedSession(id)" in confirm
+    assert "lastSessionId = names(newestRemaining) ? nil : newestRemaining" in controller
+    assert "forgetSession: { controller.forgetSession(id: $0, newestRemaining: $1) }" in recordings_view
+
+    # The Delete… dialog keeps naming its row while it animates away.
+    dialog = recordings_view.split(".confirmationDialog(")[1].split(".background {")[0]
+    assert "model.closingDeleteTitle" in dialog
+
+    # Snapshot renders ignore occlusion like the hosted window tests and wait on readiness, never a fixed sleep.
+    assert "Task.sleep(for: .seconds(" not in snapshots
+    assert snapshots.count("MainWindowPresenter(controller:") == snapshots.count("isWindowOnScreen: Self.ignoringOcclusion")
+    settings = (ROOT / "ScrumTrace" / "UI" / "SettingsView.swift").read_text()
+    assert "navigation.hasReviewableSession = reviewable" in settings
+    assert "presenter.navigation.settings.hasReviewableSession == true" in snapshots
+
+    for name in (
+        "testTheLastRecordedOrRetriedSessionCanBeDeletedOnceIdleAndTheControllerForgetsIt",
+        "testARetryOfASessionDeletedMeanwhileWritesNothingBackAndLeavesTheControllerIdle",
+        "testConfirmingADeleteForgetsTheSessionBeforeTheRemovalAndAgainAfterIt",
+        "testTheDeleteConfirmationKeepsNamingItsRowWhileItCloses",
+    ):
+        assert f"func {name}()" in tests, name
+
+    # The upload consent alert can stay open while the delete removes the folder, so a retry looks for the folder again
+    # right before writing the manifest, and the menu's status line says why nothing ran.
+    write_at = run.index("try vault.write(manifest: &local)")
+    assert run.rindex("ignoreRetryOfMissingSession()", 0, write_at) > run.index("requestUploadConsent()")
+    assert "Recording was deleted" in run
+    assert "func testARetryWhoseFolderIsDeletedWhileTheUploadConsentAlertIsOpenWritesNothingBack()" in tests
+
+
 def main() -> None:
     test_export_has_no_archive_and_no_tokens()
     test_agent_context_uses_export_relative_paths()
@@ -3715,6 +3763,7 @@ def main() -> None:
     test_recordings_start_copy_and_speaker_review_loading()
     test_overview_card_and_window_wording()
     test_main_window_docs_match_the_build()
+    test_delete_retry_race_and_closing_dialog()
     print("contract tests ok")
 
 

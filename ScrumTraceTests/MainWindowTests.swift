@@ -951,8 +951,8 @@ final class MainWindowTests: XCTestCase {
                 recorder.record("deleteSession \(id)")
                 try vault.deleteSession(id: id, recordingLockURL: lockURL)
             },
-            forgetSession: { id in
-                forgotten?.record(id)
+            forgetSession: { id, newestRemaining in
+                forgotten?.record(newestRemaining.map { "\(id) -> \($0)" } ?? id)
                 return true
             },
             loadDetail: { id in
@@ -1290,7 +1290,11 @@ final class MainWindowTests: XCTestCase {
             XCTAssertEqual(model.library.entries.map(\.id), [f.unfinished, f.completed, f.corrupt])
             XCTAssertEqual(navigation.selectedSessionId, f.corrupt)
             XCTAssertTrue(try mainEventRows(in: f).contains { $0["event"] == "main_delete_refused" && $0["session"] == f.unfinished })
-            XCTAssertEqual(forgotten.calls, [], "A refused delete forgets nothing")
+            XCTAssertEqual(
+                forgotten.calls,
+                ["\(f.unfinished) -> \(f.completed)"],
+                "A refused delete is forgotten only before the removal, never again after it"
+            )
         }
     }
 
@@ -1348,16 +1352,32 @@ final class MainWindowTests: XCTestCase {
                 XCTAssertNil(model.message)
                 XCTAssertEqual(model.library.entries.map(\.id), [f.unfinished, f.corrupt])
 
-                // The controller no longer names the deleted session, so the menu rebuilds without it.
+                // The controller no longer names the deleted session: the menu's last-session items move to the next recent
+                // recording, which stays listed, instead of turning off.
                 XCTAssertNil(controller.activeSessionId)
-                XCTAssertNil(controller.lastSessionId, "The menu's last-session items no longer point at the removed folder")
+                XCTAssertEqual(controller.lastSessionId, f.unfinished, "The menu's last-session items name the next recent recording")
                 XCTAssertNil(model.activeSessionId)
 
-                // The menu's Retry Analysis has nothing to retry and does not write the manifest back.
-                controller.retryAnalysis()
-                XCTAssertFalse(controller.isBusy)
+                // A Retry Analysis of the deleted session, from a Recent item built before the delete, writes nothing back
+                // and leaves the menu on the next recent recording.
+                controller.retryAnalysis(sessionId: f.completed)
+                let ended = await waitUntil { !controller.isBusy }
+                XCTAssertTrue(ended)
                 XCTAssertFalse(FileManager.default.fileExists(atPath: folder.path))
-                XCTAssertTrue(try logRows(at: f.log).contains { $0["event"] == "retry_ignored" && $0["reason"] == "no_session" })
+                XCTAssertEqual(controller.lastSessionId, f.unfinished)
+                XCTAssertEqual(controller.phase, .completed)
+                XCTAssertNil(controller.lastError)
+                XCTAssertTrue(try logRows(at: f.log).contains {
+                    $0["event"] == "retry_ignored" && $0["reason"] == "session_missing" && $0["session"] == f.completed
+                })
+
+                // Deleting the last readable recording leaves the menu with no last session; an unreadable row is not one.
+                navigation.selectedSessionId = f.unfinished
+                XCTAssertTrue(model.performOnSelection(.delete))
+                let last = try XCTUnwrap(model.confirmDelete(f.unfinished))
+                await last.value
+                XCTAssertEqual(model.library.entries.map(\.id), [f.corrupt])
+                XCTAssertNil(controller.lastSessionId, "No readable recording remains")
             }
         }
     }
@@ -1380,8 +1400,13 @@ final class MainWindowTests: XCTestCase {
                 let settled = await waitUntil { model.activeSessionId == f.completed && model.canChangeSessions }
                 XCTAssertTrue(settled)
 
-                // The delete starts while idle. Before it finishes, Retry Analysis of the same session starts from the menu.
+                // The delete starts while idle, and the controller forgets the session before its folder starts to go.
+                let manifest = try f.vault.loadManifest(id: f.completed)
                 let deletion = try XCTUnwrap(model.confirmDelete(f.completed))
+                XCTAssertNil(controller.activeSessionId)
+                XCTAssertEqual(controller.lastSessionId, f.unfinished, "The menu's last-session items leave the session at once")
+                // Before the delete finishes, Retry Analysis of the same session starts from a Recent item built earlier.
+                controller.holdProcessedSessionForTesting(manifest)
                 controller.isBusy = true
                 controller.phase = .transcribing
                 await deletion.value
@@ -1396,19 +1421,22 @@ final class MainWindowTests: XCTestCase {
                 XCTAssertFalse(controller.forgetSession(id: f.completed), "Nothing is forgotten while analysis runs")
                 XCTAssertEqual(controller.lastSessionId, f.completed)
 
-                // The analysis fails on the removed folder and ends; the window forgets the session then.
+                // The analysis fails on the removed folder and ends; the window forgets the session then, and the menu's
+                // last session moves to the next recent recording.
                 controller.phase = .offlineFailed
                 controller.isBusy = false
-                let forgotten = await waitUntil { controller.lastSessionId == nil }
+                let forgotten = await waitUntil { controller.lastSessionId == f.unfinished }
                 XCTAssertTrue(forgotten, "The deleted session is forgotten once the controller is idle")
                 XCTAssertNil(controller.activeSessionId)
                 let followed = await waitUntil { model.activeSessionId == nil }
                 XCTAssertTrue(followed)
 
-                controller.retryAnalysis()
-                XCTAssertFalse(controller.isBusy)
+                controller.retryAnalysis(sessionId: f.completed)
+                let ignored = await waitUntil { !controller.isBusy }
+                XCTAssertTrue(ignored)
                 XCTAssertFalse(FileManager.default.fileExists(atPath: folder.path), "The in-memory manifest is not written back")
-                XCTAssertTrue(try logRows(at: f.log).contains { $0["event"] == "retry_ignored" && $0["reason"] == "no_session" })
+                XCTAssertTrue(try logRows(at: f.log).contains { $0["event"] == "retry_ignored" && $0["reason"] == "session_missing" })
+                XCTAssertEqual(controller.lastSessionId, f.unfinished)
 
                 // Forgotten once: a session the controller holds afterwards is left alone.
                 controller.holdProcessedSessionForTesting(try f.vault.loadManifest(id: f.unfinished))
@@ -1418,6 +1446,152 @@ final class MainWindowTests: XCTestCase {
                 XCTAssertTrue(synced)
                 XCTAssertEqual(controller.lastSessionId, f.unfinished)
             }
+        }
+    }
+
+    @MainActor
+    func testARetryOfASessionDeletedMeanwhileWritesNothingBackAndLeavesTheControllerIdle() async throws {
+        try await withRecordingsFixture { f in
+            try await withFixtureController(f) { controller in
+                let folder = f.vault.sessionURL(id: f.completed)
+                // Processing finished: the controller holds the manifest in memory and names the session last.
+                controller.holdProcessedSessionForTesting(try f.vault.loadManifest(id: f.completed))
+                // The window removes the folder before the controller forgot the session, and Retry Analysis of it starts
+                // from the status-bar menu.
+                try f.vault.deleteSession(id: f.completed, recordingLockURL: f.lockURL)
+                controller.retryAnalysis(sessionId: f.completed)
+                XCTAssertTrue(controller.isBusy)
+                let ended = await waitUntil { !controller.isBusy }
+                XCTAssertTrue(ended, "The retry ends at once")
+
+                XCTAssertFalse(FileManager.default.fileExists(atPath: folder.path), "The manifest held in memory is not written into a new folder")
+                XCTAssertEqual(f.vault.sessionEntries().map(\.id), [f.unfinished, f.corrupt], "No recording without archive or export is listed")
+                XCTAssertEqual(controller.phase, .completed, "The controller is idle, not offline-failed")
+                XCTAssertNil(controller.lastError)
+                XCTAssertEqual(controller.statusLine, "Recording was deleted — nothing to retry", "The menu's status line says why nothing ran")
+                XCTAssertEqual(controller.lastSessionId, f.completed, "The menu names what it named before the retry")
+                let rows = try logRows(at: f.log)
+                XCTAssertTrue(rows.contains { $0["event"] == "retry_ignored" && $0["reason"] == "session_missing" && $0["session"] == f.completed })
+                XCTAssertFalse(rows.contains { $0["event"] == "processor_begin" || $0["event"] == "processor_fail" })
+
+                // Forgetting it then moves the menu to the recording the window names, never to the forgotten one, and to
+                // none when none remains.
+                XCTAssertTrue(controller.forgetSession(id: f.completed.uppercased(), newestRemaining: f.unfinished))
+                XCTAssertNil(controller.activeSessionId)
+                XCTAssertEqual(controller.lastSessionId, f.unfinished)
+                XCTAssertTrue(controller.forgetSession(id: f.unfinished, newestRemaining: f.unfinished.uppercased()))
+                XCTAssertNil(controller.lastSessionId)
+            }
+        }
+    }
+
+    @MainActor
+    func testARetryWhoseFolderIsDeletedWhileTheUploadConsentAlertIsOpenWritesNothingBack() async throws {
+        try await withRecordingsFixture { f in
+            let suite = "ScrumTrace.MainWindowTests.Controller.\(UUID().uuidString)"
+            let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+            defer { defaults.removePersistentDomain(forName: suite) }
+            // A stored key, so the retry asks for upload consent again: the fixture's consent names another provider.
+            let keys = SettingsKeyStore(get: { _ in "sk-test" }, contains: { _ in true }, set: { _, _ in }, remove: { _ in })
+            let controller = SessionController(settings: AppSettings(defaults: defaults, keyStore: keys), vault: f.vault)
+            let folder = f.vault.sessionURL(id: f.completed)
+            controller.lastSessionId = f.unfinished
+            // The manifest and the folder are there when the retry starts. The window's delete removes the folder while
+            // the consent alert is open.
+            let prompts = CallRecorder()
+            controller.uploadConsentPromptForTesting = {
+                prompts.record("consent")
+                try? f.vault.deleteSession(id: f.completed, recordingLockURL: f.lockURL)
+                return .denied
+            }
+            controller.retryAnalysis(sessionId: f.completed)
+            let ended = await waitUntil { !controller.isBusy }
+            XCTAssertTrue(ended, "The retry ends at once")
+            XCTAssertEqual(prompts.calls, ["consent"], "The retry asked for upload consent")
+
+            XCTAssertFalse(FileManager.default.fileExists(atPath: folder.path), "The manifest is not written into a new folder")
+            XCTAssertEqual(f.vault.sessionEntries().map(\.id), [f.unfinished, f.corrupt], "No recording without archive or export is listed")
+            XCTAssertEqual(controller.phase, .idle, "The controller is idle, not offline-failed")
+            XCTAssertNil(controller.lastError)
+            XCTAssertEqual(controller.statusLine, "Recording was deleted — nothing to retry", "The menu's status line says why nothing ran")
+            XCTAssertEqual(controller.lastSessionId, f.unfinished, "The menu names what it named before the retry")
+            let rows = try logRows(at: f.log)
+            XCTAssertTrue(rows.contains { $0["event"] == "retry_ignored" && $0["reason"] == "session_missing" && $0["session"] == f.completed })
+            XCTAssertFalse(rows.contains { $0["event"] == "processor_fail" || $0["event"] == "processor_ok" })
+        }
+    }
+
+    @MainActor
+    func testConfirmingADeleteForgetsTheSessionBeforeTheRemovalAndAgainAfterIt() async throws {
+        try await withRecordingsFixture { f in
+            let newest = try makeSession(in: f.vault, status: .completed)
+            let calls = CallRecorder()
+            let model = makeRecordingsModel(f, recorder: calls, forgotten: calls)
+            await model.refresh().value
+            XCTAssertEqual(model.library.entries.map(\.id), [newest, f.unfinished, f.completed, f.corrupt])
+
+            // The controller forgets the newest recording before its folder starts to go; its last session moves on.
+            XCTAssertTrue(model.perform(.delete, on: newest))
+            let first = try XCTUnwrap(model.confirmDelete(newest))
+            XCTAssertEqual(calls.calls, ["\(newest) -> \(f.unfinished)"])
+
+            // A second delete while the first runs never moves the last session to the recording being removed.
+            XCTAssertTrue(model.perform(.delete, on: f.unfinished))
+            let second = try XCTUnwrap(model.confirmDelete(f.unfinished))
+            XCTAssertEqual(calls.calls, ["\(newest) -> \(f.unfinished)", "\(f.unfinished) -> \(f.completed)"])
+
+            await first.value
+            await second.value
+            XCTAssertEqual(calls.calls.filter { $0.hasPrefix("deleteSession") }.sorted(), ["deleteSession \(newest)", "deleteSession \(f.unfinished)"].sorted())
+            XCTAssertEqual(
+                calls.calls.filter { !$0.hasPrefix("deleteSession") }.sorted(),
+                ["\(newest) -> \(f.unfinished)", "\(f.unfinished) -> \(f.completed)", "\(newest) -> \(f.completed)", "\(f.unfinished) -> \(f.completed)"].sorted(),
+                "Each delete is forgotten again once its folder is gone"
+            )
+            for id in [newest, f.unfinished] {
+                let delete = try XCTUnwrap(calls.calls.firstIndex(of: "deleteSession \(id)"))
+                XCTAssertTrue(calls.calls[..<delete].contains { $0.hasPrefix("\(id) -> ") }, "\(id) is forgotten before its removal")
+                XCTAssertTrue(calls.calls[(delete + 1)...].contains { $0.hasPrefix("\(id) -> ") }, "\(id) is forgotten after its removal")
+            }
+            XCTAssertEqual(model.library.entries.map(\.id), [f.completed, f.corrupt])
+
+            // With only an unreadable row left, the last session moves to none.
+            XCTAssertTrue(model.perform(.delete, on: f.completed))
+            await model.confirmDelete(f.completed)?.value
+            XCTAssertEqual(calls.calls.suffix(3), [f.completed, "deleteSession \(f.completed)", f.completed])
+        }
+    }
+
+    @MainActor
+    func testTheDeleteConfirmationKeepsNamingItsRowWhileItCloses() async throws {
+        try await withRecordingsFixture { f in
+            let recorder = CallRecorder()
+            let model = makeRecordingsModel(f, recorder: recorder)
+            await model.refresh().value
+            let unfinished = try XCTUnwrap(model.entry(id: f.unfinished))
+            let completed = try XCTUnwrap(model.entry(id: f.completed))
+            XCTAssertNil(model.closingDeleteTitle)
+
+            // Cancel clears `pendingDelete` while the dialog still animates away; it keeps the row's title.
+            XCTAssertTrue(model.perform(.delete, on: f.unfinished))
+            model.cancelDelete()
+            XCTAssertNil(model.pendingDelete)
+            XCTAssertEqual(model.closingDeleteTitle, RecordingRowText.deleteTitle(unfinished))
+            // The dialog's binding reports the dismissal again; the title stays.
+            model.cancelDelete()
+            XCTAssertEqual(model.closingDeleteTitle, RecordingRowText.deleteTitle(unfinished))
+
+            // Delete recording: the title names the confirmed row, also once the row has left the list.
+            XCTAssertTrue(model.perform(.delete, on: f.completed))
+            let deletion = try XCTUnwrap(model.confirmDelete(f.completed))
+            XCTAssertNil(model.pendingDelete)
+            XCTAssertEqual(model.closingDeleteTitle, RecordingRowText.deleteTitle(completed))
+            model.cancelDelete()
+            await deletion.value
+            XCTAssertNil(model.entry(id: f.completed))
+            XCTAssertEqual(model.closingDeleteTitle, RecordingRowText.deleteTitle(completed))
+            XCTAssertNotEqual(model.closingDeleteTitle, RecordingRowText.deleteTitle(nil))
+            XCTAssertEqual(recorder.calls, ["deleteSession \(f.completed)"])
         }
     }
 

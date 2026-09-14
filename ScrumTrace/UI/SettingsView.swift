@@ -17,8 +17,9 @@ struct SettingsView: View {
     @State private var removingKey = false
     @State private var showAdvancedSpeech = false
     @State private var showSpeakerReview = false
-    /// True once a manifest in the vault decodes, so the speaker review has a session to list.
-    @State private var hasReviewableSession = false
+    /// True once a manifest in the vault decodes, so the speaker review has a session to list. The answer is kept on
+    /// `navigation`, which outlives this view, so it stays while the next check runs and a test can wait for it.
+    private var hasReviewableSession: Bool { navigation.hasReviewableSession == true }
     @State private var preloadingSpeakers = false
     @State private var speakerModelLine = ""
 
@@ -49,7 +50,7 @@ struct SettingsView: View {
             let vault = controller.vault
             let reviewable = await Task.detached(priority: .userInitiated) { SpeakerReviewLoader.hasReviewableSession(in: vault) }.value
             guard !Task.isCancelled else { return }
-            hasReviewableSession = reviewable
+            navigation.hasReviewableSession = reviewable
         }
         .sheet(isPresented: $showSpeakerReview) {
             SpeakerReviewView(controller: controller)
@@ -588,6 +589,10 @@ struct SettingsView: View {
 @MainActor
 final class SettingsNavigation: ObservableObject {
     @Published var selectedTab = SettingsTab.speech
+    /// Whether Settings found a saved recording that Review and name speakers… can list, or nil until its first check
+    /// landed. Settings reads the vault off the main actor when it appears and when recording or analysis starts or
+    /// ends; the presenter keeps this object, so the last answer survives Settings being rebuilt.
+    @Published var hasReviewableSession: Bool?
 }
 
 enum SettingsTab: Hashable, CaseIterable {

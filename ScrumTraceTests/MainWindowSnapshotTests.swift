@@ -46,7 +46,7 @@ final class MainWindowSnapshotTests: XCTestCase {
         let directory = try snapshotDirectory()
         try await withController(populated: true) { controller, fixture in
             let f = try XCTUnwrap(fixture)
-            let presenter = MainWindowPresenter(controller: controller, frameAutosaveName: nil)
+            let presenter = MainWindowPresenter(controller: controller, frameAutosaveName: nil, isWindowOnScreen: Self.ignoringOcclusion)
             defer { presenter.window?.close() }
             let recordings = presenter.recordings
             let library = recordings.library
@@ -100,10 +100,10 @@ final class MainWindowSnapshotTests: XCTestCase {
 
             presenter.show(tab: .speech)
             // Settings asks the vault, off the main actor, whether Review and name speakers… has a session to list.
-            // render() spins the run loop without giving the main actor a turn, so let that check land first.
-            try await Task.sleep(for: .seconds(1))
+            // render() draws only once that check landed, waiting for it within its deadline: the fixture's completed
+            // recording makes the answer true.
             try await render(window, as: "settings-speech", into: directory) {
-                presenter.navigation.section == .settings
+                presenter.navigation.section == .settings && presenter.navigation.settings.hasReviewableSession == true
             }
             presenter.show(tab: .general)
             try await render(window, as: "settings-general", into: directory) {
@@ -136,7 +136,7 @@ final class MainWindowSnapshotTests: XCTestCase {
     func testRenderTheRecordingsEmptyState() async throws {
         let directory = try snapshotDirectory()
         try await withController(populated: false) { controller, _ in
-            let presenter = MainWindowPresenter(controller: controller, frameAutosaveName: nil)
+            let presenter = MainWindowPresenter(controller: controller, frameAutosaveName: nil, isWindowOnScreen: Self.ignoringOcclusion)
             defer { presenter.window?.close() }
             presenter.show(section: .recordings)
             let window = try XCTUnwrap(presenter.window)
@@ -219,6 +219,13 @@ final class MainWindowSnapshotTests: XCTestCase {
             }
             queue.append(contentsOf: view.subviews)
         }
+    }
+
+    /// Follows whether the window is shown and not minimized, not whether other windows cover it, as MainWindowTests does,
+    /// so what else is on the test Mac's screen cannot stop the refresh and readiness loops the renders wait for.
+    @MainActor
+    private static func ignoringOcclusion(_ window: NSWindow) -> Bool {
+        window.isVisible && !window.isMiniaturized
     }
 
     @MainActor

@@ -529,8 +529,8 @@ private final class AsyncGate: @unchecked Sendable {
 }
 
 /// Records the speaker review's vault reads and whether each ran on the main thread. With `holdRecentUntilTranscript`
-/// the recent list suspends for up to two seconds until a transcript read starts, which only a transcript read that
-/// does not wait for the list allows.
+/// the recent list suspends for up to five seconds, as long as the test's own waits, until a transcript read starts,
+/// which only a transcript read that does not wait for the list allows.
 private final class SpeakerReviewReads: @unchecked Sendable {
     private let lock = NSLock()
     private let transcriptStarted = AsyncGate()
@@ -566,7 +566,7 @@ private final class SpeakerReviewReads: @unchecked Sendable {
             recentSessions: { vault in
                 self.record("recent")
                 if self.holdRecentUntilTranscript {
-                    let started = await self.transcriptStarted.wait(timeout: .seconds(2))
+                    let started = await self.transcriptStarted.wait(timeout: .seconds(5))
                     self.setTranscriptFirst(started)
                 }
                 let sessions = vault.recentSessions(limit: 100)

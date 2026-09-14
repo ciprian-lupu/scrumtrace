@@ -407,10 +407,14 @@ struct RecordingsDependencies {
     var revealFolder: @MainActor (String) -> Bool
     /// Runs off the main actor.
     var deleteSession: @Sendable (String) throws -> Void
-    /// After a delete removed the folder: the controller stops naming the session, so the menu's last-session
-    /// items and Retry Analysis no longer point at it. False while the controller is busy; the model asks again
-    /// once it is idle.
-    var forgetSession: @MainActor (String) -> Bool
+    /// Just before a confirmed delete removes the folder, and again once it is gone: the controller stops naming the
+    /// session, so the menu's last-session items and Retry Analysis no longer point at it, including while the delete
+    /// runs. The second value is the newest recording still listed that no delete is removing, or nil; the menu's last
+    /// session moves to it when it named the deleted one. False while the controller is busy; the model asks again
+    /// once it is idle. A delete the vault refuses (a live `recording.lock` names the folder) or that fails part way is
+    /// not undone: the row stays listed, but the menu stays on the recording it moved to rather than on one another
+    /// capture holds or that is partly wiped.
+    var forgetSession: @MainActor (_ id: String, _ newestRemaining: String?) -> Bool
     /// Runs off the main actor.
     var loadDetail: @Sendable (String) -> SessionDetailFacts
     var startRecording: @MainActor () -> Void
@@ -456,7 +460,7 @@ struct RecordingsDependencies {
                 return true
             },
             deleteSession: { try vault.deleteSession(id: $0) },
-            forgetSession: { controller.forgetSession(id: $0) },
+            forgetSession: { controller.forgetSession(id: $0, newestRemaining: $1) },
             loadDetail: { SessionDetailFacts.load(vault: vault, id: $0) },
             startRecording: startRecording,
             isPreparingRecording: isPreparingRecording
@@ -524,6 +528,9 @@ final class RecordingsModel: ObservableObject {
     @Published var contextFilter: String?
     /// The session id Delete… asked about. The confirmation dialog shows while it is set.
     @Published var pendingDelete: String?
+    /// The title the Delete… confirmation closes with. Cancel and Delete recording clear `pendingDelete` before the
+    /// dialog finishes animating away, so the dialog keeps naming its row meanwhile instead of the generic title.
+    @Published private(set) var closingDeleteTitle: String?
     @Published var pendingPrivateReveal: PrivateRevealRequest?
     @Published var speakerReview: SpeakerReviewRequest?
     /// A short line after an action that could not run. Never a path or captured text.
@@ -562,6 +569,9 @@ final class RecordingsModel: ObservableObject {
     private var detailRequestCount = 0
     /// Deleted sessions the controller refused to forget because it was busy. Nothing on screen shows them.
     private var sessionsToForget: [String] = []
+    /// Sessions a confirmed delete is removing or removed, until a scan no longer lists them. The controller's last
+    /// session never moves to one of them.
+    private var removedSessionIds: [String] = []
     private var reviewedSessionId: String?
     /// The refresh this model started last, until it finishes. The section appearing joins it.
     private var runningRefresh: Task<Void, Never>?
@@ -657,7 +667,7 @@ final class RecordingsModel: ObservableObject {
         // A delete that finished while recording, analysis or a start ran is forgotten once they end.
         if canChange, !sessionsToForget.isEmpty {
             let waiting = sessionsToForget
-            sessionsToForget = waiting.filter { !dependencies.forgetSession($0) }
+            sessionsToForget = waiting.filter { !askControllerToForget($0) }
         }
         let active = dependencies.activeSessionId()
         if active != activeSessionId { activeSessionId = active }
@@ -689,10 +699,27 @@ final class RecordingsModel: ObservableObject {
     /// The controller stops naming a session this model deleted. A controller that is busy refuses; the id then
     /// waits in `sessionsToForget` until `syncCaptureState` sees it idle, so a running analysis keeps its session.
     private func forgetDeletedSession(_ id: String) {
-        if !dependencies.forgetSession(id), !sessionsToForget.contains(id) {
+        if !askControllerToForget(id), !sessionsToForget.contains(id) {
             sessionsToForget.append(id)
         }
         syncCaptureState()
+    }
+
+    /// Asks the controller to stop naming `id`, with the recording its last session moves to when it named `id`.
+    private func askControllerToForget(_ id: String) -> Bool {
+        dependencies.forgetSession(id, newestRemainingSession(excluding: id))
+    }
+
+    /// The newest listed recording whose manifest decodes, leaving out `id` and every recording a delete is removing or
+    /// removed. Nil when none remains. Only index rows are read, never the vault.
+    private func newestRemainingSession(excluding id: String) -> String? {
+        let listed = library.entries
+        // A removed recording is left out until a scan no longer lists it.
+        removedSessionIds.removeAll { removed in !listed.contains { $0.id == removed } }
+        let excluded = [id] + removedSessionIds
+        return listed.first { entry in
+            entry.summary != nil && !excluded.contains { $0.caseInsensitiveCompare(entry.id) == .orderedSame }
+        }?.id
     }
 
     /// Scans the vault again. Mutating actions and processing that ends always start a new scan.
@@ -943,7 +970,15 @@ final class RecordingsModel: ObservableObject {
     }
 
     func cancelDelete() {
+        keepDeleteTitleWhileClosing()
         pendingDelete = nil
+    }
+
+    /// Runs just before `pendingDelete` is cleared, which starts the dialog's dismissal. Its title keeps naming the row
+    /// until the dialog is gone, even when the delete removes the row from the list first.
+    private func keepDeleteTitleWhileClosing() {
+        guard let id = pendingDelete else { return }
+        closingDeleteTitle = RecordingRowText.deleteTitle(entry(id: id))
     }
 
     /// Deletes a session the user confirmed, off the main actor. The state is checked again because
@@ -952,7 +987,10 @@ final class RecordingsModel: ObservableObject {
     /// a large archive can outlast a selection change; it is dropped only when a newer action started.
     @discardableResult
     func confirmDelete(_ id: String) -> Task<Void, Never>? {
-        if pendingDelete != nil { pendingDelete = nil }
+        if pendingDelete != nil {
+            keepDeleteTitleWhileClosing()
+            pendingDelete = nil
+        }
         syncCaptureState()
         beginAction()
         guard let entry = entry(id: id) else {
@@ -964,6 +1002,12 @@ final class RecordingsModel: ObservableObject {
             return nil
         }
         log(.delete, id)
+        // Before the folder starts to go, the controller stops naming the session, so the status-bar menu's last-session
+        // items and Retry Analysis cannot target it while the delete runs; no later forget moves them back to it. The
+        // controller is idle here, as just checked. It is asked again once the folder is gone.
+        removedSessionIds.append(id)
+        _ = askControllerToForget(id)
+        syncCaptureState()
         let generation = actionGeneration
         let delete = dependencies.deleteSession
         return Task { @MainActor [weak self] in
@@ -988,9 +1032,12 @@ final class RecordingsModel: ObservableObject {
                 // The controller may still hold the session as its last one; nothing may point at the folder now.
                 self.forgetDeletedSession(id)
             case .live:
+                // The recording stays, so a later forget may move the menu's last session to it again.
+                self.removedSessionIds.removeAll { $0 == id }
                 AgentLog.event("main_delete_refused", ["session": id])
                 if self.actionGeneration == generation { self.message = Self.liveDeleteLine(id) }
             case .failed:
+                self.removedSessionIds.removeAll { $0 == id }
                 AgentLog.event("main_delete_failed", ["session": id])
                 if self.actionGeneration == generation { self.message = Self.failedDeleteLine(id) }
             }
@@ -1287,8 +1334,11 @@ struct RecordingsView: View {
             .toolbar { toolbar }
             .onAppear { model.sectionDidAppear() }
             .confirmationDialog(
-                // Names the row the command came from, which for a context menu need not be the selection.
-                RecordingRowText.deleteTitle(model.pendingDelete.flatMap { model.entry(id: $0) }),
+                // Names the row the command came from, which for a context menu need not be the selection. Cancel and
+                // Delete recording clear `pendingDelete` before the dialog finishes closing; it keeps naming the row meanwhile.
+                model.pendingDelete == nil
+                    ? model.closingDeleteTitle ?? RecordingRowText.deleteTitle(nil)
+                    : RecordingRowText.deleteTitle(model.pendingDelete.flatMap { model.entry(id: $0) }),
                 isPresented: Binding(
                     get: { model.pendingDelete != nil },
                     set: { if !$0 { model.cancelDelete() } }
