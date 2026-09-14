@@ -51,14 +51,24 @@ final class MenuAccessTests: XCTestCase {
             XCTAssertTrue(window.isVisible)
             XCTAssertEqual(presenter.navigation.section, .settings)
             XCTAssertEqual(presenter.navigation.settings.selectedTab, .logs)
+            // macOS 15 finishes ordering in, minimizing and restoring asynchronously; wait for each state
+            // instead of reading it at once.
+            let settleDeadline = Date().addingTimeInterval(5)
+            while (!window.isVisible || window.isMiniaturized) && Date() < settleDeadline {
+                RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.02))
+            }
             window.miniaturize(nil)
-            let miniaturizeDeadline = Date().addingTimeInterval(3)
+            let miniaturizeDeadline = Date().addingTimeInterval(5)
             while !window.isMiniaturized && Date() < miniaturizeDeadline {
                 RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.02))
             }
             XCTAssertTrue(window.isMiniaturized, "The window must be miniaturized before show()")
             presenter.show()
-            XCTAssertFalse(window.isMiniaturized)
+            let restoreDeadline = Date().addingTimeInterval(5)
+            while (window.isMiniaturized || !window.isVisible) && Date() < restoreDeadline {
+                RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.02))
+            }
+            XCTAssertFalse(window.isMiniaturized, "show() restores a minimized window")
             XCTAssertTrue(window.isVisible)
             XCTAssertEqual(presenter.navigation.section, .settings)
             XCTAssertEqual(presenter.navigation.settings.selectedTab, .logs)

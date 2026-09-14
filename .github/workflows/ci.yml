@@ -36,3 +36,6 @@ jobs:
         run: bash scripts/mac_xcode_test.sh
         env:
           SCRUMTRACE_DERIVED: ${{ runner.temp }}/ScrumTraceDerived
+      - name: Print test failure messages
+        if: failure()
+        run: python3 scripts/print_xcresult_failures.py "${{ runner.temp }}/ScrumTraceDerived"

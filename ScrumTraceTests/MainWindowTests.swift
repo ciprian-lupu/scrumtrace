@@ -213,12 +213,16 @@ final class MainWindowTests: XCTestCase {
                 "Restoring the window from the Dock starts it again"
             )
             XCTAssertTrue(recordings.isWindowVisible)
+            // macOS 15 finishes minimizing and restoring asynchronously; wait for the state instead of reading it at once.
+            XCTAssertTrue(spinRunLoop(until: { window.isVisible && !window.isMiniaturized }, timeout: 5))
             window.miniaturize(nil)
-            XCTAssertTrue(spinRunLoop(until: { window.isMiniaturized }), "The window must be miniaturized before show()")
+            XCTAssertTrue(spinRunLoop(until: { window.isMiniaturized }, timeout: 5), "The window must be miniaturized before show()")
             XCTAssertTrue(spinRunLoop(until: { !recordings.isPeriodicRefreshActive }))
             presenter.show()
-            XCTAssertFalse(window.isMiniaturized)
-            XCTAssertTrue(window.isVisible)
+            XCTAssertTrue(
+                spinRunLoop(until: { !window.isMiniaturized && window.isVisible }, timeout: 5),
+                "show() restores a minimized window"
+            )
             XCTAssertTrue(presenter.window === window)
             XCTAssertEqual(presenter.navigation.section, .recordings)
             XCTAssertTrue(recordings.isPeriodicRefreshActive)
@@ -4061,11 +4065,14 @@ extension MainWindowTests {
             presenter.show(tab: .general)
             XCTAssertEqual(fake.policyChanges, [.regular], "Showing an open window again changes nothing")
 
+            // macOS 15 finishes ordering in, minimizing and restoring asynchronously; wait for each state
+            // instead of reading it at once.
+            XCTAssertTrue(spinRunLoop(until: { window.isVisible && !window.isMiniaturized }, timeout: 5))
             window.miniaturize(nil)
-            XCTAssertTrue(spinRunLoop(until: { window.isMiniaturized }))
+            XCTAssertTrue(spinRunLoop(until: { window.isMiniaturized }, timeout: 5))
             XCTAssertEqual(fake.policy, .regular, "A minimized window is still open")
             window.deminiaturize(nil)
-            XCTAssertTrue(spinRunLoop(until: { !window.isMiniaturized }))
+            XCTAssertTrue(spinRunLoop(until: { !window.isMiniaturized && window.isVisible }, timeout: 5))
 
             // The Settings toggle applies at once while the window is open.
             settings.showInDockWhileWindowOpen = false
@@ -4086,12 +4093,15 @@ extension MainWindowTests {
 
             // Off: ScrumTrace stays an accessory throughout.
             presenter.show(section: .settings)
-            XCTAssertTrue(window.isVisible)
+            XCTAssertTrue(spinRunLoop(until: { window.isVisible && !window.isMiniaturized }, timeout: 5))
             XCTAssertEqual(fake.policy, .accessory)
             window.miniaturize(nil)
-            XCTAssertTrue(spinRunLoop(until: { window.isMiniaturized }))
+            XCTAssertTrue(spinRunLoop(until: { window.isMiniaturized }, timeout: 5))
             presenter.show()
-            XCTAssertFalse(window.isMiniaturized)
+            XCTAssertTrue(
+                spinRunLoop(until: { !window.isMiniaturized && window.isVisible }, timeout: 5),
+                "show() restores a minimized window"
+            )
             window.close()
             XCTAssertEqual(fake.policy, .accessory)
             XCTAssertEqual(fake.policyChanges.count, 4, "With the preference off the policy never changes")
