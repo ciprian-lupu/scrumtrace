@@ -223,6 +223,38 @@ struct OverviewReadiness: Equatable, Sendable {
         return "Start recording asks for the product context, then the capture area."
     }
 
+    /// The Start button's help while readiness stops a recording from starting: what to do, and the row whose buttons
+    /// do it. Nil while a recording can start.
+    var startBlockedReason: String? {
+        switch inputs.capture {
+        case .ready:
+            return nil
+        case .screenDenied:
+            return "Recording is blocked until Screen Recording is allowed. Use the buttons in the Screen Recording row below."
+        case .screenGrantedNeedsRelaunch:
+            return "Relaunch ScrumTrace before recording. Use the button in the Screen Recording row below."
+        case .microphoneDenied:
+            return "Recording is blocked until microphone access is allowed or Record microphone is turned off. Use the buttons in the Microphone row below."
+        }
+    }
+
+    /// Accessibility in the words the card shows. Settings → Permissions uses the same words.
+    static func accessibilityStatus(trusted: Bool) -> String {
+        trusted ? "Allowed" : "Not allowed"
+    }
+
+    /// A `CapturePermissions.microphoneStatus()` value in the words the card shows. Settings → Permissions uses the
+    /// same words.
+    static func microphoneStatus(_ status: String) -> String {
+        switch status {
+        case "allowed": return "Allowed"
+        case "denied": return "Denied"
+        case "restricted": return "Restricted"
+        case "not asked for this process": return "Not asked yet"
+        default: return status.prefix(1).uppercased() + status.dropFirst()
+        }
+    }
+
     private static func screenRow(_ inputs: Inputs) -> Row {
         switch inputs.capture {
         case .ready, .microphoneDenied:
@@ -264,23 +296,25 @@ struct OverviewReadiness: Equatable, Sendable {
         if inputs.capture == .microphoneDenied || status == "denied" || status == "restricted" {
             // While Screen Recording blocks, its row already offers Relaunch: one button, on the blocking row.
             let screenOffersRelaunch = inputs.capture == .screenDenied || inputs.capture == .screenGrantedNeedsRelaunch
+            // Turning Record microphone off in Capture settings also clears the block, as the summary says.
+            let fixes: [OverviewReadinessAction] = [.openMicrophoneSettings, .openCaptureSettings]
             return Row(
                 item: .microphone,
                 state: .actionNeeded,
                 status: status == "restricted" ? "Restricted" : "Denied",
                 detail: CaptureReadiness.microphoneDenied.userMessage,
-                actions: screenOffersRelaunch ? [.openMicrophoneSettings] : [.openMicrophoneSettings, .relaunch],
+                actions: screenOffersRelaunch ? fixes : fixes + [.relaunch],
                 blocksRecording: inputs.capture == .microphoneDenied
             )
         }
         switch status {
         case "allowed":
-            return Row(item: .microphone, state: .ok, status: "Allowed", detail: nil, actions: [], blocksRecording: false)
+            return Row(item: .microphone, state: .ok, status: microphoneStatus(status), detail: nil, actions: [], blocksRecording: false)
         case "not asked for this process":
             return Row(
                 item: .microphone,
                 state: .optional,
-                status: "Not asked yet",
+                status: microphoneStatus(status),
                 detail: "macOS asks for microphone access when a recording starts.",
                 actions: [],
                 blocksRecording: false
@@ -289,7 +323,7 @@ struct OverviewReadiness: Equatable, Sendable {
             return Row(
                 item: .microphone,
                 state: .optional,
-                status: status.prefix(1).uppercased() + status.dropFirst(),
+                status: microphoneStatus(status),
                 detail: nil,
                 actions: [.openMicrophoneSettings],
                 blocksRecording: false
@@ -299,12 +333,12 @@ struct OverviewReadiness: Equatable, Sendable {
 
     private static func accessibilityRow(_ inputs: Inputs) -> Row {
         guard !inputs.accessibilityTrusted else {
-            return Row(item: .accessibility, state: .ok, status: "Allowed", detail: nil, actions: [], blocksRecording: false)
+            return Row(item: .accessibility, state: .ok, status: accessibilityStatus(trusted: true), detail: nil, actions: [], blocksRecording: false)
         }
         return Row(
             item: .accessibility,
             state: .optional,
-            status: "Not allowed",
+            status: accessibilityStatus(trusted: false),
             detail: "Optional. Accessibility adds window titles and scrubbed browser URLs to help explain the recording. Screen and microphone recording work without it.",
             actions: [.openPermissionsSettings],
             blocksRecording: false
@@ -457,6 +491,8 @@ struct OverviewDependencies {
     var canChangeSessions: @MainActor () -> Bool
     /// True while a Start from the menu, Recordings or here shows the context window or the capture-area overlay.
     var isPreparingRecording: @MainActor () -> Bool
+    /// True while a recording starts, runs or is paused. While sessions cannot change and this is false, analysis runs.
+    var isRecordingActive: @MainActor () -> Bool
     var lastError: @MainActor () -> String?
     var retentionDays: @MainActor () -> Int
     var captureAreaSummary: @MainActor () -> String
@@ -487,6 +523,7 @@ struct OverviewDependencies {
             readinessInputs: { .live(settings: settings, transcriber: transcriber) },
             canChangeSessions: { controller.canChangeCaptureSettings },
             isPreparingRecording: isPreparingRecording,
+            isRecordingActive: { controller.isRecording || controller.startInFlight },
             lastError: { controller.lastError },
             retentionDays: { settings.retentionDays },
             captureAreaSummary: { settings.captureArea.summary },
@@ -529,6 +566,8 @@ final class OverviewModel: ObservableObject {
     @Published private(set) var readiness: OverviewReadiness?
     @Published private(set) var canChangeSessions: Bool
     @Published private(set) var isPreparingRecording: Bool
+    /// `dependencies.isRecordingActive()`, followed like `canChangeSessions`, so the card tells recording from analysis.
+    @Published private(set) var isRecordingActive: Bool
     @Published private(set) var lastError: String?
     @Published private(set) var retentionDays = 0
     @Published private(set) var captureAreaSummary = ""
@@ -539,7 +578,7 @@ final class OverviewModel: ObservableObject {
     @Published private(set) var preloadLine: String?
     /// True after the user dismissed `lastError`, until the controller clears or sets its error again.
     @Published private var isLastErrorDismissed = false
-    /// True while the warning before Reveal sessions folder is shown.
+    /// True while the warning before Reveal recordings folder… is shown.
     @Published var isConfirmingSessionsReveal = false
 
     private(set) var evaluationLoop: Task<Void, Never>?
@@ -568,6 +607,7 @@ final class OverviewModel: ObservableObject {
         self.preparingInterval = preparingInterval
         canChangeSessions = dependencies.canChangeSessions()
         isPreparingRecording = dependencies.isPreparingRecording()
+        isRecordingActive = dependencies.isRecordingActive()
         // Plain settings and cached values, so the first frame shows them. Readiness, which asks macOS about
         // permissions, is read only when the section appears.
         lastError = dependencies.lastError()
@@ -714,6 +754,8 @@ final class OverviewModel: ObservableObject {
     func syncStartState() {
         let canChange = dependencies.canChangeSessions()
         if canChange != canChangeSessions { canChangeSessions = canChange }
+        let recording = dependencies.isRecordingActive()
+        if recording != isRecordingActive { isRecordingActive = recording }
         let preparing = dependencies.isPreparingRecording()
         guard preparing != isPreparingRecording else { return }
         isPreparingRecording = preparing
@@ -726,21 +768,42 @@ final class OverviewModel: ObservableObject {
 
     // MARK: Start recording
 
+    /// The Start flow is free: no recording, analysis or start runs, and no Start shows its context window.
     var canStartRecording: Bool { canChangeSessions && !isPreparingRecording }
 
+    /// Why readiness stops a recording from starting, or nil. Nil too before readiness is first read.
+    var readinessStartBlock: String? { readiness?.startBlockedReason }
+
+    /// The card's Start button runs only when the flow is free and readiness allows a start, so it never ends in the
+    /// flow's “Cannot start recording” alert. The blocking row below has the buttons that fix it.
+    var isStartButtonEnabled: Bool { canStartRecording && readinessStartBlock == nil }
+
+    /// The Start button's help tag while it waits: for recording, analysis or a Start first, then for readiness.
     var startUnavailableReason: String? {
         Self.startUnavailableReason(canChangeSessions: canChangeSessions, isPreparingRecording: isPreparingRecording)
+            ?? readinessStartBlock
     }
 
-    /// Why a Start button waits. The Recordings empty state asks here too, so both buttons say the same thing.
+    /// Why a Start button waits for the Start flow. The Recordings empty state asks here too, so both buttons say the
+    /// same thing; only Overview's card, which shows readiness, also waits for it.
     nonisolated static func startUnavailableReason(canChangeSessions: Bool, isPreparingRecording: Bool) -> String? {
         if !canChangeSessions { return RecordingsModel.busyReason }
         if isPreparingRecording { return preparingReason }
         return nil
     }
 
-    /// Runs the menu's Start flow. Disabled while recording, analysis or a start is running, and while a
-    /// Start already shows its context window.
+    /// What the first row of Ready to record? shows.
+    var startCard: OverviewStartCard {
+        OverviewStartCard(
+            readiness: readiness,
+            canChangeSessions: canChangeSessions,
+            isRecordingActive: isRecordingActive,
+            isPreparingRecording: isPreparingRecording
+        )
+    }
+
+    /// Runs the menu's Start flow. Refused while recording, analysis or a start is running, and while a Start already
+    /// shows its context window. The card's button also waits while readiness blocks; the flow checks readiness itself.
     @discardableResult
     func startRecording() -> Bool {
         syncStartState()
@@ -753,13 +816,21 @@ final class OverviewModel: ObservableObject {
 
     // MARK: Readiness actions
 
+    nonisolated static let speechModelLoadingReason = "The Whisper model is already loading."
+
     func isEnabled(_ action: OverviewReadinessAction) -> Bool {
         guard let readiness, readiness.rows.contains(where: { $0.actions.contains(action) }) else { return false }
-        if action.needsIdleCapture && !canChangeSessions { return false }
-        if action == .preloadSpeechModel {
-            return !isPreloadingSpeechModel && !readiness.inputs.speechModelLoading
+        return unavailableReason(action) == nil
+    }
+
+    /// Why a row's button waits, for its help tag. Nil when it can run, and for an action no row offers.
+    func unavailableReason(_ action: OverviewReadinessAction) -> String? {
+        guard let readiness, readiness.rows.contains(where: { $0.actions.contains(action) }) else { return nil }
+        if action.needsIdleCapture && !canChangeSessions { return RecordingsModel.busyReason }
+        if action == .preloadSpeechModel, isPreloadingSpeechModel || readiness.inputs.speechModelLoading {
+            return Self.speechModelLoadingReason
         }
-        return true
+        return nil
     }
 
     /// Runs a row's button. Screen Recording is requested only here, from its button.
@@ -881,7 +952,7 @@ final class OverviewModel: ObservableObject {
         navigation.section = .settings
     }
 
-    /// Reveal sessions folder… first shows `sessionsFolderWarning`, like Reveal archive… in Recordings.
+    /// Reveal recordings folder… first shows `sessionsFolderWarning`, like Reveal archive… in Recordings.
     func requestRevealSessionsFolder() {
         if !isConfirmingSessionsReveal { isConfirmingSessionsReveal = true }
     }
@@ -961,31 +1032,14 @@ struct OverviewView: View {
     }
 
     private var startRow: some View {
-        let readiness = model.readiness
+        let card = model.startCard
         return HStack(alignment: .center, spacing: 12) {
-            Group {
-                switch readiness?.allowsStart {
-                case .some(true):
-                    Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
-                case .some(false):
-                    // The same symbol as the row that blocks recording.
-                    Image(systemName: "xmark.octagon.fill").foregroundStyle(.red)
-                case .none:
-                    Image(systemName: "circle.dotted").foregroundStyle(.secondary)
-                }
-            }
-            .font(.title2)
-            .accessibilityHidden(true)
+            OverviewStartIcon(icon: card.icon)
             VStack(alignment: .leading, spacing: 3) {
-                Text(readiness?.headline ?? "Checking whether a recording can start…")
+                Text(card.headline)
                     .font(.headline)
-                if let summary = readiness?.summary {
-                    Text(summary)
-                        .font(.caption).foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                if let reason = model.startUnavailableReason {
-                    Text(reason)
+                ForEach(card.lines, id: \.self) { line in
+                    Text(line)
                         .font(.caption).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -999,7 +1053,7 @@ struct OverviewView: View {
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
             .fixedSize()
-            .disabled(!model.canStartRecording)
+            .disabled(!model.isStartButtonEnabled)
             .help(model.startUnavailableReason ?? OverviewModel.startHelp)
             .accessibilityIdentifier("main.overview.start")
         }
@@ -1084,7 +1138,7 @@ struct OverviewView: View {
             tint: .orange,
             title: RecordingRowText.date(entry),
             status: PipelineStatusOrder.label(summary.pipelineStatus),
-            detail: "\(RecordingRowText.contextAndProduct(summary)) · \(SessionController.clock(summary.mediaSeconds)) recorded. Analysis did not finish."
+            detail: "\(RecordingRowText.contextAndProduct(summary)) · \(SessionController.clock(summary.mediaSeconds)) recorded. \(RecordingRowText.unfinishedNote(summary))"
         ) {
             Button(RecordingAction.retryAnalysis.title) { model.retryAnalysis(summary.sessionId) }
                 .disabled(!recordings.isEnabled(.retryAnalysis, for: entry))
@@ -1155,7 +1209,8 @@ struct OverviewView: View {
 
     private var storageSection: some View {
         Section("Storage") {
-            LabeledContent("Sessions folder") {
+            // The same noun as the rest of the window and the Keep recordings picker in General settings.
+            LabeledContent("Recordings folder") {
                 Text(model.sessionsFolder)
                     .lineLimit(1)
                     .truncationMode(.middle)
@@ -1169,12 +1224,12 @@ struct OverviewView: View {
             }
             LabeledContent("Keep recordings", value: model.retentionDays > 0 ? "\(model.retentionDays) days" : "Forever")
             OverviewButtonRow {
-                Button("Reveal sessions folder…") { model.requestRevealSessionsFolder() }
+                Button("Reveal recordings folder…") { model.requestRevealSessionsFolder() }
                     .accessibilityIdentifier("main.overview.revealSessions")
                 Button("Open General settings") { model.showSettings(.general) }
                     .accessibilityIdentifier("main.overview.retentionSettings")
             }
-            Text("Private archives is the size of every recording’s archive/ folder, measured in the background. Retention is set in General settings.")
+            Text("Every recording’s archive/ folder counts toward Private archives. The total is measured in the background. Retention is set in General settings.")
                 .font(.caption).foregroundStyle(.secondary)
         }
     }
@@ -1227,6 +1282,7 @@ private struct OverviewReadinessRowView: View {
                         ForEach(row.actions) { action in
                             Button(title(for: action)) { model.perform(action) }
                                 .disabled(!model.isEnabled(action))
+                                .help(model.unavailableReason(action) ?? action.title)
                                 .accessibilityIdentifier(row.accessibilityIdentifier(for: action))
                         }
                     }
@@ -1239,6 +1295,77 @@ private struct OverviewReadinessRowView: View {
 
     private func title(for action: OverviewReadinessAction) -> String {
         action == .preloadSpeechModel && model.isPreloadingSpeechModel ? "Loading Whisper model…" : action.title
+    }
+}
+
+/// The first row of Ready to record?: an icon, a headline and the lines under it. Pure, so tests read what the card says
+/// without a view. While recording or analysis runs, the card says so instead of showing readiness, so it never reads
+/// “Ready to record” beside a Start button that waits.
+struct OverviewStartCard: Equatable {
+    enum Icon: Equatable {
+        /// Readiness has not been read yet.
+        case checking
+        /// Neutral: a recording starts, runs or is paused.
+        case recording
+        /// Neutral: analysis runs.
+        case analysis
+        case ready
+        case blocked
+    }
+
+    static let checkingHeadline = "Checking whether a recording can start…"
+    static let recordingHeadline = "Recording in progress"
+    static let analysisHeadline = "Analysis in progress"
+
+    let icon: Icon
+    let headline: String
+    let lines: [String]
+
+    init(readiness: OverviewReadiness?, canChangeSessions: Bool, isRecordingActive: Bool, isPreparingRecording: Bool) {
+        if !canChangeSessions {
+            icon = isRecordingActive ? .recording : .analysis
+            headline = isRecordingActive ? Self.recordingHeadline : Self.analysisHeadline
+            lines = [RecordingsModel.busyReason]
+            return
+        }
+        let preparing = isPreparingRecording ? [OverviewModel.preparingReason] : []
+        guard let readiness else {
+            icon = .checking
+            headline = Self.checkingHeadline
+            lines = preparing
+            return
+        }
+        icon = readiness.allowsStart ? .ready : .blocked
+        headline = readiness.headline
+        lines = [readiness.summary] + preparing
+    }
+}
+
+/// The Start row's icon. Recording and analysis in progress are neutral: nothing is wrong.
+private struct OverviewStartIcon: View {
+    let icon: OverviewStartCard.Icon
+
+    var body: some View {
+        image
+            .font(.title2)
+            .accessibilityHidden(true)
+    }
+
+    @ViewBuilder
+    private var image: some View {
+        switch icon {
+        case .checking:
+            Image(systemName: "circle.dotted").foregroundStyle(.secondary)
+        case .recording:
+            Image(systemName: "record.circle").foregroundStyle(.secondary)
+        case .analysis:
+            Image(systemName: "hourglass").foregroundStyle(.secondary)
+        case .ready:
+            Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+        case .blocked:
+            // The same symbol as the row that blocks recording.
+            Image(systemName: "xmark.octagon.fill").foregroundStyle(.red)
+        }
     }
 }
 

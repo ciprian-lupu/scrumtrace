@@ -17,6 +17,8 @@ final class MainWindowSnapshotTests: XCTestCase {
         let unfinished: String
         /// Analysis ended offline.
         let offlineFailed: String
+        /// Still paused on disk: ScrumTrace stopped before the recording ended.
+        let interrupted: String
         /// A folder whose manifest is not JSON.
         let corrupt: String
         /// Saved context the completed recording used.
@@ -49,7 +51,7 @@ final class MainWindowSnapshotTests: XCTestCase {
             presenter.show(section: .overview)
             let window = try XCTUnwrap(presenter.window)
             try await render(window, as: "overview-idle", into: directory) {
-                presenter.overview.readiness != nil && library.entries.count == 4 && library.totalArchiveBytes != nil
+                presenter.overview.readiness != nil && library.entries.count == 5 && library.totalArchiveBytes != nil
             }
 
             // The live banner sits above the section while a recording runs.
@@ -67,7 +69,7 @@ final class MainWindowSnapshotTests: XCTestCase {
 
             // Needs attention, Last recording and Storage sit below the readiness card.
             try await render(window, as: "overview-scrolled", into: directory, beforeCapture: scrollToBottom) {
-                presenter.overview.attention.unfinished.count == 2 && presenter.overview.attention.unreadableIds == [f.corrupt]
+                presenter.overview.attention.unfinished.count == 3 && presenter.overview.attention.unreadableIds == [f.corrupt]
             }
 
             presenter.show(sessionId: f.completed)
@@ -78,6 +80,13 @@ final class MainWindowSnapshotTests: XCTestCase {
             try await render(window, as: "recordings-selected", into: directory, ready: detailLoaded)
             // The Recording facts and the Shots thumbnails sit below the fold of the detail pane.
             try await render(window, as: "recordings-scrolled", into: directory, beforeCapture: scrollToBottom, ready: detailLoaded)
+
+            // A recording ScrumTrace stopped during says so above its stage bar.
+            presenter.show(sessionId: f.interrupted)
+            try await render(window, as: "recordings-interrupted", into: directory) {
+                guard let summary = recordings.selectedEntry?.summary, summary.sessionId == f.interrupted else { return false }
+                return recordings.isDetailCurrent(for: summary)
+            }
 
             presenter.show(section: .contexts)
             presenter.contexts.selectedContextID = f.usedContext.id
@@ -93,7 +102,30 @@ final class MainWindowSnapshotTests: XCTestCase {
             try await render(window, as: "settings-speech", into: directory) {
                 presenter.navigation.section == .settings
             }
-            XCTAssertEqual(Set(library.entries.map(\.id)), [f.completed, f.unfinished, f.offlineFailed, f.corrupt])
+            presenter.show(tab: .general)
+            try await render(window, as: "settings-general", into: directory) {
+                presenter.navigation.settings.selectedTab == .general
+            }
+            presenter.show(tab: .permissions)
+            try await render(window, as: "settings-permissions", into: directory) {
+                presenter.navigation.settings.selectedTab == .permissions
+            }
+
+            // The smallest window, recording, with the sidebar dragged as wide as it goes: Settings keeps its sides and
+            // its footer below the banner.
+            presenter.show(tab: .speech)
+            controller.phase = .recording
+            try await render(
+                window,
+                as: "settings-minimum-recording",
+                into: directory,
+                size: MainWindowPresenter.minimumContentSize,
+                beforeCapture: widenSidebar
+            ) {
+                presenter.navigation.settings.selectedTab == .speech && !recordings.canChangeSessions
+            }
+            controller.phase = .idle
+            XCTAssertEqual(Set(library.entries.map(\.id)), [f.completed, f.unfinished, f.offlineFailed, f.interrupted, f.corrupt])
         }
     }
 
@@ -123,12 +155,13 @@ final class MainWindowSnapshotTests: XCTestCase {
         _ window: NSWindow,
         as name: String,
         into directory: URL,
+        size: NSSize = MainWindowSnapshotTests.contentSize,
         beforeCapture: (@MainActor (NSWindow) -> Void)? = nil,
         ready: @MainActor () -> Bool
     ) async throws {
         for appearance in Self.appearances {
             window.appearance = NSAppearance(named: appearance.name)
-            window.setContentSize(Self.contentSize)
+            window.setContentSize(size)
             let loaded = await waitUntil(timeout: 10, ready)
             XCTAssertTrue(loaded, "\(name) finished loading")
             // Real display cycles, so SwiftUI redraws in the new appearance and settles its layout.
@@ -137,7 +170,7 @@ final class MainWindowSnapshotTests: XCTestCase {
                 beforeCapture(window)
                 spinRunLoop(for: 0.2)
             }
-            XCTAssertEqual(window.contentView?.bounds.size, Self.contentSize, name)
+            XCTAssertEqual(window.contentView?.bounds.size, size, name)
             let file = directory.appendingPathComponent("\(name)-\(appearance.suffix).png")
             try pngData(of: window).write(to: file)
         }
@@ -167,6 +200,21 @@ final class MainWindowSnapshotTests: XCTestCase {
             guard overflow > 0 else { continue }
             scroll.contentView.scroll(to: NSPoint(x: scroll.contentView.bounds.minX, y: document.isFlipped ? overflow : 0))
             scroll.reflectScrolledClipView(scroll.contentView)
+        }
+    }
+
+    /// Drags the divider between the sidebar and the detail pane as far as it goes.
+    @MainActor
+    private func widenSidebar(in window: NSWindow) {
+        guard let content = window.contentView else { return }
+        var queue: [NSView] = [content]
+        while !queue.isEmpty {
+            let view = queue.removeFirst()
+            if let split = view as? NSSplitView, split.isVertical {
+                split.setPosition(1_000, ofDividerAt: 0)
+                return
+            }
+            queue.append(contentsOf: view.subviews)
         }
     }
 
@@ -332,6 +380,13 @@ final class MainWindowSnapshotTests: XCTestCase {
         try vault.write(manifest: &unfinished)
         try writeFile(Data(count: 64), to: ScrumTracePath.sessionMovie, in: vault.sessionURL(id: unfinished.sessionId))
 
+        var interrupted = try vault.createSession(product: .empty).manifest
+        interrupted.createdAt = now.addingTimeInterval(-50 * 3_600)
+        interrupted.pipelineStatus = .paused
+        interrupted.duration = DurationPair(wallSeconds: 910, mediaSeconds: 845)
+        try vault.write(manifest: &interrupted)
+        try writeFile(Data(count: 64), to: ScrumTracePath.sessionMovie, in: vault.sessionURL(id: interrupted.sessionId))
+
         let corrupt = "2026-09-10-0930-bad001"
         let corruptURL = vault.sessionURL(id: corrupt)
         try writeFile(Data("{ not json".utf8), to: ScrumTracePath.manifest, in: corruptURL)
@@ -341,6 +396,7 @@ final class MainWindowSnapshotTests: XCTestCase {
             completed: completed.sessionId,
             unfinished: unfinished.sessionId,
             offlineFailed: failed.sessionId,
+            interrupted: interrupted.sessionId,
             corrupt: corrupt,
             usedContext: orbit,
             unusedContext: ledger

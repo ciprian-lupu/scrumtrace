@@ -22,7 +22,7 @@ struct ProductContextsSettingsView: View {
 
     var body: some View {
         Section("Product contexts") {
-            Text("Save a context for each product or type of call. You will confirm one before every recording; changes here apply to future sessions.")
+            Text("Save a context for each product or type of call. You will confirm one before every recording; changes here apply to future recordings.")
                 .font(.caption).foregroundStyle(.secondary)
             if let issue = settings.contextLibraryIssue {
                 Text(issue).foregroundStyle(.red)

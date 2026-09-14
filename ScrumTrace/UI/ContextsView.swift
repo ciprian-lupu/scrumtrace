@@ -625,24 +625,23 @@ struct ContextsTable: View {
     let isCounting: Bool
 
     var body: some View {
-        // Ideal widths fit all six columns beside the sidebar at the default 960-point window.
+        // The ideal widths (662 pt) fit beside the sidebar at the default 960-point window, where the table has about
+        // 665 pt for its columns, so a product name and a repository URL of about 35 characters show in full. Tech stack
+        // is left to the detail pane: with it, Product and Repository truncated at that size.
         Table(profiles, selection: $model.selectedContextID) {
             TableColumn("Name") { profile in
                 ContextNameLabel(name: profile.name, isDefault: profile.id == defaultContextID)
             }
-            .width(min: 100, ideal: 140)
+            .width(min: 100, ideal: 126)
             TableColumn("Product") { profile in
                 ContextFieldCell(text: profile.product.appName)
             }
-            .width(min: 60, ideal: 90)
+            .width(min: 70, ideal: 120)
             TableColumn("Repository") { profile in
-                ContextFieldCell(text: profile.product.repoURL)
+                // A longer URL keeps its host and its repository name.
+                ContextFieldCell(text: profile.product.repoURL, truncation: .middle)
             }
-            .width(min: 80, ideal: 140)
-            TableColumn("Tech stack") { profile in
-                ContextFieldCell(text: profile.product.techStack)
-            }
-            .width(min: 60, ideal: 90)
+            .width(min: 100, ideal: 240)
             TableColumn("Recordings") { profile in
                 Text(ContextRowText.count(usage[profile.id], isCounting: isCounting))
                     .monospacedDigit()
@@ -656,7 +655,7 @@ struct ContextsTable: View {
                     .lineLimit(1)
                     .help(isCounting ? "" : item?.lastUsed.map(SessionSummary.formattedDate) ?? "")
             }
-            .width(min: 90, ideal: 104)
+            .width(min: 90, ideal: 100)
         }
         .contextMenu(forSelectionType: String.self) { ids in
             if let id = ids.first {
@@ -710,13 +709,14 @@ private struct ContextDefaultBadge: View {
 
 private struct ContextFieldCell: View {
     let text: String
+    var truncation: Text.TruncationMode = .tail
 
     var body: some View {
         let shown = ContextRowText.field(text)
         Text(shown)
             .foregroundStyle(shown == "—" ? .secondary : .primary)
             .lineLimit(1)
-            .truncationMode(.tail)
+            .truncationMode(truncation)
             .help(shown == "—" ? "" : text)
     }
 }

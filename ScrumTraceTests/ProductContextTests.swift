@@ -392,11 +392,11 @@ final class ProductContextTests: XCTestCase {
         return condition()
     }
 
-    /// The Contexts table: the only table in the window with six columns.
+    /// The Contexts table: the only table in the window with five columns.
     @MainActor
     private func contextsTable(in window: NSWindow) -> NSTableView? {
         func find(_ view: NSView) -> NSTableView? {
-            if let table = view as? NSTableView, table.tableColumns.count == 6 { return table }
+            if let table = view as? NSTableView, table.tableColumns.count == 5 { return table }
             for subview in view.subviews {
                 if let table = find(subview) { return table }
             }
@@ -792,6 +792,54 @@ final class ProductContextTests: XCTestCase {
             XCTAssertThrowsError(try model.save(SavedProductContext(name: "GIB"), isNew: true))
             XCTAssertEqual(state.starts, [])
             XCTAssertNil(model.editor)
+        }
+    }
+
+    @MainActor
+    func testTheContextsTableShowsProductAndRepositoryInFullAtTheDefaultWindowSize() async throws {
+        try await withContextsController { controller, _ in
+            let settings = controller.settings
+            let orbit = SavedProductContext(
+                name: "Orbit web",
+                product: ProductContext(appName: "Orbit Checkout", repoURL: "https://example.test/orbit-checkout", techStack: "Swift, SwiftUI")
+            )
+            let ledger = SavedProductContext(
+                name: "Ledger API",
+                product: ProductContext(appName: "Ledger", repoURL: "https://example.test/ledger", techStack: "Go, PostgreSQL")
+            )
+            try settings.saveProductContext(orbit, isNew: true)
+            try settings.saveProductContext(ledger, isNew: true)
+            try settings.selectProductContext(id: ledger.id)
+            let presenter = MainWindowPresenter(
+                controller: controller,
+                frameAutosaveName: nil,
+                isWindowOnScreen: { $0.isVisible && !$0.isMiniaturized }
+            )
+            defer { presenter.window?.close() }
+            presenter.show(section: .contexts)
+            let window = try XCTUnwrap(presenter.window)
+            window.setContentSize(NSSize(width: 960, height: 640))
+            let listed = await waitUntil { self.contextsTable(in: window)?.numberOfRows == 2 }
+            XCTAssertTrue(listed, "The five-column table lists both contexts")
+            _ = await waitUntil(timeout: 0.3) { false }
+            let table = try XCTUnwrap(contextsTable(in: window))
+            let titles = table.tableColumns.map(\.title)
+            XCTAssertEqual(titles, ["Name", "Product", "Repository", "Recordings", "Last used"], "Tech stack is shown in the detail pane")
+
+            let font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
+            func textWidth(_ text: String) -> CGFloat {
+                ceil((text as NSString).size(withAttributes: [.font: font]).width)
+            }
+            for (title, text) in [("Product", orbit.product.appName), ("Repository", orbit.product.repoURL)] {
+                let column = try XCTUnwrap(titles.firstIndex(of: title), title)
+                // The column as drawn, intercell spacing included, less the cell's inset on each side.
+                let available = table.rect(ofColumn: column).width - 18
+                XCTAssertGreaterThanOrEqual(
+                    available, textWidth(text),
+                    "\(title) has \(available) pt for “\(text)”. Columns: \(table.tableColumns.map(\.width))"
+                )
+            }
+            writeSnapshot(of: window, named: "contexts-960")
         }
     }
 

@@ -243,7 +243,7 @@ final class MenuBarController: NSObject {
         settingsMenu.addItem(actionItem("Log permission probe", #selector(probePermissions)))
         settingsMenu.addItem(actionItem("Reveal agent log", #selector(revealLog)))
         settingsMenu.addItem(actionItem("Export diagnostic bundle", #selector(exportDiagnostics)))
-        settingsMenu.addItem(actionItem("Reveal sessions folder", #selector(revealSessions)))
+        settingsMenu.addItem(actionItem("Reveal recordings folder", #selector(revealSessions)))
         settingsMenu.addItem(.separator())
         settingsMenu.addItem(actionItem("Ask for Screen Recording", #selector(askScreen)))
         settingsMenu.addItem(actionItem("Open Screen Recording settings", #selector(openScreenSettings)))

@@ -173,7 +173,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 @MainActor
 final class MainWindowPresenter: NSObject, NSWindowDelegate {
     nonisolated static let frameAutosaveName = "ScrumTraceMain"
-    nonisolated static let minimumContentSize = NSSize(width: 840, height: 580)
+    /// 620 pt tall, so at the minimum size Settings keeps its footer below the 41 pt live banner; only its bottom padding
+    /// is clipped. The width fits Settings beside `MainWindowView.sidebarMaximumWidth`.
+    nonisolated static let minimumContentSize = NSSize(width: 840, height: 620)
     let navigation: MainNavigation
     /// The Recordings section and its session index, kept for the life of the presenter.
     let recordings: RecordingsModel
@@ -491,7 +493,7 @@ final class MainWindowPresenter: NSObject, NSWindowDelegate {
         setWindowVisible(isWindowOnScreen(window))
     }
 
-    /// Keeps the window at least 840×580 points of content, for user resizes and for a
+    /// Keeps the window at least `minimumContentSize` (840×620 points) of content, for user resizes and for a
     /// frame restored from the autosave name. `contentMinSize` is not used: SwiftUI
     /// resets it whenever the split view content changes, even with `sizingOptions = []`.
     func windowWillResize(_ sender: NSWindow, to frameSize: NSSize) -> NSSize {

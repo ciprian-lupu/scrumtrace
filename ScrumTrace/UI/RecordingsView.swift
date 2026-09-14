@@ -811,6 +811,19 @@ final class RecordingsModel: ObservableObject {
 
     // MARK: Actions
 
+    /// True for a recording whose capture never ended because ScrumTrace stopped during it. The recording a running
+    /// capture holds is at the same manifest states and is not interrupted.
+    ///
+    /// A start in flight needs no exception, even before `activeSessionId` names its session: the new manifest is
+    /// written idle, the controller holds it before capture runs, and it is written recording or paused only after
+    /// `phase` changes, which queues `syncCaptureState` first. So while a start runs with no held session, or with the
+    /// last session still held, every recording or paused manifest belongs to a capture that was interrupted.
+    func isInterrupted(_ summary: SessionSummary) -> Bool {
+        guard RecordingRowText.captureWasInterrupted(summary) else { return false }
+        guard !canChangeSessions, let active = activeSessionId else { return true }
+        return active.caseInsensitiveCompare(summary.sessionId) != .orderedSame
+    }
+
     func actions(for entry: SessionEntry) -> [RecordingAction] {
         entry.summary == nil ? RecordingAction.unreadableActions : RecordingAction.readableActions
     }
@@ -1239,6 +1252,24 @@ enum RecordingRowText {
     static func deleteMessage(_ id: String) -> String {
         "Recording \(id) will be removed, including archive/ with the full recording and transcript, and export/ with the brief and session pack. This cannot be undone."
     }
+
+    /// A manifest still at recording or paused: ScrumTrace stopped before the recording ended, because a normal quit
+    /// writes idle. Callers leave out the recording a running capture holds, which is at these states too.
+    static func captureWasInterrupted(_ summary: SessionSummary) -> Bool {
+        summary.pipelineStatus == .recording || summary.pipelineStatus == .paused
+    }
+
+    /// The sentence after an unfinished recording's context and duration in Overview's Needs attention. An analysis
+    /// that did not finish keeps its own sentence.
+    static func unfinishedNote(_ summary: SessionSummary) -> String {
+        captureWasInterrupted(summary)
+            ? "\(interruptedTitle). Retry analysis processes what was captured."
+            : "Analysis did not finish."
+    }
+
+    static let interruptedTitle = "Recording was interrupted"
+    /// Shown above the stage bar of an interrupted recording, whose stages all read as not started.
+    static let interruptedExplanation = "ScrumTrace stopped before this recording ended. Retry analysis processes what was captured."
 }
 
 // MARK: - Views
@@ -1328,7 +1359,7 @@ struct RecordingsView: View {
         ContentUnavailableView {
             Label("No recordings yet", systemImage: MainSection.recordings.systemImage)
         } description: {
-            Text("Recordings appear here after you stop a session. Each one keeps a private archive and an export you can hand to an agent.")
+            Text("Recordings appear here after you stop recording. Each one keeps a private archive and an export you can hand to an agent.")
         } actions: {
             Button("Start recording") { model.startRecording() }
                 .disabled(!model.canStartRecording)
@@ -1658,6 +1689,23 @@ struct SessionDetailView: View {
             VStack(alignment: .leading, spacing: 12) {
                 header
                 VStack(alignment: .leading, spacing: 4) {
+                    if model.isInterrupted(summary) {
+                        // Every stage below reads as not started, so say first what happened.
+                        VStack(alignment: .leading, spacing: 2) {
+                            Label {
+                                Text(RecordingRowText.interruptedTitle)
+                            } icon: {
+                                Image(systemName: "exclamationmark.triangle.fill")
+                                    .foregroundStyle(.orange)
+                            }
+                            .font(.callout.weight(.semibold))
+                            Text(RecordingRowText.interruptedExplanation)
+                                .font(.caption).foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .accessibilityElement(children: .combine)
+                        .accessibilityIdentifier("main.recordings.detail.interrupted")
+                    }
                     SessionStageProgress(steps: SessionStageStep.steps(for: summary))
                     if summary.pipelineStatus == .offlineFailed {
                         Text("Analysis could not finish online. The local export is kept; Retry analysis tries again.")

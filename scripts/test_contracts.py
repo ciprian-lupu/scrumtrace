@@ -3520,6 +3520,70 @@ def test_recordings_start_copy_and_speaker_review_loading() -> None:
     assert "SpeakerReviewLoader.hasReviewableSession(in: vault)" in settings.split("var body: some View {")[1].split("private var speechTab")[0]
 
 
+def test_overview_card_and_window_wording() -> None:
+    overview_view = (ROOT / "ScrumTrace" / "UI" / "OverviewView.swift").read_text()
+    settings = (ROOT / "ScrumTrace" / "UI" / "SettingsView.swift").read_text()
+    recordings_view = (ROOT / "ScrumTrace" / "UI" / "RecordingsView.swift").read_text()
+    window = (ROOT / "ScrumTrace" / "UI" / "MainWindow.swift").read_text()
+    contexts_view = (ROOT / "ScrumTrace" / "UI" / "ContextsView.swift").read_text()
+
+    # Overview's Start waits while readiness blocks recording, with the blocking reason as its help tag. While
+    # recording or analysis runs, the card names that instead of readiness, and a waiting row button says why.
+    start_row = overview_view.split("private var startRow: some View {")[1].split("\n    }\n")[0]
+    assert ".disabled(!model.isStartButtonEnabled)" in start_row
+    assert ".help(model.startUnavailableReason ?? OverviewModel.startHelp)" in start_row
+    assert "model.startCard" in start_row
+    assert "readiness?.headline" not in start_row
+    assert "?? readinessStartBlock" in overview_view
+    row_view = overview_view.split("private struct OverviewReadinessRowView: View {")[1].split("\n}\n")[0]
+    assert ".help(model.unavailableReason(action) ?? action.title)" in row_view
+    # The banner's Resume says why it waits.
+    banner = window.split("struct MainLiveBanner: View {")[1].split("\n}\n")[0]
+    assert ".help(state.pauseHelp)" in banner
+
+    # One noun for the user, recordings, and the same permission words in Overview and Settings.
+    storage = overview_view.split("private var storageSection: some View {")[1].split("\n    }\n")[0]
+    assert 'LabeledContent("Keep recordings"' in storage
+    assert "sessions folder" not in storage.lower()
+    assert "Private archives is" not in overview_view
+    assert 'Picker("Keep recordings"' in settings
+    for drift in ("Keep sessions", "completed sessions", "Unfinished sessions", '"trusted"', '"not trusted"'):
+        assert drift not in settings, drift
+    assert "OverviewReadiness.accessibilityStatus(trusted:" in settings
+    assert "OverviewReadiness.microphoneStatus(" in settings
+    assert "after you stop a session" not in recordings_view
+    # The status-bar menu and the Contexts caption use the same noun.
+    menu_bar = (ROOT / "ScrumTrace" / "UI" / "MenuBarController.swift").read_text()
+    assert 'actionItem("Reveal recordings folder", #selector(revealSessions))' in menu_bar
+    assert "Reveal sessions folder" not in menu_bar
+    assert '"menu_reveal_sessions"' in menu_bar
+    product_context_views = (ROOT / "ScrumTrace" / "UI" / "ProductContextViews.swift").read_text()
+    assert "changes here apply to future recordings." in product_context_views
+    assert "future sessions" not in product_context_views
+
+    # A recording ScrumTrace stopped during reads as interrupted, above the stage bar, not as unfinished analysis.
+    assert "RecordingRowText.unfinishedNote(summary)" in overview_view
+    assert "Analysis did not finish." not in overview_view
+    detail = recordings_view.split("struct SessionDetailView: View {")[1].split("\n    private var header")[0]
+    assert detail.index("model.isInterrupted(summary)") < detail.index("SessionStageProgress(")
+
+    # Settings keeps its sides beside the widest sidebar; the Contexts table leaves Tech stack to the detail pane.
+    assert "max: Self.sidebarMaximumWidth" in window
+    table = contexts_view.split("struct ContextsTable: View {")[1].split("\n}\n")[0]
+    assert 'TableColumn("Tech stack")' not in table
+    assert "truncation: .middle" in table
+
+    tests = (ROOT / "ScrumTraceTests" / "MainWindowTests.swift").read_text()
+    for name in (
+        "testOverviewStartCardNamesRecordingOrAnalysisAndWaitsForReadiness",
+        "testInterruptedRecordingsReadAsInterruptedNotAsUnfinishedAnalysis",
+        "testSettingsKeepsItsSidesAndFooterBesideTheWidestSidebarAtTheMinimumSize",
+    ):
+        assert f"func {name}()" in tests, name
+    context_tests = (ROOT / "ScrumTraceTests" / "ProductContextTests.swift").read_text()
+    assert "func testTheContextsTableShowsProductAndRepositoryInFullAtTheDefaultWindowSize()" in context_tests
+
+
 def main() -> None:
     test_export_has_no_archive_and_no_tokens()
     test_agent_context_uses_export_relative_paths()
@@ -3545,6 +3609,7 @@ def main() -> None:
     test_main_window_routing_and_private_index()
     test_session_detail_facts_keep_only_upload_consent()
     test_recordings_start_copy_and_speaker_review_loading()
+    test_overview_card_and_window_wording()
     print("contract tests ok")
 
 

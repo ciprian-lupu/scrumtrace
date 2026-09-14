@@ -68,6 +68,37 @@ final class MainWindowTests: XCTestCase {
         return tops.min()
     }
 
+    /// The split view between the sidebar and the detail pane: the outermost one.
+    @MainActor
+    private func sidebarSplitView(in window: NSWindow) -> NSSplitView? {
+        guard let content = window.contentView else { return nil }
+        var queue: [NSView] = [content]
+        while !queue.isEmpty {
+            let view = queue.removeFirst()
+            if let split = view as? NSSplitView, split.isVertical, split.arrangedSubviews.count == 2 { return split }
+            queue.append(contentsOf: view.subviews)
+        }
+        return nil
+    }
+
+    /// How far the Settings tab view (an AppKit view) sits from the sidebar's trailing edge, from the window's trailing
+    /// edge and from its bottom edge. A negative value is clipped.
+    @MainActor
+    private func settingsInsets(in window: NSWindow) -> (leading: CGFloat, trailing: CGFloat, bottom: CGFloat)? {
+        guard let content = window.contentView, let sidebar = sidebarSplitView(in: window)?.arrangedSubviews.first else { return nil }
+        content.layoutSubtreeIfNeeded()
+        var stack: [NSView] = [content]
+        while let view = stack.popLast() {
+            if let tabs = view as? NSTabView, !tabs.isHiddenOrHasHiddenAncestor {
+                let frame = tabs.convert(tabs.bounds, to: nil)
+                let sidebarEdge = sidebar.convert(sidebar.bounds, to: nil).maxX
+                return (frame.minX - sidebarEdge, content.bounds.width - frame.maxX, frame.minY)
+            }
+            stack.append(contentsOf: view.subviews)
+        }
+        return nil
+    }
+
     /// Writes a PNG only when SCRUMTRACE_SNAPSHOT_DIR is set, for manual layout review.
     @MainActor
     private func writeSnapshot(of window: NSWindow, named name: String) {
@@ -444,21 +475,46 @@ final class MainWindowTests: XCTestCase {
             XCTAssertNil(live.detail)
             XCTAssertEqual(live.pauseTitle, "Pause")
             XCTAssertTrue(live.canTogglePause, "Pause does not depend on the resume gate")
+            XCTAssertNil(live.resumeBlockedReason)
+            XCTAssertEqual(live.pauseHelp, "Pause the recording. Nothing is written while paused.")
             controller.statusLine = "Pinned 12:30"
             XCTAssertEqual(MainLiveBannerState(controller: controller, resumeAllowed: false).detail, "Pinned 12:30")
 
             controller.phase = .paused
             controller.mediaElapsed = 3723
             controller.statusLine = "Paused — nothing is written"
-            let paused = MainLiveBannerState(controller: controller, resumeAllowed: false)
+            let paused = MainLiveBannerState(controller: controller, resumeAllowed: true)
             XCTAssertTrue(paused.isVisible)
             XCTAssertTrue(paused.isPaused)
             XCTAssertEqual(paused.title, "Paused")
             XCTAssertEqual(paused.elapsed, "1:02:03")
             XCTAssertEqual(paused.detail, "Paused — nothing is written")
             XCTAssertEqual(paused.pauseTitle, "Resume")
-            XCTAssertFalse(paused.canTogglePause, "Resume waits for the sampled privacy gate")
-            XCTAssertTrue(MainLiveBannerState(controller: controller, resumeAllowed: true).canTogglePause)
+            XCTAssertTrue(paused.canTogglePause)
+            XCTAssertNil(paused.resumeBlockedReason)
+            XCTAssertEqual(paused.pauseHelp, "Resume the recording.")
+
+            // A password manager came on screen after a pause the user chose: Resume waits, and the banner line and the
+            // button's help tag say why instead of repeating the pause line.
+            let held = MainLiveBannerState(controller: controller, resumeAllowed: false)
+            XCTAssertFalse(held.canTogglePause, "Resume waits for the sampled privacy gate")
+            XCTAssertEqual(held.resumeBlockedReason, MainLiveBannerState.privacyHoldReason)
+            XCTAssertEqual(held.detail, MainLiveBannerState.privacyHoldReason)
+            XCTAssertEqual(held.pauseHelp, MainLiveBannerState.privacyHoldReason)
+
+            // An automatic pause already names the app, so its line stays; the help tag still says why Resume waits.
+            controller.statusLine = "Auto-paused for com.1password.1password"
+            let automatic = MainLiveBannerState(controller: controller, resumeAllowed: false)
+            XCTAssertEqual(automatic.detail, "Auto-paused for com.1password.1password")
+            XCTAssertEqual(automatic.pauseHelp, MainLiveBannerState.privacyHoldReason)
+            controller.statusLine = "Still auto-paused for a password manager"
+            XCTAssertEqual(MainLiveBannerState(controller: controller, resumeAllowed: false).detail, "Still auto-paused for a password manager")
+
+            // Before the banner's first sample, Resume waits without a reason, so a new pause never flashes one.
+            let unsampled = MainLiveBannerState(controller: controller, resumeAllowed: nil)
+            XCTAssertFalse(unsampled.canTogglePause)
+            XCTAssertNil(unsampled.resumeBlockedReason)
+            XCTAssertEqual(unsampled.detail, "Still auto-paused for a password manager")
         }
     }
 
@@ -486,7 +542,7 @@ final class MainWindowTests: XCTestCase {
                     let clamped = presenter.windowWillResize(window, to: NSSize(width: 200, height: 150))
                     XCTAssertEqual(
                         window.contentRect(forFrameRect: NSRect(origin: .zero, size: clamped)).size,
-                        NSSize(width: 840, height: 580),
+                        NSSize(width: 840, height: 620),
                         "\(section) \(phase)"
                     )
                     XCTAssertEqual(presenter.windowWillResize(window, to: NSSize(width: 1200, height: 900)), NSSize(width: 1200, height: 900))
@@ -522,7 +578,7 @@ final class MainWindowTests: XCTestCase {
             XCTAssertEqual(
                 window.contentRect(forFrameRect: window.frame).size,
                 MainWindowPresenter.minimumContentSize,
-                "A saved 500×400 frame opens at the 840×580 minimum, not below it"
+                "A saved 500×400 frame opens at the 840×620 minimum, not below it"
             )
         }
     }
@@ -2505,6 +2561,7 @@ final class MainWindowTests: XCTestCase {
             },
             canChangeSessions: { state.canChange },
             isPreparingRecording: { state.preparing },
+            isRecordingActive: { state.recordingActive },
             lastError: { state.lastError },
             retentionDays: { state.retentionDays },
             captureAreaSummary: { state.captureArea },
@@ -2605,7 +2662,7 @@ final class MainWindowTests: XCTestCase {
         XCTAssertEqual(firstLaunch.row(.meetingNotice)?.state, .actionNeeded)
         XCTAssertEqual(firstLaunch.row(.meetingNotice)?.marker, .actionNeeded)
         XCTAssertEqual(firstLaunch.row(.microphone)?.marker, .actionNeeded)
-        XCTAssertEqual(firstLaunch.row(.microphone)?.actions, [.openMicrophoneSettings])
+        XCTAssertEqual(firstLaunch.row(.microphone)?.actions, [.openMicrophoneSettings, .openCaptureSettings])
         XCTAssertEqual(firstLaunch.rows.filter { $0.actions.contains(.relaunch) }.map(\.item), [.screenRecording])
         XCTAssertEqual(
             OverviewReadiness(inputs: overviewReadinessInputs(.screenGrantedNeedsRelaunch, microphoneStatus: "restricted"))
@@ -2670,7 +2727,8 @@ final class MainWindowTests: XCTestCase {
         XCTAssertEqual(microphone.marker, .blocksRecording)
         XCTAssertTrue(microphone.blocksRecording)
         XCTAssertEqual(microphone.detail, CaptureReadiness.microphoneDenied.userMessage)
-        XCTAssertEqual(microphone.actions, [.openMicrophoneSettings, .relaunch])
+        // The summary names two fixes: allow the microphone, or turn Record microphone off. The row offers both.
+        XCTAssertEqual(microphone.actions, [.openMicrophoneSettings, .openCaptureSettings, .relaunch])
         let notAsked = OverviewReadiness(inputs: overviewReadinessInputs(microphoneStatus: "not asked for this process"))
         XCTAssertTrue(notAsked.allowsStart)
         XCTAssertEqual(notAsked.row(.microphone)?.state, .optional)
@@ -2717,6 +2775,195 @@ final class MainWindowTests: XCTestCase {
         XCTAssertEqual(OverviewReadinessAction.openAISettings.settingsTab, .ai)
         XCTAssertEqual(OverviewReadinessAction.openPermissionsSettings.settingsTab, .permissions)
         XCTAssertNil(OverviewReadinessAction.askScreenRecording.settingsTab)
+    }
+
+    @MainActor
+    func testOverviewStartCardNamesRecordingOrAnalysisAndWaitsForReadiness() async throws {
+        try await withRecordingsFixture { f in
+            let navigation = MainNavigation()
+            let recorder = CallRecorder()
+            let state = OverviewState()
+            state.inputs = overviewReadinessInputs(.screenDenied, speechReady: false)
+            let recordings = makeRecordingsModel(f, navigation: navigation, recorder: recorder, canChange: { state.canChange })
+            let overview = makeOverviewModel(recordings: recordings, state: state, recorder: recorder)
+
+            // Before readiness is read, the card is checking and Start follows the Start flow alone.
+            XCTAssertEqual(overview.startCard.icon, .checking)
+            XCTAssertEqual(overview.startCard.headline, OverviewStartCard.checkingHeadline)
+            XCTAssertTrue(overview.isStartButtonEnabled)
+            XCTAssertNil(overview.startUnavailableReason)
+
+            // Screen Recording denied: the card says recording is blocked, and Start waits with the blocking reason as its
+            // help tag instead of opening the flow's alert. The row keeps the buttons that fix it.
+            overview.evaluate()
+            let blocked = try XCTUnwrap(overview.readiness)
+            XCTAssertEqual(overview.startCard.icon, .blocked)
+            XCTAssertEqual(overview.startCard.headline, "Recording is blocked")
+            XCTAssertEqual(overview.startCard.lines, [blocked.summary])
+            XCTAssertTrue(overview.canStartRecording, "The Start flow itself is free")
+            XCTAssertFalse(overview.isStartButtonEnabled, "Start waits while readiness blocks recording")
+            XCTAssertEqual(overview.startUnavailableReason, blocked.startBlockedReason)
+            XCTAssertTrue(overview.startUnavailableReason?.contains("Screen Recording row") == true, overview.startUnavailableReason ?? "")
+            XCTAssertTrue(overview.isEnabled(.askScreenRecording), "The blocking row still offers its fix")
+            let reasons = [CaptureReadiness.screenDenied, .screenGrantedNeedsRelaunch, .microphoneDenied].compactMap {
+                OverviewReadiness(inputs: overviewReadinessInputs($0, microphoneStatus: "denied")).startBlockedReason
+            }
+            XCTAssertEqual(Set(reasons).count, 3, "Each blocking state says what to do")
+            XCTAssertNil(OverviewReadiness(inputs: overviewReadinessInputs(service: false, key: false, notice: false)).startBlockedReason,
+                         "Rows that only ask for something never block Start")
+
+            state.inputs = overviewReadinessInputs(speechReady: false)
+            overview.evaluate()
+            XCTAssertEqual(overview.startCard.icon, .ready)
+            XCTAssertEqual(overview.startCard.headline, "Ready to record")
+            XCTAssertTrue(overview.isStartButtonEnabled)
+            XCTAssertNil(overview.startUnavailableReason)
+
+            // A recording runs: the card names it with a neutral icon and one line about why Start waits, never
+            // "Ready to record". Row buttons that wait for it say why; System Settings buttons do not wait.
+            state.inputs = overviewReadinessInputs(.screenDenied, speechReady: false)
+            overview.evaluate()
+            state.canChange = false
+            state.recordingActive = true
+            overview.syncStartState()
+            XCTAssertEqual(overview.startCard.icon, .recording)
+            XCTAssertEqual(overview.startCard.headline, OverviewStartCard.recordingHeadline)
+            XCTAssertEqual(overview.startCard.lines, [RecordingsModel.busyReason])
+            XCTAssertFalse(overview.isStartButtonEnabled)
+            XCTAssertEqual(overview.startUnavailableReason, RecordingsModel.busyReason, "Recording is the reason, not readiness")
+            for action: OverviewReadinessAction in [.askScreenRecording, .relaunch, .preloadSpeechModel] {
+                XCTAssertFalse(overview.isEnabled(action), "\(action)")
+                XCTAssertEqual(overview.unavailableReason(action), RecordingsModel.busyReason, "\(action)")
+            }
+            XCTAssertTrue(overview.isEnabled(.openScreenRecordingSettings))
+            XCTAssertNil(overview.unavailableReason(.openScreenRecordingSettings))
+            state.inputs = overviewReadinessInputs()
+            overview.evaluate()
+            XCTAssertNotEqual(overview.startCard.headline, "Ready to record", "Readiness that allows a start is not shown while recording")
+            XCTAssertEqual(overview.startCard.icon, .recording)
+
+            // Analysis of that recording.
+            state.recordingActive = false
+            overview.syncStartState()
+            XCTAssertEqual(overview.startCard.icon, .analysis)
+            XCTAssertEqual(overview.startCard.headline, OverviewStartCard.analysisHeadline)
+            XCTAssertEqual(overview.startCard.lines, [RecordingsModel.busyReason])
+
+            // Idle again while a Start shows its context window: readiness is back, with the line about that window.
+            state.canChange = true
+            state.preparing = true
+            overview.syncStartState()
+            XCTAssertEqual(overview.startCard.headline, "Ready to record")
+            XCTAssertEqual(overview.startCard.lines, [try XCTUnwrap(overview.readiness).summary, OverviewModel.preparingReason])
+            XCTAssertFalse(overview.isStartButtonEnabled)
+            XCTAssertEqual(overview.startUnavailableReason, OverviewModel.preparingReason)
+            XCTAssertEqual(recorder.calls, [])
+        }
+    }
+
+    @MainActor
+    func testInterruptedRecordingsReadAsInterruptedNotAsUnfinishedAnalysis() async throws {
+        try await withRecordingsFixture { f in
+            let navigation = MainNavigation()
+            let recorder = CallRecorder()
+            let state = OverviewState()
+            let recordings = makeRecordingsModel(
+                f,
+                navigation: navigation,
+                recorder: recorder,
+                canChange: { state.canChange },
+                activeSessionId: { state.activeSessionId }
+            )
+            let overview = makeOverviewModel(recordings: recordings, state: state, recorder: recorder)
+            let paused = try makeSession(in: f.vault, status: .paused)
+            let recording = try makeSession(in: f.vault, status: .recording)
+            let offline = try makeSession(in: f.vault, status: .offlineFailed)
+            await recordings.refresh().value
+            @MainActor func summary(_ id: String) throws -> SessionSummary {
+                let found = recordings.library.entries.first { $0.id == id }?.summary
+                return try XCTUnwrap(found, id)
+            }
+
+            // ScrumTrace stopped during these recordings. Overview says the recording was interrupted, and Retry analysis
+            // stays the way to process what was captured.
+            for id in [paused, recording] {
+                let item = try summary(id)
+                XCTAssertTrue(recordings.isInterrupted(item), id)
+                XCTAssertEqual(RecordingRowText.unfinishedNote(item), "Recording was interrupted. Retry analysis processes what was captured.", id)
+                XCTAssertTrue(overview.attention.unfinished.contains { $0.sessionId == id }, id)
+                XCTAssertTrue(recordings.isEnabled(.retryAnalysis, for: .loaded(item)), id)
+            }
+            // Analysis that did not finish keeps its own sentence and is never shown as interrupted.
+            for id in [f.unfinished, offline] {
+                let item = try summary(id)
+                XCTAssertFalse(recordings.isInterrupted(item), id)
+                XCTAssertEqual(RecordingRowText.unfinishedNote(item), "Analysis did not finish.", id)
+            }
+            XCTAssertFalse(recordings.isInterrupted(try summary(f.completed)))
+
+            // The recording a live capture holds is at the same manifest states and is not interrupted.
+            state.canChange = false
+            state.activeSessionId = recording.uppercased()
+            recordings.syncCaptureState()
+            XCTAssertFalse(recordings.isInterrupted(try summary(recording)), "The live recording")
+            XCTAssertTrue(recordings.isInterrupted(try summary(paused)), "An older interrupted recording stays interrupted")
+
+            // A start in flight, before the controller names its new session (nothing held yet, or still the last
+            // session it recorded). The new manifest is idle until capture runs, so it never reads as interrupted, and
+            // the recordings ScrumTrace stopped during still do.
+            let starting = try makeSession(in: f.vault, status: .idle)
+            await recordings.refresh().value
+            for held: String? in [nil, f.completed] {
+                state.canChange = false
+                state.activeSessionId = held
+                recordings.syncCaptureState()
+                let label = held ?? "nothing held"
+                XCTAssertFalse(recordings.isInterrupted(try summary(starting)), "The session a start just created, \(label)")
+                XCTAssertTrue(recordings.isInterrupted(try summary(paused)), "Interrupted while paused, \(label)")
+                XCTAssertTrue(recordings.isInterrupted(try summary(recording)), "Interrupted while recording, \(label)")
+            }
+            XCTAssertEqual(recorder.calls, [])
+        }
+    }
+
+    @MainActor
+    func testSettingsKeepsItsSidesAndFooterBesideTheWidestSidebarAtTheMinimumSize() throws {
+        try withController { controller, _ in
+            let presenter = MainWindowPresenter(controller: controller, frameAutosaveName: nil, isWindowOnScreen: ignoringOcclusion)
+            defer { presenter.window?.close() }
+            presenter.show(tab: .speech)
+            let window = try XCTUnwrap(presenter.window)
+            // The live banner takes height from the section.
+            controller.phase = .recording
+
+            // Roomy: Settings stretches, so its tab view sits at its own padding from the sidebar, the trailing edge and
+            // the bottom edge, with the footer below it.
+            window.setContentSize(NSSize(width: 1_200, height: 900))
+            XCTAssertTrue(spinRunLoop(until: { self.settingsInsets(in: window) != nil }))
+            let split = try XCTUnwrap(sidebarSplitView(in: window))
+            let ideal = try XCTUnwrap(split.arrangedSubviews.first).frame.width
+            split.setPosition(1_000, ofDividerAt: 0)
+            spinRunLoop(for: 0.4)
+            let widest = try XCTUnwrap(split.arrangedSubviews.first).frame.width
+            XCTAssertGreaterThan(widest, ideal, "The sidebar was dragged wider than its ideal width")
+            // macOS 26 draws the sidebar 8 pt wider than its column.
+            XCTAssertLessThanOrEqual(widest, MainWindowView.sidebarMaximumWidth + 8, "The sidebar stops at its maximum width")
+            let roomy = try XCTUnwrap(settingsInsets(in: window))
+
+            // The minimum size, recording, with the sidebar dragged as wide as it goes: Settings may lose part of its
+            // 16 pt padding, never its sides or its footer.
+            window.setContentSize(MainWindowPresenter.minimumContentSize)
+            spinRunLoop(for: 0.3)
+            split.setPosition(1_000, ofDividerAt: 0)
+            spinRunLoop(for: 0.4)
+            XCTAssertEqual(try XCTUnwrap(split.arrangedSubviews.first).frame.width, widest, accuracy: 0.5)
+            let tight = try XCTUnwrap(settingsInsets(in: window))
+            let padding: CGFloat = 16
+            XCTAssertGreaterThanOrEqual(tight.leading, roomy.leading - padding - 0.5, "Leading side clipped: \(tight), roomy \(roomy)")
+            XCTAssertGreaterThanOrEqual(tight.trailing, roomy.trailing - padding - 0.5, "Trailing side clipped: \(tight), roomy \(roomy)")
+            XCTAssertGreaterThanOrEqual(tight.bottom, roomy.bottom - padding - 0.5, "Footer clipped: \(tight), roomy \(roomy)")
+            writeSnapshot(of: window, named: "settings-minimum-widest-sidebar")
+        }
     }
 
     @MainActor
@@ -2817,7 +3064,7 @@ final class MainWindowTests: XCTestCase {
             XCTAssertFalse(overview.isEvaluationLoopActive, "No readiness loop while the window is not visible")
             await overview.archiveTotalTask?.value
             XCTAssertGreaterThan(recordings.library.totalArchiveBytes ?? 0, 0)
-            // Reveal sessions folder… warns first, like Reveal archive… in Recordings.
+            // Reveal recordings folder… warns first, like Reveal archive… in Recordings.
             overview.requestRevealSessionsFolder()
             XCTAssertTrue(overview.isConfirmingSessionsReveal)
             overview.cancelRevealSessionsFolder()
@@ -2894,6 +3141,12 @@ final class MainWindowTests: XCTestCase {
                     "\(state.name): the button follows the controller"
                 )
                 XCTAssertEqual(overview.startUnavailableReason, RecordingsModel.busyReason, state.name)
+                // The app's own controller tells a recording, paused or starting, from analysis.
+                XCTAssertEqual(
+                    overview.startCard.headline,
+                    state.name == "busy" ? OverviewStartCard.analysisHeadline : OverviewStartCard.recordingHeadline,
+                    state.name
+                )
                 XCTAssertFalse(overview.startRecording(), state.name)
                 controller.setStartInFlightForTesting(false)
                 controller.isBusy = false
@@ -2983,11 +3236,12 @@ final class MainWindowTests: XCTestCase {
             XCTAssertFalse(overview.perform(.askScreenRecording), "Nothing runs before the section read readiness")
             overview.evaluate()
             XCTAssertEqual(Set(overview.readiness?.rows.flatMap(\.actions) ?? []), [
-                .askScreenRecording, .openScreenRecordingSettings, .relaunch, .openMicrophoneSettings,
+                .askScreenRecording, .openScreenRecordingSettings, .relaunch, .openMicrophoneSettings, .openCaptureSettings,
                 .openPermissionsSettings, .preloadSpeechModel, .openAISettings, .openGeneralSettings
             ])
-            XCTAssertFalse(overview.isEnabled(.openCaptureSettings), "Only offered actions run")
-            XCTAssertFalse(overview.perform(.openCaptureSettings))
+            XCTAssertFalse(overview.isEnabled(.openSpeechSettings), "Only offered actions run")
+            XCTAssertNil(overview.unavailableReason(.openSpeechSettings), "An action no row offers has no help tag")
+            XCTAssertFalse(overview.perform(.openSpeechSettings))
 
             // Busy: the Screen Recording request, relaunch and preload wait; System Settings does not.
             // The app's controller observer syncs this; here the test does.
@@ -3008,7 +3262,8 @@ final class MainWindowTests: XCTestCase {
             XCTAssertEqual(recorder.calls, ["openScreenRecordingSettings", "askForScreenRecording", "openMicrophoneSettings", "relaunch"])
 
             let tabs: [(OverviewReadinessAction, SettingsTab)] = [
-                (.openPermissionsSettings, .permissions), (.openAISettings, .ai), (.openGeneralSettings, .general)
+                (.openPermissionsSettings, .permissions), (.openCaptureSettings, .capture), (.openAISettings, .ai),
+                (.openGeneralSettings, .general)
             ]
             for (action, tab) in tabs {
                 navigation.section = .overview
@@ -3022,7 +3277,9 @@ final class MainWindowTests: XCTestCase {
             XCTAssertTrue(overview.perform(.preloadSpeechModel))
             XCTAssertTrue(overview.isPreloadingSpeechModel)
             XCTAssertFalse(overview.perform(.preloadSpeechModel), "One preload at a time")
+            XCTAssertEqual(overview.unavailableReason(.preloadSpeechModel), OverviewModel.speechModelLoadingReason)
             await overview.preloadTask?.value
+            XCTAssertNil(overview.unavailableReason(.preloadSpeechModel))
             XCTAssertFalse(overview.isPreloadingSpeechModel)
             XCTAssertEqual(overview.preloadLine, "The selected model is ready. No relaunch is needed.")
             XCTAssertEqual(preloads.calls, [WhisperTranscriber.defaultStoredModel])
@@ -3038,10 +3295,11 @@ final class MainWindowTests: XCTestCase {
 
             XCTAssertEqual(recorder.calls.filter { $0 == "updateCheck" }, [])
             let rows = try overviewEventRows(at: f.log)
-            XCTAssertEqual(rows.compactMap { $0["event"] }, Array(repeating: "main_readiness", count: 9))
+            XCTAssertEqual(rows.compactMap { $0["event"] }, Array(repeating: "main_readiness", count: 10))
             XCTAssertEqual(rows.compactMap { $0["action"] }, [
                 "openScreenRecordingSettings", "askScreenRecording", "openMicrophoneSettings", "relaunch",
-                "openPermissionsSettings", "openAISettings", "openGeneralSettings", "preloadSpeechModel", "preloadSpeechModel"
+                "openPermissionsSettings", "openCaptureSettings", "openAISettings", "openGeneralSettings",
+                "preloadSpeechModel", "preloadSpeechModel"
             ])
         }
     }
@@ -3420,6 +3678,8 @@ private final class OverviewState {
     var inputs = overviewReadinessInputs()
     var canChange = true
     var preparing = false
+    /// A recording starts, runs or is paused. While `canChange` is false and this is false, analysis runs.
+    var recordingActive = false
     var activeSessionId: String?
     var lastError: String?
     var retentionDays = 0

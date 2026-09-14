@@ -219,6 +219,11 @@ struct MainWindowView: View {
     /// current state (for example the license line), not from window creation.
     let settingsView: @MainActor () -> SettingsView
 
+    /// The widest the sidebar column can be dragged. macOS 26 draws the sidebar 8 pt wider than its column, so at the
+    /// 840 pt minimum width the detail pane keeps at least 632 pt: Settings (620 pt plus its padding) loses some padding,
+    /// never its sides.
+    static let sidebarMaximumWidth: CGFloat = 200
+
     var body: some View {
         NavigationSplitView {
             // A required selection: clicking empty sidebar space or Command-clicking
@@ -237,7 +242,9 @@ struct MainWindowView: View {
                 }
             }
             .listStyle(.sidebar)
-            .navigationSplitViewColumnWidth(min: 170, ideal: 190, max: 260)
+            // At most `sidebarMaximumWidth`, so the Settings section keeps both sides beside the widest sidebar at the
+            // minimum window width.
+            .navigationSplitViewColumnWidth(min: 170, ideal: 190, max: Self.sidebarMaximumWidth)
         } detail: {
             VStack(spacing: 0) {
                 MainLiveBanner(controller: controller)
@@ -322,6 +329,9 @@ private struct StableWindowToolbar: ViewModifier {
 
 /// What the live banner shows, derived from the controller so tests do not need a view tree.
 struct MainLiveBannerState: Equatable {
+    /// Why Resume waits while the privacy gate holds the recording. Short enough for the banner line.
+    static let privacyHoldReason = "Resume waits while a password manager is on screen."
+
     let isVisible: Bool
     let isPaused: Bool
     let title: String
@@ -329,20 +339,41 @@ struct MainLiveBannerState: Equatable {
     let detail: String?
     let pauseTitle: String
     let canTogglePause: Bool
+    /// Set only while paused and the sampled gate holds the recording, so a disabled Resume always says why.
+    let resumeBlockedReason: String?
 
-    /// `resumeAllowed` is `controller.canResumeFromPause`, sampled by the banner. Reading
-    /// it lists on-screen windows, too costly for every tick of the media clock.
+    /// `resumeAllowed` is `controller.canResumeFromPause` as the banner last sampled it, or nil before the first
+    /// sample. Reading it lists on-screen windows, too costly for every tick of the media clock.
     @MainActor
-    init(controller: SessionController, resumeAllowed: Bool) {
+    init(controller: SessionController, resumeAllowed: Bool?) {
         isVisible = controller.isRecording
         // Follow the writer like the HUD: privacy freeze pauses it before `phase` changes.
         isPaused = controller.captureState == .paused
         title = isPaused ? "Paused" : "Recording"
         elapsed = SessionController.clock(controller.mediaElapsed)
-        let line = controller.statusLine
-        detail = line.isEmpty || line == title ? nil : line
         pauseTitle = isPaused ? "Resume" : "Pause"
-        canTogglePause = !isPaused || resumeAllowed
+        canTogglePause = !isPaused || resumeAllowed == true
+        let held = isPaused && resumeAllowed == false
+        resumeBlockedReason = held ? Self.privacyHoldReason : nil
+        let line = controller.statusLine
+        let status = line.isEmpty || line == title ? nil : line
+        // An automatic pause already says why, naming the app. After a pause the user chose, the line does not.
+        if held, !(status.map(Self.namesPrivacyPause) ?? false) {
+            detail = Self.privacyHoldReason
+        } else {
+            detail = status
+        }
+    }
+
+    /// The Pause or Resume button's help tag.
+    var pauseHelp: String {
+        if let resumeBlockedReason { return resumeBlockedReason }
+        return isPaused ? "Resume the recording." : "Pause the recording. Nothing is written while paused."
+    }
+
+    /// The status lines `SessionController` writes while the privacy guard holds a pause.
+    static func namesPrivacyPause(_ line: String) -> Bool {
+        line.hasPrefix("Auto-paused") || line.hasPrefix("Still auto-paused")
     }
 }
 
@@ -351,7 +382,8 @@ struct MainLiveBanner: View {
     @ObservedObject var controller: SessionController
     /// The clock re-renders the banner ten times a second, so the resume gate is sampled
     /// on its own slower schedule while paused. `SessionController.togglePause()` checks it again.
-    @State private var resumeAllowed = false
+    /// Nil while not paused, so a new pause shows no reason before its first sample.
+    @State private var resumeAllowed: Bool?
 
     static let resumeGateInterval: Duration = .milliseconds(500)
 
@@ -375,10 +407,12 @@ struct MainLiveBanner: View {
                             .font(.caption).foregroundStyle(.secondary)
                             .lineLimit(1)
                             .truncationMode(.tail)
+                            .help(detail)
                     }
                     Spacer(minLength: 12)
                     Button(state.pauseTitle) { pauseOrResume() }
                         .disabled(!state.canTogglePause)
+                        .help(state.pauseHelp)
                         .accessibilityIdentifier("main.banner.pause")
                     Button("Stop & process") { stopAndProcess() }
                         .accessibilityIdentifier("main.banner.stop")
@@ -408,7 +442,7 @@ struct MainLiveBanner: View {
     @MainActor
     private func sampleResumeGate(whilePaused paused: Bool) async {
         guard paused else {
-            resumeAllowed = false
+            resumeAllowed = nil
             return
         }
         while !Task.isCancelled {
