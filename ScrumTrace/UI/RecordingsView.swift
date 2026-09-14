@@ -642,10 +642,10 @@ final class RecordingsModel: ObservableObject {
         return runningRefresh ?? refresh()
     }
 
-    /// Sections that show rows from the session index: Recordings, and the Overview's unfinished recordings,
-    /// last recording and storage line.
+    /// Sections that show rows from the session index: Recordings, the Overview's unfinished recordings,
+    /// last recording and storage line, and the recording counts and lists of Contexts.
     nonisolated static func listsSessions(_ section: MainSection) -> Bool {
-        section == .recordings || section == .overview
+        section == .recordings || section == .overview || section == .contexts
     }
 
     /// The presenter reports whether the window is on screen. Becoming visible on a section that lists

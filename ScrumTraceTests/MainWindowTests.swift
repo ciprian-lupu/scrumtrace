@@ -494,11 +494,17 @@ final class MainWindowTests: XCTestCase {
                 navigation: navigation,
                 dependencies: .live(controller: controller, startRecording: {}, isPreparingRecording: { false })
             )
+            let contexts = ContextsModel(
+                settings: controller.settings,
+                recordings: recordings,
+                dependencies: .live(controller: controller, startRecording: {}, isPreparingRecording: { false })
+            )
             let hosting = NSHostingController(rootView: MainWindowView(
                 controller: controller,
                 navigation: navigation,
                 recordings: recordings,
                 overview: overview,
+                contexts: contexts,
                 settingsView: {
                     builds += 1
                     return SettingsView(settings: controller.settings, controller: controller, navigation: navigation.settings)
@@ -2317,11 +2323,17 @@ final class MainWindowTests: XCTestCase {
                 XCTAssertEqual(overview.retentionDays, 30)
                 XCTAssertNil(overview.readiness)
                 XCTAssertEqual(state.readinessReads, 0, "Creating the model asks macOS nothing")
+                let contexts = ContextsModel(
+                    settings: controller.settings,
+                    recordings: recordings,
+                    dependencies: .live(controller: controller, startRecording: {}, isPreparingRecording: { false })
+                )
                 let hosting = NSHostingController(rootView: MainWindowView(
                     controller: controller,
                     navigation: navigation,
                     recordings: recordings,
                     overview: overview,
+                    contexts: contexts,
                     settingsView: {
                         SettingsView(settings: controller.settings, controller: controller, navigation: navigation.settings)
                     }
@@ -2388,7 +2400,7 @@ final class MainWindowTests: XCTestCase {
             try await withFixtureController(f) { controller in
                 XCTAssertTrue(RecordingsModel.listsSessions(.overview))
                 XCTAssertTrue(RecordingsModel.listsSessions(.recordings))
-                XCTAssertFalse(RecordingsModel.listsSessions(.contexts))
+                XCTAssertTrue(RecordingsModel.listsSessions(.contexts))
                 XCTAssertFalse(RecordingsModel.listsSessions(.settings))
                 let checks = CallRecorder()
                 UpdateChecker.setRequestForTesting {

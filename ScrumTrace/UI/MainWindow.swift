@@ -79,6 +79,8 @@ struct MainWindowView: View {
     let recordings: RecordingsModel
     /// Owned by the presenter too. Its session rows and their actions come from `recordings`.
     let overview: OverviewModel
+    /// Owned by the presenter too. Its recording counts come from the session index `recordings` keeps.
+    let contexts: ContextsModel
     /// Built by the presenter so the six-tab Settings view stays whole. A builder, not a
     /// value: leaving the section removes Settings, and coming back must start from
     /// current state (for example the license line), not from window creation.
@@ -125,17 +127,12 @@ struct MainWindowView: View {
                 controller: controller
             )
         case .contexts:
-            ContentUnavailableView {
-                Label("Contexts", systemImage: MainSection.contexts.systemImage)
-            } description: {
-                Text("Product contexts will be listed here. Until then, edit them in Settings under General.")
-            } actions: {
-                Button("Open General settings") {
-                    navigation.settings.selectedTab = .general
-                    navigation.section = .settings
-                }
-                .accessibilityIdentifier("main.contexts.openGeneral")
-            }
+            ContextsView(
+                model: contexts,
+                settings: controller.settings,
+                recordings: recordings,
+                library: recordings.library
+            )
         case .settings:
             settingsView()
         }

@@ -22,8 +22,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var mainPresenterStorage: MainWindowPresenter?
     var mainPresenter: MainWindowPresenter {
         if let mainPresenterStorage { return mainPresenterStorage }
-        // Overview and the empty Recordings state start a session through the same flow as the menu,
-        // and Overview disables its button while that flow shows the recording-context window.
+        // Overview, the empty Recordings state and Record with this context… start a session through the same
+        // flow as the menu, and Overview and Contexts disable their buttons while it shows the recording-context window.
         let presenter = MainWindowPresenter(
             controller: controller,
             onStartRecording: { [weak self] in
@@ -141,6 +141,8 @@ final class MainWindowPresenter: NSObject, NSWindowDelegate {
     let recordings: RecordingsModel
     /// The Overview section, which shares the Recordings session index and actions.
     let overview: OverviewModel
+    /// The Contexts section, which counts recordings from the same session index.
+    let contexts: ContextsModel
     private let controller: SessionController
     private let autosaveName: String?
     private(set) var window: NSWindow?
@@ -171,9 +173,19 @@ final class MainWindowPresenter: NSObject, NSWindowDelegate {
                 isPreparingRecording: isPreparingRecording
             )
         )
+        self.contexts = ContextsModel(
+            settings: controller.settings,
+            recordings: recordings,
+            dependencies: .live(
+                controller: controller,
+                startRecording: onStartRecording,
+                isPreparingRecording: isPreparingRecording
+            )
+        )
         super.init()
         recordings.observe(controller: controller)
         overview.observe(controller: controller)
+        contexts.observe(controller: controller)
     }
 
     /// The only place the main window activates ScrumTrace. Call it from explicit user actions.
@@ -185,6 +197,7 @@ final class MainWindowPresenter: NSObject, NSWindowDelegate {
                     navigation: navigation,
                     recordings: recordings,
                     overview: overview,
+                    contexts: contexts,
                     settingsView: { [controller, navigation] in
                         SettingsView(settings: controller.settings, controller: controller, navigation: navigation.settings)
                     }
@@ -215,10 +228,12 @@ final class MainWindowPresenter: NSObject, NSWindowDelegate {
         setWindowVisible(true)
     }
 
-    /// The session list refreshes and Overview checks readiness periodically only while the window is on screen.
+    /// The session list refreshes, Overview checks readiness and Contexts follows the Start flow periodically only
+    /// while the window is on screen.
     private func setWindowVisible(_ visible: Bool) {
         recordings.setWindowVisible(visible)
         overview.setWindowVisible(visible)
+        contexts.setWindowVisible(visible)
     }
 
     func windowWillClose(_ notification: Notification) {
