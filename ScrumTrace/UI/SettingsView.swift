@@ -130,6 +130,7 @@ struct SettingsView: View {
                 Text("Speech is processed on this Mac. Preload before a meeting to finish the model download and preparation in advance.")
                     .font(.caption).foregroundStyle(.secondary)
             }
+            TranscriptionConnectionViews(settings: settings, controller: controller)
             Section("Speakers in the room and in calls") {
                 Toggle("Identify speakers locally after recording", isOn: $settings.identifySpeakers)
                     .disabled(!controller.canChangeCaptureSettings)
@@ -404,19 +405,13 @@ struct SettingsView: View {
                         .foregroundStyle(connectionLine.hasPrefix("Key accepted") ? Color.secondary : Color.red)
                 }
             }
-            Section("Provider capabilities") {
-                Text("MVP backend: OpenAI-compatible. Adapters send only what these flags allow. Google may upload a clip (inline MP4, size-capped) when Video is yes. OpenAI-compatible and Anthropic send stills and transcript only.")
+            Section("Comparison input") {
+                Text("All selected services receive the same transcript excerpts, notes, product context and up to four JPEG stills per slice. Video is excluded so models can be compared on identical evidence.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                LabeledContent("Text", value: capabilities.acceptsText ? "yes" : "no")
-                LabeledContent("Images", value: capabilities.acceptsImages ? "yes" : "no")
-                LabeledContent("Video", value: ProviderWireMedia.willUploadClip(configuration: capabilities) ? "yes" : "no")
-                if settings.provider == .google {
-                    Toggle("Allow Gemini to upload clip video", isOn: $settings.allowGoogleClipUpload)
-                    Text("Off by default. When on, Approve upload may send the 720p clip (video and audio). Local export only still sends nothing.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
+                LabeledContent("Text", value: "yes")
+                LabeledContent("Images", value: "yes")
+                LabeledContent("Video", value: "no — identical input comparison")
             }
             Section("Export") {
                 Toggle("Include full transcript in session-pack.zip", isOn: $settings.includeFullTranscriptInZip)
@@ -527,10 +522,6 @@ struct SettingsView: View {
         if let url = URL(string: "https://github.com/ciprian-lupu/scrumtrace/blob/develop/\(relative)") {
             NSWorkspace.shared.open(url)
         }
-    }
-
-    private var capabilities: AIProviderConfiguration {
-        settings.providerConfiguration(includeKey: false)
     }
 
     private var canTestConnection: Bool {

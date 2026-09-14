@@ -102,8 +102,8 @@ struct SessionBriefRenderer {
             "{{SPEAKERS_HTML}}": presentation.speakersHTML,
             "{{DOWNLOADS_HTML}}": presentation.downloadsHTML,
             "{{REVIEW_OPEN}}": confirmed.isEmpty ? "open" : "",
-            "{{TASKS_HTML}}": confirmed.isEmpty ? "<p class=\"muted\">No confirmed findings. Review the captured evidence below.</p>" : confirmed.map { task in taskCard(task, excerpts: excerpts, sessionURL: sessionURL, omitted: manifest.omitted, slice: manifest.slices.first { $0.sliceId == task.sourceSliceId }, transcript: transcript) }.joined(),
-            "{{NEEDS_REVIEW_HTML}}": review.isEmpty ? "<p class=\"muted\">No items need review.</p>" : review.map { task in taskCard(task, excerpts: excerpts, sessionURL: sessionURL, omitted: manifest.omitted, slice: manifest.slices.first { $0.sliceId == task.sourceSliceId }, transcript: transcript) }.joined(),
+            "{{TASKS_HTML}}": confirmed.isEmpty ? "<p class=\"muted\">No confirmed findings. Review the captured evidence below.</p>" : groupedTaskCards(confirmed, excerpts: excerpts, sessionURL: sessionURL, omitted: manifest.omitted, manifest: manifest, transcript: transcript),
+            "{{NEEDS_REVIEW_HTML}}": review.isEmpty ? "<p class=\"muted\">No items need review.</p>" : groupedTaskCards(review, excerpts: excerpts, sessionURL: sessionURL, omitted: manifest.omitted, manifest: manifest, transcript: transcript),
             "{{TIMELINE_HTML}}": timeline(manifest),
             "{{SHOTS_HTML}}": shots(manifest, sessionURL: sessionURL),
             "{{TRANSCRIPT_HTML}}": transcriptHTML(manifest: manifest, excerpts: excerpts, sessionURL: sessionURL, transcript: transcript) + fullTranscriptHTML(manifest: manifest, sessionURL: sessionURL),
@@ -142,10 +142,11 @@ struct SessionBriefRenderer {
     private func taskCard(_ task: TaskRecord, excerpts: [String: String], sessionURL: URL, omitted: [OmittedAsset], slice: SliceRecord?, transcript: FullTranscript?) -> String {
         let turns = transcript.flatMap { value in slice.map { SpeakerTimeline.turns(in: value, start: $0.startMedia, end: $0.endMedia) } } ?? []
         let sanitized = PromptTemplates.sanitizeUntrusted(task.agentInstructions)
-        let instructions = slice?.analysisStatus == .skipped
+        let serviceStatus = slice?.serviceEvaluations.first(where: { $0.serviceId == task.serviceId })?.status ?? slice?.analysisStatus
+        let instructions = serviceStatus == .skipped
             ? sanitized.replacingOccurrences(of: "[Requires Manual Review - API Offline]", with: "[Requires Manual Review]")
             : sanitized
-        let confidenceLabel = slice?.analysisStatus == .success
+        let confidenceLabel = serviceStatus == .success
             ? String(format: "%.2f", task.confidence) : "Not evaluated"
         let observed = task.observed.isEmpty ? "No visual observation recorded." : task.observed
         let stated = task.stated.isEmpty ? "No participant statement linked." : task.stated
@@ -182,6 +183,7 @@ struct SessionBriefRenderer {
             <span class="conf">\(HTMLEscaper.escape(confidenceLabel))</span>
             <h3>\(HTMLEscaper.escape(task.title))</h3>
           </header>
+          \(task.serviceName.map { "<p class=\"clip-meta\">Source: \(HTMLEscaper.escape($0)) · model: \(HTMLEscaper.escape(task.serviceModel ?? "unknown"))</p>" } ?? "")
           <dl class="epistemic">
             <div><dt>Observed</dt><dd>\(HTMLEscaper.escape(observed))</dd></div>
             <div><dt>Stated</dt><dd>\(HTMLEscaper.escape(stated))</dd></div>
@@ -197,6 +199,21 @@ struct SessionBriefRenderer {
           </details>
         </article>
         """
+    }
+
+    private func groupedTaskCards(_ tasks: [TaskRecord], excerpts: [String: String], sessionURL: URL, omitted: [OmittedAsset], manifest: SessionManifest, transcript: FullTranscript?) -> String {
+        let groups = Dictionary(grouping: tasks) { task in
+            task.serviceId ?? "local"
+        }
+        return groups.keys.sorted().map { key in
+            let first = groups[key]?.first
+            let name = first?.serviceName ?? "Local review"
+            let model = first?.serviceModel ?? "No model"
+            let cards = (groups[key] ?? []).map { task in
+                taskCard(task, excerpts: excerpts, sessionURL: sessionURL, omitted: omitted, slice: manifest.slices.first { $0.sliceId == task.sourceSliceId }, transcript: transcript)
+            }.joined()
+            return "<section class=\"model-results\"><h3>\(HTMLEscaper.escape(name)) <span class=\"muted\">· \(HTMLEscaper.escape(model))</span></h3>\(cards)</section>"
+        }.joined()
     }
 
     private func transcriptHTML(manifest: SessionManifest, excerpts: [String: String], sessionURL: URL, transcript: FullTranscript?) -> String {

@@ -2227,8 +2227,18 @@ struct SliceRecord: Codable, Sendable, Identifiable, Hashable {
     var analysisStatus: SliceAnalysisStatus
     var score: Double
     var mediaSent: [String]? = nil
+    /// Per-destination state is canonical for comparison sessions. The legacy
+    /// `analysis_status` remains as a conservative compatibility summary.
+    var serviceEvaluations: [SliceServiceEvaluation] = []
 
     var id: String { sliceId }
+
+    init(sliceId: String, startMedia: TimeInterval, endMedia: TimeInterval, trigger: SliceTrigger, associatedShotId: String?, clipPath: String?, exportClipPath: String? = nil, stills: [String], analysisStatus: SliceAnalysisStatus, score: Double, mediaSent: [String]? = nil, serviceEvaluations: [SliceServiceEvaluation] = []) {
+        self.sliceId = sliceId; self.startMedia = startMedia; self.endMedia = endMedia
+        self.trigger = trigger; self.associatedShotId = associatedShotId; self.clipPath = clipPath
+        self.exportClipPath = exportClipPath; self.stills = stills; self.analysisStatus = analysisStatus
+        self.score = score; self.mediaSent = mediaSent; self.serviceEvaluations = serviceEvaluations
+    }
 
     /// Drop clip/still paths that were never written (failed encode or still grab).
     func withExistingMedia(sessionURL: URL) -> SliceRecord {
@@ -2254,6 +2264,45 @@ struct SliceRecord: Codable, Sendable, Identifiable, Hashable {
         case stills
         case analysisStatus = "analysis_status"
         case score
+        case mediaSent = "media_sent"
+        case serviceEvaluations = "service_evaluations"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        sliceId = try c.decode(String.self, forKey: .sliceId)
+        startMedia = try c.decode(TimeInterval.self, forKey: .startMedia)
+        endMedia = try c.decode(TimeInterval.self, forKey: .endMedia)
+        trigger = try c.decode(SliceTrigger.self, forKey: .trigger)
+        associatedShotId = try c.decodeIfPresent(String.self, forKey: .associatedShotId)
+        clipPath = try c.decodeIfPresent(String.self, forKey: .clipPath)
+        exportClipPath = try c.decodeIfPresent(String.self, forKey: .exportClipPath)
+        stills = try c.decode([String].self, forKey: .stills)
+        analysisStatus = try c.decode(SliceAnalysisStatus.self, forKey: .analysisStatus)
+        score = try c.decode(Double.self, forKey: .score)
+        mediaSent = try c.decodeIfPresent([String].self, forKey: .mediaSent)
+        serviceEvaluations = try c.decodeIfPresent([SliceServiceEvaluation].self, forKey: .serviceEvaluations) ?? []
+    }
+}
+
+struct SliceServiceEvaluation: Codable, Sendable, Hashable, Identifiable {
+    var serviceId: String
+    var serviceName: String
+    var provider: String
+    var model: String
+    var status: SliceAnalysisStatus
+    var mediaSent: [String]
+    var inputFingerprint: String? = nil
+    var destination: UploadDestination? = nil
+    var diagnostic: String? = nil
+    var id: String { serviceId }
+
+    enum CodingKeys: String, CodingKey {
+        case inputFingerprint = "input_fingerprint"
+        case destination, diagnostic
+        case serviceId = "service_id"
+        case serviceName = "service_name"
+        case provider, model, status
         case mediaSent = "media_sent"
     }
 }
@@ -2285,6 +2334,11 @@ struct TaskRecord: Codable, Sendable, Identifiable, Hashable {
     var quotes: [QuoteRecord]
     var evidenceMedia: [String]
     var confidence: Double
+    /// Nil is a legacy/local review row. Provider-produced findings always
+    /// carry this non-secret source snapshot.
+    var serviceId: String? = nil
+    var serviceName: String? = nil
+    var serviceModel: String? = nil
 
     var id: String { taskId }
 
@@ -2301,6 +2355,9 @@ struct TaskRecord: Codable, Sendable, Identifiable, Hashable {
         case quotes
         case evidenceMedia = "evidence_media"
         case confidence
+        case serviceId = "service_id"
+        case serviceName = "service_name"
+        case serviceModel = "service_model"
     }
 
     init(
@@ -2329,6 +2386,9 @@ struct TaskRecord: Codable, Sendable, Identifiable, Hashable {
         self.quotes = quotes
         self.evidenceMedia = evidenceMedia
         self.confidence = confidence
+        self.serviceId = nil
+        self.serviceName = nil
+        self.serviceModel = nil
     }
 
     init(from decoder: Decoder) throws {
@@ -2345,6 +2405,9 @@ struct TaskRecord: Codable, Sendable, Identifiable, Hashable {
         quotes = try container.decodeIfPresent([QuoteRecord].self, forKey: .quotes) ?? []
         evidenceMedia = try container.decodeIfPresent([String].self, forKey: .evidenceMedia) ?? []
         confidence = try container.decodeIfPresent(Double.self, forKey: .confidence) ?? 0
+        serviceId = try container.decodeIfPresent(String.self, forKey: .serviceId)
+        serviceName = try container.decodeIfPresent(String.self, forKey: .serviceName)
+        serviceModel = try container.decodeIfPresent(String.self, forKey: .serviceModel)
     }
 }
 
@@ -2516,15 +2579,25 @@ struct TranscriptionAnalysis: Codable, Sendable, Hashable {
 struct FullTranscript: Codable, Sendable {
     var sessionId: String
     var language: String
+    /// All languages reported by the transcription engine. `language` remains
+    /// a compatibility/display hint; never discard the detected list.
+    var detectedLanguages: [String]? = nil
     var segments: [TranscriptSegment]
     var speakers: [SessionSpeaker]? = nil
     var speakerAnalysis: [SpeakerAnalysis]? = nil
     var transcriptionAnalysis: [TranscriptionAnalysis]? = nil
     /// Capture sources, not individual people: `room` and/or `system`.
     var sources: [String]? = nil
+    /// Untimed cloud text is reviewable but cannot drive clips or become primary.
+    var untimedText: String? = nil
 
     var hasUsableText: Bool {
         segments.contains { !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            || !(untimedText ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    var hasTimedSegments: Bool {
+        segments.contains { $0.start.isFinite && $0.end.isFinite && $0.end > $0.start && !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     }
 
     /// Empty legacy transcripts were previously marked complete, even when
@@ -2539,11 +2612,13 @@ struct FullTranscript: Codable, Sendable {
     enum CodingKeys: String, CodingKey {
         case sessionId = "session_id"
         case language
+        case detectedLanguages = "detected_languages"
         case segments
         case sources
         case speakers
         case speakerAnalysis = "speaker_analysis"
         case transcriptionAnalysis = "transcription_analysis"
+        case untimedText = "untimed_text"
     }
 }
 
@@ -2772,6 +2847,13 @@ struct UploadConsent: Codable, Sendable, Hashable {
     var includesClipAudio: Bool
     var includesClipVideo: Bool
     var includesStills: Bool
+    var destinations: [UploadDestination] = []
+
+    init(approved: Bool, approvedAt: Date?, provider: String, endpoint: String, model: String, includesClipAudio: Bool, includesClipVideo: Bool, includesStills: Bool, destinations: [UploadDestination] = []) {
+        self.approved = approved; self.approvedAt = approvedAt; self.provider = provider; self.endpoint = endpoint
+        self.model = model; self.includesClipAudio = includesClipAudio; self.includesClipVideo = includesClipVideo
+        self.includesStills = includesStills; self.destinations = destinations
+    }
 
     enum CodingKeys: String, CodingKey {
         case approved
@@ -2782,6 +2864,7 @@ struct UploadConsent: Codable, Sendable, Hashable {
         case includesClipAudio = "includes_clip_audio"
         case includesClipVideo = "includes_clip_video"
         case includesStills = "includes_stills"
+        case destinations
     }
 
     static let denied = UploadConsent(
@@ -2814,6 +2897,24 @@ struct UploadConsent: Codable, Sendable, Hashable {
     }
 }
 
+/// A non-secret snapshot of every destination shown in the consent sheet.
+struct UploadDestination: Codable, Sendable, Hashable, Identifiable {
+    var serviceId: String
+    var serviceName: String
+    var provider: String
+    var endpoint: String
+    var model: String
+    var includesClipVideo: Bool
+    var id: String { serviceId }
+
+    enum CodingKeys: String, CodingKey {
+        case serviceId = "service_id"
+        case serviceName = "service_name"
+        case provider, endpoint, model
+        case includesClipVideo = "includes_clip_video"
+    }
+}
+
 extension UploadConsent {
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -2826,6 +2927,15 @@ extension UploadConsent {
         includesClipVideo = try container.decodeIfPresent(Bool.self, forKey: .includesClipVideo)
             ?? includesClipAudio
         includesStills = try container.decode(Bool.self, forKey: .includesStills)
+        destinations = try container.decodeIfPresent([UploadDestination].self, forKey: .destinations) ?? []
+    }
+
+    func needsReprompt(destinations proposed: [UploadDestination]) -> Bool {
+        let sort: ([UploadDestination]) -> [UploadDestination] = { $0.sorted { $0.serviceId < $1.serviceId } }
+        let legacy: [UploadDestination] = provider.isEmpty ? [] : [
+            UploadDestination(serviceId: "legacy", serviceName: "Legacy service", provider: provider, endpoint: endpoint, model: model, includesClipVideo: includesClipVideo)
+        ]
+        return sort(destinations.isEmpty ? legacy : destinations) != sort(proposed)
     }
 }
 

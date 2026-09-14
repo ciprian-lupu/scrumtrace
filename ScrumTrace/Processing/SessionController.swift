@@ -37,6 +37,7 @@ final class SessionController: ObservableObject {
     private var pausedByPrivacy = false
     private var lastMetaSignature = ""
     private var terminateRequested = false
+    private let transcriptionReviewPresenter = TranscriptionReviewPresenter()
     let captureFreeze: CaptureFreeze
     #if os(macOS)
     /// True while the main window is open, minimized included. The main window's presenter connects it, so
@@ -305,6 +306,116 @@ final class SessionController: ObservableObject {
     /// A Retry Analysis run, with the last session the controller named before the retry started.
     private struct RetryOrigin {
         let lastSessionId: String?
+    }
+
+    /// This is intentionally separate from Retry Analysis: it runs only the
+    /// checked speech profiles against the already-recorded canonical audio and
+    /// never replaces the current transcript without a later explicit choice.
+    func compareTranscriptions(sessionId: String) {
+        guard canChangeCaptureSettings, let processor else {
+            statusLine = "Wait for recording or processing to finish."
+            return
+        }
+        let configurations = settings.transcriptionServiceConfigurations(includedOnly: true)
+        guard !configurations.isEmpty else {
+            statusLine = "Choose one or more transcription services in Settings → Speech."
+            return
+        }
+        let cloud = configurations.filter { $0.service.backend.requiresCredential }
+        guard cloud.isEmpty || requestAudioUploadConsent(sessionId: sessionId, services: cloud) else {
+            statusLine = "Transcription comparison kept local; audio was not uploaded."
+            return
+        }
+        isBusy = true; lastSessionId = sessionId; statusLine = "Comparing transcriptions serially…"
+        Task {
+            do {
+                let runs = try await processor.compareTranscriptions(sessionId: sessionId, configurations: configurations)
+                let succeeded = runs.filter { $0.status == .succeeded }.count
+                statusLine = "Saved \(succeeded) of \(runs.count) transcription comparison results."
+                AgentLog.event("transcription_compare_ok", ["session": sessionId, "runs": String(runs.count), "succeeded": String(succeeded)])
+                // Selection itself invalidates outputs, so it must not be
+                // rejected by the busy guard left by the comparison task.
+                isBusy = false
+                presentPrimaryTranscriptionPicker(sessionId: sessionId, runs: runs)
+            } catch {
+                statusLine = error.localizedDescription; lastError = error.localizedDescription
+                AgentLog.event("transcription_compare_fail", ["session": sessionId, "error": AgentLog.sanitize(error.localizedDescription)])
+            }
+            isBusy = false
+        }
+    }
+
+    func selectPrimaryTranscription(sessionId: String, runID: String) {
+        guard canChangeCaptureSettings, let processor else { statusLine = "Wait for recording or processing to finish."; return }
+        do {
+            _ = try processor.selectPrimaryTranscription(sessionId: sessionId, runID: runID)
+            lastSessionId = sessionId
+            statusLine = "Selected transcript is now primary. Re-run analysis to generate results for it."
+        } catch { statusLine = error.localizedDescription; lastError = error.localizedDescription }
+    }
+
+    private func requestAudioUploadConsent(sessionId: String, services: [TranscriptionServiceConfiguration]) -> Bool {
+        #if os(macOS)
+        let duration = vault.recentSessions().first(where: { $0.sessionId == sessionId })?.duration.mediaSeconds ?? 0
+        let sessionURL = vault.sessionURL(id: sessionId)
+        let audioSources = TranscriptionComparisonRunner.uploadDescription(sessionURL: sessionURL)
+        let rows = services.map { "• \($0.service.name)\n  \($0.service.endpoint)\n  Model: \($0.service.model)" }.joined(separator: "\n")
+        let alert = NSAlert()
+        alert.messageText = "Send meeting audio to transcription services?"
+        alert.informativeText = """
+        The selected cloud services receive only this captured audio (about \(Int(duration)) seconds), serially: \(audioSources). This is audio upload, separate from AI-analysis consent.
+
+        \(rows)
+
+        The archive master movie and all other archive data stay on this Mac. When system audio is in the movie, ScrumTrace extracts a private audio-only M4A locally; the movie itself is never uploaded. Saved API keys and comparison checkboxes are not consent. Temporary upload copies are removed after each request.
+        """
+        alert.addButton(withTitle: "Approve audio upload")
+        alert.addButton(withTitle: "Cancel")
+        let approved = alert.runModal() == .alertFirstButtonReturn
+        AgentLog.event("transcription_audio_consent", ["approved": approved ? "1" : "0", "destinations": String(services.count)])
+        return approved
+        #else
+        return false
+        #endif
+    }
+
+    private func presentPrimaryTranscriptionPicker(sessionId: String, runs: [TranscriptionRun]) {
+        #if os(macOS)
+        let successful = runs.filter { $0.status == .succeeded }
+        guard !successful.isEmpty else { return }
+        let alert = NSAlert()
+        alert.messageText = "Transcription comparison complete"
+        alert.informativeText = transcriptionReviewText(sessionId: sessionId, runs: successful) + "\n\nChoose a timestamped result to make it primary. Existing results stay in the private archive."
+        for run in successful {
+            alert.addButton(withTitle: "Use \(run.configuration.name) · \(run.resolvedModel ?? run.configuration.requestedModel)")
+        }
+        alert.addButton(withTitle: "Keep current transcript")
+        let choice = Int(alert.runModal().rawValue - NSApplication.ModalResponse.alertFirstButtonReturn.rawValue)
+        guard successful.indices.contains(choice) else { return }
+        selectPrimaryTranscription(sessionId: sessionId, runID: successful[choice].id)
+        #endif
+    }
+
+    /// Reopens private comparison evidence without starting a new request.
+    /// It deliberately renders a compact preview only; archive run files never
+    /// enter export/ until a timestamped choice is promoted and reprocessed.
+    func reviewTranscriptions(sessionId: String) {
+        #if os(macOS)
+        guard canChangeCaptureSettings else { statusLine = "Wait for recording or analysis to finish."; return }
+        transcriptionReviewPresenter.show(controller: self, sessionID: sessionId)
+        #endif
+    }
+
+    private func transcriptionReviewText(sessionId: String, runs: [TranscriptionRun]) -> String {
+        let sessionURL = vault.sessionURL(id: sessionId)
+        return runs.map { run in
+            let transcript = TranscriptionRunStore.loadTranscript(id: run.id, sessionURL: sessionURL)
+            let timestamps = transcript?.hasTimedSegments == true ? "timestamps: available" : "timestamps: unavailable (cannot promote)"
+            let input = run.inputs.map { "\($0.source) · \($0.transform) · \($0.bytes) bytes" }.joined(separator: "; ")
+            let allText = TranscriptionReviewText.fullText(transcript)
+            let preview = allText.prefix(280)
+            return "\(run.configuration.name) · requested \(run.configuration.requestedModel)\nstatus: \(run.status.rawValue) · duration: \(Int(run.processingSeconds ?? 0))s · \(timestamps)\naudio: \(input)\n\(preview)"
+        }.joined(separator: "\n\n")
     }
 
     func updateSpeakers(sessionId: String, names: [String: String]? = nil, assignments: [Int: String] = [:], reanalyze: Bool = false) async throws -> FullTranscript {
@@ -783,36 +894,32 @@ final class SessionController: ObservableObject {
                     local = memory
                 }
             }
+            let services = settings.comparisonServiceConfigurations
             if var local {
                 local.includeFullTranscriptInZip = settings.includeFullTranscriptInZip
-                let capabilities = settings.providerConfiguration()
-                let hasAPIKey = !capabilities.apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                let destinations = services.map(\.destination)
+                let hasAPIKey = services.contains { !$0.configuration.apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
                 // No key means nothing can leave this Mac; asking a first-time
                 // local-only user to approve an upload would only confuse them.
-                if !hasAPIKey {
+                if services.isEmpty {
+                    local.uploadConsent = .denied
+                } else if !hasAPIKey {
+                    local.uploadConsent.approved = false
                     AgentLog.event("consent_skipped", ["reason": "key_missing"])
-                } else if local.uploadConsent.needsReprompt(
-                    provider: settings.provider.rawValue,
-                    endpoint: settings.baseURL,
-                    model: settings.model,
-                    acceptsVideo: ProviderWireMedia.willUploadClip(configuration: capabilities)
-                ) {
+                } else if !local.uploadConsent.approved || local.uploadConsent.needsReprompt(destinations: destinations) {
                     let previous = local.uploadConsent
-                    let askedBefore = !previous.provider.isEmpty
-                    local.uploadConsent = uploadConsentPromptForTesting?() ?? requestUploadConsent()
-                    if askedBefore && (
-                        previous.provider != local.uploadConsent.provider
-                        || previous.endpoint != local.uploadConsent.endpoint
-                        || previous.model != local.uploadConsent.model
-                        || previous.includesClipAudio != local.uploadConsent.includesClipAudio
-                        || previous.includesClipVideo != local.uploadConsent.includesClipVideo
-                    ) {
+                    let askedBefore = !previous.destinations.isEmpty || !previous.provider.isEmpty
+                    local.uploadConsent = uploadConsentPromptForTesting?() ?? requestUploadConsent(destinations: destinations)
+                    if local.uploadConsent.approved && askedBefore && (previous.needsReprompt(destinations: destinations)
+                        || previous.includesClipVideo != local.uploadConsent.includesClipVideo) {
                         local.completedStages.removeAll {
                             $0 == .evaluating || $0 == .synthesizing || $0 == .completed
                         }
-                        local.tasks = []
+                        let unchanged = Set(destinations.filter { previous.destinations.contains($0) }.map(\.serviceId))
+                        local.tasks.removeAll { !unchanged.contains($0.serviceId ?? "") }
                         for index in local.slices.indices {
                             local.slices[index].analysisStatus = .pending
+                            local.slices[index].serviceEvaluations.removeAll { !unchanged.contains($0.serviceId) }
                         }
                     }
                 }
@@ -825,12 +932,46 @@ final class SessionController: ObservableObject {
             let storedPins = vault.loadPinTimes(sessionId: sessionId)
             let livePins = pinTimesSessionId == sessionId ? pinTimes : []
             let pins = Self.mergePins(livePins, storedPins)
-            transcriber.setLanguage(settings.speechLanguage)
+            // The saved speech default is independent from the selected AI
+            // analysis service. Cloud speech is completed first and promoted
+            // to the normal transcript only for this normal-processing path;
+            // explicit comparison never promotes automatically.
+            let defaultSpeech = settings.selectedTranscriptionServiceConfiguration()
+            let hasReusablePrimary = processor!.hasValidPrimaryTranscript(sessionId: sessionId)
+            let whisperModel: String
+            if let speech = defaultSpeech, speech.service.backend == .openAITranscription {
+                if hasReusablePrimary {
+                    // Retry Analysis is deterministic with respect to the
+                    // selected primary. Do not re-consent or make a new cloud
+                    // request merely because a default profile changed.
+                    whisperModel = settings.whisperModel
+                } else {
+                    guard requestAudioUploadConsent(sessionId: sessionId, services: [speech]) else {
+                        throw SettingsValidationError("Audio upload was not approved, so the cloud transcription service was not used.")
+                    }
+                    let runs = try await processor!.compareTranscriptions(sessionId: sessionId, configurations: [speech])
+                    guard let success = runs.last(where: { $0.status == .succeeded }) else {
+                        throw SettingsValidationError(runs.last?.diagnostic ?? "Cloud transcription did not return a usable result.")
+                    }
+                    _ = try processor!.selectPrimaryTranscription(sessionId: sessionId, runID: success.id)
+                    whisperModel = settings.whisperModel
+                }
+            } else if let speech = defaultSpeech {
+                whisperModel = try await prepareLocalTranscriptionIfNeeded(
+                    transcriber: transcriber,
+                    service: speech.service,
+                    reusingPrimaryTranscript: hasReusablePrimary
+                )
+            } else {
+                transcriber.setLanguage(settings.speechLanguage)
+                whisperModel = settings.whisperModel
+            }
             let result = try await processor?.process(
                 sessionId: sessionId,
                 pinTimes: pins,
-                configuration: settings.providerConfiguration(),
-                whisperModel: settings.whisperModel,
+                configuration: services.first?.configuration ?? settings.providerConfiguration(includeKey: false),
+                serviceConfigurations: services,
+                whisperModel: whisperModel,
                 identifySpeakers: settings.identifySpeakers,
                 onStatus: { [weak self] status, line in
                     AgentLog.event("pipeline_status", [
@@ -865,23 +1006,23 @@ final class SessionController: ObservableObject {
         isBusy = false
     }
 
-    private func requestUploadConsent() -> UploadConsent {
+    private func requestUploadConsent(destinations: [UploadDestination]) -> UploadConsent {
         #if os(macOS)
         NSApp.activate(ignoringOtherApps: true)
         let alert = NSAlert()
-        alert.messageText = "Send stills and transcript excerpts off this Mac?"
-        let capabilities = settings.providerConfiguration()
-        let uploadsClip = ProviderWireMedia.willUploadClip(configuration: capabilities)
-        let payload: String
-        if uploadsClip {
-            payload = "Stills and transcript excerpts, and clip audio will leave this Mac, plus window titles, scrubbed URLs, Shot notes, product context, and the 720p clip video. Clip audio includes the room microphone and call audio."
-        } else {
-            payload = "Stills and transcript excerpts will leave this Mac, plus window titles, scrubbed URLs, Shot notes, and product context. Clip video and the master movie are not uploaded."
-        }
+        alert.messageText = "Send evidence to selected AI services?"
+        // `includesClipVideo` was snapshotted from ProviderWireMedia.willUploadClip
+        // for every selected service before this consent sheet is displayed.
+        let uploadsClip = destinations.contains(where: \.includesClipVideo)
+        let details = destinations.map { destination in
+            "• \(destination.serviceName) — \(destination.provider)\n  \(destination.endpoint)\n  Model: \(destination.model.isEmpty ? "(none)" : destination.model)\n  \(destination.includesClipVideo ? "Google may receive the size-capped clip video (including clip audio)." : "Stills and transcript excerpts only; no clip video.")"
+        }.joined(separator: "\n")
+        let payload = uploadsClip
+            ? "Stills and transcript excerpts, window titles, scrubbed URLs, Shot notes, and product context may leave this Mac. Selected Google services may also receive the size-capped clip video; clip audio will leave this Mac with that clip."
+            : "Stills and transcript excerpts, window titles, scrubbed URLs, Shot notes, and product context may leave this Mac. Clip video and the master movie are not uploaded."
         alert.informativeText = """
-        Destination: \(settings.provider.title)
-        \(settings.baseURL)
-        Model: \(settings.model.isEmpty ? "(none)" : settings.model)
+        Destinations (serial upload):
+        \(details.isEmpty ? "No valid selected service." : details)
 
         \(payload) The archive (session.mp4, full transcript, raw events) stays local. Keychain storage is not consent. This sheet runs at Stop before transcription.
         """
@@ -890,18 +1031,19 @@ final class SessionController: ObservableObject {
         let approved = alert.runModal() == .alertFirstButtonReturn
         AgentLog.event("consent_result", [
             "approved": approved ? "1" : "0",
-            "provider": settings.provider.rawValue,
+            "destinations": String(destinations.count),
             "clip": (approved && uploadsClip) ? "1" : "0"
         ])
         return UploadConsent(
             approved: approved,
             approvedAt: Date(),
-            provider: settings.provider.rawValue,
-            endpoint: settings.baseURL,
-            model: settings.model,
+            provider: destinations.first?.provider ?? "",
+            endpoint: destinations.first?.endpoint ?? "",
+            model: destinations.first?.model ?? "",
             includesClipAudio: approved && uploadsClip,
             includesClipVideo: approved && uploadsClip,
-            includesStills: approved
+            includesStills: approved,
+            destinations: destinations
         )
         #else
         return .denied
@@ -1336,6 +1478,22 @@ final class SessionController: ObservableObject {
     private func stemFrom(_ shotId: String) -> String {
         shotId.replacingOccurrences(of: "shot-", with: "")
     }
+}
+
+/// Retry Analysis reuses the chosen archive transcript before it touches a
+/// local model source. Keeping this small decision at the call site makes it
+/// impossible for a missing custom WhisperKit folder to block analysis only.
+@MainActor
+func prepareLocalTranscriptionIfNeeded(
+    transcriber: WhisperTranscriber,
+    service: SavedTranscriptionService,
+    reusingPrimaryTranscript: Bool
+) async throws -> String {
+    guard !reusingPrimaryTranscript else { return service.model }
+    let language = service.language
+    transcriber.setLanguage(language.mode == .single && language.languages.count == 1 ? language.languages[0] : .automatic)
+    try await transcriber.prepare(model: service.model, source: service.whisperSource ?? .standard)
+    return service.model
 }
 
 #if os(macOS)

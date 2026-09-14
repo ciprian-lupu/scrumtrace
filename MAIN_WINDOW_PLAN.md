@@ -992,9 +992,10 @@ and these checks have not been run on a Mac:
    start recording* (Start from the status-bar menu and ⌘N), the update result (Check for updates in
    the status-bar menu, then switch away before it answers), the capture-area picker (Start, and Select
    area on screen…), the recording-context window, the upload consent alert (Stop & process),
-   *Recording did not start* and the first-run permissions window (`OnboardingWindow.focus`, on a
+   *Recording did not start*, the first-run permissions window (`OnboardingWindow.focus`, on a
    first launch and from Show first-run permissions in Settings → General; note which of the two
-   windows ends up in front). Note whether the main window comes forward with each, whether macOS
+   windows ends up in front) and the transcription review window (Review transcription results in
+   the status-bar menu). Note whether the main window comes forward with each, whether macOS
    switches Spaces, and which app is in front after Record in the capture-area picker.
 8. What the snapshot PNGs cannot show: the real window in the light and dark appearance on macOS 26 and
    on macOS 14, including the sidebar, the toolbar items and the Settings tab strip; Settings at the

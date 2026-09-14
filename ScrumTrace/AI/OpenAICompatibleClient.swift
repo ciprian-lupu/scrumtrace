@@ -15,22 +15,14 @@ struct OpenAICompatibleClient: AIProvider {
         let url = try Self.chatCompletionsURL(baseURL: configuration.baseURL)
 
         var content: [[String: Any]] = [
-            ["type": "text", "text": PromptTemplates.evaluationUserPrompt(
-                product: request.product,
-                slice: request.slice,
-                transcript: request.transcriptExcerpt,
-                shotNote: request.shotNote,
-                windowContext: request.windowContext
-            )]
+            ["type": "text", "text": request.userPrompt]
         ]
         if configuration.acceptsImages {
-            for imageURL in request.imageURLs.prefix(4) {
-                if let payload = ImageBase64.jpegPayload(url: imageURL, sessionRoot: request.sessionURL) {
-                    content.append([
-                        "type": "image_url",
-                        "image_url": ["url": "data:\(payload.mime);base64,\(payload.base64)"]
-                    ])
-                }
+            for payload in request.imagePayloads {
+                content.append([
+                    "type": "image_url",
+                    "image_url": ["url": "data:\(payload.mime);base64,\(payload.base64)"]
+                ])
             }
         }
 
@@ -40,7 +32,7 @@ struct OpenAICompatibleClient: AIProvider {
             "model": configuration.model,
             "temperature": 0.1,
             "messages": [
-                ["role": "system", "content": PromptTemplates.system],
+                ["role": "system", "content": request.systemPrompt],
                 ["role": "user", "content": content]
             ]
         ]

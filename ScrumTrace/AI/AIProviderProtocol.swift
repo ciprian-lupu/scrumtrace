@@ -19,6 +19,19 @@ struct SliceEvaluationRequest: Sendable {
     var clipURL: URL?
     /// Session root used to refuse stills whose path walks a planted symlink.
     var sessionURL: URL
+    var preparedInput: ComparisonInput? = nil
+
+    var userPrompt: String {
+        preparedInput?.userPrompt ?? PromptTemplates.evaluationUserPrompt(product: product, slice: slice,
+            transcript: transcriptExcerpt, shotNote: shotNote, windowContext: windowContext)
+    }
+    var systemPrompt: String { preparedInput?.systemPrompt ?? PromptTemplates.system }
+    var imagePayloads: [ComparisonInput.Image] {
+        preparedInput?.images ?? imageURLs.prefix(4).compactMap {
+            guard let payload = ImageBase64.jpegPayload(url: $0, sessionRoot: sessionURL) else { return nil }
+            return ComparisonInput.Image(mime: payload.mime, base64: payload.base64)
+        }
+    }
 }
 
 enum AIProviderError: LocalizedError {
@@ -68,6 +81,7 @@ enum AIProviderError: LocalizedError {
     }
 
     static func diagnosticCode(_ error: Error) -> String {
+        if error is ComparisonInputError { return "comparison_input_changed" }
         guard let providerError = error as? AIProviderError else {
             return "provider_error"
         }

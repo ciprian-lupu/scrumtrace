@@ -2,7 +2,7 @@
 
 Read this before changing product code, gates, remotes, or TCC/signing. The working spec is [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md). Mac debug loop: [AGENT_DEBUG.md](AGENT_DEBUG.md). Hardware results: [samples/GATE_LOG.md](samples/GATE_LOG.md) (empty until a Mac run).
 
-Snapshot date: **2026-09-14** (audit TASK-01–17 plus leftover *code* items closed; all-gate inspectors: `inspect_all_gates.py` / `mac_all_gates.sh`; user-approved main window and its review fixes recorded). Hardware gates still open. Update the snapshot when status in this file changes.
+Snapshot date: **2026-09-14** (audit TASK-01–17 plus leftover *code* items closed; all-gate inspectors: `inspect_all_gates.py` / `mac_all_gates.sh`; user-approved main window and its review fixes recorded; user-approved multi-provider comparison recorded). Hardware gates still open. Update the snapshot when status in this file changes.
 
 ## What this is
 
@@ -52,6 +52,8 @@ Hard rules:
 **Hardware gates are not closed.** `samples/GATE_LOG.md` has no PASS rows. No Mac has run Gate −0 after these fixes. Treat Record, pause, Whisper, and drift as **unproven** until that log is filled.
 
 Speaker review, Settings and menu stabilization were explicitly requested by the user on 2026-09-12 and are implemented and locally verified. Session-local diarization, manual names/corrections, timed clip transcripts and room/call mixing are within that approved scope. Native tests, Linux contracts, Settings and speaker-review UI checks pass; real multi-person accuracy and hardware gates remain open. The status-bar menu still needs a complete visual walkthrough. Still deferred: 60-minute drift claims and unrelated new product surfaces.
+
+The user approved multi-provider comparison on 2026-09-13. Selected services evaluate identical prompt/JPEG/transcript inputs serially, with per-pair destination and SHA-256 provenance. Comparison excludes video. Retry preserves unchanged successes and refuses changed inputs. Live provider and hardware acceptance remain open.
 
 The main window was explicitly requested by the user on 2026-09-13 and is an approved exception of the same class ([MAIN_WINDOW_PLAN.md](MAIN_WINDOW_PLAN.md), tasks H01–H07). Opening ScrumTrace from Finder, Launchpad, Spotlight or the Dock, clicking its icon or choosing **Open ScrumTrace…** in the menu opens one window with four sections: **Overview** (readiness, Start recording, needs attention, last recording, storage), **Recordings** (a metadata-only session table with search, filters, details and the Recent-menu actions), **Contexts** (saved contexts with usage counts and Record with this context…) and **Settings** (the existing six tabs). A Login Item launch, the agent loop (`--background`) and **Relaunch ScrumTrace** with the window closed keep ScrumTrace in the menu bar. While the window is open, ScrumTrace has a Dock tile and a ⌘-Tab entry, unless *Show ScrumTrace in the Dock while its window is open* is off in Settings → General. After the window closes, the tile stays until no other titled ScrumTrace window (such as the first-run permissions window) is open. The window does not change capture, pause, clock, Whisper, slicing, provider or export behaviour. Outside `App/`, `UI/` and the new `Storage/SessionLibrary.swift`, the branch adds only a read-only `recording.lock` reader in `Capture/AgentLog.swift`, a read-only `activeSessionId`, `forgetSession(id:newestRemaining:)` for a session the window deletes, and test hooks in `Processing/SessionController.swift`, and makes `listedSessionIds` internal in `Storage/SessionVault.swift`. The main window is not gate evidence: Xcode tests and Linux contracts pass, but none of its Mac checks (item 6 under *Next work*: Keynote focus with the window open, the focus hand-back after closing it, the real sidebar and toolbar) has been run.
 
@@ -184,7 +186,7 @@ C4 wire truth today: Google may upload a size-capped inline MP4. OpenAI-compatib
 
 ## Next work (priority)
 
-The user-approved 2026-09-12 speaker/Settings/menu work, the 2026-09-13 main window (Overview, Recordings, Contexts, Settings), saved product contexts with selection before recording, and usable session briefs with transcript recovery are exceptions to the product-surface deferral. Keep other new surfaces deferred. Prefer work that can be verified in this environment.
+The user-approved 2026-09-12 speaker/Settings/menu work, the 2026-09-13 main window (Overview, Recordings, Contexts, Settings), saved product contexts with selection before recording, and usable session briefs with transcript recovery and multi-provider comparison are exceptions to the product-surface deferral. Keep other new surfaces deferred. Prefer work that can be verified in this environment.
 
 ### On a Mac (blocks “done”)
 
@@ -193,7 +195,7 @@ The user-approved 2026-09-12 speaker/Settings/menu work, the 2026-09-13 main win
 3. Gate 0: Keynote full-screen; Shot / Pin / Pause must not steal focus. Watch `ShotNoteWindow.canBecomeKey` — it is `true` today and can steal focus.
 4. Gate 1: ≥ 20 min, three pauses, token `ST-G1-PAUSE-TOKEN-9F3C`, passphrase `orchid lantern seven`. Fill [samples/GATE_LOG.md](samples/GATE_LOG.md).
 5. Only then treat Whisper / slicer / AI as gateable (Gates 3–6). Re-run `inspect_all_gates.py --strict` on that folder.
-6. Main window walkthrough (not a gate; never write it into `GATE_LOG.md`): §7 and *Manual checks still open* in §8 of [MAIN_WINDOW_PLAN.md](MAIN_WINDOW_PLAN.md). None has been run. The ones that matter most: the switch to a Dock app when the window opens and the focus hand-back when it closes, on macOS 14 and on macOS 26; Gate 0 in Keynote full screen with the window closed and with it open behind the presentation, Shot included; what the older `NSApp.activate` calls (meeting notice, Cannot start recording, update result, capture-area picker, recording-context window, upload consent, Recording did not start, first-run permissions window) do while the window is open, because each may bring the window forward with it; the real sidebar, toolbar and Settings tab strip, which the snapshot PNGs leave blank in places; and the cost of the visible window's refresh with hundreds of recordings.
+6. Main window walkthrough (not a gate; never write it into `GATE_LOG.md`): §7 and *Manual checks still open* in §8 of [MAIN_WINDOW_PLAN.md](MAIN_WINDOW_PLAN.md). None has been run. The ones that matter most: the switch to a Dock app when the window opens and the focus hand-back when it closes, on macOS 14 and on macOS 26; Gate 0 in Keynote full screen with the window closed and with it open behind the presentation, Shot included; what the older `NSApp.activate` calls (meeting notice, Cannot start recording, update result, capture-area picker, recording-context window, upload consent, Recording did not start, first-run permissions window, transcription review window) do while the window is open, because each may bring the window forward with it; the real sidebar, toolbar and Settings tab strip, which the snapshot PNGs leave blank in places; and the cost of the visible window's refresh with hundreds of recordings.
 
 ### In Swift (Linux-testable; do not call them “gated”)
 
@@ -201,7 +203,7 @@ Code leftovers from `SCRUMTRACE_AUDIT.md` that can be done without a Mac or Appl
 
 Product contexts are a saved library in General. Start/⌘N confirms one (or No context) before capture-area selection. Copy the confirmed value into the session; never look up a current profile when retrying old sessions. The previous single context migrates once. Automatic selection is deferred to v2.
 
-AI keys are a saved library of named services in Settings → AI. Only the selected service supplies provider, endpoint, model, and key. The previous single provider setting migrates once. Keys stay on the service id, not the endpoint host. Never log keys.
+AI keys are a saved library of named services in Settings → AI. The active service controls editing/test; explicitly checked services supply provider, endpoint, model, and key for comparison. The previous single provider setting migrates once. Keys stay on the service id, not the endpoint host. Never log keys.
 
 Settings is a six-tab section of the main window (Speech, Capture, Logs, Permissions, AI, General), not a window of its own; see the next paragraph. Start recording opens a macOS-style overlay (dashed rectangle, move/resize, Record / Entire Display / Cancel; Return confirms the key display) and does not request Screen Recording from that click. Capture can turn the pointer and microphone off for the next session.
 

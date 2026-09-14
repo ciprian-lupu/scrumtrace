@@ -12,21 +12,72 @@ final class SessionProcessor: @unchecked Sendable {
     private let briefRenderer = SessionBriefRenderer()
     private let agentRenderer = AgentContextRenderer()
     private let zipper = SessionPackZipper()
+    private let providerFactory: @Sendable (AIProviderConfiguration) -> any AIProvider
     private let evalLock = NSLock()
     private var evalAuthFailed = false
     /// Last transcript this processor wrote. `loadTranscript` prefers disk,
     /// then this, so a decode miss cannot slice as if the room was silent.
     private var writtenTranscript: FullTranscript?
 
-    init(vault: SessionVault, transcriber: WhisperTranscriber) {
+    init(vault: SessionVault, transcriber: WhisperTranscriber, providerFactory: @escaping @Sendable (AIProviderConfiguration) -> any AIProvider = { AIEngine.make(configuration: $0) }) {
+        self.providerFactory = providerFactory
         self.vault = vault
         self.transcriber = transcriber
+    }
+
+    /// Explicit comparison for an already captured session. This intentionally
+    /// does not participate in normal `process`: the caller supplies only the
+    /// configurations the user checked and consented to, and every invocation
+    /// appends fresh private run records.
+    func compareTranscriptions(
+        sessionId: String,
+        configurations: [TranscriptionServiceConfiguration]
+    ) async throws -> [TranscriptionRun] {
+        let sessionURL = vault.sessionURL(id: sessionId)
+        try requireUsableSession(sessionURL, id: sessionId)
+        return try await TranscriptionComparisonRunner(transcriber: transcriber)
+            .run(sessionURL: sessionURL, configurations: configurations)
+    }
+
+    /// Retry must use an already selected, timestamped primary transcript
+    /// exactly as stored. Profile edits only affect explicit new comparisons
+    /// or recovery when this archive artifact is absent/corrupt.
+    func hasValidPrimaryTranscript(sessionId: String) -> Bool {
+        let sessionURL = vault.sessionURL(id: sessionId)
+        guard ExportRel.isUsableSessionRoot(sessionURL),
+              let transcript = SpeakerTimeline.load(sessionURL: sessionURL) else { return false }
+        return transcript.hasTimedSegments && !transcript.needsTranscriptionRetry
+    }
+
+    /// Promote a reviewed comparative result to the normal transcript. Earlier
+    /// runs remain private history. Dependent slices and AI outputs are cleared
+    /// so no old analysis is presented as belonging to the new text.
+    func selectPrimaryTranscription(sessionId: String, runID: String) throws -> FullTranscript {
+        let sessionURL = vault.sessionURL(id: sessionId)
+        try requireUsableSession(sessionURL, id: sessionId)
+        let transcript = try TranscriptionRunStore.selectPrimary(id: runID, sessionURL: sessionURL)
+        var manifest = try vault.loadManifest(id: sessionId)
+        manifest.slices = []
+        manifest.tasks = []
+        manifest.completedStages.removeAll { $0 == .slicing || $0 == .evaluating || $0 == .synthesizing || $0 == .completed }
+        manifest.markCompleted(.transcribing)
+        manifest.pipelineStatus = .transcribing
+        try vault.write(manifest: &manifest)
+        // Remove stale brief, clips, projection and pack before any later Retry
+        // can produce evidence from the newly selected transcript.
+        _ = try ExportProjector().project(
+            sessionURL: sessionURL,
+            manifest: manifest,
+            includeFullTranscript: manifest.includeFullTranscriptInZip
+        )
+        return transcript
     }
 
     func process(
         sessionId: String,
         pinTimes: [TimeInterval],
         configuration: AIProviderConfiguration,
+        serviceConfigurations: [AIServiceConfiguration]? = nil,
         whisperModel: String,
         identifySpeakers: Bool = false,
         onStatus: @escaping @MainActor (PipelineStatus, String) -> Void
@@ -59,6 +110,16 @@ final class SessionProcessor: @unchecked Sendable {
         }
 
         var timing = PipelineTiming.load(sessionURL: sessionURL) ?? PipelineTiming()
+        // A selected primary is a complete, timestamped archive artifact.
+        // Retry Analysis must be able to resume from it even if an older
+        // manifest was interrupted before recording the transcribing stage.
+        if !manifest.hasCompleted(.transcribing),
+           let primary = SpeakerTimeline.load(sessionURL: sessionURL),
+           primary.hasTimedSegments, !primary.needsTranscriptionRetry {
+            manifest.markCompleted(.transcribing)
+            manifest.pipelineStatus = .transcribing
+            try vault.write(manifest: &manifest)
+        }
         if manifest.hasCompleted(.transcribing),
            let archived = SpeakerTimeline.load(sessionURL: sessionURL), archived.needsTranscriptionRetry {
             manifest.completedStages.removeAll { $0 == .transcribing || $0 == .slicing || $0 == .evaluating || $0 == .synthesizing || $0 == .completed }
@@ -211,10 +272,18 @@ final class SessionProcessor: @unchecked Sendable {
         }
 
         try requireUsableSession(sessionURL, id: sessionId)
-        let needsEvaluate = !manifest.hasCompleted(.evaluating)
+        let comparisonServices = serviceConfigurations ?? []
+        let isComparison = serviceConfigurations != nil
+        let needsEvaluate = (isComparison
+            ? !manifest.hasCompleted(.evaluating) || manifest.slices.contains { slice in
+                comparisonServices.contains { service in
+                    !Self.completedEvaluation(slice, service: service)
+                }
+            }
+            : !manifest.hasCompleted(.evaluating)
             || manifest.slices.contains { $0.analysisStatus == .offlineFailed || $0.analysisStatus == .pending }
             || (manifest.uploadConsent.approved
-                && manifest.slices.contains { $0.analysisStatus == .skipped })
+                && manifest.slices.contains { $0.analysisStatus == .skipped }))
 
         if needsEvaluate {
             if !manifest.hasCompleted(.transcribing) {
@@ -231,6 +300,14 @@ final class SessionProcessor: @unchecked Sendable {
                     "provider": configuration.kind.rawValue
                 ])
                 try vault.write(manifest: &manifest)
+            } else if isComparison {
+                try await evaluateComparison(
+                    manifest: &manifest,
+                    transcript: transcript,
+                    sessionURL: sessionURL,
+                    services: comparisonServices,
+                    onStatus: onStatus
+                )
             } else if configuration.kind == .anthropic && (
                 configuration.model.isEmpty
                     || AIProviderConfiguration.isRetiredAnthropic(configuration.model)
@@ -822,6 +899,116 @@ final class SessionProcessor: @unchecked Sendable {
         return (try? JSONDecoder().decode(FullTranscript.self, from: data)) == nil
     }
 
+    /// Comparison runs one selected destination at a time, then one slice at a
+    /// time. Results are never supplied to another model or folded into a
+    /// consensus; the manifest persists the `(slice, service)` checkpoint after
+    /// each request so Retry only resumes unfinished pairs.
+    func evaluateComparison(
+        manifest: inout SessionManifest,
+        transcript: FullTranscript,
+        sessionURL: URL,
+        services: [AIServiceConfiguration],
+        onStatus: @escaping @MainActor (PipelineStatus, String) -> Void
+    ) async throws {
+        guard manifest.uploadConsent.approved,
+              !manifest.uploadConsent.needsReprompt(destinations: services.map(\.destination)) else {
+            throw SettingsValidationError("Approve the selected comparison destinations before uploading.")
+        }
+        resetEvalAuthGate()
+        manifest.pipelineStatus = .evaluating
+        let cache = ComparisonInputCache(slices: manifest.slices)
+        for service in services {
+            var config = service.configuration
+            // A common wire contract is mandatory, including single-service runs
+            // that may have another model added on Retry.
+            config.acceptsVideo = false
+            let invalid: String? = {
+                if config.apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return "key_missing" }
+                if config.kind == .anthropic && (config.model.isEmpty || AIProviderConfiguration.isRetiredAnthropic(config.model)) { return "model_refused" }
+                if !config.acceptsText || !config.acceptsImages { return "comparison_requires_text_and_images" }
+                do { try config.validate() } catch { return "configuration_invalid" }
+                return nil
+            }()
+            if let invalid {
+                for index in manifest.slices.indices {
+                    guard !Self.completedEvaluation(manifest.slices[index], service: service) else { continue }
+                    setServiceEvaluation(&manifest.slices[index], service: service, status: .skipped, media: [], diagnostic: invalid)
+                }
+                AgentLog.event("eval_service", ["service": service.service.id, "status": "skipped", "error": invalid])
+                try vault.write(manifest: &manifest)
+                continue
+            }
+            await onStatus(.evaluating, "Evaluating slices with \(service.service.name) — \(service.service.model)")
+            let provider = ComparisonProvider(provider: providerFactory(config), cache: cache)
+            for index in manifest.slices.indices {
+                guard !Self.completedEvaluation(manifest.slices[index], service: service) else { continue }
+                let source = manifest.slices[index]
+                setServiceEvaluation(&manifest.slices[index], service: service, status: .pending, media: [])
+                try vault.write(manifest: &manifest)
+                let result = await evaluateSlice(
+                    slice: source,
+                    manifest: manifest,
+                    transcript: transcript,
+                    sessionURL: sessionURL,
+                    provider: provider,
+                    configuration: config
+                )
+                let fingerprint = await cache.fingerprint(for: source.sliceId)
+                let diagnostic = await cache.diagnostic(for: source.sliceId)
+                setServiceEvaluation(&manifest.slices[index], service: service, status: result.0.analysisStatus,
+                    media: result.0.mediaSent ?? [], fingerprint: fingerprint,
+                    diagnostic: diagnostic ?? (result.0.analysisStatus == .offlineFailed ? "provider_failed_or_auth_stopped" : nil))
+                manifest.tasks.removeAll { $0.serviceId == service.service.id && $0.sourceSliceId == source.sliceId }
+                manifest.tasks.append(contentsOf: tagged(result.1, service: service))
+                try vault.write(manifest: &manifest)
+            }
+        }
+        for index in manifest.slices.indices { refreshLegacyStatus(&manifest.slices[index]) }
+        manifest.markCompleted(.evaluating)
+        if manifest.slices.contains(where: { $0.serviceEvaluations.contains { $0.status == .offlineFailed } }) {
+            manifest.pipelineStatus = .offlineFailed
+        }
+        AgentLog.event("eval_done", ["session": manifest.sessionId, "clips": String(manifest.slices.count), "services": String(services.count), "approved": manifest.uploadConsent.approved ? "1" : "0"])
+        try vault.write(manifest: &manifest)
+    }
+
+    static func completedEvaluation(_ slice: SliceRecord, service: AIServiceConfiguration) -> Bool {
+        slice.serviceEvaluations.contains {
+            $0.serviceId == service.service.id && $0.status == .success
+                && $0.destination == service.destination && $0.inputFingerprint != nil
+        }
+    }
+
+    private func setServiceEvaluation(_ slice: inout SliceRecord, service: AIServiceConfiguration, status: SliceAnalysisStatus, media: [String], fingerprint: String? = nil, diagnostic: String? = nil) {
+        let retainedFingerprint = fingerprint ?? slice.serviceEvaluations.first { $0.serviceId == service.service.id }?.inputFingerprint
+        let entry = SliceServiceEvaluation(serviceId: service.service.id, serviceName: service.service.name, provider: service.service.provider.rawValue, model: service.service.model, status: status, mediaSent: media, inputFingerprint: retainedFingerprint, destination: service.destination, diagnostic: diagnostic)
+        if let index = slice.serviceEvaluations.firstIndex(where: { $0.serviceId == service.service.id }) {
+            slice.serviceEvaluations[index] = entry
+        } else {
+            slice.serviceEvaluations.append(entry)
+        }
+        refreshLegacyStatus(&slice)
+    }
+
+    private func refreshLegacyStatus(_ slice: inout SliceRecord) {
+        guard !slice.serviceEvaluations.isEmpty else { return }
+        let values = slice.serviceEvaluations.map(\.status)
+        slice.analysisStatus = values.allSatisfy { $0 == .success } ? .success
+            : values.contains(.offlineFailed) ? .offlineFailed
+            : values.contains(.pending) ? .pending : .skipped
+    }
+
+    private func tagged(_ tasks: [TaskRecord], service: AIServiceConfiguration) -> [TaskRecord] {
+        tasks.enumerated().map { index, task in
+            var copy = task
+            copy.taskId = "\(service.service.id)-\(task.sourceSliceId)-TASK-\(index + 1)"
+            copy.serviceId = service.service.id
+            copy.serviceName = service.service.name
+            copy.serviceModel = service.service.model
+            return copy
+        }
+    }
+
     private func evaluateSlice(
         slice: SliceRecord,
         manifest: SessionManifest,
@@ -886,6 +1073,7 @@ final class SessionProcessor: @unchecked Sendable {
                 ImageBase64.jpegPayload(url: url, sessionRoot: sessionURL) != nil
             }
         }
+        images = Array(images.prefix(4))
         var mediaSent: [String] = []
         if configuration.acceptsImages && !images.isEmpty {
             mediaSent.append("stills")
@@ -950,6 +1138,7 @@ final class SessionProcessor: @unchecked Sendable {
                 sessionURL: sessionURL
             ) && !EvidenceValidator.ownedByOtherAssociatedShot($0, slice: slice, shots: linked)
         }
+        promptSlice.stills = images.compactMap { ExportRel.unfollowedRelative($0, sessionRoot: sessionURL) }
         let request = SliceEvaluationRequest(
             product: manifest.productContext,
             slice: promptSlice,
@@ -1368,11 +1557,31 @@ final class SessionProcessor: @unchecked Sendable {
     }
 
     /// D14: a denied retry or missing key must not erase slices that already evaluated.
-    private func abandonEvaluate(
+    func abandonEvaluate(
         manifest: inout SessionManifest,
         failedStatus: SliceAnalysisStatus,
         markOffline: Bool
     ) {
+        if manifest.slices.contains(where: { !$0.serviceEvaluations.isEmpty }) {
+            // A denied Retry must preserve every service's success, including
+            // slices where another service failed. Never apply global ranking.
+            manifest.tasks = manifest.tasks.filter { task in
+                guard let id = task.serviceId else { return true }
+                return manifest.slices.first { $0.sliceId == task.sourceSliceId }?
+                    .serviceEvaluations.contains { $0.serviceId == id && $0.status == .success } == true
+            }
+            for index in manifest.slices.indices {
+                for serviceIndex in manifest.slices[index].serviceEvaluations.indices {
+                    if manifest.slices[index].serviceEvaluations[serviceIndex].status != .success {
+                        manifest.slices[index].serviceEvaluations[serviceIndex].status = failedStatus
+                        manifest.slices[index].serviceEvaluations[serviceIndex].diagnostic = "upload_not_approved"
+                    }
+                }
+                refreshLegacyStatus(&manifest.slices[index])
+            }
+            manifest.markCompleted(.evaluating)
+            return
+        }
         let kept = manifest.tasks.filter { task in
             manifest.slices.first { $0.sliceId == task.sourceSliceId }?.analysisStatus == .success
         }

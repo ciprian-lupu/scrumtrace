@@ -1889,8 +1889,8 @@ def test_phase45_clip_consent_and_budget() -> None:
     controller_src = (ROOT / "ScrumTrace" / "Processing" / "SessionController.swift").read_text()
     assert "Privacy_ScreenCapture" in controller_src
     assert "enum SystemPrivacySettings" in controller_src
-    assert "capabilities.acceptsText" in settings
-    assert "willUploadClip" in settings
+    assert 'Section("Comparison input")' in settings
+    assert "no — identical input comparison" in settings
     assert "Save key" in settings
     assert "Key saved on this Mac" in settings
     models = (ROOT / "ScrumTrace" / "Storage" / "SessionModels.swift").read_text()
@@ -2048,9 +2048,10 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "readContainedData" in payload
     assert "NSImage(data:" in payload
     assert "NSImage(contentsOf:" not in payload
-    assert "sessionRoot: request.sessionURL" in openai
-    assert "sessionRoot: request.sessionURL" in anthropic
-    assert "sessionRoot: request.sessionURL" in google
+    # Every adapter uses the same contained JPEG encoder, or the frozen comparison payload.
+    for adapter in (openai, anthropic, google):
+        assert "request.imagePayloads" in adapter
+    assert "ImageBase64.jpegPayload(url: $0, sessionRoot: sessionURL)" in protocol_src
     assert "mp4BodyURL" in openai
     assert "mp4BodyURL" in anthropic
     assert "mp4BodyURL" in google
@@ -3224,7 +3225,7 @@ def test_ai_connection_library() -> None:
     assert "Duplicate" in views
     assert "Delete service" in views
     readme = (ROOT / "README.md").read_text()
-    assert "Only the selected service is used for analysis" in readme
+    assert "Only explicitly checked services are used for comparison analysis" in readme
     agents = (ROOT / "AGENTS.md").read_text()
     assert "named services" in agents
     assert "Never log keys" in agents
@@ -3667,6 +3668,7 @@ def test_main_window_docs_match_the_build() -> None:
         ("SessionController.swift", "requestUploadConsent"): "upload consent",
         ("SessionController.swift", "presentStartFailureAlert"): "Recording did not start",
         ("OnboardingWindow.swift", "focus"): "first-run permissions window",
+        ("TranscriptionReviewView.swift", "show"): "transcription review window",
     }
     self_activation = re.compile(
         r"\b(?:NSApp|NSApplication\s*\.\s*shared|NSRunningApplication\s*\.\s*current)\s*[?!]?\s*\.\s*activate\b"
@@ -3731,7 +3733,7 @@ def test_delete_retry_race_and_closing_dialog() -> None:
     # The upload consent alert can stay open while the delete removes the folder, so a retry looks for the folder again
     # right before writing the manifest, and the menu's status line says why nothing ran.
     write_at = run.index("try vault.write(manifest: &local)")
-    assert run.rindex("ignoreRetryOfMissingSession()", 0, write_at) > run.index("requestUploadConsent()")
+    assert run.rindex("ignoreRetryOfMissingSession()", 0, write_at) > run.index("requestUploadConsent(destinations: destinations)")
     assert "Recording was deleted" in run
     assert "func testARetryWhoseFolderIsDeletedWhileTheUploadConsentAlertIsOpenWritesNothingBack()" in tests
 

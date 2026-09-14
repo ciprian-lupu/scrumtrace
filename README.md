@@ -92,7 +92,11 @@ In **Settings → General → Product contexts** or the window's **Contexts** se
 Each session saves a copy of the confirmed context, including its name and ID. Later profile changes, deletion, or switching products do not alter that session or its subsequent analysis/export. When the optional product name is blank, the context name supplies it. Context selection is manual in v1; automatic selection is deferred to v2.
 
 
-In **Settings → Speech**, choose the meeting language and preload the selected Whisper model before recording. Romanian is available explicitly. Existing transcripts keep their recorded language until analysis is run again.
+In **Settings → Speech**, choose the meeting language and preload the selected Whisper model before recording. Romanian and Hungarian are available explicitly. Existing transcripts keep their recorded language until analysis is run again.
+
+Speech profiles are separate from AI-analysis services. Add named local WhisperKit or OpenAI transcription profiles, choose one as the normal default, and check profiles only for an explicit comparison. A cloud profile stores its key in Keychain; profiles may reuse a credential ID when they intentionally share a key. Automatic detects language, a single selection is sent as a recognition hint, and the Romanian/English/Hungarian multi-language mode is saved as expected-language context/validation—not incorrectly sent to WhisperKit as `ro,en,hu`. No mode requests translation.
+
+To compare an existing recording, check at least one profile and choose **Menu → Compare transcriptions** (or the action in a Recent session). Every profile runs serially against the same canonical private audio file and creates a separately fingerprinted archive result with its requested/resolved model, language strategy, duration and status. Cloud runs show a dedicated audio-upload consent sheet naming the endpoint, model, audio source and duration. Pick a completed result to make it primary; prior results are retained privately and dependent slices/AI analysis are cleared until Retry Analysis regenerates them. Comparative transcripts and audio are never automatically put in `export/`.
 
 Speaker identification is enabled by default on new installations and runs locally after transcription. It requires macOS 15+ and downloads the FluidAudio 0.15.7 speaker models on first use; **Preload speaker models** prepares them in advance. Room-microphone and call-audio speakers have separate anonymous IDs. Audio and voice embeddings are not uploaded for this analysis, and embeddings are not saved. This does not recognize people's names or link identities between meetings.
 
@@ -104,7 +108,7 @@ WhisperKit's prefill cache is disabled for decoding because it produced empty 30
 
 The exported brief shows speaker labels and clickable passages within each selected clip. Estimates, unclear passages and overlapping voices remain marked for review. Use headphones to reduce call audio leaking into the room microphone. Real multi-person accuracy and long-run synchronization still need hardware validation; local tests do not close those gates.
 
-In **AI**, save each provider as a named service (Hive, DeepSeek, OpenAI, and so on) with its own endpoint, model, and key. Only the selected service is used for analysis. Saved keys are not displayed again. The previous single provider setting is imported once. **Logs** filters the current run and can export diagnostics. **General** explains retention: completed recordings are removed on the next launch when their retention period expires; **Forever** keeps them.
+In **AI**, save each provider as a named service (Hive, DeepSeek, OpenAI, and so on) with its own endpoint, model, and key. Only explicitly checked services are used for comparison analysis. Saved keys are not displayed again. The previous single provider setting is imported once. **Logs** filters the current run and can export diagnostics. **General** explains retention: completed recordings are removed on the next launch when their retention period expires; **Forever** keeps them.
 
 ## Hotkeys
 
@@ -153,3 +157,18 @@ Use the fill-in log at [`samples/GATE_LOG.md`](samples/GATE_LOG.md). Linux tests
 2. Phase 0–1: Keynote focus; 20 min record, 3 pauses, all-source pause token test (screen, system audio, mic, Shot, Hold-to-Talk)
 3. Phase 3: WhisperKit elapsed time on a named Mac; confirm `full_transcript.json` `sources` includes room and system when both were captured
 4. Phase 4–6: ≤ 12 slices; measured zip ≤ 35 MB; consent / evidence; remaining `AGENT_CONTEXT.md` paths exist
+
+
+### Comparing services and models
+
+In Settings → AI, add a named service for each endpoint/model combination. Duplicate a service to compare another model at the same endpoint, then edit its model and save. The active service controls editing and connection testing; the comparison checkboxes control uploads. Unchecking all services stays local, including after relaunch.
+
+Record once, then approve the listed destinations at Stop. Every selected, configured service evaluates every slice serially using the same system/user prompts, transcript excerpt, notes, context and up to four JPEG stills. Comparison excludes video for all providers. The HTTP envelope and provider-specific structured-output controls still differ; model outputs are not deterministic.
+
+The brief and AGENT_CONTEXT include a per-slice/service status table and SHA-256 input fingerprints. Results stay grouped by service/model; there is no consensus or ranking across models. A successful empty candidate response is still a completed evaluation, with any local evidence review shown separately.
+
+Retry Analysis resumes unfinished pairs and preserves successful results for unchanged destinations. Adding a service asks for consent again and evaluates only the new service plus unfinished pairs. Changing a model or endpoint invalidates that service's results. Missing keys/configuration skip that service; HTTP 401/403 stops all remaining uploads for that attempt.
+
+The fingerprint includes the exact prompts and encoded image bytes. If evidence or prompts changed between attempts, Retry refuses the changed input before uploading it and reports `comparison_input_changed`; existing results stay available. Start a new recording for revised evidence. Older results without fingerprints must be evaluated once with the new implementation before they count as verified comparisons. No transcript, image payload or API key is included in the fingerprint table.
+
+Verification uses synthetic providers and temporary sessions. A live multi-provider session still requires configured keys, explicit upload consent and inspection of the resulting export; software tests do not close hardware gates.
