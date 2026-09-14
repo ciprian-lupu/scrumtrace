@@ -516,6 +516,8 @@ final class OverviewModel: ObservableObject {
     /// While a Start shows its context window, the Start button follows it at this pace.
     nonisolated static let preparingInterval: Duration = .milliseconds(500)
     nonisolated static let preparingReason = "Finish or cancel the recording you started: choose its context and capture area."
+    /// The Start button's help while it can run. The Recordings empty state shows it too.
+    nonisolated static let startHelp = "Confirm the product context, then choose the capture area."
     nonisolated static let lastRecordingActions: [RecordingAction] = [.revealExport, .openInClaude, .openInChatGPT]
     nonisolated static let sessionsFolderWarning = "This folder holds every recording’s archive/ folder, with the full recording and transcript. Never hand it, or anything inside archive/, to an agent."
 
@@ -727,8 +729,13 @@ final class OverviewModel: ObservableObject {
     var canStartRecording: Bool { canChangeSessions && !isPreparingRecording }
 
     var startUnavailableReason: String? {
+        Self.startUnavailableReason(canChangeSessions: canChangeSessions, isPreparingRecording: isPreparingRecording)
+    }
+
+    /// Why a Start button waits. The Recordings empty state asks here too, so both buttons say the same thing.
+    nonisolated static func startUnavailableReason(canChangeSessions: Bool, isPreparingRecording: Bool) -> String? {
         if !canChangeSessions { return RecordingsModel.busyReason }
-        if isPreparingRecording { return Self.preparingReason }
+        if isPreparingRecording { return preparingReason }
         return nil
     }
 
@@ -993,7 +1000,7 @@ struct OverviewView: View {
             .controlSize(.large)
             .fixedSize()
             .disabled(!model.canStartRecording)
-            .help(model.startUnavailableReason ?? "Confirm the product context, then choose the capture area.")
+            .help(model.startUnavailableReason ?? OverviewModel.startHelp)
             .accessibilityIdentifier("main.overview.start")
         }
         .padding(.vertical, 4)

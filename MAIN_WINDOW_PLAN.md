@@ -751,8 +751,35 @@ task kept the contract pins in §1.5 and passed `scripts/test_contracts.py`.
   fields (provider and model only when approved). `scripts/test_contracts.py` pins that
   `SessionDetailFacts` reads only `uploadConsent`, and a `Mirror` allow-list test pins its fields.
 - The row drag checks `export/` at drag time on the main actor (a lazy provider would advertise a
-  file URL before the check). `SpeakerReviewView` still decodes up to 100 recent manifests on the
-  main actor, as it did before.
+  file URL before the check).
+- `SpeakerReviewView` reads its session list and the selected transcript off the main actor, through
+  `SpeakerReviewLoader`. Opened from Recordings, it reads the requested manifest on its own first and
+  selects it, so that transcript loads while the recent list (every manifest that decodes, at most 100,
+  as before) is still being read. Names and corrections change only together with the transcript, and
+  after a save the sheet shows the transcript the controller returns instead of reading it again.
+  The loader's recent-list read is async, so a test can hold it without holding a thread.
+  Settings → Speech enables *Review and name speakers…* once a manifest decodes, as before, but that tab
+  is redrawn every second, so the check runs off the main actor, only when Settings appears and when
+  recording or analysis starts or ends. It tries the newest folders first and usually decodes one
+  manifest. The disabled button has a help tag.
+- The empty state's Start recording follows Overview's rule and help text: it waits while recording,
+  analysis or a start runs, and while a Start shows its recording-context window. Opening that window
+  from the status-bar menu or ⌘N, and cancelling it, publishes nothing on the controller, so while the
+  window is visible `RecordingsModel` reads the capture state every 2 s, and every 0.5 s while the
+  context window shows, as Overview does while its section is shown.
+- At 960×640 Duration, Shots, Tasks and Export sit at their minimum widths (52, 34, 46 and 56 pt, which
+  fit a meeting over an hour, 99 / 99 tasks and a pack at its 35 MB cap), and Date, Context and Status
+  shrink by the same amount from their ideals (174, 184 and 172 pt). That leaves Date a 24-hour date and
+  time, Context *Unreadable manifest* with its symbol, and Status *Offline — needs review*, all in full.
+  A 12-hour time, a long context and a narrower window truncate; Date, Context and Status cells carry
+  the full text as a help tag.
+- An unreadable row shows plain words for its fixed reason: *Damaged*, *Could not be read* or *Folder
+  name mismatch* in the Status column, and one sentence in the detail pane. The technical phrases stay in
+  `SessionEntry` and never reach the window.
+- The Delete… confirmation names the recording as its row does, by date and context (*Unreadable
+  manifest* for an unreadable row), and its message names the folder id. It deletes the row the command
+  came from, so Delete… in the context menu of a row that is not selected deletes that row and leaves the
+  selection alone.
 - Delete… waits only while recording or analysis runs, like the other session-changing actions.
   The session the controller last recorded or retried can be deleted once both finish. After the
   delete, `SessionController.forgetSession(id:)` drops the in-memory manifest and `lastSessionId`

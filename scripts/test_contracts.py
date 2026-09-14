@@ -3436,6 +3436,90 @@ def test_session_detail_facts_keep_only_upload_consent() -> None:
     assert "func testDetailFactsStoreOnlyAllowListedFields()" in tests
 
 
+def test_recordings_start_copy_and_speaker_review_loading() -> None:
+    recordings_view = (ROOT / "ScrumTrace" / "UI" / "RecordingsView.swift").read_text()
+    overview_view = (ROOT / "ScrumTrace" / "UI" / "OverviewView.swift").read_text()
+
+    # The Recordings empty state's Start follows Overview's enabled rule and help text, the context window included.
+    empty = recordings_view.split("private var emptyState: some View {")[1].split("\n    }\n")[0]
+    assert ".disabled(!model.canStartRecording)" in empty
+    assert ".help(model.startUnavailableReason ?? OverviewModel.startHelp)" in empty
+    assert "canChangeSessions" not in empty
+    assert ".help(model.startUnavailableReason ?? OverviewModel.startHelp)" in overview_view
+    for source in (recordings_view, overview_view):
+        assert "var canStartRecording: Bool { canChangeSessions && !isPreparingRecording }" in source
+    assert (
+        "OverviewModel.startUnavailableReason(canChangeSessions: canChangeSessions, isPreparingRecording: isPreparingRecording)"
+        in recordings_view
+    )
+    sync = recordings_view.split("\n    func syncCaptureState() {")[1].split("\n    }\n")[0]
+    assert "dependencies.isPreparingRecording()" in sync
+    assert "updatePreparingFollow()" in sync
+
+    # Status cells carry the full label as a help tag; an unreadable row shows plain words, never the technical reason.
+    status_cell = recordings_view.split("private struct RecordingStatusCell: View {")[1].split("\nprivate struct ")[0]
+    assert ".help(label)" in status_cell
+    assert "RecordingRowText.unreadableStatus(reason)" in status_cell
+    assert "Text(reason)" not in status_cell
+    unreadable_detail = recordings_view.split("private struct UnreadableSessionDetailView: View {")[1]
+    assert "RecordingRowText.unreadableExplanation(reason)" in unreadable_detail
+    assert "(\\(reason))" not in unreadable_detail
+
+    # Delete… names the row the command came from by date and context, and the message names its id.
+    dialog = recordings_view.split(".confirmationDialog(")[1].split(".background {")[0]
+    assert "RecordingRowText.deleteTitle(model.pendingDelete.flatMap { model.entry(id: $0) })" in dialog
+    assert "presenting: model.pendingDelete" in dialog
+    assert 'Button("Delete recording", role: .destructive) { model.confirmDelete(id) }' in dialog
+    assert "Text(RecordingRowText.deleteMessage(id))" in dialog
+    menu = recordings_view.split(".contextMenu(forSelectionType: String.self) { ids in")[1].split(".onDeleteCommand")[0]
+    assert "if let id = ids.first, let entry = model.entry(id: id)" in menu
+    items = recordings_view.split("struct RecordingActionMenuItems: View {")[1].split("\n}\n")[0]
+    assert "model.perform(action, on: entry.id)" in items
+
+    # The speaker review reads the vault only in detached tasks, through its loader.
+    speaker = (ROOT / "ScrumTrace" / "UI" / "SpeakerReviewView.swift").read_text()
+    view = speaker.split("struct SpeakerReviewView: View {")[1].split("\n}\n")[0]
+    code = "\n".join(line for line in view.splitlines() if not line.lstrip().startswith("//"))
+    for read in ("vault.recentSessions(", "vault.loadManifest(", "SpeakerTimeline.load("):
+        assert read not in code, ("SpeakerReviewView", read)
+    for detached in (
+        "Task.detached(priority: .userInitiated) { loader.manifest(vault, requested) }",
+        "Task.detached(priority: .utility) { await loader.recentSessions(vault) }",
+        "Task.detached(priority: .userInitiated) { loader.transcript(url) }",
+    ):
+        assert detached in code, detached
+    settings = (ROOT / "ScrumTrace" / "UI" / "SettingsView.swift").read_text()
+    assert "vault.recentSessions(" not in settings, "Settings decodes manifests each time the Speech tab redraws"
+
+    tests = (ROOT / "ScrumTraceTests" / "MainWindowTests.swift").read_text()
+    for name in (
+        "testRecordingsEmptyStateStartWaitsLikeOverviewAndFollowsTheContextWindow",
+        "testTheStatusColumnFitsEveryStatusAtTheDefaultWindowSize",
+        "testUnreadableRowsShowPlainWordsForTheirReason",
+        "testDeleteConfirmationNamesTheRowItCameFromByDateAndContext",
+    ):
+        assert f"func {name}()" in tests, name
+    speaker_tests = (ROOT / "ScrumTraceTests" / "SpeakerTests.swift").read_text()
+    assert "func testSpeakerReviewReadsTheVaultOffTheMainActorAndOpensTheRequestedSessionFirst()" in speaker_tests
+
+    # While the window is visible the capture state is read on a timer, so a context window opened from the status-bar
+    # menu or Cmd-N, which publishes nothing on the controller, still disables the empty state's Start.
+    follow = recordings_view.split("private func updatePreparingFollow() {")[1].split("\n    }\n")[0]
+    assert "isWindowVisible" in follow
+    assert "startStateInterval" in follow
+    assert "startStateInterval: Duration = OverviewModel.evaluationInterval" in recordings_view
+    assert "func testTheDateAndContextColumnsFitAtTheDefaultWindowSize()" in tests
+
+    # Settings asks whether a manifest decodes off the main actor, never in the body the Speech tab redraws each second.
+    assert "Task.detached(priority: .userInitiated) { SpeakerReviewLoader.hasReviewableSession(in: vault) }" in settings
+    assert ".disabled(!controller.canChangeCaptureSettings || !hasReviewableSession)" in settings
+    assert "vault.listedSessionIds()" not in settings
+    assert "func testReviewSpeakersIsOfferedOnceAManifestDecodes()" in speaker_tests
+    speech_tab = settings.split("private var speechTab: some View {")[1].split("private var speechControlsDisabled")[0]
+    assert "hasReviewableSession(in:" not in speech_tab, "The Speech tab redraws every second; the check runs outside it"
+    assert "SpeakerReviewLoader.hasReviewableSession(in: vault)" in settings.split("var body: some View {")[1].split("private var speechTab")[0]
+
+
 def main() -> None:
     test_export_has_no_archive_and_no_tokens()
     test_agent_context_uses_export_relative_paths()
@@ -3460,6 +3544,7 @@ def main() -> None:
     test_sanitize_untrusted_strips_whitespace_breakout()
     test_main_window_routing_and_private_index()
     test_session_detail_facts_keep_only_upload_consent()
+    test_recordings_start_copy_and_speaker_review_loading()
     print("contract tests ok")
 
 

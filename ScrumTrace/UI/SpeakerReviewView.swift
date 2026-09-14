@@ -1,10 +1,35 @@
 import SwiftUI
 @preconcurrency import AVKit
 
+/// What the speaker review reads from the vault. The sheet runs every read off the main actor; tests replace them.
+struct SpeakerReviewLoader: Sendable {
+    /// The picker's sessions: every manifest that decodes, newest first, at most 100. Async, so a reader that waits
+    /// suspends instead of holding a thread.
+    var recentSessions: @Sendable (SessionVault) async -> [SessionManifest]
+    /// One session's manifest, or nil when it cannot be read.
+    var manifest: @Sendable (SessionVault, String) -> SessionManifest?
+    /// The saved transcript of one session folder.
+    var transcript: @Sendable (URL) -> FullTranscript?
+
+    static let live = SpeakerReviewLoader(
+        recentSessions: { $0.recentSessions(limit: 100) },
+        manifest: { vault, id in try? vault.loadManifest(id: id) },
+        transcript: { SpeakerTimeline.load(sessionURL: $0) }
+    )
+
+    /// True when the picker would list a session: some manifest in the vault decodes. Folder names start with the
+    /// date, so the newest folders are tried first and this usually decodes a single manifest. It reads files, so call
+    /// it off the main actor.
+    static func hasReviewableSession(in vault: SessionVault) -> Bool {
+        vault.listedSessionIds().sorted(by: >).contains { (try? vault.loadManifest(id: $0)) != nil }
+    }
+}
+
 struct SpeakerReviewView: View {
     @ObservedObject var controller: SessionController
     /// Selected when the sheet opens. Nil keeps the previous choice: the last session, else the newest.
     var initialSessionId: String? = nil
+    var loader: SpeakerReviewLoader = .live
     @Environment(\.dismiss) private var dismiss
     @State private var sessions: [SessionManifest] = []
     @State private var selected = ""
@@ -13,6 +38,10 @@ struct SpeakerReviewView: View {
     @State private var assignments: [Int: String] = [:]
     @State private var message = ""
     @State private var confirmingReanalysis = false
+    /// True until the picker's list has been read.
+    @State private var isLoadingSessions = true
+    /// The session whose transcript is being read, or nil.
+    @State private var loadingTranscriptId: String?
     @StateObject private var preview = SpeakerPreviewModel()
 
     var body: some View {
@@ -26,7 +55,7 @@ struct SpeakerReviewView: View {
             Picker("Session", selection: $selected) {
                 ForEach(sessions, id: \.sessionId) { session in Text(session.sessionId).tag(session.sessionId) }
             }
-            .disabled(controller.isBusy || changed)
+            .disabled(controller.isBusy || changed || isLoadingSessions)
             if let transcript = displayedTranscript {
                 HStack(alignment: .top, spacing: 16) {
                     VStack(alignment: .leading, spacing: 8) {
@@ -64,6 +93,9 @@ struct SpeakerReviewView: View {
                         }
                     }
                 }.frame(minHeight: 180)
+            } else if loadingTranscriptId != nil || (isLoadingSessions && selected.isEmpty) {
+                ProgressView(loadingTranscriptId != nil ? "Loading transcript…" : "Loading recordings…")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ContentUnavailableView("No transcript yet", systemImage: "waveform", description: Text("Finish transcription with Retry Analysis, then reopen this session."))
             }
@@ -72,7 +104,7 @@ struct SpeakerReviewView: View {
                 Button("Analyze speakers locally…") { confirmingReanalysis = true }
                     .disabled(controller.isBusy || transcript == nil || changed)
                 Spacer()
-                if changed { Button("Discard edits") { reload() }.disabled(controller.isBusy) }
+                if changed { Button("Discard edits") { resetEdits() }.disabled(controller.isBusy) }
                 Button(controller.isBusy ? "Updating…" : "Save names and corrections") { update(reanalyze: false) }
                     .disabled(controller.isBusy || !changed)
                     .keyboardShortcut("s", modifiers: .command)
@@ -80,20 +112,10 @@ struct SpeakerReviewView: View {
         }
         .padding(20).frame(minWidth: 760, idealWidth: 800, minHeight: 650)
         .interactiveDismissDisabled(controller.isBusy || changed)
-        .onAppear {
-            let vault = controller.vault
-            let picker = Self.pickerSessions(
-                recent: vault.recentSessions(limit: 100),
-                initialSessionId: initialSessionId,
-                lastSessionId: controller.lastSessionId,
-                loadManifest: { try? vault.loadManifest(id: $0) }
-            )
-            sessions = picker.sessions
-            selected = picker.selected
-        }
+        .task { await loadSessions() }
         .task(id: selected) {
-            reload()
-            guard !selected.isEmpty else { return }
+            await loadTranscript()
+            guard !selected.isEmpty, !Task.isCancelled else { return }
             await preview.load(sessionURL: controller.vault.sessionURL(id: selected))
         }
         .onDisappear { preview.stop() }
@@ -125,6 +147,74 @@ struct SpeakerReviewView: View {
         return (sessions, selected)
     }
 
+    /// Reads the picker's list off the main actor. The session `initialSessionId` asks for is read on its own first
+    /// and selected, so its transcript starts loading before every manifest in the vault has been decoded.
+    private func loadSessions() async {
+        let vault = controller.vault
+        let loader = loader
+        let requested = initialSessionId
+        let lastSessionId = controller.lastSessionId
+        var requestedManifest: SessionManifest?
+        if let requested {
+            requestedManifest = await Task.detached(priority: .userInitiated) { loader.manifest(vault, requested) }.value
+            guard !Task.isCancelled else { return }
+            if let requestedManifest {
+                sessions = [requestedManifest]
+                selected = requestedManifest.sessionId
+            }
+        }
+        let recent = await Task.detached(priority: .utility) { await loader.recentSessions(vault) }.value
+        guard !Task.isCancelled else { return }
+        let known = requestedManifest
+        let picker = Self.pickerSessions(
+            recent: recent,
+            initialSessionId: requested,
+            lastSessionId: lastSessionId,
+            loadManifest: { id in known?.sessionId == id ? known : nil }
+        )
+        sessions = picker.sessions
+        // The requested session selected above stays selected, so its transcript is not read again.
+        if !picker.sessions.contains(where: { $0.sessionId == selected }) {
+            selected = picker.selected
+        }
+        isLoadingSessions = false
+    }
+
+    /// Reads the selected session's transcript off the main actor. Nothing of the previous session stays on screen
+    /// meanwhile, and names and corrections change in the same main-actor step as the transcript, so an edit never
+    /// lands on another session.
+    private func loadTranscript() async {
+        let id = selected
+        preview.stop()
+        transcript = nil
+        names = [:]
+        assignments = [:]
+        guard !id.isEmpty else {
+            loadingTranscriptId = nil
+            return
+        }
+        loadingTranscriptId = id
+        let url = controller.vault.sessionURL(id: id)
+        let loader = loader
+        let loaded = await Task.detached(priority: .userInitiated) { loader.transcript(url) }.value
+        // A newer selection started its own read.
+        guard !Task.isCancelled, selected == id else { return }
+        show(loaded)
+        loadingTranscriptId = nil
+    }
+
+    /// Shows `loaded` with the names it holds and no pending corrections.
+    private func show(_ loaded: FullTranscript?) {
+        transcript = loaded
+        resetEdits()
+    }
+
+    /// Back to the names and speakers of the transcript on screen, which is the saved one.
+    private func resetEdits() {
+        names = (transcript?.speakers ?? []).reduce(into: [:]) { $0[$1.id] = $1.name ?? "" }
+        assignments = [:]
+    }
+
     private var displayedTranscript: FullTranscript? {
         guard let transcript else { return nil }
         let named = SpeakerTimeline.names(names, appliedTo: transcript)
@@ -133,12 +223,6 @@ struct SpeakerReviewView: View {
 
     private var changed: Bool {
         !assignments.isEmpty || (transcript?.speakers ?? []).contains { (names[$0.id] ?? "") != ($0.name ?? "") }
-    }
-
-    private func reload() {
-        transcript = selected.isEmpty ? nil : SpeakerTimeline.load(sessionURL: controller.vault.sessionURL(id: selected))
-        names = (transcript?.speakers ?? []).reduce(into: [:]) { $0[$1.id] = $1.name ?? "" }
-        assignments = [:]
     }
 
     private func currentSpeaker(_ transcript: FullTranscript) -> String {
@@ -183,8 +267,9 @@ struct SpeakerReviewView: View {
         message = reanalyze ? "Analyzing locally; first use can take several minutes…" : "Saving and rebuilding the local export…"
         Task {
             do {
-                transcript = try await controller.updateSpeakers(sessionId: selected, names: reanalyze ? nil : names, assignments: reanalyze ? [:] : assignments, reanalyze: reanalyze)
-                reload()
+                // The controller returns the transcript it saved, so nothing is read again on the main actor.
+                let saved = try await controller.updateSpeakers(sessionId: selected, names: reanalyze ? nil : names, assignments: reanalyze ? [:] : assignments, reanalyze: reanalyze)
+                show(saved)
                 let failed = transcript?.speakerAnalysis?.contains { $0.status == "failed" || $0.status == "source_unknown" } == true
                 message = failed ? "Export updated, but some speaker analysis is unavailable. Review unclear passages or try analysis again." : "Saved locally. The transcript, brief and session pack are updated."
             } catch {

@@ -24,7 +24,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var mainPresenter: MainWindowPresenter {
         if let mainPresenterStorage { return mainPresenterStorage }
         // Overview, the empty Recordings state and Record with this context… start a session through the same
-        // flow as the menu, and Overview and Contexts disable their buttons while it shows the recording-context window.
+        // flow as the menu, and all three disable their buttons while it shows the recording-context window.
         let presenter = MainWindowPresenter(
             controller: controller,
             activation: .live,

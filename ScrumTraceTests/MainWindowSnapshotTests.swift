@@ -87,6 +87,9 @@ final class MainWindowSnapshotTests: XCTestCase {
             }
 
             presenter.show(tab: .speech)
+            // Settings asks the vault, off the main actor, whether Review and name speakers… has a session to list.
+            // render() spins the run loop without giving the main actor a turn, so let that check land first.
+            try await Task.sleep(for: .seconds(1))
             try await render(window, as: "settings-speech", into: directory) {
                 presenter.navigation.section == .settings
             }

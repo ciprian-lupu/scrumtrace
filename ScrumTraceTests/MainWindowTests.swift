@@ -853,7 +853,10 @@ final class MainWindowTests: XCTestCase {
         manifestLoadGate: DispatchGroup? = nil,
         beforeManifestLoad: (@Sendable () -> Void)? = nil,
         refreshInterval: Duration = RecordingsModel.refreshInterval,
-        isPreparingRecording: @escaping @MainActor () -> Bool = { false }
+        isPreparingRecording: @escaping @MainActor () -> Bool = { false },
+        startStateInterval: Duration = OverviewModel.evaluationInterval,
+        preparingInterval: Duration = OverviewModel.preparingInterval,
+        onStartRecording: @escaping @MainActor () -> Void = {}
     ) -> RecordingsModel {
         let vault = f.vault
         let lockURL = f.lockURL
@@ -901,7 +904,10 @@ final class MainWindowTests: XCTestCase {
                 detailLoadGate?.pass(id)
                 return SessionDetailFacts.load(vault: vault, id: id)
             },
-            startRecording: { recorder.record("startRecording") },
+            startRecording: {
+                recorder.record("startRecording")
+                onStartRecording()
+            },
             isPreparingRecording: isPreparingRecording
         )
         return RecordingsModel(
@@ -914,7 +920,9 @@ final class MainWindowTests: XCTestCase {
             }),
             navigation: navigation ?? MainNavigation(),
             dependencies: dependencies,
-            refreshInterval: refreshInterval
+            refreshInterval: refreshInterval,
+            startStateInterval: startStateInterval,
+            preparingInterval: preparingInterval
         )
     }
 
@@ -1057,7 +1065,7 @@ final class MainWindowTests: XCTestCase {
                 try mainEventRows(in: f).compactMap { $0["event"] }.filter { $0 == "main_start" }
             }
 
-            // The empty state's button stays enabled while another Start shows its context window.
+            // A Start that still reaches the model while another Start shows its context window is refused too.
             model.startRecording()
             XCTAssertEqual(recorder.calls, [], "The Start flow would refuse a second Start")
             XCTAssertEqual(try starts(), [], "A refused Start logs no main_start for the Gate 0 overlay check")
@@ -2200,6 +2208,241 @@ final class MainWindowTests: XCTestCase {
         )
         XCTAssertEqual(ids(picker.sessions), ids(recent))
         XCTAssertEqual(picker.selected, last.sessionId, "A request that cannot be read falls back to the default")
+    }
+
+    @MainActor
+    func testRecordingsEmptyStateStartWaitsLikeOverviewAndFollowsTheContextWindow() async throws {
+        try await withRecordingsFixture { f in
+            let recorder = CallRecorder()
+            let canChange = MainActorBox(true)
+            let preparing = MainActorBox(false)
+            let model = makeRecordingsModel(
+                f,
+                recorder: recorder,
+                canChange: { canChange.value },
+                isPreparingRecording: { preparing.value },
+                startStateInterval: .milliseconds(60),
+                preparingInterval: .milliseconds(20),
+                // The menu's flow opens the recording-context window.
+                onStartRecording: { preparing.value = true }
+            )
+            XCTAssertTrue(model.canStartRecording)
+            XCTAssertNil(model.startUnavailableReason)
+            XCTAssertFalse(model.isPreparingFollowActive, "A window never shown follows nothing")
+
+            // Recording or analysis running: disabled with the reason Overview gives.
+            canChange.value = false
+            model.syncCaptureState()
+            XCTAssertFalse(model.canStartRecording)
+            XCTAssertEqual(model.startUnavailableReason, RecordingsModel.busyReason)
+            XCTAssertEqual(
+                model.startUnavailableReason,
+                OverviewModel.startUnavailableReason(canChangeSessions: false, isPreparingRecording: false)
+            )
+            canChange.value = true
+            model.syncCaptureState()
+            XCTAssertTrue(model.canStartRecording)
+
+            // A visible window reads the capture state at Overview's slower pace.
+            model.setWindowVisible(true)
+            XCTAssertTrue(model.isPreparingFollowActive)
+            XCTAssertEqual(model.preparingFollowInterval, .milliseconds(60))
+
+            // A Start from the status-bar menu or ⌘N opens the context window without publishing anything on the
+            // controller or calling this model. The button follows it within the interval, then at the faster pace.
+            preparing.value = true
+            let followedMenuStart = await waitUntil(timeout: 2) { !model.canStartRecording }
+            XCTAssertTrue(followedMenuStart, "A context window opened from the menu or ⌘N disables the empty state's Start")
+            XCTAssertEqual(model.startUnavailableReason, OverviewModel.preparingReason)
+            XCTAssertEqual(model.preparingFollowInterval, .milliseconds(20), "Faster while the context window shows")
+            model.startRecording()
+            XCTAssertEqual(recorder.calls, [], "The Start flow would refuse a click while that window shows")
+            preparing.value = false
+            let followedMenuCancel = await waitUntil(timeout: 2) { model.canStartRecording }
+            XCTAssertTrue(followedMenuCancel, "Cancelling that window enables the button again")
+            XCTAssertEqual(model.preparingFollowInterval, .milliseconds(60))
+
+            // The Start this button runs opens the context window: the button waits at once, with Overview's reason.
+            model.startRecording()
+            XCTAssertEqual(recorder.calls, ["startRecording"])
+            XCTAssertTrue(model.isPreparingRecording, "Disabled at once, not after the next check")
+            XCTAssertFalse(model.canStartRecording)
+            XCTAssertEqual(model.startUnavailableReason, OverviewModel.preparingReason)
+            XCTAssertEqual(model.preparingFollowInterval, .milliseconds(20))
+            model.startRecording()
+            XCTAssertEqual(recorder.calls, ["startRecording"], "A second Start waits for the context window")
+
+            // Cancelling the context window changes nothing the controller publishes. The button comes back anyway.
+            preparing.value = false
+            let enabled = await waitUntil(timeout: 2) { model.canStartRecording }
+            XCTAssertTrue(enabled, "The empty state's Start follows the context window closing")
+            XCTAssertNil(model.startUnavailableReason)
+            XCTAssertEqual(model.preparingFollowInterval, .milliseconds(60), "Back to the slower pace once the context window closed")
+
+            // A hidden window follows nothing. Shown again, it reads the context window at once.
+            model.setWindowVisible(false)
+            XCTAssertFalse(model.isPreparingFollowActive, "A hidden window does no periodic work")
+            XCTAssertNil(model.preparingFollowInterval)
+            preparing.value = true
+            model.syncCaptureState()
+            XCTAssertFalse(model.canStartRecording)
+            XCTAssertFalse(model.isPreparingFollowActive, "A hidden window does no periodic work")
+            preparing.value = false
+            model.setWindowVisible(true)
+            XCTAssertTrue(model.canStartRecording, "Shown again, the button is enabled at once")
+            XCTAssertEqual(model.preparingFollowInterval, .milliseconds(60))
+            model.setWindowVisible(false)
+            XCTAssertFalse(model.isPreparingFollowActive)
+            XCTAssertEqual(try mainEventRows(in: f).compactMap { $0["event"] }, ["main_start"])
+        }
+    }
+
+    @MainActor
+    func testTheStatusColumnFitsEveryStatusAtTheDefaultWindowSize() async throws {
+        try await withRecordingsFixture { f in
+            let offline = try makeSession(in: f.vault, status: .offlineFailed)
+            try await withFixtureController(f) { controller in
+                let presenter = MainWindowPresenter(controller: controller, frameAutosaveName: nil, isWindowOnScreen: ignoringOcclusion)
+                defer { presenter.window?.close() }
+                presenter.show(section: .recordings)
+                let window = try XCTUnwrap(presenter.window)
+                window.setContentSize(NSSize(width: 960, height: 640))
+                let listed = await waitUntil { self.recordingsTable(in: window)?.numberOfRows == 4 }
+                XCTAssertTrue(listed)
+                XCTAssertTrue(presenter.recordings.library.entries.contains { $0.id == offline })
+                spinRunLoop(for: 0.3)
+                let table = try XCTUnwrap(recordingsTable(in: window))
+                let font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
+                func textWidth(_ text: String) -> CGFloat {
+                    ceil((text as NSString).size(withAttributes: [.font: font]).width)
+                }
+                let statuses: [PipelineStatus] = [
+                    .idle, .recording, .paused, .transcribing, .slicing, .evaluating, .synthesizing, .completed, .offlineFailed
+                ]
+                // Every status but the offline one may carry the needs-review marker: 4 pt of spacing and the symbol.
+                let marker: CGFloat = 4 + 16
+                let loaded = statuses.map { textWidth(PipelineStatusOrder.label($0)) + ($0 == .offlineFailed ? 0 : marker) }
+                let unreadable = [SessionEntry.decodingFailed, SessionEntry.notReadable, SessionEntry.sessionIdMismatch]
+                    .map { textWidth(RecordingRowText.unreadableStatus($0)) }
+                let widest = (loaded + unreadable).max() ?? 0
+                XCTAssertEqual(widest, textWidth(PipelineStatusOrder.label(.offlineFailed)), "Offline — needs review is the widest")
+                // The column as drawn, intercell spacing included, less the cell's inset on each side.
+                let column = table.rect(ofColumn: 3).width
+                XCTAssertGreaterThanOrEqual(
+                    column - 18, widest,
+                    "The Status column is \(column) pt for \(widest) pt of text. Columns: \(table.tableColumns.map(\.width))"
+                )
+            }
+        }
+    }
+
+    @MainActor
+    func testTheDateAndContextColumnsFitAtTheDefaultWindowSize() async throws {
+        try await withRecordingsFixture { f in
+            _ = try makeSession(in: f.vault, status: .offlineFailed)
+            try await withFixtureController(f) { controller in
+                let presenter = MainWindowPresenter(controller: controller, frameAutosaveName: nil, isWindowOnScreen: ignoringOcclusion)
+                defer { presenter.window?.close() }
+                presenter.show(section: .recordings)
+                let window = try XCTUnwrap(presenter.window)
+                window.setContentSize(NSSize(width: 960, height: 640))
+                let listed = await waitUntil { self.recordingsTable(in: window)?.numberOfRows == 4 }
+                XCTAssertTrue(listed)
+                spinRunLoop(for: 0.3)
+                let table = try XCTUnwrap(recordingsTable(in: window))
+                let digits = NSFont.monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
+                func textWidth(_ text: String) -> CGFloat {
+                    ceil((text as NSString).size(withAttributes: [.font: digits]).width)
+                }
+                // The unreadable row's label as SwiftUI lays it out: its symbol, the label spacing and the text.
+                let label = NSHostingView(rootView: Label {
+                    Text("Unreadable manifest")
+                } icon: {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                })
+                let needed: [(column: Int, name: String, width: CGFloat)] = [
+                    // The widest English 24-hour date and time.
+                    (0, "Date", textWidth("May 30, 2026 at 23:59")),
+                    (1, "Context", ceil(label.fittingSize.width)),
+                    (2, "Duration", textWidth("1:23:04")),
+                    (4, "Shots", textWidth("999")),
+                    (5, "Tasks", textWidth("99 / 99")),
+                    (6, "Export", textWidth(RecordingRowText.bytes(MediaBudget.maxZipBytes)))
+                ]
+                let columns = table.tableColumns.map(\.width)
+                for item in needed {
+                    // The column as drawn, intercell spacing included, less the cell's inset on each side.
+                    let available = table.rect(ofColumn: item.column).width - 18
+                    XCTAssertGreaterThanOrEqual(
+                        available, item.width,
+                        "\(item.name) has \(available) pt for \(item.width) pt of text. Columns: \(columns)"
+                    )
+                }
+            }
+        }
+    }
+
+    @MainActor
+    func testUnreadableRowsShowPlainWordsForTheirReason() {
+        let cases: [(reason: String, status: String, explanation: String)] = [
+            (SessionEntry.decodingFailed, "Damaged", "Its contents are damaged."),
+            (SessionEntry.notReadable, "Could not be read", "It is missing or could not be opened."),
+            (SessionEntry.sessionIdMismatch, "Folder name mismatch", "It names a different recording than its folder.")
+        ]
+        for item in cases {
+            XCTAssertEqual(RecordingRowText.unreadableStatus(item.reason), item.status, item.reason)
+            XCTAssertEqual(RecordingRowText.unreadableExplanation(item.reason), item.explanation, item.reason)
+        }
+        // A phrase the index does not produce is never shown either.
+        XCTAssertEqual(RecordingRowText.unreadableStatus("errno 13"), "Could not be read")
+        XCTAssertEqual(RecordingRowText.unreadableExplanation("errno 13"), "It could not be read.")
+        for reason in cases.map({ $0.reason }) + ["errno 13"] {
+            let status = RecordingRowText.unreadableStatus(reason)
+            XCTAssertFalse(status.localizedCaseInsensitiveContains(reason), "\(reason) stays out of the Status column")
+            XCTAssertFalse(RecordingRowText.unreadableExplanation(reason).localizedCaseInsensitiveContains(reason), reason)
+            XCTAssertEqual(String(status.prefix(1)), status.prefix(1).uppercased(), "Sentence case, like the other statuses")
+        }
+    }
+
+    @MainActor
+    func testDeleteConfirmationNamesTheRowItCameFromByDateAndContext() async throws {
+        try await withRecordingsFixture { f in
+            let navigation = MainNavigation()
+            let recorder = CallRecorder()
+            let model = makeRecordingsModel(f, navigation: navigation, recorder: recorder)
+            await model.refresh().value
+            let completed = try XCTUnwrap(model.entry(id: f.completed))
+            let unfinished = try XCTUnwrap(model.entry(id: f.unfinished))
+            let corrupt = try XCTUnwrap(model.entry(id: f.corrupt))
+
+            XCTAssertEqual(
+                RecordingRowText.deleteTitle(completed),
+                "Delete “\(RecordingRowText.date(completed)) · Orbit web / Orbit Checkout”?"
+            )
+            XCTAssertEqual(RecordingRowText.deleteTitle(unfinished), "Delete “\(RecordingRowText.date(unfinished)) · No context”?")
+            XCTAssertNotEqual(RecordingRowText.date(corrupt), "—", "An unreadable row is dated by its folder name")
+            XCTAssertEqual(RecordingRowText.deleteTitle(corrupt), "Delete “\(RecordingRowText.date(corrupt)) · Unreadable manifest”?")
+            XCTAssertEqual(RecordingRowText.deleteTitle(nil), "Delete this recording?", "A row no longer listed")
+            for entry in [completed, unfinished, corrupt] {
+                XCTAssertFalse(RecordingRowText.deleteTitle(entry).contains(entry.id), "The title names the row as the table does")
+                XCTAssertEqual(
+                    RecordingRowText.deleteMessage(entry.id),
+                    "Recording \(entry.id) will be removed, including archive/ with the full recording and transcript, and export/ with the brief and session pack. This cannot be undone."
+                )
+            }
+
+            // Delete… from the context menu of a row that is not selected asks about that row and deletes only it.
+            navigation.selectedSessionId = f.completed
+            XCTAssertTrue(model.perform(.delete, on: f.unfinished))
+            let asked = try XCTUnwrap(model.pendingDelete)
+            XCTAssertEqual(asked, f.unfinished)
+            XCTAssertEqual(RecordingRowText.deleteTitle(model.entry(id: asked)), RecordingRowText.deleteTitle(unfinished))
+            let deletion = try XCTUnwrap(model.confirmDelete(asked))
+            await deletion.value
+            XCTAssertEqual(recorder.calls, ["deleteSession \(f.unfinished)"])
+            XCTAssertEqual(navigation.selectedSessionId, f.completed, "The selection is left alone")
+            XCTAssertEqual(model.library.entries.map(\.id), [f.completed, f.corrupt])
+        }
     }
 
     @MainActor

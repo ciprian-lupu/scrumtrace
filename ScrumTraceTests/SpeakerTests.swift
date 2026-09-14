@@ -46,17 +46,115 @@ final class SpeakerTests: XCTestCase {
         window.isReleasedWhenClosed = false
         defer { window.close() }
         window.makeKeyAndOrderFront(nil)
-        // Exercise the full onAppear/task/render path that crashed in the installed app.
-        try await Task.sleep(for: .milliseconds(300))
-        hosting.view.layoutSubtreeIfNeeded()
         func playerView(in view: NSView) -> AVPlayerView? {
             if let player = view as? AVPlayerView { return player }
             return view.subviews.lazy.compactMap { playerView(in: $0) }.first
+        }
+        // Exercise the full onAppear/task/render path that crashed in the installed app. The session list and the
+        // transcript are read off the main actor before the player shows, so wait for it rather than a fixed delay.
+        let deadline = Date().addingTimeInterval(5)
+        hosting.view.layoutSubtreeIfNeeded()
+        while playerView(in: hosting.view) == nil && Date() < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+            hosting.view.layoutSubtreeIfNeeded()
         }
         let player = try XCTUnwrap(playerView(in: hosting.view))
         XCTAssertEqual(player.controlsStyle, .inline)
         XCTAssertTrue(player.showsFullScreenToggleButton)
         XCTAssertTrue(window.isVisible)
+    }
+
+    @MainActor
+    func testSpeakerReviewReadsTheVaultOffTheMainActorAndOpensTheRequestedSessionFirst() async throws {
+        let vault = SessionVault(rootURL: root.appendingPathComponent("sessions"))
+        func completedSession(createdAt: Date) throws -> String {
+            let session = try vault.createSession(product: .empty)
+            var manifest = session.manifest
+            manifest.createdAt = createdAt
+            manifest.pipelineStatus = .completed
+            manifest.completedStages = [.transcribing, .completed]
+            try vault.write(manifest: &manifest)
+            var saved = assigned()
+            saved.sessionId = manifest.sessionId
+            try SpeakerTimeline.save(saved, sessionURL: session.url)
+            return manifest.sessionId
+        }
+        let older = try completedSession(createdAt: Date().addingTimeInterval(-86_400))
+        let newest = try completedSession(createdAt: Date())
+        let suite = "ScrumTrace.SpeakerReviewLoading.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let controller = SessionController(settings: AppSettings(defaults: defaults, keyStore: .empty), vault: vault)
+
+        func waitUntil(_ condition: () -> Bool) async -> Bool {
+            let deadline = Date().addingTimeInterval(5)
+            while !condition() && Date() < deadline {
+                try? await Task.sleep(for: .milliseconds(10))
+            }
+            return condition()
+        }
+        func present(_ view: SpeakerReviewView) -> NSWindow {
+            let window = NSWindow(contentViewController: NSHostingController(rootView: view))
+            window.isReleasedWhenClosed = false
+            window.makeKeyAndOrderFront(nil)
+            return window
+        }
+        func popUp(in view: NSView?) -> NSPopUpButton? {
+            guard let view else { return nil }
+            if let popUp = view as? NSPopUpButton { return popUp }
+            return view.subviews.lazy.compactMap { popUp(in: $0) }.first
+        }
+        func playerView(in view: NSView?) -> AVPlayerView? {
+            guard let view else { return nil }
+            if let player = view as? AVPlayerView { return player }
+            return view.subviews.lazy.compactMap { playerView(in: $0) }.first
+        }
+
+        // Opened from Recordings on the older recording: its manifest is read on its own and selected, its transcript
+        // starts loading while the recent list is still being read, and no read runs on the main thread.
+        let fromRecordings = SpeakerReviewReads(holdRecentUntilTranscript: true)
+        let recordingsWindow = present(SpeakerReviewView(controller: controller, initialSessionId: older, loader: fromRecordings.loader))
+        let listed = await waitUntil { fromRecordings.calls.contains("recent returned") }
+        XCTAssertTrue(listed, "\(fromRecordings.calls)")
+        XCTAssertEqual(fromRecordings.transcriptStartedBeforeRecentReturned, true, "The requested transcript does not wait for every manifest")
+        XCTAssertEqual(fromRecordings.readsOnMainThread, [], "No vault read runs on the main thread")
+        XCTAssertEqual(fromRecordings.calls.first, "manifest \(older)", "The requested manifest is read before the recent list")
+        let pickerListed = await waitUntil { popUp(in: recordingsWindow.contentView)?.itemTitles == [newest, older] }
+        XCTAssertTrue(pickerListed, "The picker lists the recent sessions once they are read: \(popUp(in: recordingsWindow.contentView)?.itemTitles ?? [])")
+        XCTAssertEqual(popUp(in: recordingsWindow.contentView)?.titleOfSelectedItem, older, "The requested session stays selected")
+        let shown = await waitUntil { playerView(in: recordingsWindow.contentView) != nil }
+        XCTAssertTrue(shown, "The requested transcript is on screen")
+        XCTAssertEqual(fromRecordings.calls.filter { $0.hasPrefix("transcript") }, ["transcript \(older)"], "The list arriving reads no transcript again")
+        XCTAssertEqual(fromRecordings.calls.filter { $0.hasPrefix("manifest") }, ["manifest \(older)"])
+        recordingsWindow.close()
+
+        // Opened from Settings: the recent list is read off the main thread, then the default session's transcript.
+        let fromSettings = SpeakerReviewReads(holdRecentUntilTranscript: false)
+        let settingsWindow = present(SpeakerReviewView(controller: controller, loader: fromSettings.loader))
+        defer { settingsWindow.close() }
+        let opened = await waitUntil { fromSettings.calls.contains { $0.hasPrefix("transcript") } }
+        XCTAssertTrue(opened)
+        XCTAssertEqual(fromSettings.calls, ["recent", "recent returned", "transcript \(controller.lastSessionId ?? newest)"])
+        XCTAssertEqual(fromSettings.readsOnMainThread, [], "No vault read runs on the main thread")
+    }
+
+    func testReviewSpeakersIsOfferedOnceAManifestDecodes() throws {
+        let vault = SessionVault(rootURL: root.appendingPathComponent("sessions"))
+        XCTAssertFalse(SpeakerReviewLoader.hasReviewableSession(in: vault), "An empty vault has nothing to review")
+
+        // The newest folder holds a manifest that is not JSON, as an unreadable row in Recordings.
+        let brokenId = "2099-01-01-0000-bad001"
+        let broken = vault.sessionURL(id: brokenId)
+        try FileManager.default.createDirectory(at: broken, withIntermediateDirectories: true)
+        try Data("{ not json".utf8).write(to: broken.appendingPathComponent(ScrumTracePath.manifest))
+        XCTAssertEqual(vault.listedSessionIds(), [brokenId], "The folder is listed")
+        XCTAssertTrue(vault.recentSessions(limit: 1).isEmpty, "The picker would list nothing")
+        XCTAssertFalse(SpeakerReviewLoader.hasReviewableSession(in: vault), "A listed folder alone offers nothing to review")
+
+        // An older folder whose manifest decodes: the check looks past the newest one.
+        _ = try vault.createSession(product: .empty)
+        XCTAssertFalse(vault.recentSessions(limit: 1).isEmpty)
+        XCTAssertTrue(SpeakerReviewLoader.hasReviewableSession(in: vault))
     }
 
     func testOldTranscriptStillDecodesWithSourceOnlyLabels() throws {
@@ -378,5 +476,116 @@ final class SpeakerTests: XCTestCase {
         if let result = env["SCRUMTRACE_SPEAKER_PROBE_RESULT"] {
             try JSONEncoder().encode(intervals).write(to: URL(fileURLWithPath: result))
         }
+    }
+}
+
+/// Resumes its waiters once `open()` runs, or with false after their timeout. A waiter suspends; no thread is held, so
+/// the task that opens the gate can run even when the concurrency pool has a single thread.
+private final class AsyncGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var isOpen = false
+    private var waiters: [UUID: CheckedContinuation<Bool, Never>] = [:]
+
+    func open() {
+        lock.lock()
+        isOpen = true
+        let pending = Array(waiters.values)
+        waiters = [:]
+        lock.unlock()
+        pending.forEach { $0.resume(returning: true) }
+    }
+
+    func wait(timeout: Duration) async -> Bool {
+        let id = UUID()
+        return await withCheckedContinuation { continuation in
+            if enqueue(continuation, id: id) {
+                Task.detached {
+                    try? await Task.sleep(for: timeout)
+                    self.expire(id)
+                }
+            }
+        }
+    }
+
+    /// False when the gate is already open; the continuation has then resumed.
+    private func enqueue(_ continuation: CheckedContinuation<Bool, Never>, id: UUID) -> Bool {
+        lock.lock()
+        guard !isOpen else {
+            lock.unlock()
+            continuation.resume(returning: true)
+            return false
+        }
+        waiters[id] = continuation
+        lock.unlock()
+        return true
+    }
+
+    private func expire(_ id: UUID) {
+        lock.lock()
+        let continuation = waiters.removeValue(forKey: id)
+        lock.unlock()
+        continuation?.resume(returning: false)
+    }
+}
+
+/// Records the speaker review's vault reads and whether each ran on the main thread. With `holdRecentUntilTranscript`
+/// the recent list suspends for up to two seconds until a transcript read starts, which only a transcript read that
+/// does not wait for the list allows.
+private final class SpeakerReviewReads: @unchecked Sendable {
+    private let lock = NSLock()
+    private let transcriptStarted = AsyncGate()
+    private let holdRecentUntilTranscript: Bool
+    private var recorded: [String] = []
+    private var onMainThread: [String] = []
+    private var transcriptFirst: Bool?
+
+    init(holdRecentUntilTranscript: Bool) {
+        self.holdRecentUntilTranscript = holdRecentUntilTranscript
+    }
+
+    var calls: [String] { locked { recorded } }
+    var readsOnMainThread: [String] { locked { onMainThread } }
+    var transcriptStartedBeforeRecentReturned: Bool? { locked { transcriptFirst } }
+
+    private func locked<T>(_ body: () -> T) -> T {
+        lock.lock()
+        defer { lock.unlock() }
+        return body()
+    }
+
+    private func record(_ call: String) {
+        let main = Thread.isMainThread
+        locked {
+            recorded.append(call)
+            if main { onMainThread.append(call) }
+        }
+    }
+
+    var loader: SpeakerReviewLoader {
+        SpeakerReviewLoader(
+            recentSessions: { vault in
+                self.record("recent")
+                if self.holdRecentUntilTranscript {
+                    let started = await self.transcriptStarted.wait(timeout: .seconds(2))
+                    self.setTranscriptFirst(started)
+                }
+                let sessions = vault.recentSessions(limit: 100)
+                self.record("recent returned")
+                return sessions
+            },
+            manifest: { vault, id in
+                self.record("manifest \(id)")
+                return try? vault.loadManifest(id: id)
+            },
+            transcript: { url in
+                self.record("transcript \(url.lastPathComponent)")
+                self.transcriptStarted.open()
+                return SpeakerTimeline.load(sessionURL: url)
+            }
+        )
+    }
+
+    private func setTranscriptFirst(_ started: Bool) {
+        locked { transcriptFirst = started }
     }
 }

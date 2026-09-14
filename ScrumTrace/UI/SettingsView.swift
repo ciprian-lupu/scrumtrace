@@ -17,6 +17,8 @@ struct SettingsView: View {
     @State private var removingKey = false
     @State private var showAdvancedSpeech = false
     @State private var showSpeakerReview = false
+    /// True once a manifest in the vault decodes, so the speaker review has a session to list.
+    @State private var hasReviewableSession = false
     @State private var preloadingSpeakers = false
     @State private var speakerModelLine = ""
 
@@ -41,6 +43,14 @@ struct SettingsView: View {
         }
         .frame(minWidth: 620, minHeight: 560)
         .padding()
+        // Whether Review and name speakers… has a session to list. The vault is read off the main actor when Settings
+        // appears and when recording or analysis starts or ends, never in the Speech tab, which is redrawn every second.
+        .task(id: controller.canChangeCaptureSettings ? (controller.lastSessionId ?? "") : nil) {
+            let vault = controller.vault
+            let reviewable = await Task.detached(priority: .userInitiated) { SpeakerReviewLoader.hasReviewableSession(in: vault) }.value
+            guard !Task.isCancelled else { return }
+            hasReviewableSession = reviewable
+        }
         .sheet(isPresented: $showSpeakerReview) {
             SpeakerReviewView(controller: controller)
         }
@@ -138,7 +148,8 @@ struct SettingsView: View {
                     }
                     .disabled(preloadingSpeakers || !controller.canChangeCaptureSettings)
                     Button("Review and name speakers…") { showSpeakerReview = true }
-                        .disabled(!controller.canChangeCaptureSettings || controller.vault.recentSessions(limit: 1).isEmpty)
+                        .disabled(!controller.canChangeCaptureSettings || !hasReviewableSession)
+                        .help(reviewSpeakersHelp)
                 }
                 if !speakerModelLine.isEmpty { Text(speakerModelLine).font(.caption).textSelection(.enabled) }
                 Text("Requires macOS 15+. First use downloads FluidAudio's public models. Meeting audio stays on this Mac; no voice profile is saved for future meetings.")
@@ -162,6 +173,12 @@ struct SettingsView: View {
 
     private var speechControlsDisabled: Bool {
         preloadingWhisper || controller.transcriber.isPreparing || !controller.canChangeCaptureSettings
+    }
+
+    private var reviewSpeakersHelp: String {
+        if !controller.canChangeCaptureSettings { return RecordingsModel.busyReason }
+        if !hasReviewableSession { return "No saved recording to review yet." }
+        return "Name the speakers of a saved recording and correct passages."
     }
 
     private var captureTab: some View {

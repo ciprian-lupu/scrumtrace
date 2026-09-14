@@ -531,6 +531,8 @@ final class RecordingsModel: ObservableObject {
     /// `controller.canChangeCaptureSettings`, followed while the model observes a controller.
     @Published private(set) var canChangeSessions: Bool
     @Published private(set) var activeSessionId: String?
+    /// `dependencies.isPreparingRecording()`, followed like the capture state. The empty state's Start waits for it.
+    @Published private(set) var isPreparingRecording: Bool
     /// True once the first refresh this model asked for has finished.
     @Published private(set) var hasLoaded = false
     @Published private(set) var details: [String: CachedDetail] = [:]
@@ -541,10 +543,18 @@ final class RecordingsModel: ObservableObject {
     private(set) var actionTask: Task<Void, Never>?
     /// The refresh loop that runs while the window is visible.
     private(set) var periodicRefresh: Task<Void, Never>?
+    /// Reads the capture state again while the window is visible, `isPreparingRecording` included. A Start from the
+    /// status-bar menu or ⌘N opens the recording-context window, and cancelling closes it, without publishing anything
+    /// on the controller, so without it the empty state's Start would follow neither until clicked.
+    private(set) var preparingFollow: Task<Void, Never>?
+    /// The pace `preparingFollow` runs at, or nil while it does not run.
+    private(set) var preparingFollowInterval: Duration?
     private(set) var isWindowVisible = false
 
     private let dependencies: RecordingsDependencies
     private let refreshInterval: Duration
+    private let startStateInterval: Duration
+    private let preparingInterval: Duration
     private var observations: Set<AnyCancellable> = []
     private var navigationObservations: Set<AnyCancellable> = []
     private var detailOrder: [String] = []
@@ -567,14 +577,19 @@ final class RecordingsModel: ObservableObject {
         library: SessionLibrary,
         navigation: MainNavigation,
         dependencies: RecordingsDependencies,
-        refreshInterval: Duration = RecordingsModel.refreshInterval
+        refreshInterval: Duration = RecordingsModel.refreshInterval,
+        startStateInterval: Duration = OverviewModel.evaluationInterval,
+        preparingInterval: Duration = OverviewModel.preparingInterval
     ) {
         self.library = library
         self.navigation = navigation
         self.dependencies = dependencies
         self.refreshInterval = refreshInterval
+        self.startStateInterval = startStateInterval
+        self.preparingInterval = preparingInterval
         canChangeSessions = dependencies.canChangeSessions()
         activeSessionId = dependencies.activeSessionId()
+        isPreparingRecording = dependencies.isPreparingRecording()
         // Synchronous: @Published emits on the main actor, in the change itself, so a line set right after a
         // selection change is never cleared by a queued block.
         Publishers.Merge(
@@ -636,6 +651,9 @@ final class RecordingsModel: ObservableObject {
     func syncCaptureState() {
         let canChange = dependencies.canChangeSessions()
         if canChange != canChangeSessions { canChangeSessions = canChange }
+        let preparing = dependencies.isPreparingRecording()
+        if preparing != isPreparingRecording { isPreparingRecording = preparing }
+        updatePreparingFollow()
         // A delete that finished while recording, analysis or a start ran is forgotten once they end.
         if canChange, !sessionsToForget.isEmpty {
             let waiting = sessionsToForget
@@ -643,6 +661,29 @@ final class RecordingsModel: ObservableObject {
         }
         let active = dependencies.activeSessionId()
         if active != activeSessionId { activeSessionId = active }
+    }
+
+    var isPreparingFollowActive: Bool { preparingFollow != nil }
+
+    /// Runs `preparingFollow` while the window is visible, at Overview's pace: every `startStateInterval`, and every
+    /// `preparingInterval` while a Start shows its context window. A hidden window follows nothing.
+    private func updatePreparingFollow() {
+        let pace: Duration? = isWindowVisible
+            ? (isPreparingRecording ? min(preparingInterval, startStateInterval) : startStateInterval)
+            : nil
+        guard pace != preparingFollowInterval else { return }
+        preparingFollow?.cancel()
+        preparingFollow = nil
+        preparingFollowInterval = pace
+        guard let interval = pace else { return }
+        // A sync that changes the pace cancels this loop and starts the next one.
+        preparingFollow = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: interval)
+                guard !Task.isCancelled, let self else { return }
+                self.syncCaptureState()
+            }
+        }
     }
 
     /// The controller stops naming a session this model deleted. A controller that is busy refuses; the id then
@@ -687,6 +728,9 @@ final class RecordingsModel: ObservableObject {
         isWindowVisible = visible
         periodicRefresh?.cancel()
         periodicRefresh = nil
+        // Back on screen, a context window opened meanwhile disables the empty state's Start at once. A hidden
+        // window stops following it.
+        syncCaptureState()
         guard visible else { return }
         refresh()
         let interval = refreshInterval
@@ -1012,6 +1056,17 @@ final class RecordingsModel: ObservableObject {
         guard canChangeSessions, !dependencies.isPreparingRecording() else { return }
         AgentLog.event("main_start", [:])
         dependencies.startRecording()
+        // The flow now shows its context window, so the empty state's Start waits at once.
+        syncCaptureState()
+    }
+
+    /// The empty state's Start follows Overview's rule: it waits for recording, analysis or a start, and for a Start
+    /// that already shows its context window.
+    var canStartRecording: Bool { canChangeSessions && !isPreparingRecording }
+
+    /// Why the empty state's Start waits, in Overview's words.
+    var startUnavailableReason: String? {
+        OverviewModel.startUnavailableReason(canChangeSessions: canChangeSessions, isPreparingRecording: isPreparingRecording)
     }
 
     // MARK: Detail
@@ -1146,6 +1201,44 @@ enum RecordingRowText {
     static func bytes(_ count: Int) -> String {
         ByteCountFormatter.string(fromByteCount: Int64(count), countStyle: .file)
     }
+
+    /// The Status column of an unreadable row. `reason` is one of `SessionEntry`'s fixed technical phrases; the window
+    /// shows plain words for it and never the phrase itself.
+    static func unreadableStatus(_ reason: String) -> String {
+        switch reason {
+        case SessionEntry.decodingFailed: return "Damaged"
+        case SessionEntry.sessionIdMismatch: return "Folder name mismatch"
+        case SessionEntry.notReadable: return "Could not be read"
+        default: return "Could not be read"
+        }
+    }
+
+    /// One sentence for the detail pane of an unreadable row, from the same fixed reasons.
+    static func unreadableExplanation(_ reason: String) -> String {
+        switch reason {
+        case SessionEntry.decodingFailed: return "Its contents are damaged."
+        case SessionEntry.sessionIdMismatch: return "It names a different recording than its folder."
+        case SessionEntry.notReadable: return "It is missing or could not be opened."
+        default: return "It could not be read."
+        }
+    }
+
+    /// The Delete… confirmation names the recording as its row does, by date and context. A row that is no longer
+    /// listed has neither, so the title stays general; the message names the folder id either way.
+    static func deleteTitle(_ entry: SessionEntry?) -> String {
+        guard let entry else { return "Delete this recording?" }
+        let name: String
+        switch entry {
+        case .loaded(let summary): name = contextAndProduct(summary)
+        case .unreadable: name = "Unreadable manifest"
+        }
+        let parts = [entry.sortDate.map(SessionSummary.formattedDate), name].compactMap { $0 }
+        return "Delete “\(parts.joined(separator: " · "))”?"
+    }
+
+    static func deleteMessage(_ id: String) -> String {
+        "Recording \(id) will be removed, including archive/ with the full recording and transcript, and export/ with the brief and session pack. This cannot be undone."
+    }
 }
 
 // MARK: - Views
@@ -1163,7 +1256,8 @@ struct RecordingsView: View {
             .toolbar { toolbar }
             .onAppear { model.sectionDidAppear() }
             .confirmationDialog(
-                "Delete this recording?",
+                // Names the row the command came from, which for a context menu need not be the selection.
+                RecordingRowText.deleteTitle(model.pendingDelete.flatMap { model.entry(id: $0) }),
                 isPresented: Binding(
                     get: { model.pendingDelete != nil },
                     set: { if !$0 { model.cancelDelete() } }
@@ -1175,7 +1269,7 @@ struct RecordingsView: View {
                     .accessibilityIdentifier("main.recordings.confirmDelete")
                 Button("Cancel", role: .cancel) { model.cancelDelete() }
             } message: { id in
-                Text("\(id) will be removed, including archive/ with the full recording and transcript, and export/ with the brief and session pack. This cannot be undone.")
+                Text(RecordingRowText.deleteMessage(id))
             }
             .background {
                 // A second dialog on its own view, so the two presentations never compete.
@@ -1237,7 +1331,8 @@ struct RecordingsView: View {
             Text("Recordings appear here after you stop a session. Each one keeps a private archive and an export you can hand to an agent.")
         } actions: {
             Button("Start recording") { model.startRecording() }
-                .disabled(!model.canChangeSessions)
+                .disabled(!model.canStartRecording)
+                .help(model.startUnavailableReason ?? OverviewModel.startHelp)
                 .accessibilityIdentifier("main.recordings.start")
         }
     }
@@ -1390,32 +1485,41 @@ struct RecordingsTable: View {
 
     var body: some View {
         Table(of: SessionEntry.self, selection: $navigation.selectedSessionId) {
+            // At the default 960×640 window, Duration, Shots, Tasks and Export sit at their minimum widths, which still fit
+            // their widest text (a meeting over an hour, 99 / 99 tasks, a pack at its 35 MB cap), and Date, Context and
+            // Status shrink by the same amount from their ideals. These ideals leave Date a 24-hour date and time, Context
+            // "Unreadable manifest" with its symbol, and Status "Offline — needs review". A 12-hour time, a long context
+            // and a narrower window truncate, with the full text in a help tag.
             TableColumn("Date") { entry in
-                Text(RecordingRowText.date(entry)).monospacedDigit()
+                let text = RecordingRowText.date(entry)
+                Text(text).monospacedDigit()
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .help(text)
             }
-            .width(min: 120, ideal: 172)
+            .width(min: 120, ideal: 174)
             TableColumn("Context / product") { entry in
                 RecordingContextCell(entry: entry)
             }
-            .width(min: 140, ideal: 190)
+            .width(min: 140, ideal: 184)
             TableColumn("Duration") { entry in
                 Text(RecordingRowText.duration(entry)).monospacedDigit()
                     .frame(maxWidth: .infinity, alignment: .trailing)
             }
-            .width(min: 56, ideal: 68)
+            .width(min: 52, ideal: 68)
             TableColumn("Status") { entry in
                 RecordingStatusCell(entry: entry)
             }
-            .width(min: 100, ideal: 150)
+            .width(min: 110, ideal: 172)
             TableColumn("Shots") { entry in
                 Text(RecordingRowText.shots(entry)).monospacedDigit()
                     .frame(maxWidth: .infinity, alignment: .trailing)
             }
-            .width(min: 40, ideal: 46)
+            .width(min: 34, ideal: 46)
             TableColumn("Tasks") { entry in
                 RecordingTasksCell(entry: entry)
             }
-            .width(min: 48, ideal: 60)
+            .width(min: 46, ideal: 60)
             TableColumn("Export") { entry in
                 Text(RecordingRowText.export(entry)).monospacedDigit()
                     .frame(maxWidth: .infinity, alignment: .trailing)
@@ -1453,10 +1557,13 @@ private struct RecordingContextCell: View {
         case .unreadable:
             Label {
                 Text("Unreadable manifest")
+                    .lineLimit(1)
+                    .truncationMode(.tail)
             } icon: {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .foregroundStyle(.orange)
             }
+            .help("Unreadable manifest")
         }
     }
 }
@@ -1467,9 +1574,12 @@ private struct RecordingStatusCell: View {
     var body: some View {
         switch entry {
         case .loaded(let summary):
+            let label = PipelineStatusOrder.label(summary.pipelineStatus)
             HStack(spacing: 4) {
-                Text(PipelineStatusOrder.label(summary.pipelineStatus))
+                Text(label)
                     .lineLimit(1)
+                    .truncationMode(.tail)
+                    .help(label)
                 if RecordingRowText.needsReviewMarker(summary) {
                     Image(systemName: "exclamationmark.circle.fill")
                         .foregroundStyle(.orange)
@@ -1478,9 +1588,12 @@ private struct RecordingStatusCell: View {
                 }
             }
         case .unreadable(_, let reason):
-            Text(reason)
+            let status = RecordingRowText.unreadableStatus(reason)
+            Text(status)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
+                .truncationMode(.tail)
+                .help(status)
         }
     }
 }
@@ -1757,7 +1870,7 @@ private struct UnreadableSessionDetailView: View {
         ContentUnavailableView {
             Label("Unreadable manifest", systemImage: "exclamationmark.triangle")
         } description: {
-            Text("The manifest of \(id) could not be used (\(reason)). Reveal the folder to inspect it, or delete the recording.")
+            Text("The manifest of \(id) could not be used. \(RecordingRowText.unreadableExplanation(reason)) Reveal the folder to inspect it, or delete the recording.")
         } actions: {
             HStack {
                 ForEach(model.actions(for: entry)) { action in
