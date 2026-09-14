@@ -3736,6 +3736,53 @@ def test_delete_retry_race_and_closing_dialog() -> None:
     assert "func testARetryWhoseFolderIsDeletedWhileTheUploadConsentAlertIsOpenWritesNothingBack()" in tests
 
 
+def test_macos26_sdk_apis_are_compiler_guarded() -> None:
+    """CI builds with Xcode 16.4 (macOS 15.5 SDK). Symbols that exist only in the macOS 26 SDK
+    must sit inside `#if compiler(>=6.2)`; `if #available` is a run-time check and does not stop
+    an older compiler from rejecting an unknown member."""
+    import re
+
+    sdk26_only = (
+        "sharedBackgroundVisibility",
+        "glassEffect",
+        "GlassEffectContainer",
+        "NSGlassEffectView",
+        "ToolbarSpacer",
+        "backgroundExtensionEffect",
+        "scrollEdgeEffectStyle",
+        ".glassProminent",
+        "buttonStyle(.glass)",
+    )
+    compiler_guard = re.compile(r"compiler\(\s*>=\s*(?:6\.(?:[2-9]|\d{2,})|[7-9]|\d{2,})")
+    checked = 0
+    for path in sorted((ROOT / "ScrumTrace").rglob("*.swift")):
+        stack: list[list[bool]] = []  # [is the #if a Swift 6.2+ compiler guard, now in its #else]
+        for number, line in enumerate(path.read_text().splitlines(), start=1):
+            stripped = line.strip()
+            if stripped.startswith("#if"):
+                stack.append([bool(compiler_guard.search(stripped)), False])
+                continue
+            if stripped.startswith("#elseif") or stripped.startswith("#else"):
+                if stack:
+                    stack[-1][1] = True
+                continue
+            if stripped.startswith("#endif"):
+                if stack:
+                    stack.pop()
+                continue
+            if stripped.startswith("//"):
+                continue
+            for symbol in sdk26_only:
+                if symbol in line:
+                    checked += 1
+                    guarded = any(is_guard and not in_else for is_guard, in_else in stack)
+                    assert guarded, (
+                        f"{path.relative_to(ROOT)}:{number} uses macOS 26 SDK-only `{symbol}` "
+                        "outside `#if compiler(>=6.2)`"
+                    )
+    assert checked >= 1, "expected at least the StableWindowToolbar sharedBackgroundVisibility call"
+
+
 def main() -> None:
     test_export_has_no_archive_and_no_tokens()
     test_agent_context_uses_export_relative_paths()
@@ -3760,6 +3807,7 @@ def main() -> None:
     test_sanitize_untrusted_strips_whitespace_breakout()
     test_main_window_routing_and_private_index()
     test_session_detail_facts_keep_only_upload_consent()
+    test_macos26_sdk_apis_are_compiler_guarded()
     test_recordings_start_copy_and_speaker_review_loading()
     test_overview_card_and_window_wording()
     test_main_window_docs_match_the_build()

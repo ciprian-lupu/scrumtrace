@@ -307,6 +307,10 @@ private struct RecordingsSidebarLabel: View {
 /// shrinks it again on the next section.
 private struct StableWindowToolbar: ViewModifier {
     func body(content: Content) -> some View {
+        // `sharedBackgroundVisibility` exists only in the macOS 26 SDK (Swift 6.2 / Xcode 26).
+        // The compiler check keeps older toolchains such as the Xcode 16.4 CI runner building;
+        // the availability check keeps macOS 14 and 15 working at run time.
+        #if compiler(>=6.2)
         if #available(macOS 26.0, *) {
             // macOS 26 draws a shared glass capsule behind toolbar items; this one holds nothing to see.
             content.toolbar {
@@ -318,6 +322,11 @@ private struct StableWindowToolbar: ViewModifier {
                 ToolbarItem(placement: .navigation) { Self.placeholder }
             }
         }
+        #else
+        content.toolbar {
+            ToolbarItem(placement: .navigation) { Self.placeholder }
+        }
+        #endif
     }
 
     private static var placeholder: some View {
