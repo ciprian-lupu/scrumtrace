@@ -19,6 +19,8 @@ jobs:
           cache-dependency-path: scripts/requirements.txt
       - name: Install Python dependencies
         run: python3 -m pip install -r scripts/requirements.txt
+      - name: Install ffmpeg (ffprobe for test_evidence.py)
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
       - name: Run Linux suite
         run: bash scripts/run_linux_tests.sh
 
