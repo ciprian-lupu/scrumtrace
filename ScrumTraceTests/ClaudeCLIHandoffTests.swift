@@ -112,7 +112,12 @@ final class ClaudeCLIHandoffTests: XCTestCase {
         XCTAssertTrue(plan.arguments.contains("--"))
         XCTAssertTrue(ClaudeCLIHandoff.appleScriptSource.contains("quoted form of"))
         XCTAssertTrue(ClaudeCLIHandoff.appleScriptSource.contains("tell application \"Terminal\""))
-        XCTAssertTrue(ClaudeCLIHandoff.appleScriptSource.contains(ClaudeCLIHandoff.execFlag))
+        // The flag is argv item 2, not script text; `forwarded` below pins items 1–2 to this binary + execFlag.
+        let script = ClaudeCLIHandoff.appleScriptSource
+        XCTAssertEqual(plan.arguments.dropFirst().first, script)
+        XCTAssertTrue(script.contains("set exe to item 1 of argv"))
+        XCTAssertTrue(script.contains("set flag to item 2 of argv"))
+        XCTAssertTrue(script.contains("do script (quoted form of exe & \" \" & quoted form of flag & "))
         XCTAssertFalse(ClaudeCLIHandoff.appleScriptSource.contains("cd "))
         XCTAssertFalse(ClaudeCLIHandoff.appleScriptSource.contains(" -p"))
         XCTAssertFalse(ClaudeCLIHandoff.appleScriptSource.contains("--print"))
