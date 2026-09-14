@@ -3584,6 +3584,110 @@ def test_overview_card_and_window_wording() -> None:
     assert "func testTheContextsTableShowsProductAndRepositoryInFullAtTheDefaultWindowSize()" in context_tests
 
 
+def test_main_window_docs_match_the_build() -> None:
+    agents = (ROOT / "AGENTS.md").read_text()
+    readme = (ROOT / "README.md").read_text()
+    plan = (ROOT / "MAIN_WINDOW_PLAN.md").read_text()
+    app = (ROOT / "ScrumTrace" / "App" / "AppDelegate.swift").read_text()
+    window = (ROOT / "ScrumTrace" / "UI" / "MainWindow.swift").read_text()
+    snapshots = (ROOT / "ScrumTraceTests" / "MainWindowSnapshotTests.swift").read_text()
+
+    # Settings is a section of the main window in every doc, never a window of its own.
+    assert "Settings is a six-tab window" not in agents
+    assert "Settings is a six-tab section of the main window" in agents
+    assert "is a section of the ScrumTrace window" in readme
+
+    # The snapshot renders are documented where the next agent looks: the file, the variable the tests read and how
+    # xcodebuild passes it, that no pixel is asserted, and what cacheDisplay cannot draw. The test keeps its own note.
+    variable = re.search(r'environment\["(SCRUMTRACE_\w+)"\]', snapshots)
+    assert variable, "MainWindowSnapshotTests.swift reads no SCRUMTRACE_ variable"
+    spelled = f"TEST_RUNNER_{variable.group(1)}"
+    skip = re.search(r'XCTSkip\(\s*"([^"]*)"', snapshots)
+    assert skip and spelled in skip.group(1), "The skip message names the xcodebuild spelling"
+    assert "cacheDisplay` cannot draw Liquid Glass" in snapshots
+    assert "MainWindowSnapshotTests.swift" in agents.split("## Where to work")[1].split("## Commands")[0]
+    assert "MainWindowSnapshotTests.swift" in plan.split("## 3. Architecture")[1].split("Data flow:")[0]
+    for name, doc in (("AGENTS.md", agents), ("MAIN_WINDOW_PLAN.md", plan)):
+        for phrase in (f"{spelled}=", "Nothing is asserted about pixels", "cacheDisplay", "Liquid Glass"):
+            assert phrase in doc, (name, phrase)
+
+    # The plan states the minimum size and sidebar maximum the code enforces, the Contexts columns the table shows,
+    # and the window's current wording. The spec (§2, task H01, §6) states only current values; the §8 notes must
+    # carry the current statement but may still name an earlier value as history.
+    size = re.search(r"static let minimumContentSize = NSSize\(width: (\d+), height: (\d+)\)", app)
+    assert size, "MainWindowPresenter.minimumContentSize"
+    minimum = (size.group(1), size.group(2))
+    target = plan.split("## 2. Target experience")[1].split("## 3. Architecture")[0]
+    task_h01 = plan.split("### TASK H01")[1].split("### TASK H02")[0]
+    risks = plan.split("## 6. Risks")[1].split("## 7. Verification summary")[0]
+    note_h01 = plan.split("### H01 — window shell")[1].split("### H02")[0]
+    assert "by default, minimum {}×{}".format(*minimum) in target.split("###")[0]
+    assert "`contentMinSize` {}×{}".format(*minimum) in task_h01
+    assert "The {}×{} minimum (`MainWindowPresenter.minimumContentSize`)".format(*minimum) in note_h01
+    stated_minimum = re.compile(r"(?:minimum|contentMinSize`?)\s+(\d+)×(\d+)|(\d+)×(\d+)\s+minimum")
+    for name, section in (("§2", target), ("TASK H01", task_h01), ("§6", risks)):
+        for found in stated_minimum.finditer(section):
+            assert tuple(group for group in found.groups() if group) == minimum, (name, found.group(0))
+    sidebar = re.search(r"static let sidebarMaximumWidth: CGFloat = (\d+)", window)
+    assert sidebar, "MainWindowView.sidebarMaximumWidth"
+    assert f"at most {sidebar.group(1)} pt" in note_h01
+    assert "Tech stack ·" not in plan.split("### Contexts")[1].split("### Settings")[0]
+    assert "Reveal sessions folder" not in plan.split("## 2. Target experience")[1].split("## 5. Other suggestions")[0]
+
+    # README: the window opens from Finder, Launchpad, Spotlight or the Dock; a Login Item launch, the agent loop and
+    # Relaunch with the window closed keep ScrumTrace in the menu bar.
+    launch = readme.split("## Main window")[1].split("\n- **Overview**")[0]
+    for phrase in ("Finder, Launchpad, Spotlight or the Dock", "Login Item", "agent loop", "Relaunch ScrumTrace"):
+        assert phrase in launch, phrase
+
+    # The Mac checks still open carry the review's top risks and the older NSApp.activate calls, each in its own check.
+    items = re.split(r"\n(?=\d+\. )", plan.split("### Manual checks still open")[1])
+
+    def has_check(*needles: str) -> bool:
+        return any(all(needle in item for needle in needles) for item in items)
+
+    assert has_check("NSRunningApplication.activate(options: [])", "macOS 14", "macOS 26"), "focus hand-back on 14 and 26"
+    assert has_check("Keynote", "open behind the presentation", "Shot"), "Gate 0 with the window open, Shot included"
+    assert has_check("NSApp.activate", "Keynote"), "older activations with the window open"
+    assert has_check("snapshot PNGs", "sidebar", "dark", "macOS 26"), "the real sidebar and dark toolbar"
+    assert has_check("hundreds of recordings", "Recordings folder"), "refresh cost, in the window's folder name"
+    walkthrough = agents.split("### On a Mac")[1].split("### In Swift")[0].split("\n6. ")[1]
+    for risk in ("macOS 14", "macOS 26", "Keynote", "Shot", "NSApp.activate", "sidebar", "hundreds of recordings"):
+        assert risk in walkthrough, ("AGENTS.md", risk)
+
+    # Every call that activates ScrumTrace outside AppDelegate.swift (where the routing test allows only
+    # MainWindowPresenter.show()) is named in the plan's check for older activations and in the AGENTS.md walkthrough,
+    # so a new one cannot skip its Mac check. The pattern is the routing test's.
+    older_activations = {
+        ("MenuBarController.swift", "runMeetingNoticeAlert"): "meeting notice",
+        ("MenuBarController.swift", "presentStartBlocked"): "Cannot start recording",
+        ("MenuBarController.swift", "checkUpdates"): "update result",
+        ("CaptureAreaPicker.swift", "begin"): "capture-area picker",
+        ("ProductContextViews.swift", "present"): "recording-context window",
+        ("SessionController.swift", "requestUploadConsent"): "upload consent",
+        ("SessionController.swift", "presentStartFailureAlert"): "Recording did not start",
+        ("OnboardingWindow.swift", "focus"): "first-run permissions window",
+    }
+    self_activation = re.compile(
+        r"\b(?:NSApp|NSApplication\s*\.\s*shared|NSRunningApplication\s*\.\s*current)\s*[?!]?\s*\.\s*activate\b"
+        r"|\bactivate\s*\(\s*ignoringOtherApps\b"
+    )
+    activation_sites = set()
+    for path in sorted((ROOT / "ScrumTrace").rglob("*.swift")):
+        if path.name == "AppDelegate.swift":
+            continue
+        source = path.read_text()
+        for found in self_activation.finditer(source):
+            functions = re.findall(r"\bfunc\s+(\w+)", source[: found.start()])
+            activation_sites.add((path.name, functions[-1] if functions else ""))
+    assert activation_sites == set(older_activations), sorted(activation_sites ^ set(older_activations))
+    older_checks = [" ".join(item.split()) for item in items if "NSApp.activate" in item and "Keynote" in item]
+    assert len(older_checks) == 1, "one check for older activations with the window open"
+    for phrase in older_activations.values():
+        assert phrase in older_checks[0], ("MAIN_WINDOW_PLAN.md", phrase)
+        assert phrase in walkthrough, ("AGENTS.md", phrase)
+
+
 def main() -> None:
     test_export_has_no_archive_and_no_tokens()
     test_agent_context_uses_export_relative_paths()
@@ -3610,6 +3714,7 @@ def main() -> None:
     test_session_detail_facts_keep_only_upload_consent()
     test_recordings_start_copy_and_speaker_review_loading()
     test_overview_card_and_window_wording()
+    test_main_window_docs_match_the_build()
     print("contract tests ok")
 
 

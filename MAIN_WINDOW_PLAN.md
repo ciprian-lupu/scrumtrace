@@ -1,6 +1,7 @@
 # ScrumTrace — Main Window Plan (Overview · Recordings · Contexts · Settings)
 
-Status: **implemented on `feature/main-window`** (tasks H01–H07; proposal written 2026-09-13).
+Status: **implemented on `feature/main-window`** (tasks H01–H07, then layout snapshot renders and review
+fixes; proposal written 2026-09-13).
 Applies to `develop`. Written after reading the tree at `be436db`
 (`feat: save multiple AI services and select one`). Where the build differs from the task text,
 §8 *Implementation notes* is authoritative.
@@ -70,7 +71,7 @@ preferences, and the session library only exists as nested menus.
 
 ## 2. Target experience
 
-One retained window titled **ScrumTrace**, 960×640 by default, minimum 840×580, frame
+One retained window titled **ScrumTrace**, 960×640 by default, minimum 840×620, frame
 autosaved. Left sidebar with four sections; the detail pane changes with the selection. When a
 recording is live, a banner sits above the detail pane in every section.
 
@@ -99,7 +100,7 @@ recording is live, a banner sits above the detail pane in every section.
 - **Needs attention** list: unfinished sessions (Retry analysis), `controller.lastError`,
   retention notice when `retentionDays > 0`, update line only if a check already ran.
 - **Last recording** card: date, context, duration, status, the four actions.
-- **Storage** line: sessions folder (home-scrubbed path), session count, total bytes (computed
+- **Storage** line: Recordings folder (home-scrubbed path), recording count, total bytes (computed
   off the main thread, cached), link to Settings → General → Retention.
 
 ### Recordings
@@ -130,8 +131,9 @@ recording is live, a banner sits above the detail pane in every section.
 
 ### Contexts
 
-- **Table**: Name · Product · Repository · Tech stack · Recordings (count of sessions whose
-  `product_context.context_id` equals the profile id) · Last used.
+- **Table**: Name · Product · Repository · Recordings (count of sessions whose
+  `product_context.context_id` equals the profile id) · Last used. Tech stack is shown in the detail
+  pane only (§8 H05).
 - Toolbar: New… · Edit… · Duplicate… · Delete… · **Record with this context…** ·
   Set as default. The editor is the existing `ProductContextEditor` (made internal).
 - Detail: `ProductContextSummary` plus the list of sessions recorded with it.
@@ -147,7 +149,7 @@ The existing `SettingsView` with its six tabs, unchanged. ⌘, and the menu’s
 
 | Trigger | Result |
 |---|---|
-| Launch from Finder / Launchpad / Spotlight | Window opens on Overview. Skipped when launched with `--background` (the LaunchAgent loop) or when the first-run onboarding window is showing on top — it still opens behind it. |
+| Launch from Finder / Launchpad / Spotlight / Dock | Window opens on Overview. Skipped when launched with `--background` (the LaunchAgent loop) or when the first-run onboarding window is showing on top — it still opens behind it. |
 | Launch as a Login Item | Menu bar only. The launch event says `keyAELaunchedAsLogInItem`. |
 | Relaunch ScrumTrace | The new instance gets `--background` unless the window was open, and always when this instance had it. |
 | Icon click while running (reopen) | Window fronted, section unchanged. No longer opens Settings. |
@@ -183,6 +185,7 @@ ScrumTrace/
 ScrumTraceTests/
     MainWindowTests.swift     NEW
     SessionLibraryTests.swift NEW
+    MainWindowSnapshotTests.swift NEW  layout PNGs for a visual review, added after H07 (§7)
     MenuAccessTests.swift     presenter rename only
 scripts/test_contracts.py     + pins for the new routing (see H07)
 ```
@@ -227,7 +230,7 @@ parallel with H01 (no shared files).
    (`@Published section`, `settings = SettingsNavigation()`, `@Published selectedSessionId`).
 2. Add `MainWindowPresenter` (replaces `SettingsWindowPresenter`, same shape): one retained
    `NSWindow`, title `ScrumTrace`, `[.titled, .closable, .miniaturizable, .resizable]`,
-   `setContentSize(NSSize(width: 960, height: 640))`, `contentMinSize` 840×580,
+   `setContentSize(NSSize(width: 960, height: 640))`, `contentMinSize` 840×620 (see §8 H01),
    `isReleasedWhenClosed = false`, frame autosave name `ScrumTraceMain`, `hosting.sizingOptions = []`
    (same macOS 26 hosting workaround as `RecordingContextPresenter`).
    API: `show()`, `show(section:)`, `show(tab:)` (→ `.settings` + tab), `show(sessionId:)`.
@@ -424,7 +427,7 @@ deleting or revealing a session cannot touch anything outside that session folde
    this launch (no automatic network call from the window).
 4. Last recording card reuses `SessionDetailView` actions in compact form.
 5. Storage line: `CapturePermissions.scrubHome(vault.rootURL.path)`, count, total archive bytes
-   (background, cached), *Reveal sessions folder*, link to Settings → General.
+   (background, cached), *Reveal recordings folder…*, link to Settings → General.
 6. The card copy states plainly what is missing and whether a relaunch is required
    (reuse `CaptureReadiness.userMessage`).
 
@@ -631,12 +634,14 @@ Do not do:
 | Risk | Mitigation |
 |---|---|
 | Activation-policy flip leaves no app focused after the window closes | Presenter re-activates the previous frontmost app; preference to turn the Dock behaviour off; manual check in H06. |
-| `SettingsView` hosted in a split view is narrower than its 620 pt minimum | Window minimum width 840 with a 200 pt sidebar; sidebar collapsible. |
+| `SettingsView` hosted in a split view is narrower than its 620 pt minimum | Window minimum 840×620 and a sidebar of at most 200 pt, so Settings keeps its sides and footer while recording (§8 H01); sidebar collapsible. |
 | Hundreds of sessions make refresh slow | Stat-cache before decode; sizes computed on selection only; 5 s timer only while visible. |
 | A contract grep breaks on refactor | New vault code lives in `SessionLibrary.swift`; AppDelegate keeps every pinned literal (§1.5); run `python3 scripts/test_contracts.py` after each task. |
 | Delete removes the wrong folder | Same owned-folder removal as `removeAbandonedSession`; symlink and live-lock refusal; confirmation names the id. |
 | The LaunchAgent loop pops the window every three minutes | `--background` argument in `mac_agent_loop.sh` (H01.7). |
 | Two Settings paths (SwiftUI `Settings` scene + presenter) | Unchanged from today; the command group already routes ⌘, to the presenter. Optional cleanup later. |
+| Older `NSApp.activate` calls (alerts, capture-area picker, context window) bring the open window forward over another app or a presentation | Not changed by this plan; manual check 7 in §8. |
+| Layout review relies on snapshot PNGs that cannot draw Liquid Glass | The PNGs are for a person to look at; the real sidebar and toolbar are manual check 8 in §8. |
 
 ---
 
@@ -648,6 +653,25 @@ After each task:
 bash scripts/run_linux_tests.sh
 bash scripts/mac_xcode_test.sh
 ```
+
+Layout snapshots (added after H07; not a gate and not a pixel test):
+
+```bash
+TEST_RUNNER_SCRUMTRACE_SNAPSHOT_DIR=/absolute/dir bash scripts/mac_xcode_test.sh
+```
+
+xcodebuild passes `TEST_RUNNER_` variables to the test process without the prefix, so the tests read
+`SCRUMTRACE_SNAPSHOT_DIR`. `ScrumTraceTests/MainWindowSnapshotTests.swift` then draws the real window over
+a fixture vault (five recordings, one of them unreadable, and two saved contexts) at 960×640 in the light
+and dark appearance: Overview idle, recording and scrolled; Recordings selected, scrolled, interrupted and
+empty; Contexts; Settings → Speech, General and Permissions; and Settings at the 840×620 minimum while
+recording beside the widest sidebar. Files are named `<section>-<variant>-<light|dark>.png`. Some
+`MainWindowTests` and `ProductContextTests` also write `main-*.png` into the same folder. Without the
+variable the two snapshot tests are skipped and the others write nothing. Nothing is asserted about pixels:
+the PNGs are for a person to look at. `NSView.cacheDisplay` cannot draw Liquid Glass on macOS 26, so the
+sidebar and, in the dark appearance, the toolbar items and the Settings tab strip come out as blank shapes.
+That is a limit of the renderer, not a regression; check those areas in the real window (manual check 8
+in §8).
 
 Manual, once, after H06 (does not touch `samples/GATE_LOG.md`):
 
@@ -681,7 +705,8 @@ task kept the contract pins in §1.5 and passed `scripts/test_contracts.py`.
   `MainWindowLaunchPolicy`.
 - The Settings section receives `SettingsView` through a builder closure created in
   `AppDelegate.swift`, and builds it fresh each time the section is shown.
-- The 840×580 minimum is enforced in `windowWillResize(_:to:)`, because SwiftUI resets
+- The 840×620 minimum (`MainWindowPresenter.minimumContentSize`) is enforced in
+  `windowWillResize(_:to:)`, because SwiftUI resets
   `contentMinSize` whenever the split view content changes. The same clamp applies to a frame
   restored from the `ScrumTraceMain` autosave name. Tests pass `frameAutosaveName: nil`.
 - While a sheet is attached to the window, section, tab and session navigation are ignored and the
@@ -698,8 +723,20 @@ task kept the contract pins in §1.5 and passed `scripts/test_contracts.py`.
   presenter tells `SessionController.isMainWindowOpen` whether its window is open. A relaunch with the window
   closed therefore passes `--background` on: a later Relaunch from that instance stays in the menu bar even if
   the window was opened in between (manual check 6).
-- The detail pane is clipped so the banner and the Settings tab strip stay visible at the minimum
-  size. The banner samples whether Resume is allowed every 0.5 s, and only while paused.
+- Settings at the minimum size: the sidebar column can be dragged to at most 200 pt
+  (`MainWindowView.sidebarMaximumWidth`, down from 260), and the minimum content height is 620 pt, up
+  from 580 in the first build. Measured on macOS 26, the sidebar is drawn 8 pt wider than its column,
+  Settings needs about 652×592 pt and the live banner is 41 pt. So at 840×620, recording, beside the
+  widest sidebar, Settings keeps both sides, its tab strip and its footer, and loses at most 10 pt of
+  side padding and 13 pt of bottom padding. The detail pane is still clipped, which now cuts only that
+  padding. The cost: the window can shrink only 20 pt below its 640 pt default height.
+  `testSettingsKeepsItsSidesAndFooterBesideTheWidestSidebarAtTheMinimumSize` checks that the sidebar
+  stops at its maximum (plus the 8 pt) and that Settings loses no more than its 16 pt padding on either
+  side or at the bottom; the 10 pt and 13 pt figures come from the measurement, not the test.
+- The banner samples whether Resume is allowed every 0.5 s, and only while paused. While the privacy
+  guard holds a pause, Resume is disabled with *Resume waits while a password manager is on screen.*
+  as its help tag, and as the banner's detail line unless the status line already names the automatic
+  pause.
 
 ### H02 — session index
 
@@ -713,6 +750,8 @@ task kept the contract pins in §1.5 and passed `scripts/test_contracts.py`.
   reason `session id mismatch`, in addition to `decoding failed` and `not readable`.
 - The Unfinished filter uses the `isUnfinished` definition, so offline-failed sessions also appear
   there. Filters may overlap.
+- Views filter on every render, so an empty search formats no date, and a search builds each row's
+  searchable fields (id, formatted date, context and product names) once per row.
 - The `recording.lock` reader sits in `AgentLog.swift` right after `setRecording`; it refuses
   symlinked locks and never deletes the lock. `SessionVault.swift` changed only
   `private func listedSessionIds` to internal. A lock counts as live only while its pid runs an
@@ -790,6 +829,11 @@ task kept the contract pins in §1.5 and passed `scripts/test_contracts.py`.
 - Detail facts load only for the selected row. Selecting another row cancels every other row's
   load (the thumbnail loop stops before its next still) and drops its result, and the eight-entry
   detail cache never evicts the selected row's facts.
+- A recording whose manifest is still at `recording` or `paused`, and that no running capture holds,
+  was cut short when ScrumTrace stopped (a normal quit writes idle). It reads as interrupted:
+  *Recording was interrupted* and one sentence above its stage bar in the detail pane, and the same
+  words in Overview's Needs attention (`RecordingsModel.isInterrupted`,
+  `RecordingRowText.unfinishedNote`). The empty state says recordings appear after you stop recording.
 
 ### H04 — Overview
 
@@ -808,9 +852,25 @@ task kept the contract pins in §1.5 and passed `scripts/test_contracts.py`.
   stop the loops they wait for.
 - The meeting-notice row is marked as needing action but never blocks recording, because Start
   asks for the notice itself. Only the Screen Recording and microphone rows block.
+- Overview's Start button also waits while readiness blocks recording (Screen Recording denied or
+  granted but needing a relaunch, microphone denied), and its help tag names the row whose buttons fix
+  it, so the card never leads to the flow's *Cannot start recording* alert. The flow itself is
+  unchanged: the status-bar menu, ⌘N, the Recordings empty state and Contexts' Record with this
+  context… still show that alert when readiness blocks. While recording or analysis runs, the card's
+  first row reads *Recording in progress* or *Analysis in progress* with a neutral icon instead of
+  readiness (`OverviewStartCard`).
+- A readiness row button that waits has a help tag saying why (recording or analysis, or the Whisper
+  model already loading). The microphone row also offers Capture settings, because turning Record
+  microphone off clears the block.
 - The update line appears only when a check that already ran found a newer release.
 - Additions: a Needs attention line for unreadable manifests, a local Dismiss for the last error,
   and an Accessibility row that opens Settings → Permissions instead of prompting.
+- One noun for the user: the window, Settings and the status-bar menu say *recordings* where they
+  said *sessions* (*Recordings folder*, *Reveal recordings folder…*, *Keep recordings*, the retention
+  and Product contexts captions). Settings → Permissions shows Microphone and Accessibility in the
+  card's words, lower-cased (`OverviewReadiness.microphoneStatus`, `accessibilityStatus`). Internal
+  names (`SessionVault`, `revealSessions`, the `reveal_sessions` log value) are unchanged.
+  `test_overview_card_and_window_wording` in `scripts/test_contracts.py` pins the wording.
 - `SessionController` gained `setStartInFlightForTesting(_:)` in an extension at the end of the
   file.
 
@@ -821,6 +881,10 @@ task kept the contract pins in §1.5 and passed `scripts/test_contracts.py`.
 - `ProductContextNaming.duplicate` compares names ignoring case and diacritics, the rule
   `saveProductContext` uses; Settings → General uses the same helper.
 - `ProductContextEditor` gained an explicit internal `init`; its body is unchanged.
+- The table has five columns, not the six in §2: Name, Product, Repository, Recordings and Last used.
+  Tech stack shows in the detail pane (`ProductContextSummary`). With six columns, Product and
+  Repository truncated at 960×640; now a product name and a repository URL of about 35 characters fit,
+  and a longer URL truncates in the middle so it keeps its host and repository name.
 - While recording or analysis runs, the table, detail and Show in Recordings stay usable; only the
   six context actions are disabled.
 - Record with this context… selects the context first. If the Start flow returns without opening
@@ -865,19 +929,43 @@ task kept the contract pins in §1.5 and passed `scripts/test_contracts.py`.
   onboarding, the capture-area picker, the recording-context window, the menu's alerts (meeting
   notice, readiness, updates), the upload consent alert during processing and the failed-start
   alert.
+  While the window is open ScrumTrace is a regular app, so each of those activations may also bring
+  the main window forward, over another app or a full-screen presentation. The capture-area picker
+  activates on every Start and afterwards only orders its overlays out, so after Record an open window
+  may stay in front of what is being recorded. None of this is checked on a Mac (manual check 7).
+
+### After H07 — snapshot renders and review fixes
+
+- `ScrumTraceTests/MainWindowSnapshotTests.swift` (commit `test: render main window sections for layout
+  review`) renders the window for a visual review; §7 says how to run it and what it cannot draw. The
+  doc comment on its `render` helper stays the authoritative note on the `cacheDisplay` limit.
+- A review of the branch led to four fix commits. Their notes sit under the task each one changes:
+  - `fix: keep login and relaunch starts in the menu bar`: Login Item and Relaunch launches (H01), one
+    start row per Start and the occlusion seam (H04).
+  - `fix: let finished recordings be deleted and drop stale detail loads`: `recording.lock` pid
+    ownership, new folders without a manifest and a cheaper search (H02); the held-session rule for
+    Delete…, `forgetSession(id:)`, stale detail loads and the detail pane's C2 pin (H03).
+  - `fix: clarify Recordings states and load speaker review off the main thread`: speaker review
+    loading, the empty state's Start, column widths, plain words for unreadable rows and the Delete…
+    confirmation (H03).
+  - `fix: make Overview, banner and Contexts states read correctly`: Settings at the minimum size and
+    the banner's Resume (H01), interrupted recordings (H03), the Start card, row help and wording
+    (H04), and the Contexts columns (H05).
 
 ### Manual checks still open
 
-Agents building H01–H07 were not allowed to launch or install ScrumTrace, so §7 and these checks
-have not been run on a Mac:
+Agents building H01–H07 and the review fixes were not allowed to launch or install ScrumTrace, so §7
+and these checks have not been run on a Mac:
 
 1. Keynote full screen: ⌥⌘S, ⌥⌘↩ and ⌥⌘P do not bring ScrumTrace forward, with the window closed
-   and with it open behind the presentation.
+   and with it open behind the presentation. Take a Shot and type its note both ways too
+   (`ShotNoteWindow.canBecomeKey` is still true).
 2. Keynote full screen: open the Shot note, click its field, press ⌘F, ⌘, and ⌘2. ScrumTrace must
    stay behind the presentation.
-3. Open the window from the Dock icon, Finder, Spotlight and the menu; close it; the previous app
-   regains focus (150 ms delay, `NSRunningApplication.activate(options: [])` under cooperative
-   activation) and the menu bar appears after the switch to `.regular`.
+3. On macOS 14 and on macOS 26: open the window from the Dock icon, Finder, Spotlight and the menu;
+   the Dock tile and ScrumTrace's menu bar appear after the switch to `.regular`. Close it; the previous
+   app regains focus (150 ms delay, `NSRunningApplication.activate(options: [])` under cooperative
+   activation) and no app is left without focus.
 4. First run: close the main window while the permissions window is open; the permissions window
    keeps its Dock tile and focus.
 5. Turn *Show ScrumTrace in the Dock while its window is open* off while the window has focus.
@@ -885,4 +973,24 @@ have not been run on a Mac:
    ScrumTrace stays in the menu bar with no window and no Dock tile. The unit test builds the launch event
    itself, so this also confirms that `currentAppleEvent` holds the launch event in
    `applicationDidFinishLaunching` under the SwiftUI app delegate adaptor. Then choose Relaunch ScrumTrace
-   with the window closed (menu bar only) and with it open (the window returns).
+   with the window closed (menu bar only) and with it open (the window returns). Also log out with
+   *Reopen windows when logging back in* on while ScrumTrace runs, and note whether that launch shows
+   the window.
+7. Older activations with the window open. Open the window, then switch to another app, and separately
+   to Keynote full screen. Trigger each older `NSApp.activate` call: the meeting notice and *Cannot
+   start recording* (Start from the status-bar menu and ⌘N), the update result (Check for updates in
+   the status-bar menu, then switch away before it answers), the capture-area picker (Start, and Select
+   area on screen…), the recording-context window, the upload consent alert (Stop & process),
+   *Recording did not start* and the first-run permissions window (`OnboardingWindow.focus`, on a
+   first launch and from Show first-run permissions in Settings → General; note which of the two
+   windows ends up in front). Note whether the main window comes forward with each, whether macOS
+   switches Spaces, and which app is in front after Record in the capture-area picker.
+8. What the snapshot PNGs cannot show: the real window in the light and dark appearance on macOS 26 and
+   on macOS 14, including the sidebar, the toolbar items and the Settings tab strip; Settings at the
+   840×620 minimum while recording, with the sidebar dragged to its widest; and the Recordings Date
+   column with a 12-hour clock, which truncates the time at 960×640.
+9. Refresh cost: with hundreds of recordings in the Recordings folder, keep the window open on Overview
+   and on Recordings, on battery, and watch CPU and energy in Activity Monitor. While the window is
+   visible and not covered, the index refreshes every 5 s (an lstat of each manifest plus export size
+   probes), and while Overview is shown it reads readiness every 2 s (Screen Recording preflight,
+   Accessibility trust, microphone status).

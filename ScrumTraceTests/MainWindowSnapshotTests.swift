@@ -5,7 +5,8 @@ import XCTest
 
 /// Layout snapshots of the real main window, for a human visual review. Runs only when SCRUMTRACE_SNAPSHOT_DIR is
 /// set, and skips otherwise. Each view is drawn at 960×640 points of content in the light and dark appearance and
-/// written as `<section>-<variant>-<light|dark>.png`. Nothing is asserted about pixels.
+/// written as `<section>-<variant>-<light|dark>.png`. Nothing is asserted about pixels. Through xcodebuild the variable
+/// is TEST_RUNNER_SCRUMTRACE_SNAPSHOT_DIR (MAIN_WINDOW_PLAN.md §7).
 final class MainWindowSnapshotTests: XCTestCase {
     private static let contentSize = NSSize(width: 960, height: 640)
     private static let appearances: [(name: NSAppearance.Name, suffix: String)] = [(.aqua, "light"), (.darkAqua, "dark")]
@@ -29,7 +30,9 @@ final class MainWindowSnapshotTests: XCTestCase {
 
     private func snapshotDirectory() throws -> URL {
         guard let path = ProcessInfo.processInfo.environment["SCRUMTRACE_SNAPSHOT_DIR"], !path.isEmpty else {
-            throw XCTSkip("Set SCRUMTRACE_SNAPSHOT_DIR to render main window snapshots for layout review")
+            throw XCTSkip(
+                "Set SCRUMTRACE_SNAPSHOT_DIR (TEST_RUNNER_SCRUMTRACE_SNAPSHOT_DIR through xcodebuild) to render main window snapshots for layout review"
+            )
         }
         let directory = URL(fileURLWithPath: path, isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
