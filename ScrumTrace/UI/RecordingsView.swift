@@ -1315,7 +1315,7 @@ enum RecordingRowText {
     }
 
     static func deleteMessage(_ id: String) -> String {
-        "Recording \(id) will be removed, including archive/ with the full recording and transcript, and export/ with the brief and session pack. This cannot be undone."
+        "Recording \(id) will be removed, including archive/ with the full recording and transcript, export/ with the brief and session pack, and its Codex workspaces with any analysis notes. This cannot be undone."
     }
 
     /// A manifest still at recording or paused: ScrumTrace stopped before the recording ended, because a normal quit

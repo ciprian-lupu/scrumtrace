@@ -318,7 +318,7 @@ struct SettingsView: View {
                 }
                 .accessibilityIdentifier("settings.codexDestination")
                 Text(settings.codexHandoffDestination == .app
-                     ? "Opens a new task in the Codex app with this recording's export folder and a prepared prompt. You send the prompt yourself."
+                     ? "Opens a project named after the recording's context and date, with a copy of its exported materials and a prepared prompt. You send the prompt yourself."
                      : "Starts Codex CLI in Terminal using your existing login. Install the codex command and allow ScrumTrace to control Terminal when macOS asks.")
                     .font(.caption).foregroundStyle(.secondary)
                 Text("Claude opens its CLI in Terminal. Coding-agent handoffs use only export/ and do not use the API key below.")

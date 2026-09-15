@@ -21,7 +21,7 @@ final class CodexHandoffTests: XCTestCase {
         try data.write(to: session.appendingPathComponent("export/session.manifest.json"))
     }
 
-    func testDesktopLinkUsesTheExportDirectoryAndOnlyPrefillsThePrompt() throws {
+    func testDesktopLinkUsesANamedExportWorkspaceAndOnlyPrefillsThePrompt() throws {
         try withSession { session in
             let link = try CodexAppHandoff.link(sessionURL: session)
             let parts = try XCTUnwrap(URLComponents(url: link, resolvingAgainstBaseURL: false))
@@ -30,11 +30,14 @@ final class CodexHandoffTests: XCTestCase {
             XCTAssertEqual(parts.path, "/new")
             let query = Dictionary(uniqueKeysWithValues: (parts.queryItems ?? []).map { ($0.name, $0.value ?? "") })
             XCTAssertEqual(Set(query.keys), ["path", "prompt"])
-            XCTAssertEqual(
-                URL(fileURLWithPath: try XCTUnwrap(query["path"])).standardizedFileURL.path,
-                session.appendingPathComponent("export").standardizedFileURL.path
-            )
-            XCTAssertEqual(query["prompt"], ClaudeCLIHandoff.startupPrompt)
+            let workspace = URL(fileURLWithPath: try XCTUnwrap(query["path"]))
+            XCTAssertTrue(workspace.lastPathComponent.hasPrefix("ScrumTrace - Recording - "))
+            XCTAssertEqual(workspace.deletingLastPathComponent().standardizedFileURL.path,
+                           session.appendingPathComponent(CodexWorkspace.directoryName).standardizedFileURL.path)
+            XCTAssertEqual(query["prompt"], CodexWorkspace.prompt(workspace: workspace))
+            XCTAssertTrue(query["prompt"]?.contains("Read export/AGENT_CONTEXT.md first") == true)
+            XCTAssertEqual(try Data(contentsOf: workspace.appendingPathComponent("export/AGENT_CONTEXT.md")),
+                           try Data(contentsOf: session.appendingPathComponent("export/AGENT_CONTEXT.md")))
             XCTAssertTrue(link.absoluteString.contains("%2B"), "A plus in a path must survive URLSearchParams decoding")
             XCTAssertFalse(link.absoluteString.contains("/archive"))
             XCTAssertFalse(link.absoluteString.contains("submit"))
@@ -75,6 +78,7 @@ final class CodexHandoffTests: XCTestCase {
                 XCTAssertEqual($0 as? ClaudeCLIHandoffError, .codexAppMissing)
             }
             XCTAssertFalse(attemptedOpen)
+            XCTAssertFalse(FileManager.default.fileExists(atPath: session.appendingPathComponent(CodexWorkspace.directoryName).path))
             XCTAssertThrowsError(try CodexAppHandoff.open(sessionURL: session, applicationForURL: { _ in
                 URL(fileURLWithPath: "/Applications/Codex.app")
             }, openURL: { _ in false })) {

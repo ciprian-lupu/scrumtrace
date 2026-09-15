@@ -2716,7 +2716,7 @@ final class MainWindowTests: XCTestCase {
                 XCTAssertFalse(RecordingRowText.deleteTitle(entry).contains(entry.id), "The title names the row as the table does")
                 XCTAssertEqual(
                     RecordingRowText.deleteMessage(entry.id),
-                    "Recording \(entry.id) will be removed, including archive/ with the full recording and transcript, and export/ with the brief and session pack. This cannot be undone."
+                    "Recording \(entry.id) will be removed, including archive/ with the full recording and transcript, export/ with the brief and session pack, and its Codex workspaces with any analysis notes. This cannot be undone."
                 )
             }
 

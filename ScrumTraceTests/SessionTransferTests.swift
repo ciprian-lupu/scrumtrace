@@ -87,6 +87,25 @@ final class SessionTransferTests: XCTestCase {
         }
     }
 
+    func testTransferAndReanalysisIgnoreDerivedCodexWorkspaces() throws {
+        try fixture { base, vault, id in
+            let workspace = try CodexWorkspace.prepare(sessionURL: vault.sessionURL(id: id))
+            try FileManager.default.createSymbolicLink(
+                at: workspace.appendingPathComponent("agent-created-link"), withDestinationURL: base
+            )
+            let transfer = SessionTransfer(vault: vault)
+            let index = try transfer.export(
+                id: id, to: base.appendingPathComponent("with-workspace.scrumtrace"),
+                scope: .complete, includePrivate: true, environment: sender
+            )
+            XCTAssertFalse(index.files.contains { $0.path.hasPrefix(CodexWorkspace.directoryName + "/") })
+            let copyID = try transfer.analysisCopy(id: id, retranscribe: false)
+            XCTAssertFalse(FileManager.default.fileExists(atPath: vault.sessionURL(id: copyID)
+                .appendingPathComponent(CodexWorkspace.directoryName).path))
+            XCTAssertTrue(FileManager.default.fileExists(atPath: workspace.path))
+        }
+    }
+
     func testEvidencePackageContainsNoPrivateOriginalAndCannotBeReprocessed() throws {
         try fixture { base, vault, id in
             let package = base.appendingPathComponent("evidence.scrumtrace")

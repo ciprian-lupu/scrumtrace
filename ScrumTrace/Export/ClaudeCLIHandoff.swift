@@ -86,6 +86,7 @@ enum ClaudeCLIHandoffError: LocalizedError, Equatable {
     case terminalAutomationDenied
     case codexAppMissing
     case codexAppLaunchFailed
+    case codexWorkspaceFailed
 
     var errorDescription: String? {
         switch self {
@@ -108,6 +109,8 @@ enum ClaudeCLIHandoffError: LocalizedError, Equatable {
             return "The Codex app is not installed or registered on this Mac. Install and open it once, or choose Codex CLI in Terminal in Settings → AI."
         case .codexAppLaunchFailed:
             return "Could not open the Codex app. Open it once from Applications, then try again."
+        case .codexWorkspaceFailed:
+            return "Could not prepare this recording's Codex workspace. Check available disk space and folder access, then try again."
         }
     }
 
@@ -132,6 +135,8 @@ enum ClaudeCLIHandoffError: LocalizedError, Equatable {
             return "codex_app_missing"
         case .codexAppLaunchFailed:
             return "codex_app_launch_failed"
+        case .codexWorkspaceFailed:
+            return "codex_workspace_failed"
         }
     }
 
@@ -416,7 +421,7 @@ enum ClaudeCLIHandoff {
         let omitted: [OmittedAsset]?
     }
 
-    private static func exportFdIncludesTranscript(_ fd: Int32) -> Bool {
+    static func exportFdIncludesTranscript(_ fd: Int32) -> Bool {
         // Read the projection through the same bound directory, without following a link.
         let child = Darwin.openat(fd, "session.manifest.json", O_RDONLY | O_CLOEXEC | O_NOFOLLOW)
         guard child >= 0 else { return false }

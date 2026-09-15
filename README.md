@@ -124,7 +124,7 @@ Give the agent **`export/`** only. Never drop the session root or `archive/` (ma
 
 **Open last session in Codex** in the menu and **Open in Codex** in Recordings follow **Settings → AI → Local coding agents → Open in Codex**:
 
-- **Codex app** (default): opens a new local task with the validated export/ folder and a prepared prompt. The prompt stays in the composer until you send it. The app must be installed and opened once on this Mac; no separate CLI installation is needed.
+- **Codex app** (default): opens a project named for the recording's saved context and date, such as **ScrumTrace - Payments - 2026-09-15 17.59 UTC - a1b2c3d4**. It contains a copy of the validated exported materials and a prepared prompt that asks the agent to give the task a descriptive title. The prompt stays in the composer until you send it. The app must be installed and opened once on this Mac; no separate CLI installation is needed.
 - **Codex CLI in Terminal**: starts the interactive codex command with its working directory bound to export/. Install the CLI and sign in with ChatGPT in Terminal first. Allow ScrumTrace to control Terminal when macOS asks.
 
 **Open last session in Claude** / **Open in Claude** still uses the interactive claude command in Terminal with your existing Claude login. Neither CLI uses claude -p or codex exec. These handoffs do not use a ScrumTrace API key and never open archive/. A full transcript in export/ is allowed only when the export manifest explicitly includes it and it was not omitted from the pack.
@@ -132,6 +132,8 @@ Give the agent **`export/`** only. Never drop the session root or `archive/` (ma
 After replacing or rebuilding ScrumTrace, quit the old process and reopen the installed copy. macOS can refuse Automation when the running process no longer matches its binary on disk. If Automation was denied, enable Terminal under **System Settings → Privacy & Security → Automation → ScrumTrace**; no macOS permission is changed automatically.
 
 The app handoff uses the [documented Codex workspace and prompt link](https://learn.chatgpt.com/docs/reference/commands#deep-links).
+
+The named project lives under the recording's codex-workspaces/ folder. Reopening the same recording reuses it and replaces only its export/ reference folder, including removal of materials no longer exported. Save agent notes outside that reference folder. Deleting the recording also deletes these workspaces and their notes; the deletion confirmation states this.
 
 
 Phase -1 mock pack (open in a browser or drop into Cursor):

@@ -114,7 +114,8 @@ struct SessionTransfer {
         let sourceManifest = try read(ScrumTracePath.manifest, in: source)
         let paths: [String]
         if scope == .complete {
-            paths = try inventory(source).filter { $0 != Self.indexName && Self.isSessionPath($0) }
+            paths = try inventory(source, excludingTopLevel: [CodexWorkspace.directoryName])
+                .filter { $0 != Self.indexName && Self.isSessionPath($0) }
         } else {
             let exportRoot = source.appendingPathComponent(ScrumTracePath.export)
             _ = try inventory(exportRoot)
@@ -253,7 +254,7 @@ struct SessionTransfer {
               retranscribe ? assessment.hasRecording : (assessment.hasRecording || assessment.hasTimedTranscript) else {
             throw SessionTransferError.missingSources
         }
-        let paths = try inventory(source).filter(Self.isSessionPath)
+        let paths = try inventory(source, excludingTopLevel: [CodexWorkspace.directoryName]).filter(Self.isSessionPath)
         try ensureSpace(paths: paths, source: source, destination: vault.rootURL)
         let stage = try makeStage(in: vault.rootURL)
         defer { ExportRel.removeOwnedSessionFolder(sessionURL: stage, sessionsRoot: vault.rootURL) }
@@ -333,7 +334,7 @@ struct SessionTransfer {
             && ["png", "jpg", "jpeg", "mp4", "json", "txt"].contains((path as NSString).pathExtension.lowercased())
     }
 
-    private func inventory(_ root: URL) throws -> [String] {
+    private func inventory(_ root: URL, excludingTopLevel: Set<String> = []) throws -> [String] {
         guard ExportRel.unfollowedDirectoryURL(root) != nil else { throw SessionTransferError.invalidPackage }
         var result: [String] = []
         func walk(_ relative: String, depth: Int) throws {
@@ -342,6 +343,9 @@ struct SessionTransfer {
             let items = try FileManager.default.contentsOfDirectory(atPath: directory.path)
             for name in items.sorted() {
                 if name == ".DS_Store" { continue }
+                // Agent workspaces are derived copies and may contain agent-created files.
+                // Canonical export / reanalysis never traverses them. Import remains strict.
+                if relative.isEmpty, excludingTopLevel.contains(name) { continue }
                 let path = relative.isEmpty ? name : relative + "/" + name
                 guard Self.isSafePath(path) else { throw SessionTransferError.unsafePath }
                 let url = root.appendingPathComponent(path)
