@@ -49,6 +49,16 @@ final class SessionController: ObservableObject {
     /// Tests only. Answers the upload consent question in place of the modal alert, which would block the test.
     var uploadConsentPromptForTesting: (@MainActor () -> UploadConsent)?
 
+    /// Platform handoff seam; tests capture the destination without opening another app or sending session data.
+    var openAgentExport: @MainActor (SessionVault, String, LocalCodingCLI, CodexHandoffDestination) throws -> Void = {
+        vault, id, cli, destination in
+        if cli == .chatGPT && destination == .app {
+            try vault.openExportInCodexApp(sessionId: id)
+        } else {
+            try vault.openExportInLocalCLI(sessionId: id, cli: cli)
+        }
+    }
+
     init(settings: AppSettings, vault: SessionVault = SessionVault()) {
         self.settings = settings
         self.vault = vault
@@ -474,14 +484,16 @@ final class SessionController: ObservableObject {
             AgentLog.event(cli.logFail, ["reason": "no_session"])
             return
         }
+        let destination: CodexHandoffDestination = cli == .chatGPT ? settings.codexHandoffDestination : .terminal
         do {
-            try vault.openExportInLocalCLI(sessionId: id, cli: cli)
+            try openAgentExport(vault, id, cli, destination)
             statusLine = cli.successStatus
-            AgentLog.event(cli.logSuccess, ["session": id])
+            AgentLog.event(cli.logSuccess, ["session": id, "destination": destination.rawValue])
         } catch let error as ClaudeCLIHandoffError {
             statusLine = error.localizedDescription
             AgentLog.event(cli.logFail, [
                 "session": id,
+                "destination": destination.rawValue,
                 "reason": error.logReason
             ])
         } catch {

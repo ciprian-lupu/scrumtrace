@@ -932,3 +932,7 @@ STANDING RULES
 - Commit messages: plain conventional commits, present tense, describing the change only.
   No AI or assistant attribution, no co-author trailers, no "generated with" footers, no emoji.
 ```
+
+### 2026-09-15 follow-up — explicit coding-agent handoff
+
+The historical TCC-17 recommendation to remove the unused Automation entitlement predates the Terminal coding-agent handoff. Open in Claude and the user-selected Codex CLI now send Apple Events to Terminal. The entitlement is restored for this explicit user action in hardened builds, with an updated usage description; it only permits the macOS consent prompt. Open in Codex can instead use the documented desktop-app link. Neither destination changes capture permission requirements or grants TCC access automatically.

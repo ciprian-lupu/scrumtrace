@@ -122,6 +122,10 @@ final class AppSettings: ObservableObject {
         didSet { defaults.set(includeFullTranscriptInZip, forKey: Keys.includeTranscript) }
     }
 
+    @Published var codexHandoffDestination: CodexHandoffDestination {
+        didSet { defaults.set(codexHandoffDestination.rawValue, forKey: Keys.codexHandoffDestination) }
+    }
+
     @Published var allowGoogleClipUpload: Bool {
         didSet { defaults.set(allowGoogleClipUpload, forKey: Keys.allowGoogleClip) }
     }
@@ -207,6 +211,8 @@ final class AppSettings: ObservableObject {
         self.contextLibrary = contexts.library
         self.contextLibraryIssue = contexts.issue
         self.includeFullTranscriptInZip = defaults.bool(forKey: Keys.includeTranscript)
+        self.codexHandoffDestination = defaults.string(forKey: Keys.codexHandoffDestination)
+            .flatMap(CodexHandoffDestination.init(rawValue:)) ?? .app
         self.allowGoogleClipUpload = defaults.object(forKey: Keys.allowGoogleClip) as? Bool ?? false
         self.retentionDays = defaults.object(forKey: Keys.retentionDays) as? Int ?? 0
         self.meetingNoticeAccepted = defaults.bool(forKey: Keys.meetingNotice)
@@ -707,6 +713,7 @@ final class AppSettings: ObservableObject {
             "scrumtrace.ai.\(provider.rawValue).\(field)"
         }
         static let includeTranscript = "scrumtrace.includeFullTranscript"
+        static let codexHandoffDestination = "scrumtrace.codexHandoffDestination"
         static let allowGoogleClip = "scrumtrace.allowGoogleClipUpload"
         static let retentionDays = "scrumtrace.retentionDays"
         static let meetingNotice = "scrumtrace.meetingNoticeAccepted"

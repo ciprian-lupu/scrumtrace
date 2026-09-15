@@ -433,6 +433,17 @@ final class SessionVault: @unchecked Sendable {
     }
 
     func openExportInLocalCLI(sessionId: String, cli: LocalCodingCLI) throws {
+        let session = try handoffSession(sessionId: sessionId)
+        try ClaudeCLIHandoff.open(sessionURL: session, sessionId: sessionId, cli: cli)
+    }
+
+    @MainActor
+    func openExportInCodexApp(sessionId: String) throws {
+        let session = try handoffSession(sessionId: sessionId)
+        try CodexAppHandoff.open(sessionURL: session)
+    }
+
+    private func handoffSession(sessionId: String) throws -> URL {
         guard Self.isValidSessionId(sessionId) else {
             throw ClaudeCLIHandoffError.sessionUnusable
         }
@@ -446,7 +457,7 @@ final class SessionVault: @unchecked Sendable {
         if (try? session.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
             throw ClaudeCLIHandoffError.sessionUnusable
         }
-        try ClaudeCLIHandoff.open(sessionURL: session, sessionId: sessionId, cli: cli)
+        return session
     }
 
     func revealRootInFinder() {

@@ -178,7 +178,7 @@ final class MenuBarController: NSObject {
         let claude = actionItem("Open last session in Claude", #selector(openLastInClaude))
         claude.isEnabled = controller.lastSessionId != nil
         menu.addItem(claude)
-        let chatGPT = actionItem("Open last session in ChatGPT", #selector(openLastInChatGPT))
+        let chatGPT = actionItem("Open last session in Codex", #selector(openLastInChatGPT))
         chatGPT.isEnabled = controller.lastSessionId != nil
         menu.addItem(chatGPT)
         let recent = NSMenuItem(title: "Recent", action: nil, keyEquivalent: "")
@@ -229,7 +229,7 @@ final class MenuBarController: NSObject {
                 claudeItem.representedObject = session.sessionId
                 claudeItem.target = self
                 let chatGPTItem = NSMenuItem(
-                    title: "Open in ChatGPT",
+                    title: "Open in Codex",
                     action: #selector(openRecentInChatGPT(_:)),
                     keyEquivalent: ""
                 )

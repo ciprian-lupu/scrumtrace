@@ -42,6 +42,23 @@ final class MainWindowSnapshotTests: XCTestCase {
     // MARK: - Tests
 
     @MainActor
+    func testRenderCodexDestinationSettings() async throws {
+        let directory = try snapshotDirectory()
+        try await withController(populated: false) { controller, _ in
+            let presenter = MainWindowPresenter(controller: controller, frameAutosaveName: nil, isWindowOnScreen: Self.ignoringOcclusion)
+            defer { presenter.window?.close() }
+            presenter.show(tab: .ai)
+            let window = try XCTUnwrap(presenter.window)
+            for destination in CodexHandoffDestination.allCases {
+                controller.settings.codexHandoffDestination = destination
+                try await render(window, as: "settings-codex-\(destination.rawValue)", into: directory) {
+                    controller.settings.codexHandoffDestination == destination
+                }
+            }
+        }
+    }
+
+    @MainActor
     func testRenderBatchSelectionAndResults() async throws {
         let directory = try snapshotDirectory()
         try await withController(populated: true) { controller, fixture in

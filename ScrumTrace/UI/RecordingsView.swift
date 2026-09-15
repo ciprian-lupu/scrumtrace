@@ -34,7 +34,7 @@ enum RecordingAction: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .revealExport: return "Reveal export/"
         case .openInClaude: return "Open in Claude"
-        case .openInChatGPT: return "Open in ChatGPT"
+        case .openInChatGPT: return "Open in Codex"
         case .openBrief: return "Open brief"
         case .copyExportPath: return "Copy export path"
         case .retryAnalysis: return "Retry analysis"
@@ -48,7 +48,8 @@ enum RecordingAction: String, CaseIterable, Identifiable, Sendable {
     var systemImage: String {
         switch self {
         case .revealExport: return "folder"
-        case .openInClaude, .openInChatGPT: return "terminal"
+        case .openInClaude: return "terminal"
+        case .openInChatGPT: return "arrow.up.forward.app"
         case .openBrief: return "doc.richtext"
         case .copyExportPath: return "doc.on.clipboard"
         case .retryAnalysis: return "arrow.clockwise"

@@ -19,7 +19,7 @@ enum LocalCodingCLI: String, Equatable, CaseIterable {
         case .claude:
             return "Claude"
         case .chatGPT:
-            return "ChatGPT"
+            return "Codex"
         }
     }
 
@@ -28,7 +28,7 @@ enum LocalCodingCLI: String, Equatable, CaseIterable {
         case .claude:
             return "Opened export in Claude"
         case .chatGPT:
-            return "Opened export in ChatGPT"
+            return "Opened export in Codex"
         }
     }
 
@@ -37,7 +37,7 @@ enum LocalCodingCLI: String, Equatable, CaseIterable {
         case .claude:
             return "No session to open in Claude."
         case .chatGPT:
-            return "No session to open in ChatGPT."
+            return "No session to open in Codex."
         }
     }
 
@@ -83,6 +83,9 @@ enum ClaudeCLIHandoffError: LocalizedError, Equatable {
     case exportMissing
     case cliMissing(LocalCodingCLI)
     case launchFailed
+    case terminalAutomationDenied
+    case codexAppMissing
+    case codexAppLaunchFailed
 
     var errorDescription: String? {
         switch self {
@@ -98,7 +101,13 @@ enum ClaudeCLIHandoffError: LocalizedError, Equatable {
                 return "ChatGPT Codex CLI is not installed. Install the codex command, sign in with ChatGPT, then try again."
             }
         case .launchFailed:
-            return "Could not open Terminal to start the local coding agent."
+            return "Could not open Terminal. Quit ScrumTrace, reopen the installed app, then try again."
+        case .terminalAutomationDenied:
+            return "macOS blocked ScrumTrace from controlling Terminal. Quit and reopen ScrumTrace, then allow Terminal under System Settings → Privacy & Security → Automation → ScrumTrace."
+        case .codexAppMissing:
+            return "The Codex app is not installed or registered on this Mac. Install and open it once, or choose Codex CLI in Terminal in Settings → AI."
+        case .codexAppLaunchFailed:
+            return "Could not open the Codex app. Open it once from Applications, then try again."
         }
     }
 
@@ -117,7 +126,21 @@ enum ClaudeCLIHandoffError: LocalizedError, Equatable {
             }
         case .launchFailed:
             return "launch_failed"
+        case .terminalAutomationDenied:
+            return "terminal_automation_denied"
+        case .codexAppMissing:
+            return "codex_app_missing"
+        case .codexAppLaunchFailed:
+            return "codex_app_launch_failed"
         }
+    }
+
+    static func terminalFailure(stderr: String) -> Self {
+        // Apple Events access denied / privilege violation. Never expose raw stderr or its paths.
+        if stderr.contains("(-1743)") || stderr.contains("(-10004)") {
+            return .terminalAutomationDenied
+        }
+        return .launchFailed
     }
 }
 
@@ -231,10 +254,14 @@ enum ClaudeCLIHandoff {
         let process = Process()
         process.executableURL = plan.executable
         process.arguments = plan.arguments
+        let errors = Pipe()
+        process.standardError = errors
+        process.standardOutput = FileHandle.nullDevice
         try process.run()
+        let errorData = errors.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
         guard process.terminationStatus == 0 else {
-            throw ClaudeCLIHandoffError.launchFailed
+            throw ClaudeCLIHandoffError.terminalFailure(stderr: String(decoding: errorData, as: UTF8.self))
         }
         #else
         throw ClaudeCLIHandoffError.cliMissing(cli)
@@ -377,9 +404,33 @@ enum ClaudeCLIHandoff {
     }
 
     private static func exportFdLooksLikeArchive(_ fd: Int32) -> Bool {
-        ["session.mp4", "audio.wav", "full_transcript.json"].contains { name in
+        if ["session.mp4", "audio.wav"].contains(where: { name in
             isRegularFileAt(name, directoryFd: fd, minimumBytes: 0)
-        }
+        }) { return true }
+        return isRegularFileAt("full_transcript.json", directoryFd: fd, minimumBytes: 0)
+            && !exportFdIncludesTranscript(fd)
+    }
+
+    private struct TranscriptExportConsent: Decodable {
+        let include_full_transcript_in_zip: Bool
+        let omitted: [OmittedAsset]?
+    }
+
+    private static func exportFdIncludesTranscript(_ fd: Int32) -> Bool {
+        // Read the projection through the same bound directory, without following a link.
+        let child = Darwin.openat(fd, "session.manifest.json", O_RDONLY | O_CLOEXEC | O_NOFOLLOW)
+        guard child >= 0 else { return false }
+        defer { Darwin.close(child) }
+        let limit = 16 * 1024 * 1024
+        var info = stat()
+        guard Darwin.fstat(child, &info) == 0, (info.st_mode & S_IFMT) == S_IFREG,
+              info.st_size > 0, info.st_size <= limit,
+              let data = try? FileHandle(fileDescriptor: child, closeOnDealloc: false).read(upToCount: limit + 1),
+              data.count <= limit,
+              let consent = try? JSONDecoder().decode(TranscriptExportConsent.self, from: data)
+        else { return false }
+        return consent.include_full_transcript_in_zip
+            && !(consent.omitted ?? []).contains { ["full_transcript.json", "export/full_transcript.json"].contains($0.path) }
     }
 
     private static func isRegularFileAt(_ name: String, directoryFd: Int32, minimumBytes: off_t) -> Bool {

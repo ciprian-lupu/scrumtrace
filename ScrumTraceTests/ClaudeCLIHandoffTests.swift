@@ -212,7 +212,7 @@ final class ClaudeCLIHandoffTests: XCTestCase {
         controller.openInClaude()
         XCTAssertEqual(controller.statusLine, "No session to open in Claude.")
         controller.openInChatGPT()
-        XCTAssertEqual(controller.statusLine, "No session to open in ChatGPT.")
+        XCTAssertEqual(controller.statusLine, "No session to open in Codex.")
     }
 
     @MainActor
@@ -236,8 +236,8 @@ final class ClaudeCLIHandoffTests: XCTestCase {
         menu.update()
         XCTAssertNotNil(menu.item(withTitle: "Open last session in Claude"))
         XCTAssertTrue(try XCTUnwrap(menu.item(withTitle: "Open last session in Claude")).isEnabled)
-        XCTAssertNotNil(menu.item(withTitle: "Open last session in ChatGPT"))
-        XCTAssertTrue(try XCTUnwrap(menu.item(withTitle: "Open last session in ChatGPT")).isEnabled)
+        XCTAssertNotNil(menu.item(withTitle: "Open last session in Codex"))
+        XCTAssertTrue(try XCTUnwrap(menu.item(withTitle: "Open last session in Codex")).isEnabled)
         XCTAssertNil(menu.item(withTitle: "Open last session in Cursor"))
     }
 }
