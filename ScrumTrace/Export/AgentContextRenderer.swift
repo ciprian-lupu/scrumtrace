@@ -4,6 +4,11 @@ struct AgentContextRenderer {
     func render(manifest: SessionManifest, sessionURL: URL) -> String {
         var lines: [String] = []
         lines.append("# ScrumTrace session — \(manifest.sessionId)")
+        if let origin = manifest.importOrigin {
+            lines.append(origin.kind == .analysisCopy
+                ? "This is an analysis copy of an earlier recording. Compare its evidence before claiming an improvement."
+                : "This recording was imported. Import integrity does not establish transcript accuracy or capture quality.")
+        }
         lines.append("")
         lines.append("Drop **this export folder** into a coding-agent workspace. Read this file first, then open the linked evidence. Do not guess facts that exist only in a screenshot or clip. Never open the private capture folder.")
         lines.append("")

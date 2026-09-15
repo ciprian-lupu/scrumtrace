@@ -933,6 +933,10 @@ final class MainWindowTests: XCTestCase {
                 recorder.record("\(cli.rawValue) \(id)")
                 return handoffFailure()
             },
+            openPrivateArchiveInCodex: { id in
+                recorder.record("privateCodex \(id)")
+                return handoffFailure()
+            },
             openBrief: { id in
                 recorder.record("openBrief \(id)")
                 return true
@@ -1033,6 +1037,61 @@ final class MainWindowTests: XCTestCase {
     }
 
     @MainActor
+    func testBatchSelectionExportsOnlyVisibleReadableRowsAndKeepsSingleActionsDisabled() async throws {
+        try await withRecordingsFixture { f in
+            let navigation = MainNavigation()
+            let recorder = CallRecorder()
+            let model = makeRecordingsModel(f, navigation: navigation, recorder: recorder)
+            await model.refresh().value
+            navigation.selectedSessionIds = [f.completed, f.unfinished, f.corrupt]
+            XCTAssertNil(navigation.selectedSessionId)
+            XCTAssertNil(model.selectedEntry)
+            XCTAssertEqual(model.selectedExportIDs, [f.unfinished, f.completed])
+            XCTAssertFalse(model.performOnSelection(.delete))
+            XCTAssertFalse(model.performOnSelection(.retryAnalysis))
+            XCTAssertTrue(recorder.calls.isEmpty)
+            model.statusFilter = .completed
+            XCTAssertEqual(model.selectedExportIDs, [f.completed], "Hidden selections never enter an export")
+            XCTAssertEqual(model.selectedEntries.count, 1)
+            model.clearFilters()
+            XCTAssertEqual(model.selectedExportIDs, [f.unfinished, f.completed])
+            navigation.selectedSessionId = f.completed
+            XCTAssertEqual(navigation.selectedSessionIds, [f.completed])
+            XCTAssertEqual(model.selectedEntry?.id, f.completed)
+            model.importedOnly = true
+            XCTAssertNil(model.selectedEntry, "The imported-only filter also hides single-row actions")
+            XCTAssertTrue(model.selectedExportIDs.isEmpty)
+        }
+    }
+
+    @MainActor
+    func testRecordingsTableSupportsNativeMultipleSelectionAndSelectAll() async throws {
+        try await withRecordingsFixture { f in
+            try await withFixtureController(f) { controller in
+                let presenter = MainWindowPresenter(controller: controller, frameAutosaveName: nil, isWindowOnScreen: ignoringOcclusion)
+                defer { presenter.window?.close() }
+                presenter.show(section: .recordings)
+                let window = try XCTUnwrap(presenter.window)
+                let ready = await waitUntil { recordingsTable(in: window)?.numberOfRows == 3 }
+                XCTAssertTrue(ready)
+                let table = try XCTUnwrap(recordingsTable(in: window))
+                XCTAssertTrue(table.allowsMultipleSelection)
+                table.selectRowIndexes(IndexSet([0, 1]), byExtendingSelection: false)
+                let selected = await waitUntil { presenter.navigation.selectedSessionIds == Set([f.unfinished, f.completed]) }
+                XCTAssertTrue(selected)
+                table.selectAll(nil)
+                let all = await waitUntil { presenter.navigation.selectedSessionIds.count == 3 }
+                XCTAssertTrue(all)
+                XCTAssertEqual(presenter.recordings.selectedExportIDs, [f.unfinished, f.completed])
+                presenter.show(sessionId: f.completed)
+                let single = await waitUntil { table.selectedRowIndexes == IndexSet(integer: 1) }
+                XCTAssertTrue(single)
+                XCTAssertEqual(presenter.navigation.selectedSessionIds, [f.completed])
+            }
+        }
+    }
+
+    @MainActor
     func testRecordingActionsDispatchToTheInjectedClosuresWithTheSelectedId() async throws {
         try await withRecordingsFixture { f in
             let navigation = MainNavigation()
@@ -1106,6 +1165,33 @@ final class MainWindowTests: XCTestCase {
                 rows.map { $0["session"] ?? "" },
                 Array(repeating: f.completed, count: 8) + [f.unfinished, ""]
             )
+        }
+    }
+
+    @MainActor
+    func testCodexScopesAreSeparateActionsAndArchiveDoesNotRequireAnExport() async throws {
+        try await withRecordingsFixture { f in
+            let recorder = CallRecorder()
+            let canChange = MainActorBox(true)
+            let model = makeRecordingsModel(f, recorder: recorder, canChange: { canChange.value })
+            await model.refresh().value
+            let unfinished = try XCTUnwrap(model.entry(id: f.unfinished))
+            XCTAssertEqual(RecordingAction.openInChatGPT.title, "Open export in Codex")
+            XCTAssertEqual(RecordingAction.openPrivateArchiveInCodex.title, "Open archive in Codex…")
+            XCTAssertTrue(OverviewModel.lastRecordingActions.contains(.openInChatGPT))
+            XCTAssertTrue(OverviewModel.lastRecordingActions.contains(.openPrivateArchiveInCodex))
+            XCTAssertFalse(model.isEnabled(.openInChatGPT, for: unfinished))
+            XCTAssertTrue(model.isEnabled(.openPrivateArchiveInCodex, for: unfinished))
+            XCTAssertTrue(model.perform(.openPrivateArchiveInCodex, on: f.unfinished))
+            XCTAssertEqual(recorder.calls, ["privateCodex \(f.unfinished)"])
+            canChange.value = false
+            XCTAssertFalse(model.perform(.openPrivateArchiveInCodex, on: f.unfinished))
+            XCTAssertEqual(recorder.calls.count, 1)
+            canChange.value = true
+            try FileManager.default.removeItem(at: f.vault.sessionURL(id: f.unfinished).appendingPathComponent(ScrumTracePath.sessionMovie))
+            await model.refresh().value
+            XCTAssertFalse(model.perform(.openPrivateArchiveInCodex, on: f.unfinished))
+            XCTAssertEqual(recorder.calls.count, 1)
         }
     }
 
@@ -1614,7 +1700,7 @@ final class MainWindowTests: XCTestCase {
                 XCTAssertEqual(model.library.entries.map(\.id), [f.unfinished, f.completed, f.corrupt])
                 let completed = try XCTUnwrap(model.entry(id: f.completed))
                 let unreadable = try XCTUnwrap(model.entry(id: f.corrupt))
-                let gated: [RecordingAction] = [.retryAnalysis, .delete, .reviewSpeakers, .revealArchive]
+                let gated: [RecordingAction] = [.retryAnalysis, .delete, .reviewSpeakers, .revealArchive, .openPrivateArchiveInCodex]
                 let handoff: [RecordingAction] = [.revealExport, .openInClaude, .openInChatGPT, .openBrief, .copyExportPath]
                 for action in gated + handoff {
                     XCTAssertTrue(model.isEnabled(action, for: completed), "idle \(action)")
@@ -2661,7 +2747,7 @@ final class MainWindowTests: XCTestCase {
                 XCTAssertFalse(RecordingRowText.deleteTitle(entry).contains(entry.id), "The title names the row as the table does")
                 XCTAssertEqual(
                     RecordingRowText.deleteMessage(entry.id),
-                    "Recording \(entry.id) will be removed, including archive/ with the full recording and transcript, and export/ with the brief and session pack. This cannot be undone."
+                    "Recording \(entry.id) will be removed, including archive/ with the full recording and transcript, export/ with the brief and session pack, and its Codex workspaces with any analysis notes. This cannot be undone."
                 )
             }
 

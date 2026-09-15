@@ -11,6 +11,7 @@ enum RecordingAction: String, CaseIterable, Identifiable, Sendable {
     case revealExport
     case openInClaude
     case openInChatGPT
+    case openPrivateArchiveInCodex
     case openBrief
     case copyExportPath
     case retryAnalysis
@@ -23,7 +24,7 @@ enum RecordingAction: String, CaseIterable, Identifiable, Sendable {
 
     /// A session whose manifest was read, in menu order.
     static let readableActions: [RecordingAction] = [
-        .revealExport, .openInClaude, .openInChatGPT, .openBrief, .copyExportPath,
+        .revealExport, .openInClaude, .openInChatGPT, .openPrivateArchiveInCodex, .openBrief, .copyExportPath,
         .retryAnalysis, .reviewSpeakers, .revealArchive, .delete
     ]
 
@@ -34,7 +35,8 @@ enum RecordingAction: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .revealExport: return "Reveal export/"
         case .openInClaude: return "Open in Claude"
-        case .openInChatGPT: return "Open in ChatGPT"
+        case .openInChatGPT: return "Open export in Codex"
+        case .openPrivateArchiveInCodex: return "Open archive in Codex…"
         case .openBrief: return "Open brief"
         case .copyExportPath: return "Copy export path"
         case .retryAnalysis: return "Retry analysis"
@@ -48,7 +50,9 @@ enum RecordingAction: String, CaseIterable, Identifiable, Sendable {
     var systemImage: String {
         switch self {
         case .revealExport: return "folder"
-        case .openInClaude, .openInChatGPT: return "terminal"
+        case .openInClaude: return "terminal"
+        case .openInChatGPT: return "arrow.up.forward.app"
+        case .openPrivateArchiveInCodex: return "archivebox"
         case .openBrief: return "doc.richtext"
         case .copyExportPath: return "doc.on.clipboard"
         case .retryAnalysis: return "arrow.clockwise"
@@ -62,7 +66,7 @@ enum RecordingAction: String, CaseIterable, Identifiable, Sendable {
     /// Actions that change a session or show its private files wait for recording and analysis to finish.
     var needsIdleCapture: Bool {
         switch self {
-        case .retryAnalysis, .reviewSpeakers, .revealArchive, .revealFolder, .delete:
+        case .openPrivateArchiveInCodex, .retryAnalysis, .reviewSpeakers, .revealArchive, .revealFolder, .delete:
             return true
         case .revealExport, .openInClaude, .openInChatGPT, .openBrief, .copyExportPath:
             return false
@@ -83,6 +87,7 @@ enum RecordingAction: String, CaseIterable, Identifiable, Sendable {
         case .revealExport: return "main_reveal_export"
         case .openInClaude: return "main_claude"
         case .openInChatGPT: return "main_chatgpt"
+        case .openPrivateArchiveInCodex: return "main_codex_private_archive"
         case .openBrief: return "main_open_brief"
         case .copyExportPath: return "main_copy_export_path"
         case .retryAnalysis: return "main_retry"
@@ -398,6 +403,8 @@ struct RecordingsDependencies {
     var revealExport: @MainActor (URL) -> Void
     /// Nil when the handoff started, otherwise a fixed line saying why not (never a path).
     var openInCLI: @MainActor (LocalCodingCLI, String) -> String?
+    /// The controller obtains archive consent and holds the busy state during the copy.
+    var openPrivateArchiveInCodex: @MainActor (String) -> String?
     /// False when the brief is not a usable export file.
     var openBrief: @MainActor (String) -> Bool
     var retryAnalysis: @MainActor (String) -> Void
@@ -438,6 +445,9 @@ struct RecordingsDependencies {
                 // The controller reports only through its status line: the success text, or the fixed
                 // description of a ClaudeCLIHandoffError.
                 return controller.statusLine == cli.successStatus ? nil : controller.statusLine
+            },
+            openPrivateArchiveInCodex: { id in
+                controller.openPrivateArchiveInCodex(sessionId: id) == nil ? controller.statusLine : nil
             },
             openBrief: { id in
                 guard let url = SessionFileAccess.briefURL(vault: vault, id: id) else { return false }
@@ -526,6 +536,7 @@ final class RecordingsModel: ObservableObject {
     @Published var searchText = ""
     @Published var statusFilter: SessionStatusFilter?
     @Published var contextFilter: String?
+    @Published var importedOnly = false
     /// The session id Delete… asked about. The confirmation dialog shows while it is set.
     @Published var pendingDelete: String?
     /// The title the Delete… confirmation closes with. Cancel and Delete recording clear `pendingDelete` before the
@@ -603,7 +614,7 @@ final class RecordingsModel: ObservableObject {
         // Synchronous: @Published emits on the main actor, in the change itself, so a line set right after a
         // selection change is never cleared by a queued block.
         Publishers.Merge(
-            navigation.$selectedSessionId.removeDuplicates().dropFirst().map { _ in () },
+            navigation.$selectedSessionIds.removeDuplicates().dropFirst().map { _ in () },
             navigation.$section.removeDuplicates().dropFirst().map { _ in () }
         )
         .sink { [weak self] _ in
@@ -611,11 +622,13 @@ final class RecordingsModel: ObservableObject {
         }
         .store(in: &navigationObservations)
         // The emitted value is the new selection; the property still holds the old one while this runs.
-        navigation.$selectedSessionId
+        navigation.$selectedSessionIds
             .removeDuplicates()
             .dropFirst()
             .sink { [weak self] selected in
-                MainActor.assumeIsolated { self?.cancelDetailLoads(except: selected) }
+                MainActor.assumeIsolated {
+                    self?.cancelDetailLoads(except: selected.count == 1 ? selected.first : nil)
+                }
             }
             .store(in: &navigationObservations)
     }
@@ -776,15 +789,17 @@ final class RecordingsModel: ObservableObject {
 
     var visibleEntries: [SessionEntry] {
         library.filtered(search: searchText, status: statusFilter, contextID: contextFilter)
+            .filter { !importedOnly || $0.summary?.importOrigin != nil }
     }
 
     var hasActiveFilters: Bool {
-        !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || statusFilter != nil || contextFilter != nil
+        importedOnly || !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || statusFilter != nil || contextFilter != nil
     }
 
     /// True when the search and filters keep `entry` in the table.
     func isListed(_ entry: SessionEntry) -> Bool {
-        ![entry].filtered(search: searchText, status: statusFilter, contextID: contextFilter).isEmpty
+        (!importedOnly || entry.summary?.importOrigin != nil)
+            && ![entry].filtered(search: searchText, status: statusFilter, contextID: contextFilter).isEmpty
     }
 
     /// Escape while the table has the keyboard. The status and context filters stay.
@@ -793,6 +808,7 @@ final class RecordingsModel: ObservableObject {
     }
 
     func clearFilters() {
+        importedOnly = false
         if !searchText.isEmpty { searchText = "" }
         if statusFilter != nil { statusFilter = nil }
         if contextFilter != nil { contextFilter = nil }
@@ -815,6 +831,13 @@ final class RecordingsModel: ObservableObject {
         guard let entry = entry(id: navigation.selectedSessionId), isListed(entry) else { return nil }
         return entry
     }
+
+    /// Batch export uses visible, readable selections in table order. Hidden rows never leave the Mac.
+    var selectedEntries: [SessionEntry] {
+        visibleEntries.filter { navigation.selectedSessionIds.contains($0.id) }
+    }
+
+    var selectedExportIDs: [String] { selectedEntries.compactMap { $0.summary?.sessionId } }
 
     /// Contexts recorded in listed sessions, named as their newest session saved them.
     var contextOptions: [SessionContextFilterOption] {
@@ -870,13 +893,20 @@ final class RecordingsModel: ObservableObject {
         case .openInClaude, .openInChatGPT:
             // The handoff needs export/AGENT_CONTEXT.md, the file `hasExportContext` probes.
             return entry.summary?.hasExportContext == true ? nil : "This recording has no export to hand to an agent yet."
+        case .openPrivateArchiveInCodex:
+            return entry.summary?.hasArchiveRecording == true
+                ? nil : "This recording has no private master video to analyze."
         case .reviewSpeakers:
             return entry.summary?.hasFullTranscriptArchive == true ? nil : "This recording has no transcript to review yet."
         case .delete:
             // The session being recorded or analysed is held only as long as that runs, which the busy check covers.
             // The vault still refuses a folder a live recording.lock names.
             return nil
-        case .revealExport, .copyExportPath, .retryAnalysis, .revealArchive, .revealFolder:
+        case .retryAnalysis:
+            return entry.summary?.importOrigin?.kind == .imported
+                ? "Use Analyze a copy in Origin & analysis to preserve the imported results."
+                : nil
+        case .revealExport, .copyExportPath, .revealArchive, .revealFolder:
             return nil
         }
     }
@@ -906,6 +936,11 @@ final class RecordingsModel: ObservableObject {
         case .openInClaude, .openInChatGPT:
             log(action, id)
             if let failure = dependencies.openInCLI(action == .openInClaude ? .claude : .chatGPT, id) {
+                message = failure
+            }
+        case .openPrivateArchiveInCodex:
+            log(action, id)
+            if let failure = dependencies.openPrivateArchiveInCodex(id) {
                 message = failure
             }
         case .openBrief:
@@ -1297,7 +1332,7 @@ enum RecordingRowText {
     }
 
     static func deleteMessage(_ id: String) -> String {
-        "Recording \(id) will be removed, including archive/ with the full recording and transcript, and export/ with the brief and session pack. This cannot be undone."
+        "Recording \(id) will be removed, including archive/ with the full recording and transcript, export/ with the brief and session pack, and its Codex workspaces with any analysis notes. This cannot be undone."
     }
 
     /// A manifest still at recording or paused: ScrumTrace stopped before the recording ended, because a normal quit
@@ -1327,12 +1362,49 @@ struct RecordingsView: View {
     @ObservedObject var navigation: MainNavigation
     /// Only handed to the speaker review sheet, which observes it itself.
     let controller: SessionController
+    @StateObject private var transfer: SessionTransferModel
+
+    init(model: RecordingsModel, library: SessionLibrary, navigation: MainNavigation, controller: SessionController) {
+        self.model = model
+        self.library = library
+        self.navigation = navigation
+        self.controller = controller
+        _transfer = StateObject(wrappedValue: SessionTransferModel(controller: controller) { ids in
+            model.clearFilters()
+            navigation.selectedSessionIds = Set(ids)
+            model.refresh()
+        })
+    }
 
     var body: some View {
         content
             .searchable(text: $model.searchText, placement: .toolbar, prompt: "Search recordings")
             .toolbar { toolbar }
             .onAppear { model.sectionDidAppear() }
+            .sheet(isPresented: Binding(
+                get: { !transfer.exportSessionIDs.isEmpty },
+                set: { if !$0 { transfer.exportSessionIDs = [] } }
+            )) { SessionTransferExportView(model: transfer) }
+            .sheet(item: $transfer.batchResult) { result in
+                SessionTransferResultsView(model: transfer, result: result)
+            }
+            .alert("Session transfer", isPresented: Binding(
+                get: { transfer.notice != nil },
+                set: { if !$0 { transfer.notice = nil } }
+            )) {
+                Button("OK") { transfer.notice = nil }
+            } message: { Text(transfer.notice ?? "") }
+            .safeAreaInset(edge: .bottom) {
+                if transfer.isWorking {
+                    HStack {
+                        ProgressView().controlSize(.small)
+                        Text(transfer.progress).font(.caption)
+                        Spacer()
+                        Button("Cancel transfer") { transfer.cancel() }
+                    }
+                    .padding(10).background(.bar)
+                }
+            }
             .confirmationDialog(
                 // Names the row the command came from, which for a context menu need not be the selection. Cancel and
                 // Delete recording clear `pendingDelete` before the dialog finishes closing; it keeps naming the row meanwhile.
@@ -1370,7 +1442,7 @@ struct RecordingsView: View {
                         .accessibilityIdentifier("main.recordings.confirmPrivateReveal")
                         Button("Cancel", role: .cancel) { model.cancelPrivateReveal() }
                     } message: { _ in
-                        Text("This folder holds the full recording and transcript. Never hand it to an agent.")
+                        Text("This folder holds the full recording and transcript, beyond the selected export evidence.")
                     }
             }
             .sheet(item: $model.speakerReview, onDismiss: { model.speakerReviewDidClose() }) { request in
@@ -1431,7 +1503,9 @@ struct RecordingsView: View {
                         .accessibilityIdentifier("main.recordings.clearFilters")
                 }
             } else {
-                RecordingsTable(model: model, navigation: navigation, entries: entries)
+                RecordingsTable(model: model, navigation: navigation, entries: entries) {
+                    transfer.presentExport(ids: $0)
+                }
             }
             if let message = model.message {
                 Divider()
@@ -1459,23 +1533,67 @@ struct RecordingsView: View {
 
     @ViewBuilder
     private var detailPane: some View {
-        switch model.selectedEntry {
-        case .loaded(let summary):
-            SessionDetailView(model: model, summary: summary)
-        case .unreadable(let id, let reason):
-            UnreadableSessionDetailView(model: model, id: id, reason: reason)
-        case nil:
-            ContentUnavailableView(
-                "No recording selected",
-                systemImage: "film",
-                description: Text("Select a recording to see its processing stages, upload consent and export files.")
-            )
+        if navigation.selectedSessionIds.count > 1 {
+            ContentUnavailableView {
+                Label("\(model.selectedEntries.count) recordings selected", systemImage: "film.stack")
+            } description: {
+                Text("Export the selected recordings together, or select one recording to see its details. Use Command-click or Shift-click to change the selection.")
+                if model.selectedEntries.count != model.selectedExportIDs.count {
+                    Text("Recordings with unreadable manifests cannot be exported.")
+                }
+                if navigation.selectedSessionIds.count > model.selectedEntries.count {
+                    Text("Selections hidden by the search or filters are excluded from this export.")
+                }
+            } actions: {
+                Button("Export \(model.selectedExportIDs.count) recordings…") {
+                    transfer.presentExport(ids: model.selectedExportIDs)
+                }
+                .disabled(!canExportSelection)
+                .accessibilityIdentifier("main.recordings.transfer.exportSelection")
+            }
+        } else {
+            switch model.selectedEntry {
+            case .loaded(let summary):
+                SessionDetailView(model: model, summary: summary, transfer: transfer)
+            case .unreadable(let id, let reason):
+                UnreadableSessionDetailView(model: model, id: id, reason: reason)
+            case nil:
+                ContentUnavailableView(
+                    "No recording selected",
+                    systemImage: "film",
+                    description: Text("Select a recording to see its processing stages, upload consent and export files.")
+                )
+            }
         }
+    }
+
+    private var canExportSelection: Bool {
+        !model.selectedExportIDs.isEmpty && model.canChangeSessions
+            && !model.isPreparingRecording && !transfer.isWorking
     }
 
     @ToolbarContentBuilder
     private var toolbar: some ToolbarContent {
         ToolbarItemGroup(placement: .primaryAction) {
+            Menu {
+                Button("Import recordings…") { transfer.chooseImport() }
+                    .disabled(!model.canChangeSessions || model.isPreparingRecording || transfer.isWorking)
+                Button(model.selectedExportIDs.count > 1
+                       ? "Export \(model.selectedExportIDs.count) recordings for another Mac…"
+                       : "Export for another Mac…") {
+                    transfer.presentExport(ids: model.selectedExportIDs)
+                }
+                .disabled(!canExportSelection)
+                Divider()
+                Button("Select all listed recordings") {
+                    navigation.selectedSessionIds = Set(model.visibleEntries.map(\.id))
+                }
+                .disabled(model.visibleEntries.isEmpty)
+            } label: {
+                Label("Transfer recordings", systemImage: "arrow.left.arrow.right")
+            }
+            .help("Import or export recordings between Macs")
+            .accessibilityIdentifier("main.recordings.transfer")
             Menu {
                 Picker("Status", selection: $model.statusFilter) {
                     Text("All statuses").tag(SessionStatusFilter?.none)
@@ -1484,6 +1602,8 @@ struct RecordingsView: View {
                     }
                 }
                 .pickerStyle(.inline)
+                Divider()
+                Toggle("Imported recordings only", isOn: $model.importedOnly)
             } label: {
                 Label(
                     "Status filter",
@@ -1513,7 +1633,7 @@ struct RecordingsView: View {
                 .keyboardShortcut("r", modifiers: .command)
 
             Menu {
-                selectionMenuItems([.openInClaude, .openInChatGPT, .openBrief, .copyExportPath])
+                selectionMenuItems([.openInClaude, .openInChatGPT, .openPrivateArchiveInCodex, .openBrief, .copyExportPath])
             } label: {
                 Label("Open", systemImage: "arrow.up.forward.app")
             }
@@ -1563,9 +1683,10 @@ struct RecordingsTable: View {
     @ObservedObject var model: RecordingsModel
     @ObservedObject var navigation: MainNavigation
     let entries: [SessionEntry]
+    var exportSelection: ([String]) -> Void = { _ in }
 
     var body: some View {
-        Table(of: SessionEntry.self, selection: $navigation.selectedSessionId) {
+        Table(of: SessionEntry.self, selection: $navigation.selectedSessionIds) {
             // At the default 960×640 window, Duration, Shots, Tasks and Export sit at their minimum widths, which still fit
             // their widest text (a meeting over an hour, 99 / 99 tasks, a pack at its 35 MB cap), and Date, Context and
             // Status shrink by the same amount from their ideals. These ideals leave Date a 24-hour date and time, Context
@@ -1613,8 +1734,18 @@ struct RecordingsTable: View {
             }
         }
         .contextMenu(forSelectionType: String.self) { ids in
-            if let id = ids.first, let entry = model.entry(id: id) {
-                RecordingActionMenuItems(model: model, entry: entry, actions: model.actions(for: entry))
+            if ids.count == 1 {
+                if let id = ids.first, let entry = model.entry(id: id) {
+                    RecordingActionMenuItems(model: model, entry: entry, actions: model.actions(for: entry))
+                }
+            }
+            let exportIDs = entries.filter { ids.contains($0.id) }.compactMap { $0.summary?.sessionId }
+            if !exportIDs.isEmpty {
+                Divider()
+                Button(exportIDs.count == 1 ? "Export for another Mac…" : "Export \(exportIDs.count) recordings…") {
+                    exportSelection(exportIDs)
+                }
+                .disabled(!model.canChangeSessions || model.isPreparingRecording)
             }
         }
         .onDeleteCommand { model.performOnSelection(.delete) }
@@ -1631,10 +1762,13 @@ private struct RecordingContextCell: View {
         switch entry {
         case .loaded(let summary):
             let text = RecordingRowText.contextAndProduct(summary)
-            Text(text)
-                .lineLimit(1)
-                .truncationMode(.tail)
-                .help(text)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(text).lineLimit(1).truncationMode(.tail).help(text)
+                if let origin = summary.importOrigin {
+                    Text(origin.kind == .imported ? "Imported" : "Analysis copy")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+            }
         case .unreadable:
             Label {
                 Text("Unreadable manifest")
@@ -1723,8 +1857,9 @@ struct RecordingActionMenuItems: View {
 struct SessionDetailView: View {
     @ObservedObject var model: RecordingsModel
     let summary: SessionSummary
+    var transfer: SessionTransferModel? = nil
 
-    private static let primaryActions: [RecordingAction] = [.revealExport, .openInClaude, .openInChatGPT, .openBrief]
+    private static let primaryActions: [RecordingAction] = [.revealExport, .openInClaude, .openInChatGPT, .openPrivateArchiveInCodex, .openBrief]
     private static let columns = [GridItem(.adaptive(minimum: 280), spacing: 12, alignment: .top)]
 
     private struct Fact: Identifiable {
@@ -1738,6 +1873,9 @@ struct SessionDetailView: View {
         ScrollView(.vertical) {
             VStack(alignment: .leading, spacing: 12) {
                 header
+                if let transfer {
+                    SessionTransferReviewView(transfer: transfer, summary: summary, canAnalyze: model.canChangeSessions)
+                }
                 VStack(alignment: .leading, spacing: 4) {
                     if model.isInterrupted(summary) {
                         // Every stage below reads as not started, so say first what happened.
@@ -1770,7 +1908,7 @@ struct SessionDetailView: View {
                         GroupBox("Shots") { shots(thumbnails) }
                     }
                 }
-                Text("Only export/ is handed to agents. Dragging a row offers this folder.")
+                Text("Export and archive open in the same Codex project. Archive access is explicit; dragging a row offers only export/.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             .padding(12)
@@ -1793,8 +1931,17 @@ struct SessionDetailView: View {
             Text(headerLine)
                 .font(.caption).foregroundStyle(.secondary)
                 .monospacedDigit()
+            // Keep the two scopes adjacent without squeezing six buttons into one narrow row.
             HStack(spacing: 8) {
-                ForEach(Self.primaryActions) { action in
+                ForEach([RecordingAction.openInChatGPT, .openPrivateArchiveInCodex]) { action in
+                    Button(action.title) { model.perform(action, on: summary.sessionId) }
+                        .disabled(!model.isEnabled(action, for: entry))
+                        .help(model.unavailableReason(action, for: entry) ?? action.title)
+                        .accessibilityIdentifier("main.recordings.detail.\(action.rawValue)")
+                }
+            }
+            HStack(spacing: 8) {
+                ForEach([RecordingAction.revealExport, .openInClaude, .openBrief]) { action in
                     Button(action.title) { model.perform(action, on: summary.sessionId) }
                         .disabled(!model.isEnabled(action, for: entry))
                         .help(model.unavailableReason(action, for: entry) ?? action.title)

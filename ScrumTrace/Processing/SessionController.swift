@@ -49,6 +49,21 @@ final class SessionController: ObservableObject {
     /// Tests only. Answers the upload consent question in place of the modal alert, which would block the test.
     var uploadConsentPromptForTesting: (@MainActor () -> UploadConsent)?
 
+    /// Platform handoff seam; tests capture the destination without opening another app or sending session data.
+    var openAgentExport: @MainActor (SessionVault, String, LocalCodingCLI, CodexHandoffDestination) throws -> Void = {
+        vault, id, cli, destination in
+        if cli == .chatGPT && destination == .app {
+            try vault.openExportInCodexApp(sessionId: id)
+        } else {
+            try vault.openExportInLocalCLI(sessionId: id, cli: cli)
+        }
+    }
+
+    var openAgentArchive: @MainActor (SessionVault, String) async throws -> Void = { vault, id in
+        try await vault.openPrivateArchiveInCodexApp(sessionId: id)
+    }
+    private(set) var codexArchiveTask: Task<Void, Never>?
+
     init(settings: AppSettings, vault: SessionVault = SessionVault()) {
         self.settings = settings
         self.vault = vault
@@ -95,6 +110,17 @@ final class SessionController: ObservableObject {
 
     var canChangeCaptureSettings: Bool {
         !isRecording && !isBusy && !startInFlight
+    }
+
+    /// Serialize local transfer work with capture, processing and deletion.
+    func beginSessionTransfer() -> Bool {
+        guard canChangeCaptureSettings else { return false }
+        isBusy = true
+        return true
+    }
+
+    func endSessionTransfer() {
+        isBusy = false
     }
 
     /// The session this controller holds in memory: the one being recorded or processed, and afterwards
@@ -283,6 +309,10 @@ final class SessionController: ObservableObject {
     }
 
     func retryAnalysis(sessionId: String) {
+        if (try? vault.loadManifest(id: sessionId).importOrigin?.kind) == .imported {
+            statusLine = "Use Analyze a copy in Recordings to preserve the imported results."
+            return
+        }
         guard !isBusy, !isRecording, !startInFlight else {
             statusLine = isBusy ? "Already processing a session" : "Stop recording before retry"
             AgentLog.event("retry_ignored", [
@@ -453,20 +483,64 @@ final class SessionController: ObservableObject {
         openInLocalCLI(.chatGPT, sessionId: sessionId)
     }
 
+    /// Every entry point uses the same archive/name dialog and shared desktop project. Serialize the
+    /// potentially multi-GB copy with recording, processing, transfers and deletion.
+    @discardableResult
+    func openPrivateArchiveInCodex(sessionId: String? = nil) -> Task<Void, Never>? {
+        guard let id = sessionId ?? lastSessionId ?? manifest?.sessionId else {
+            statusLine = LocalCodingCLI.chatGPT.noSessionStatus
+            return nil
+        }
+        guard beginSessionTransfer() else {
+            statusLine = "Finish recording or processing before opening the archive in Codex."
+            return nil
+        }
+        statusLine = "Preparing archive for Codex…"
+        let task = Task { [self] in
+            defer {
+                endSessionTransfer()
+                codexArchiveTask = nil
+            }
+            do {
+                try await openAgentArchive(vault, id)
+                statusLine = "Opened archive in Codex"
+                AgentLog.event("codex_private_archive_handoff", ["session": id])
+            } catch let error as ClaudeCLIHandoffError {
+                statusLine = error.localizedDescription
+                if error != .handoffCancelled {
+                    AgentLog.event("codex_private_archive_handoff_fail", ["session": id, "reason": error.logReason])
+                }
+            } catch {
+                statusLine = ClaudeCLIHandoffError.codexWorkspaceFailed.localizedDescription
+                AgentLog.event("codex_private_archive_handoff_fail", ["session": id,
+                    "reason": ClaudeCLIHandoffError.codexWorkspaceFailed.logReason])
+            }
+        }
+        codexArchiveTask = task
+        return task
+    }
+
     func openInLocalCLI(_ cli: LocalCodingCLI, sessionId: String? = nil) {
+        guard codexArchiveTask == nil else {
+            statusLine = "Wait for the Codex archive copy to finish."
+            return
+        }
         guard let id = sessionId ?? lastSessionId ?? manifest?.sessionId else {
             statusLine = cli.noSessionStatus
             AgentLog.event(cli.logFail, ["reason": "no_session"])
             return
         }
+        let destination: CodexHandoffDestination = cli == .chatGPT ? settings.codexHandoffDestination : .terminal
         do {
-            try vault.openExportInLocalCLI(sessionId: id, cli: cli)
+            try openAgentExport(vault, id, cli, destination)
             statusLine = cli.successStatus
-            AgentLog.event(cli.logSuccess, ["session": id])
+            AgentLog.event(cli.logSuccess, ["session": id, "destination": destination.rawValue])
         } catch let error as ClaudeCLIHandoffError {
             statusLine = error.localizedDescription
+            if error == .handoffCancelled { return }
             AgentLog.event(cli.logFail, [
                 "session": id,
+                "destination": destination.rawValue,
                 "reason": error.logReason
             ])
         } catch {
@@ -609,6 +683,7 @@ final class SessionController: ObservableObject {
             }
             sessionURL = created.url
             var createdManifest = created.manifest
+            createdManifest.captureEnvironment = .current()
             createdManifest.includeFullTranscriptInZip = settings.includeFullTranscriptInZip
             try vault.write(manifest: &createdManifest)
             manifest = createdManifest

@@ -21,6 +21,9 @@ struct ExportProjector {
 
         var omitted: [OmittedAsset] = []
         var projected = manifest
+        // Machine names and capture environment belong to private Mac-to-Mac transfer only.
+        projected.captureEnvironment = nil
+        projected.importOrigin?.exportedFrom = nil
         var projectedShots: [ShotRecord] = []
         var projectedSlices: [SliceRecord] = []
         var projectedTasks: [TaskRecord] = []

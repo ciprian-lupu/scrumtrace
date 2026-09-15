@@ -311,9 +311,18 @@ struct SettingsView: View {
     private var aiTab: some View {
         Form {
             Section("Local coding agents") {
-                Text("Open last session in Claude or ChatGPT starts the CLI installed on this Mac (`claude` or `codex`) in Terminal, signed in with your Claude or ChatGPT account. That path does not use the API key below and never opens archive/.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                Picker("Open export in Codex", selection: $settings.codexHandoffDestination) {
+                    ForEach(CodexHandoffDestination.allCases) { destination in
+                        Text(destination.title).tag(destination)
+                    }
+                }
+                .accessibilityIdentifier("settings.codexDestination")
+                Text(settings.codexHandoffDestination == .app
+                     ? "Choose a project name on first open. Export and archive analyses reuse that recording's project, with separate task prompts. You send the prompt yourself."
+                     : "Starts Codex CLI in Terminal using your existing login. Install the codex command and allow ScrumTrace to control Terminal when macOS asks.")
+                    .font(.caption).foregroundStyle(.secondary)
+                Text("Open archive in Codex always uses the desktop app and adds the original source to the shared project. Claude and the Terminal option use only export/. These handoffs do not use the API key below.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
             AIConnectionsSettingsView(settings: settings, controller: controller)
             Section("Selected service") {

@@ -46,7 +46,13 @@ enum MainSection: String, Hashable, CaseIterable, Identifiable {
 final class MainNavigation: ObservableObject {
     @Published var section = MainSection.overview
     let settings = SettingsNavigation()
-    @Published var selectedSessionId: String?
+    @Published var selectedSessionIds: Set<String> = []
+
+    /// Existing detail and navigation actions always target exactly one recording.
+    var selectedSessionId: String? {
+        get { selectedSessionIds.count == 1 ? selectedSessionIds.first : nil }
+        set { selectedSessionIds = newValue.map { [$0] } ?? [] }
+    }
 }
 
 /// Why the main window opened. Logged as a technical enum only.

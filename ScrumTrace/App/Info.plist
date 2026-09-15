@@ -31,7 +31,7 @@
 	<key>NSHighResolutionCapable</key>
 	<true/>
 	<key>NSAppleEventsUsageDescription</key>
-	<string>ScrumTrace reads the frontmost window title so meeting context can name the app you were presenting.</string>
+	<string>ScrumTrace controls Terminal to start Codex or Claude with your recording's export folder when you choose a CLI handoff.</string>
 	<key>NSAccessibilityUsageDescription</key>
 	<string>ScrumTrace reads the frontmost window title so agent context can name the app you were presenting. It does not control the computer.</string>
 	<key>NSMicrophoneUsageDescription</key>
@@ -45,5 +45,25 @@
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
+	<key>UTExportedTypeDeclarations</key>
+	<array>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.str8minds.ScrumTrace.transfer</string>
+			<key>UTTypeDescription</key>
+			<string>ScrumTrace recording transfer</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>com.apple.package</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>scrumtrace</string>
+				</array>
+			</dict>
+		</dict>
+	</array>
 </dict>
 </plist>
