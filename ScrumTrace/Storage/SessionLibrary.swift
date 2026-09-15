@@ -81,6 +81,8 @@ struct SessionSummary: Sendable, Identifiable, Hashable {
     private(set) var hasFullTranscriptArchive: Bool
     /// The pipeline status is neither `idle` nor `completed`.
     let isUnfinished: Bool
+    /// Transfer provenance only; no captured content or local credentials.
+    let importOrigin: SessionImportOrigin?
 
     var id: String { sessionId }
 
@@ -103,6 +105,7 @@ struct SessionSummary: Sendable, Identifiable, Hashable {
         taskCounts = SessionTaskCounts(tasks: manifest.tasks)
         consentApproved = manifest.uploadConsent.approved
         omittedCount = manifest.omitted.count
+        importOrigin = manifest.importOrigin
         hasExportContext = exportProbe.hasAgentContext
         hasBrief = exportProbe.hasBrief
         hasPack = exportProbe.packBytes != nil
@@ -393,6 +396,7 @@ private struct SessionFolderIdentity: Equatable {
 extension SessionVault {
     /// Export files a session detail may list with sizes, as session-relative paths in display order.
     static let indexedExportFiles = [
+        SessionTransferReviewReport.path,
         ScrumTracePath.agentContext,
         ScrumTracePath.agentPrompt,
         ScrumTracePath.sessionBrief,

@@ -97,6 +97,17 @@ final class SessionController: ObservableObject {
         !isRecording && !isBusy && !startInFlight
     }
 
+    /// Serialize local transfer work with capture, processing and deletion.
+    func beginSessionTransfer() -> Bool {
+        guard canChangeCaptureSettings else { return false }
+        isBusy = true
+        return true
+    }
+
+    func endSessionTransfer() {
+        isBusy = false
+    }
+
     /// The session this controller holds in memory: the one being recorded or processed, and afterwards
     /// the last one it recorded or processed (retries included), until another recording starts, another
     /// session is retried, `forgetSession(id:)` drops it, or the app relaunches. Read-only. The main window
@@ -283,6 +294,10 @@ final class SessionController: ObservableObject {
     }
 
     func retryAnalysis(sessionId: String) {
+        if (try? vault.loadManifest(id: sessionId).importOrigin?.kind) == .imported {
+            statusLine = "Use Analyze a copy in Recordings to preserve the imported results."
+            return
+        }
         guard !isBusy, !isRecording, !startInFlight else {
             statusLine = isBusy ? "Already processing a session" : "Stop recording before retry"
             AgentLog.event("retry_ignored", [
@@ -609,6 +624,7 @@ final class SessionController: ObservableObject {
             }
             sessionURL = created.url
             var createdManifest = created.manifest
+            createdManifest.captureEnvironment = .current()
             createdManifest.includeFullTranscriptInZip = settings.includeFullTranscriptInZip
             try vault.write(manifest: &createdManifest)
             manifest = createdManifest

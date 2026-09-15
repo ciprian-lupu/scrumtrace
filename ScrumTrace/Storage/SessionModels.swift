@@ -2790,6 +2790,8 @@ struct SessionManifest: Codable, Sendable {
     var includeFullTranscriptInZip: Bool
     var uploadConsent: UploadConsent
     var omitted: [OmittedAsset]
+    var captureEnvironment: SessionEnvironment? = nil
+    var importOrigin: SessionImportOrigin? = nil
 
     enum CodingKeys: String, CodingKey {
         case manifestVersion = "manifest_version"
@@ -2806,6 +2808,8 @@ struct SessionManifest: Codable, Sendable {
         case includeFullTranscriptInZip = "include_full_transcript_in_zip"
         case uploadConsent = "upload_consent"
         case omitted
+        case captureEnvironment = "capture_environment"
+        case importOrigin = "import_origin"
     }
 
     static func makeNew(sessionId: String, product: ProductContext) -> SessionManifest {

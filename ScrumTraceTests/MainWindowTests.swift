@@ -1033,6 +1033,61 @@ final class MainWindowTests: XCTestCase {
     }
 
     @MainActor
+    func testBatchSelectionExportsOnlyVisibleReadableRowsAndKeepsSingleActionsDisabled() async throws {
+        try await withRecordingsFixture { f in
+            let navigation = MainNavigation()
+            let recorder = CallRecorder()
+            let model = makeRecordingsModel(f, navigation: navigation, recorder: recorder)
+            await model.refresh().value
+            navigation.selectedSessionIds = [f.completed, f.unfinished, f.corrupt]
+            XCTAssertNil(navigation.selectedSessionId)
+            XCTAssertNil(model.selectedEntry)
+            XCTAssertEqual(model.selectedExportIDs, [f.unfinished, f.completed])
+            XCTAssertFalse(model.performOnSelection(.delete))
+            XCTAssertFalse(model.performOnSelection(.retryAnalysis))
+            XCTAssertTrue(recorder.calls.isEmpty)
+            model.statusFilter = .completed
+            XCTAssertEqual(model.selectedExportIDs, [f.completed], "Hidden selections never enter an export")
+            XCTAssertEqual(model.selectedEntries.count, 1)
+            model.clearFilters()
+            XCTAssertEqual(model.selectedExportIDs, [f.unfinished, f.completed])
+            navigation.selectedSessionId = f.completed
+            XCTAssertEqual(navigation.selectedSessionIds, [f.completed])
+            XCTAssertEqual(model.selectedEntry?.id, f.completed)
+            model.importedOnly = true
+            XCTAssertNil(model.selectedEntry, "The imported-only filter also hides single-row actions")
+            XCTAssertTrue(model.selectedExportIDs.isEmpty)
+        }
+    }
+
+    @MainActor
+    func testRecordingsTableSupportsNativeMultipleSelectionAndSelectAll() async throws {
+        try await withRecordingsFixture { f in
+            try await withFixtureController(f) { controller in
+                let presenter = MainWindowPresenter(controller: controller, frameAutosaveName: nil, isWindowOnScreen: ignoringOcclusion)
+                defer { presenter.window?.close() }
+                presenter.show(section: .recordings)
+                let window = try XCTUnwrap(presenter.window)
+                let ready = await waitUntil { recordingsTable(in: window)?.numberOfRows == 3 }
+                XCTAssertTrue(ready)
+                let table = try XCTUnwrap(recordingsTable(in: window))
+                XCTAssertTrue(table.allowsMultipleSelection)
+                table.selectRowIndexes(IndexSet([0, 1]), byExtendingSelection: false)
+                let selected = await waitUntil { presenter.navigation.selectedSessionIds == Set([f.unfinished, f.completed]) }
+                XCTAssertTrue(selected)
+                table.selectAll(nil)
+                let all = await waitUntil { presenter.navigation.selectedSessionIds.count == 3 }
+                XCTAssertTrue(all)
+                XCTAssertEqual(presenter.recordings.selectedExportIDs, [f.unfinished, f.completed])
+                presenter.show(sessionId: f.completed)
+                let single = await waitUntil { table.selectedRowIndexes == IndexSet(integer: 1) }
+                XCTAssertTrue(single)
+                XCTAssertEqual(presenter.navigation.selectedSessionIds, [f.completed])
+            }
+        }
+    }
+
+    @MainActor
     func testRecordingActionsDispatchToTheInjectedClosuresWithTheSelectedId() async throws {
         try await withRecordingsFixture { f in
             let navigation = MainNavigation()

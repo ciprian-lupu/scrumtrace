@@ -235,6 +235,7 @@ final class SessionVault: @unchecked Sendable {
                 return nil
             }
             let id = url.lastPathComponent
+            if id.hasPrefix("ScrumTrace-transfer-") { return nil }
             guard Self.isValidSessionId(id) else { return nil }
             return id
         }
@@ -461,6 +462,7 @@ final class SessionVault: @unchecked Sendable {
         guard days > 0 else { return }
         let cutoff = Date().addingTimeInterval(-Double(days) * 86_400)
         for manifest in recentSessions(limit: 500) where manifest.createdAt < cutoff {
+            if let imported = manifest.importOrigin?.importedAt, imported >= cutoff { continue }
             switch manifest.pipelineStatus {
             case .completed:
                 removeAbandonedSession(id: manifest.sessionId)

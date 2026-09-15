@@ -3356,7 +3356,7 @@ def test_main_window_routing_and_private_index() -> None:
     assert "sessionId" in manifest_fields
     assert manifest_fields <= {
         "sessionId", "createdAt", "pipelineStatus", "completedStages", "duration", "pauses",
-        "productContext", "shots", "slices", "tasks", "uploadConsent", "omitted",
+        "productContext", "shots", "slices", "tasks", "uploadConsent", "omitted", "importOrigin",
     }, manifest_fields
 
     agents = (ROOT / "AGENTS.md").read_text()

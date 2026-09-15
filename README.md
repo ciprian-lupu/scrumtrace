@@ -172,3 +172,20 @@ Retry Analysis resumes unfinished pairs and preserves successful results for unc
 The fingerprint includes the exact prompts and encoded image bytes. If evidence or prompts changed between attempts, Retry refuses the changed input before uploading it and reports `comparison_input_changed`; existing results stay available. Start a new recording for revised evidence. Older results without fingerprints must be evaluated once with the new implementation before they count as verified comparisons. No transcript, image payload or API key is included in the fingerprint table.
 
 Verification uses synthetic providers and temporary sessions. A live multi-provider session still requires configured keys, explicit upload consent and inspection of the resulting export; software tests do not close hardware gates.
+
+## Transfer a recording between Macs
+
+In **Recordings**, open the **Transfer recordings** toolbar menu:
+
+- Select recordings with **Command-click** or **Shift-click**, or choose **Select all listed recordings** in the transfer menu. **Export for another Mac…** defaults to the existing export evidence. Choose **Complete recording** and explicitly check the private-data option to include original video/audio, full transcripts, raw events, previous results and available session diagnostics. For multiple recordings, choose one destination folder; each gets its own package. Hidden selections and unreadable recordings are excluded.
+- Copy the whole **.scrumtrace package** to the receiving Mac. This is a Finder package containing ordinary files and a versioned checksum index. A complete transfer can exceed 35 MB; the separate coding-agent session-pack.zip remains capped at 35 MB.
+- Choose **Import recordings…** on the receiving Mac and select one or more packages or folders together. Older versions can be migrated by copying the entire session folder; an existing export folder is also accepted. Unzip a legacy session pack first and select its folder.
+- Imported rows show **Imported**, source/export information and which materials are available. File verification does not establish transcription accuracy. A legacy folder has no source checksum claim.
+- **Analyze a copy** reuses the available transcript and starts fresh evidence evaluation in a separate session. **Transcribe a new copy** requires original media and starts transcription again. The receiving Mac uses its own selected services and asks for fresh upload consent. Original imported results remain available.
+- Read **export/TRANSFER_REVIEW.md** for technical facts, missing evidence and measured before/current outcomes. New transcription times are reported only when transcription actually runs again. More findings alone do not establish better quality.
+
+A result list shows each completed, skipped or failed transfer. Duplicate imports and existing destination packages are skipped; an invalid item does not stop the remaining selection. Cancel removes the unfinished copy and keeps transfers already completed. The private-data choice applies to the selected recordings together; provider upload consent is still reset independently in every import.
+
+Keys, app settings and macOS permissions are not transferred. Complete packages are private Mac-to-Mac transfers; coding agents receive only export/. Newly imported old recordings receive the configured retention period from their import date.
+
+The original app's capture environment is recorded only for new captures made with this version. Older sessions show it as unavailable instead of attributing them to the Mac that exported them.

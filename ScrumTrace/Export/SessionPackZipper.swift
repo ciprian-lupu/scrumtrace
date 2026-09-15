@@ -472,6 +472,7 @@ struct SessionPackZipper {
 
 enum PackBudget {
     static let protectedNames: Set<String> = [
+        "TRANSFER_REVIEW.md",
         "AGENT_CONTEXT.md",
         "SESSION_BRIEF.html",
         "session.manifest.json",
@@ -593,6 +594,7 @@ enum PackBudget {
         removeEscapingExportLinks(exportDir: exportDir)
         let sessionRoot = exportDir.deletingLastPathComponent()
         let named = [
+            "TRANSFER_REVIEW.md",
             "AGENT_CONTEXT.md",
             "SESSION_BRIEF.html",
             "AGENT_PROMPT.txt",

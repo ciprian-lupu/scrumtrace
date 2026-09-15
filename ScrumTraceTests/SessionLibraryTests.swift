@@ -393,7 +393,8 @@ final class SessionLibraryTests: XCTestCase {
             ("hasPack", "Bool"),
             ("packBytes", "Optional<Int>"),
             ("hasFullTranscriptArchive", "Bool"),
-            ("isUnfinished", "Bool")
+            ("isUnfinished", "Bool"),
+            ("importOrigin", "Optional<SessionImportOrigin>")
         ]
         XCTAssertEqual(
             fields.map(\.0), expected.map(\.0),

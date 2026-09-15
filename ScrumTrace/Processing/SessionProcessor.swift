@@ -711,6 +711,9 @@ final class SessionProcessor: @unchecked Sendable {
         let html = briefRenderer.render(manifest: projected, excerpts: excerpts, sessionURL: sessionURL)
         try ExportRel.writeExportText(html, relative: ScrumTracePath.sessionBrief, sessionURL: sessionURL)
         try projector.writeProjectionManifest(projected, sessionURL: sessionURL)
+        if let report = SessionTransferReviewReport.render(manifest: projected, sessionURL: sessionURL) {
+            try ExportRel.writeExportText(report, relative: SessionTransferReviewReport.path, sessionURL: sessionURL)
+        }
     }
 
     private func transcribe(

@@ -42,6 +42,87 @@ final class MainWindowSnapshotTests: XCTestCase {
     // MARK: - Tests
 
     @MainActor
+    func testRenderBatchSelectionAndResults() async throws {
+        let directory = try snapshotDirectory()
+        try await withController(populated: true) { controller, fixture in
+            let f = try XCTUnwrap(fixture)
+            let presenter = MainWindowPresenter(controller: controller, frameAutosaveName: nil, isWindowOnScreen: Self.ignoringOcclusion)
+            defer { presenter.window?.close() }
+            presenter.show(section: .recordings)
+            presenter.navigation.selectedSessionIds = [f.completed, f.offlineFailed, f.corrupt]
+            let window = try XCTUnwrap(presenter.window)
+            try await render(window, as: "recordings-multiple-selected", into: directory) {
+                presenter.recordings.selectedEntries.count == 3 && presenter.recordings.selectedExportIDs.count == 2
+            }
+            let model = SessionTransferModel(controller: controller) { _ in }
+            model.presentExport(ids: presenter.recordings.selectedExportIDs)
+            model.scope = .complete
+            let sheet = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 548, height: 420),
+                                 styleMask: [.titled, .closable], backing: .buffered, defer: false)
+            sheet.isReleasedWhenClosed = false
+            defer { sheet.close() }
+            sheet.contentView = NSHostingView(rootView: SessionTransferExportView(model: model))
+            sheet.orderFront(nil)
+            try await render(sheet, as: "transfer-multiple-consent", into: directory,
+                             size: try XCTUnwrap(sheet.contentView).fittingSize) { true }
+            let result = SessionTransferBatchResult(operation: .importing, items: [
+                .init(id: 0, name: "Meeting-01.scrumtrace", outcome: .imported("local-01")),
+                .init(id: 1, name: "Meeting-02.scrumtrace", outcome: .alreadyImported("local-02")),
+                .init(id: 2, name: "Meeting-03.scrumtrace", outcome: .failed(SessionTransferError.checksumMismatch.localizedDescription))
+            ])
+            sheet.contentView = NSHostingView(rootView: SessionTransferResultsView(model: model, result: result))
+            let resultSize = try XCTUnwrap(sheet.contentView).fittingSize
+            try await render(sheet, as: "transfer-mixed-results", into: directory,
+                             size: NSSize(width: ceil(resultSize.width), height: ceil(resultSize.height))) { true }
+        }
+    }
+
+    @MainActor
+    func testRenderSessionTransferAndImportedOrigin() async throws {
+        let directory = try snapshotDirectory()
+        try await withController(populated: true) { controller, fixture in
+            let f = try XCTUnwrap(fixture)
+            var manifest = try controller.vault.loadManifest(id: f.completed)
+            let environment = SessionEnvironment(computer: "Presentation Mac", macOS: "macOS 14.7",
+                                                  appVersion: "1.0.0", appBuild: "2", architecture: "arm64")
+            manifest.importOrigin = .init(kind: .imported, originalSessionID: "2026-09-13-1200-source",
+                                          importedAt: Date(), exportedFrom: environment,
+                                          transferID: UUID().uuidString, scope: .complete,
+                                          integrityVerified: true, parentSessionID: nil)
+            manifest.uploadConsent = .denied
+            try controller.vault.write(manifest: &manifest)
+            let presenter = MainWindowPresenter(controller: controller, frameAutosaveName: nil, isWindowOnScreen: Self.ignoringOcclusion)
+            defer { presenter.window?.close() }
+            presenter.show(sessionId: f.completed)
+            let window = try XCTUnwrap(presenter.window)
+            let detailLoaded = await waitUntil {
+                guard let summary = presenter.recordings.selectedEntry?.summary else { return false }
+                return summary.importOrigin != nil && presenter.recordings.isDetailCurrent(for: summary)
+            }
+            XCTAssertTrue(detailLoaded)
+            // Let the provenance view's asynchronous file assessment settle as well.
+            try await Task.sleep(nanoseconds: 500_000_000)
+            try await render(window, as: "recordings-imported", into: directory) {
+                presenter.recordings.selectedEntry?.summary?.importOrigin != nil
+            }
+            try await render(window, as: "recordings-imported-detail", into: directory, beforeCapture: scrollToBottom) {
+                presenter.recordings.selectedEntry?.summary?.importOrigin != nil
+            }
+            let model = SessionTransferModel(controller: controller) { _ in }
+            model.presentExport(id: f.completed)
+            model.scope = .complete
+            let sheet = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 548, height: 350),
+                                 styleMask: [.titled, .closable], backing: .buffered, defer: false)
+            sheet.contentView = NSHostingView(rootView: SessionTransferExportView(model: model))
+            sheet.isReleasedWhenClosed = false
+            defer { sheet.close() }
+            sheet.orderFront(nil)
+            let sheetSize = try XCTUnwrap(sheet.contentView).fittingSize
+            try await render(sheet, as: "transfer-private-consent", into: directory, size: sheetSize) { true }
+        }
+    }
+
+    @MainActor
     func testRenderSectionsOverAFixtureVault() async throws {
         let directory = try snapshotDirectory()
         try await withController(populated: true) { controller, fixture in
