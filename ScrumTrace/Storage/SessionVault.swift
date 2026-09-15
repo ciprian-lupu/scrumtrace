@@ -443,6 +443,12 @@ final class SessionVault: @unchecked Sendable {
         try CodexAppHandoff.open(sessionURL: session)
     }
 
+    @MainActor
+    func openPrivateArchiveInCodexApp(sessionId: String) async throws {
+        let session = try handoffSession(sessionId: sessionId)
+        try await CodexAppHandoff.openPrivateArchive(sessionURL: session)
+    }
+
     private func handoffSession(sessionId: String) throws -> URL {
         guard Self.isValidSessionId(sessionId) else {
             throw ClaudeCLIHandoffError.sessionUnusable

@@ -90,6 +90,10 @@ final class SessionTransferTests: XCTestCase {
     func testTransferAndReanalysisIgnoreDerivedCodexWorkspaces() throws {
         try fixture { base, vault, id in
             let workspace = try CodexWorkspace.prepare(sessionURL: vault.sessionURL(id: id))
+            let legacyPrivate = vault.sessionURL(id: id).appendingPathComponent(CodexWorkspace.privateArchiveDirectoryName)
+            try FileManager.default.createDirectory(at: legacyPrivate, withIntermediateDirectories: true)
+            try Data("legacy marker".utf8).write(to: legacyPrivate.appendingPathComponent(".scrumtrace-workspace"))
+            try FileManager.default.createSymbolicLink(at: legacyPrivate.appendingPathComponent("agent-link"), withDestinationURL: base)
             try FileManager.default.createSymbolicLink(
                 at: workspace.appendingPathComponent("agent-created-link"), withDestinationURL: base
             )
@@ -99,6 +103,7 @@ final class SessionTransferTests: XCTestCase {
                 scope: .complete, includePrivate: true, environment: sender
             )
             XCTAssertFalse(index.files.contains { $0.path.hasPrefix(CodexWorkspace.directoryName + "/") })
+            XCTAssertFalse(index.files.contains { $0.path.hasPrefix(CodexWorkspace.privateArchiveDirectoryName + "/") })
             let copyID = try transfer.analysisCopy(id: id, retranscribe: false)
             XCTAssertFalse(FileManager.default.fileExists(atPath: vault.sessionURL(id: copyID)
                 .appendingPathComponent(CodexWorkspace.directoryName).path))

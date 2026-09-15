@@ -11,6 +11,7 @@ enum RecordingAction: String, CaseIterable, Identifiable, Sendable {
     case revealExport
     case openInClaude
     case openInChatGPT
+    case openPrivateArchiveInCodex
     case openBrief
     case copyExportPath
     case retryAnalysis
@@ -23,7 +24,7 @@ enum RecordingAction: String, CaseIterable, Identifiable, Sendable {
 
     /// A session whose manifest was read, in menu order.
     static let readableActions: [RecordingAction] = [
-        .revealExport, .openInClaude, .openInChatGPT, .openBrief, .copyExportPath,
+        .revealExport, .openInClaude, .openInChatGPT, .openPrivateArchiveInCodex, .openBrief, .copyExportPath,
         .retryAnalysis, .reviewSpeakers, .revealArchive, .delete
     ]
 
@@ -34,7 +35,8 @@ enum RecordingAction: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .revealExport: return "Reveal export/"
         case .openInClaude: return "Open in Claude"
-        case .openInChatGPT: return "Open in Codex"
+        case .openInChatGPT: return "Open export in Codex"
+        case .openPrivateArchiveInCodex: return "Open archive in Codex…"
         case .openBrief: return "Open brief"
         case .copyExportPath: return "Copy export path"
         case .retryAnalysis: return "Retry analysis"
@@ -50,6 +52,7 @@ enum RecordingAction: String, CaseIterable, Identifiable, Sendable {
         case .revealExport: return "folder"
         case .openInClaude: return "terminal"
         case .openInChatGPT: return "arrow.up.forward.app"
+        case .openPrivateArchiveInCodex: return "archivebox"
         case .openBrief: return "doc.richtext"
         case .copyExportPath: return "doc.on.clipboard"
         case .retryAnalysis: return "arrow.clockwise"
@@ -63,7 +66,7 @@ enum RecordingAction: String, CaseIterable, Identifiable, Sendable {
     /// Actions that change a session or show its private files wait for recording and analysis to finish.
     var needsIdleCapture: Bool {
         switch self {
-        case .retryAnalysis, .reviewSpeakers, .revealArchive, .revealFolder, .delete:
+        case .openPrivateArchiveInCodex, .retryAnalysis, .reviewSpeakers, .revealArchive, .revealFolder, .delete:
             return true
         case .revealExport, .openInClaude, .openInChatGPT, .openBrief, .copyExportPath:
             return false
@@ -84,6 +87,7 @@ enum RecordingAction: String, CaseIterable, Identifiable, Sendable {
         case .revealExport: return "main_reveal_export"
         case .openInClaude: return "main_claude"
         case .openInChatGPT: return "main_chatgpt"
+        case .openPrivateArchiveInCodex: return "main_codex_private_archive"
         case .openBrief: return "main_open_brief"
         case .copyExportPath: return "main_copy_export_path"
         case .retryAnalysis: return "main_retry"
@@ -399,6 +403,8 @@ struct RecordingsDependencies {
     var revealExport: @MainActor (URL) -> Void
     /// Nil when the handoff started, otherwise a fixed line saying why not (never a path).
     var openInCLI: @MainActor (LocalCodingCLI, String) -> String?
+    /// The controller obtains archive consent and holds the busy state during the copy.
+    var openPrivateArchiveInCodex: @MainActor (String) -> String?
     /// False when the brief is not a usable export file.
     var openBrief: @MainActor (String) -> Bool
     var retryAnalysis: @MainActor (String) -> Void
@@ -439,6 +445,9 @@ struct RecordingsDependencies {
                 // The controller reports only through its status line: the success text, or the fixed
                 // description of a ClaudeCLIHandoffError.
                 return controller.statusLine == cli.successStatus ? nil : controller.statusLine
+            },
+            openPrivateArchiveInCodex: { id in
+                controller.openPrivateArchiveInCodex(sessionId: id) == nil ? controller.statusLine : nil
             },
             openBrief: { id in
                 guard let url = SessionFileAccess.briefURL(vault: vault, id: id) else { return false }
@@ -884,6 +893,9 @@ final class RecordingsModel: ObservableObject {
         case .openInClaude, .openInChatGPT:
             // The handoff needs export/AGENT_CONTEXT.md, the file `hasExportContext` probes.
             return entry.summary?.hasExportContext == true ? nil : "This recording has no export to hand to an agent yet."
+        case .openPrivateArchiveInCodex:
+            return entry.summary?.hasArchiveRecording == true
+                ? nil : "This recording has no private master video to analyze."
         case .reviewSpeakers:
             return entry.summary?.hasFullTranscriptArchive == true ? nil : "This recording has no transcript to review yet."
         case .delete:
@@ -924,6 +936,11 @@ final class RecordingsModel: ObservableObject {
         case .openInClaude, .openInChatGPT:
             log(action, id)
             if let failure = dependencies.openInCLI(action == .openInClaude ? .claude : .chatGPT, id) {
+                message = failure
+            }
+        case .openPrivateArchiveInCodex:
+            log(action, id)
+            if let failure = dependencies.openPrivateArchiveInCodex(id) {
                 message = failure
             }
         case .openBrief:
@@ -1425,7 +1442,7 @@ struct RecordingsView: View {
                         .accessibilityIdentifier("main.recordings.confirmPrivateReveal")
                         Button("Cancel", role: .cancel) { model.cancelPrivateReveal() }
                     } message: { _ in
-                        Text("This folder holds the full recording and transcript. Never hand it to an agent.")
+                        Text("This folder holds the full recording and transcript, beyond the selected export evidence.")
                     }
             }
             .sheet(item: $model.speakerReview, onDismiss: { model.speakerReviewDidClose() }) { request in
@@ -1616,7 +1633,7 @@ struct RecordingsView: View {
                 .keyboardShortcut("r", modifiers: .command)
 
             Menu {
-                selectionMenuItems([.openInClaude, .openInChatGPT, .openBrief, .copyExportPath])
+                selectionMenuItems([.openInClaude, .openInChatGPT, .openPrivateArchiveInCodex, .openBrief, .copyExportPath])
             } label: {
                 Label("Open", systemImage: "arrow.up.forward.app")
             }
@@ -1842,7 +1859,7 @@ struct SessionDetailView: View {
     let summary: SessionSummary
     var transfer: SessionTransferModel? = nil
 
-    private static let primaryActions: [RecordingAction] = [.revealExport, .openInClaude, .openInChatGPT, .openBrief]
+    private static let primaryActions: [RecordingAction] = [.revealExport, .openInClaude, .openInChatGPT, .openPrivateArchiveInCodex, .openBrief]
     private static let columns = [GridItem(.adaptive(minimum: 280), spacing: 12, alignment: .top)]
 
     private struct Fact: Identifiable {
@@ -1891,7 +1908,7 @@ struct SessionDetailView: View {
                         GroupBox("Shots") { shots(thumbnails) }
                     }
                 }
-                Text("Only export/ is handed to agents. Dragging a row offers this folder.")
+                Text("Export and archive open in the same Codex project. Archive access is explicit; dragging a row offers only export/.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             .padding(12)
@@ -1914,8 +1931,17 @@ struct SessionDetailView: View {
             Text(headerLine)
                 .font(.caption).foregroundStyle(.secondary)
                 .monospacedDigit()
+            // Keep the two scopes adjacent without squeezing six buttons into one narrow row.
             HStack(spacing: 8) {
-                ForEach(Self.primaryActions) { action in
+                ForEach([RecordingAction.openInChatGPT, .openPrivateArchiveInCodex]) { action in
+                    Button(action.title) { model.perform(action, on: summary.sessionId) }
+                        .disabled(!model.isEnabled(action, for: entry))
+                        .help(model.unavailableReason(action, for: entry) ?? action.title)
+                        .accessibilityIdentifier("main.recordings.detail.\(action.rawValue)")
+                }
+            }
+            HStack(spacing: 8) {
+                ForEach([RecordingAction.revealExport, .openInClaude, .openBrief]) { action in
                     Button(action.title) { model.perform(action, on: summary.sessionId) }
                         .disabled(!model.isEnabled(action, for: entry))
                         .help(model.unavailableReason(action, for: entry) ?? action.title)

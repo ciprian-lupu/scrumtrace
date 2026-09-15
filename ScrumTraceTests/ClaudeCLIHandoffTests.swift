@@ -236,8 +236,10 @@ final class ClaudeCLIHandoffTests: XCTestCase {
         menu.update()
         XCTAssertNotNil(menu.item(withTitle: "Open last session in Claude"))
         XCTAssertTrue(try XCTUnwrap(menu.item(withTitle: "Open last session in Claude")).isEnabled)
-        XCTAssertNotNil(menu.item(withTitle: "Open last session in Codex"))
-        XCTAssertTrue(try XCTUnwrap(menu.item(withTitle: "Open last session in Codex")).isEnabled)
+        XCTAssertNotNil(menu.item(withTitle: "Open last export in Codex"))
+        XCTAssertTrue(try XCTUnwrap(menu.item(withTitle: "Open last export in Codex")).isEnabled)
+        XCTAssertNotNil(menu.item(withTitle: "Open last archive in Codex…"))
+        XCTAssertTrue(try XCTUnwrap(menu.item(withTitle: "Open last archive in Codex…")).isEnabled)
         XCTAssertNil(menu.item(withTitle: "Open last session in Cursor"))
     }
 }

@@ -3155,9 +3155,11 @@ def test_claude_cli_handoff() -> None:
     assert "/archive/" not in handoff or "pathComponents.contains(\"archive\")" in handoff
     menu = (ROOT / "ScrumTrace" / "UI" / "MenuBarController.swift").read_text()
     assert "Open last session in Claude" in menu
-    assert "Open last session in Codex" in menu
+    assert "Open last export in Codex" in menu
+    assert "Open last archive in Codex" in menu
     assert "Open in Claude" in menu
-    assert "Open in Codex" in menu
+    assert "Open export in Codex" in menu
+    assert "Open archive in Codex" in menu
     assert "openLastInClaude" in menu
     assert "openLastInChatGPT" in menu
     assert "openRecentInClaude" in menu
@@ -3191,7 +3193,8 @@ def test_claude_cli_handoff() -> None:
     assert "tryExecFromArguments" in app
     readme = (ROOT / "README.md").read_text()
     assert "Open last session in Claude" in readme
-    assert "Open last session in Codex" in readme
+    assert "Open last export in Codex" in readme
+    assert "Open archive in Codex" in readme
     assert "claude -p" in readme
     assert "codex exec" in readme
     settings_ui = (ROOT / "ScrumTrace" / "UI" / "SettingsView.swift").read_text()

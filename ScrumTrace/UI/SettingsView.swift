@@ -311,17 +311,17 @@ struct SettingsView: View {
     private var aiTab: some View {
         Form {
             Section("Local coding agents") {
-                Picker("Open in Codex", selection: $settings.codexHandoffDestination) {
+                Picker("Open export in Codex", selection: $settings.codexHandoffDestination) {
                     ForEach(CodexHandoffDestination.allCases) { destination in
                         Text(destination.title).tag(destination)
                     }
                 }
                 .accessibilityIdentifier("settings.codexDestination")
                 Text(settings.codexHandoffDestination == .app
-                     ? "Opens a project named after the recording's context and date, with a copy of its exported materials and a prepared prompt. You send the prompt yourself."
+                     ? "Choose a project name on first open. Export and archive analyses reuse that recording's project, with separate task prompts. You send the prompt yourself."
                      : "Starts Codex CLI in Terminal using your existing login. Install the codex command and allow ScrumTrace to control Terminal when macOS asks.")
                     .font(.caption).foregroundStyle(.secondary)
-                Text("Claude opens its CLI in Terminal. Coding-agent handoffs use only export/ and do not use the API key below.")
+                Text("Open archive in Codex always uses the desktop app and adds the original source to the shared project. Claude and the Terminal option use only export/. These handoffs do not use the API key below.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             AIConnectionsSettingsView(settings: settings, controller: controller)

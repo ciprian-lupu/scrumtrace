@@ -933,6 +933,10 @@ final class MainWindowTests: XCTestCase {
                 recorder.record("\(cli.rawValue) \(id)")
                 return handoffFailure()
             },
+            openPrivateArchiveInCodex: { id in
+                recorder.record("privateCodex \(id)")
+                return handoffFailure()
+            },
             openBrief: { id in
                 recorder.record("openBrief \(id)")
                 return true
@@ -1161,6 +1165,33 @@ final class MainWindowTests: XCTestCase {
                 rows.map { $0["session"] ?? "" },
                 Array(repeating: f.completed, count: 8) + [f.unfinished, ""]
             )
+        }
+    }
+
+    @MainActor
+    func testCodexScopesAreSeparateActionsAndArchiveDoesNotRequireAnExport() async throws {
+        try await withRecordingsFixture { f in
+            let recorder = CallRecorder()
+            let canChange = MainActorBox(true)
+            let model = makeRecordingsModel(f, recorder: recorder, canChange: { canChange.value })
+            await model.refresh().value
+            let unfinished = try XCTUnwrap(model.entry(id: f.unfinished))
+            XCTAssertEqual(RecordingAction.openInChatGPT.title, "Open export in Codex")
+            XCTAssertEqual(RecordingAction.openPrivateArchiveInCodex.title, "Open archive in Codex…")
+            XCTAssertTrue(OverviewModel.lastRecordingActions.contains(.openInChatGPT))
+            XCTAssertTrue(OverviewModel.lastRecordingActions.contains(.openPrivateArchiveInCodex))
+            XCTAssertFalse(model.isEnabled(.openInChatGPT, for: unfinished))
+            XCTAssertTrue(model.isEnabled(.openPrivateArchiveInCodex, for: unfinished))
+            XCTAssertTrue(model.perform(.openPrivateArchiveInCodex, on: f.unfinished))
+            XCTAssertEqual(recorder.calls, ["privateCodex \(f.unfinished)"])
+            canChange.value = false
+            XCTAssertFalse(model.perform(.openPrivateArchiveInCodex, on: f.unfinished))
+            XCTAssertEqual(recorder.calls.count, 1)
+            canChange.value = true
+            try FileManager.default.removeItem(at: f.vault.sessionURL(id: f.unfinished).appendingPathComponent(ScrumTracePath.sessionMovie))
+            await model.refresh().value
+            XCTAssertFalse(model.perform(.openPrivateArchiveInCodex, on: f.unfinished))
+            XCTAssertEqual(recorder.calls.count, 1)
         }
     }
 
@@ -1669,7 +1700,7 @@ final class MainWindowTests: XCTestCase {
                 XCTAssertEqual(model.library.entries.map(\.id), [f.unfinished, f.completed, f.corrupt])
                 let completed = try XCTUnwrap(model.entry(id: f.completed))
                 let unreadable = try XCTUnwrap(model.entry(id: f.corrupt))
-                let gated: [RecordingAction] = [.retryAnalysis, .delete, .reviewSpeakers, .revealArchive]
+                let gated: [RecordingAction] = [.retryAnalysis, .delete, .reviewSpeakers, .revealArchive, .openPrivateArchiveInCodex]
                 let handoff: [RecordingAction] = [.revealExport, .openInClaude, .openInChatGPT, .openBrief, .copyExportPath]
                 for action in gated + handoff {
                     XCTAssertTrue(model.isEnabled(action, for: completed), "idle \(action)")

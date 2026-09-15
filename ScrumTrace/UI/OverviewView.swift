@@ -555,7 +555,7 @@ final class OverviewModel: ObservableObject {
     nonisolated static let preparingReason = "Finish or cancel the recording you started: choose its context and capture area."
     /// The Start button's help while it can run. The Recordings empty state shows it too.
     nonisolated static let startHelp = "Confirm the product context, then choose the capture area."
-    nonisolated static let lastRecordingActions: [RecordingAction] = [.revealExport, .openInClaude, .openInChatGPT]
+    nonisolated static let lastRecordingActions: [RecordingAction] = [.revealExport, .openInClaude, .openInChatGPT, .openPrivateArchiveInCodex]
     nonisolated static let sessionsFolderWarning = "This folder holds every recording’s archive/ folder, with the full recording and transcript. Never hand it, or anything inside archive/, to an agent."
 
     let recordings: RecordingsModel

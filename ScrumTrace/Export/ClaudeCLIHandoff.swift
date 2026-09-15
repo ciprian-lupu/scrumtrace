@@ -87,6 +87,8 @@ enum ClaudeCLIHandoffError: LocalizedError, Equatable {
     case codexAppMissing
     case codexAppLaunchFailed
     case codexWorkspaceFailed
+    case privateArchiveMissing
+    case handoffCancelled
 
     var errorDescription: String? {
         switch self {
@@ -111,6 +113,10 @@ enum ClaudeCLIHandoffError: LocalizedError, Equatable {
             return "Could not open the Codex app. Open it once from Applications, then try again."
         case .codexWorkspaceFailed:
             return "Could not prepare this recording's Codex workspace. Check available disk space and folder access, then try again."
+        case .privateArchiveMissing:
+            return "This recording's private original media is unavailable, so Codex cannot open a complete-source workspace."
+        case .handoffCancelled:
+            return "Codex handoff cancelled."
         }
     }
 
@@ -137,6 +143,10 @@ enum ClaudeCLIHandoffError: LocalizedError, Equatable {
             return "codex_app_launch_failed"
         case .codexWorkspaceFailed:
             return "codex_workspace_failed"
+        case .privateArchiveMissing:
+            return "private_archive_missing"
+        case .handoffCancelled:
+            return "handoff_cancelled"
         }
     }
 

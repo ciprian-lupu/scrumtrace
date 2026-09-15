@@ -393,6 +393,7 @@ final class SessionLibraryTests: XCTestCase {
             ("hasPack", "Bool"),
             ("packBytes", "Optional<Int>"),
             ("hasFullTranscriptArchive", "Bool"),
+            ("hasArchiveRecording", "Bool"), // Size/existence only; never video or transcript contents.
             ("isUnfinished", "Bool"),
             ("importOrigin", "Optional<SessionImportOrigin>")
         ]
@@ -406,6 +407,27 @@ final class SessionLibraryTests: XCTestCase {
         let counts = Mirror(reflecting: summary.taskCounts).children
         XCTAssertEqual(counts.compactMap(\.label), ["confirmed", "needsReview", "dropped"])
         XCTAssertTrue(counts.allSatisfy { $0.value is Int })
+    }
+
+    @MainActor
+    func testArchiveAvailabilityIsOnlyANonemptyRegularFileProbeAndRefreshesWithoutManifestEdits() async throws {
+        try await withFixture { f in
+            let library = SessionLibrary(vault: f.vault)
+            let movie = f.vault.sessionURL(id: f.completed).appendingPathComponent(ScrumTracePath.sessionMovie)
+            await library.refresh().value
+            XCTAssertFalse(library.entries.first { $0.id == f.completed }?.summary?.hasArchiveRecording == true)
+            try Data("synthetic movie".utf8).write(to: movie)
+            await library.refresh().value
+            XCTAssertTrue(library.entries.first { $0.id == f.completed }?.summary?.hasArchiveRecording == true)
+            try Data().write(to: movie)
+            await library.refresh().value
+            XCTAssertFalse(library.entries.first { $0.id == f.completed }?.summary?.hasArchiveRecording == true)
+            try FileManager.default.removeItem(at: movie)
+            try FileManager.default.createSymbolicLink(at: movie, withDestinationURL:
+                f.vault.sessionURL(id: f.completed).appendingPathComponent(ScrumTracePath.manifest))
+            await library.refresh().value
+            XCTAssertFalse(library.entries.first { $0.id == f.completed }?.summary?.hasArchiveRecording == true)
+        }
     }
 
     // MARK: Deletion

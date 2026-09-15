@@ -59,6 +59,11 @@ final class SessionController: ObservableObject {
         }
     }
 
+    var openAgentArchive: @MainActor (SessionVault, String) async throws -> Void = { vault, id in
+        try await vault.openPrivateArchiveInCodexApp(sessionId: id)
+    }
+    private(set) var codexArchiveTask: Task<Void, Never>?
+
     init(settings: AppSettings, vault: SessionVault = SessionVault()) {
         self.settings = settings
         self.vault = vault
@@ -478,7 +483,48 @@ final class SessionController: ObservableObject {
         openInLocalCLI(.chatGPT, sessionId: sessionId)
     }
 
+    /// Every entry point uses the same archive/name dialog and shared desktop project. Serialize the
+    /// potentially multi-GB copy with recording, processing, transfers and deletion.
+    @discardableResult
+    func openPrivateArchiveInCodex(sessionId: String? = nil) -> Task<Void, Never>? {
+        guard let id = sessionId ?? lastSessionId ?? manifest?.sessionId else {
+            statusLine = LocalCodingCLI.chatGPT.noSessionStatus
+            return nil
+        }
+        guard beginSessionTransfer() else {
+            statusLine = "Finish recording or processing before opening the archive in Codex."
+            return nil
+        }
+        statusLine = "Preparing archive for Codex…"
+        let task = Task { [self] in
+            defer {
+                endSessionTransfer()
+                codexArchiveTask = nil
+            }
+            do {
+                try await openAgentArchive(vault, id)
+                statusLine = "Opened archive in Codex"
+                AgentLog.event("codex_private_archive_handoff", ["session": id])
+            } catch let error as ClaudeCLIHandoffError {
+                statusLine = error.localizedDescription
+                if error != .handoffCancelled {
+                    AgentLog.event("codex_private_archive_handoff_fail", ["session": id, "reason": error.logReason])
+                }
+            } catch {
+                statusLine = ClaudeCLIHandoffError.codexWorkspaceFailed.localizedDescription
+                AgentLog.event("codex_private_archive_handoff_fail", ["session": id,
+                    "reason": ClaudeCLIHandoffError.codexWorkspaceFailed.logReason])
+            }
+        }
+        codexArchiveTask = task
+        return task
+    }
+
     func openInLocalCLI(_ cli: LocalCodingCLI, sessionId: String? = nil) {
+        guard codexArchiveTask == nil else {
+            statusLine = "Wait for the Codex archive copy to finish."
+            return
+        }
         guard let id = sessionId ?? lastSessionId ?? manifest?.sessionId else {
             statusLine = cli.noSessionStatus
             AgentLog.event(cli.logFail, ["reason": "no_session"])
@@ -491,6 +537,7 @@ final class SessionController: ObservableObject {
             AgentLog.event(cli.logSuccess, ["session": id, "destination": destination.rawValue])
         } catch let error as ClaudeCLIHandoffError {
             statusLine = error.localizedDescription
+            if error == .handoffCancelled { return }
             AgentLog.event(cli.logFail, [
                 "session": id,
                 "destination": destination.rawValue,

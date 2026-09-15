@@ -114,7 +114,7 @@ struct SessionTransfer {
         let sourceManifest = try read(ScrumTracePath.manifest, in: source)
         let paths: [String]
         if scope == .complete {
-            paths = try inventory(source, excludingTopLevel: [CodexWorkspace.directoryName])
+            paths = try inventory(source, excludingTopLevel: [CodexWorkspace.directoryName, CodexWorkspace.privateArchiveDirectoryName])
                 .filter { $0 != Self.indexName && Self.isSessionPath($0) }
         } else {
             let exportRoot = source.appendingPathComponent(ScrumTracePath.export)
@@ -254,7 +254,8 @@ struct SessionTransfer {
               retranscribe ? assessment.hasRecording : (assessment.hasRecording || assessment.hasTimedTranscript) else {
             throw SessionTransferError.missingSources
         }
-        let paths = try inventory(source, excludingTopLevel: [CodexWorkspace.directoryName]).filter(Self.isSessionPath)
+        let paths = try inventory(source, excludingTopLevel: [CodexWorkspace.directoryName, CodexWorkspace.privateArchiveDirectoryName])
+            .filter(Self.isSessionPath)
         try ensureSpace(paths: paths, source: source, destination: vault.rootURL)
         let stage = try makeStage(in: vault.rootURL)
         defer { ExportRel.removeOwnedSessionFolder(sessionURL: stage, sessionsRoot: vault.rootURL) }

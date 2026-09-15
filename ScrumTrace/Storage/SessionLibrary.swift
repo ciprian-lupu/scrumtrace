@@ -29,6 +29,7 @@ struct SessionExportProbe: Sendable, Hashable {
     var hasBrief = false
     var packBytes: Int?
     var hasFullTranscriptArchive = false
+    var hasArchiveRecording = false
 
     /// `regularFileByteCount` opens every component with `O_NOFOLLOW` and needs a regular file, so a
     /// planted `export/session-pack.zip` link into `archive/` is not a pack (C2, C3). Zero bytes counts
@@ -43,7 +44,8 @@ struct SessionExportProbe: Sendable, Hashable {
             hasAgentContext: bytes(ScrumTracePath.agentContext) != nil,
             hasBrief: bytes(ScrumTracePath.sessionBrief) != nil,
             packBytes: bytes(ScrumTracePath.packZip),
-            hasFullTranscriptArchive: bytes(ScrumTracePath.fullTranscript) != nil
+            hasFullTranscriptArchive: bytes(ScrumTracePath.fullTranscript) != nil,
+            hasArchiveRecording: bytes(ScrumTracePath.sessionMovie) != nil
         )
     }
 }
@@ -79,6 +81,8 @@ struct SessionSummary: Sendable, Identifiable, Hashable {
     private(set) var packBytes: Int?
     /// `archive/full_transcript.json` exists, so speakers can be reviewed.
     private(set) var hasFullTranscriptArchive: Bool
+    /// `archive/session.mp4` exists, so a user-confirmed private-source Codex workspace can be made.
+    private(set) var hasArchiveRecording: Bool
     /// The pipeline status is neither `idle` nor `completed`.
     let isUnfinished: Bool
     /// Transfer provenance only; no captured content or local credentials.
@@ -111,6 +115,7 @@ struct SessionSummary: Sendable, Identifiable, Hashable {
         hasPack = exportProbe.packBytes != nil
         packBytes = exportProbe.packBytes
         hasFullTranscriptArchive = exportProbe.hasFullTranscriptArchive
+        hasArchiveRecording = exportProbe.hasArchiveRecording
         switch manifest.pipelineStatus {
         case .idle, .completed:
             isUnfinished = false
@@ -127,6 +132,7 @@ struct SessionSummary: Sendable, Identifiable, Hashable {
         copy.hasPack = exportProbe.packBytes != nil
         copy.packBytes = exportProbe.packBytes
         copy.hasFullTranscriptArchive = exportProbe.hasFullTranscriptArchive
+        copy.hasArchiveRecording = exportProbe.hasArchiveRecording
         return copy
     }
 

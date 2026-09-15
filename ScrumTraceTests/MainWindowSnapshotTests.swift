@@ -42,6 +42,24 @@ final class MainWindowSnapshotTests: XCTestCase {
     // MARK: - Tests
 
     @MainActor
+    func testRenderCodexProjectNameAndArchiveDialogs() async throws {
+        let directory = try snapshotDirectory()
+        for includeArchive in [false, true] {
+            let (alert, _) = CodexAppHandoff.projectAlert(.init(
+                suggestedName: "Guildford Import Flow Review", existing: false, includeArchive: includeArchive
+            ))
+            alert.layout()
+            let window = alert.window
+            window.isReleasedWhenClosed = false
+            defer { window.close() }
+            window.orderFront(nil)
+            let size = try XCTUnwrap(window.contentView).bounds.size
+            XCTAssertGreaterThan(size.width, 300, "The NSAlert's laid-out size, not its empty fittingSize")
+            try await render(window, as: includeArchive ? "codex-archive-project" : "codex-export-project", into: directory, size: size) { true }
+        }
+    }
+
+    @MainActor
     func testRenderCodexDestinationSettings() async throws {
         let directory = try snapshotDirectory()
         try await withController(populated: false) { controller, _ in
