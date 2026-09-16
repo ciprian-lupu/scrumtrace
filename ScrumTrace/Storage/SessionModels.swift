@@ -2775,6 +2775,105 @@ struct WindowMetadata: Sendable, Hashable {
     var url: String?
 }
 
+/// The only automatically selected meeting text that may cross from the
+/// private transcript into `export/`. It deliberately has no source path,
+/// digest, or speaker catalogue: consumers get timestamps and export-relative
+/// evidence only.
+enum HandoffEvidenceState: String, Codable, Sendable, Hashable {
+    case visualAndText = "visual_and_text"
+    case transcriptOnly = "transcript_only"
+    case noteOnly = "note_only"
+    case unavailable = "unavailable_or_omitted"
+}
+
+struct HandoffPassage: Codable, Sendable, Hashable, Identifiable {
+    var id: String
+    var text: String
+    var startMedia: TimeInterval
+    var endMedia: TimeInterval
+    /// `room`, `system`, `mixed`, or `unclear`; never a private display name.
+    var source: String
+    var uncertain: Bool
+    var sliceIDs: [String]
+    var shotIDs: [String]
+    /// Empty in the archive manifest. Export projection fills only existing,
+    /// export-relative asset paths.
+    var evidenceMedia: [String]
+    var evidenceState: HandoffEvidenceState
+
+    enum CodingKeys: String, CodingKey {
+        case id, text, source, uncertain
+        case startMedia = "t_media_start"
+        case endMedia = "t_media_end"
+        case sliceIDs = "slice_ids"
+        case shotIDs = "shot_ids"
+        case evidenceMedia = "evidence_media"
+        case evidenceState = "evidence_state"
+    }
+}
+
+struct HandoffSection: Codable, Sendable, Hashable, Identifiable {
+    var id: String
+    var title: String
+    var startMedia: TimeInterval
+    var endMedia: TimeInterval
+    var passageIDs: [String]
+    var sliceIDs: [String]
+    var shotIDs: [String]
+    var evidenceState: HandoffEvidenceState
+
+    enum CodingKeys: String, CodingKey {
+        case id, title
+        case startMedia = "t_media_start"
+        case endMedia = "t_media_end"
+        case passageIDs = "passage_ids"
+        case sliceIDs = "slice_ids"
+        case shotIDs = "shot_ids"
+        case evidenceState = "evidence_state"
+    }
+}
+
+/// A bounded, extractive local outline. It is review-only: it never confers
+/// `confirmed` task status or adds transcript neighbourhoods to AI requests.
+struct HandoffBrief: Codable, Sendable, Hashable {
+    static let selectionVersion = 1
+    static let briefVersion = 1
+
+    var selectionVersion: Int
+    var briefVersion: Int
+    var selective: Bool
+    var sections: [HandoffSection]
+    var passages: [HandoffPassage]
+    /// A small diagnostic is intentionally typed and local; it distinguishes
+    /// no-consent/no-service/key failures without claiming the API is offline.
+    var evaluationDiagnostic: String?
+
+    enum CodingKeys: String, CodingKey {
+        case selectionVersion = "selection_version"
+        case briefVersion = "brief_version"
+        case selective
+        case sections, passages
+        case evaluationDiagnostic = "evaluation_diagnostic"
+    }
+}
+
+/// Canonical-only provenance for the bounded local export. Its fingerprint is
+/// deliberately private: it establishes whether a saved selection came from
+/// the same local inputs without becoming an export-side tracking identifier.
+struct LocalExportGeneration: Codable, Sendable, Hashable {
+    var selectionVersion: Int
+    var briefVersion: Int
+    var privateInputFingerprint: String
+    var rebuiltAt: Date
+
+    enum CodingKeys: String, CodingKey {
+        case selectionVersion = "selection_version"
+        case briefVersion = "brief_version"
+        case privateInputFingerprint = "private_input_fingerprint"
+        case rebuiltAt = "rebuilt_at"
+    }
+}
+
 struct SessionManifest: Codable, Sendable {
     var manifestVersion: String
     var sessionId: String
@@ -2790,6 +2889,10 @@ struct SessionManifest: Codable, Sendable {
     var includeFullTranscriptInZip: Bool
     var uploadConsent: UploadConsent
     var omitted: [OmittedAsset]
+    /// Optional for backwards-compatible decoding of every existing session.
+    var handoffBrief: HandoffBrief? = nil
+    /// Never projected to `export/session.manifest.json`.
+    var localExportGeneration: LocalExportGeneration? = nil
 
     enum CodingKeys: String, CodingKey {
         case manifestVersion = "manifest_version"
@@ -2806,6 +2909,8 @@ struct SessionManifest: Codable, Sendable {
         case includeFullTranscriptInZip = "include_full_transcript_in_zip"
         case uploadConsent = "upload_consent"
         case omitted
+        case handoffBrief = "handoff_brief"
+        case localExportGeneration = "local_export_generation"
     }
 
     static func makeNew(sessionId: String, product: ProductContext) -> SessionManifest {
@@ -2823,7 +2928,9 @@ struct SessionManifest: Codable, Sendable {
             completedStages: [],
             includeFullTranscriptInZip: false,
             uploadConsent: .denied,
-            omitted: []
+            omitted: [],
+            handoffBrief: nil,
+            localExportGeneration: nil
         )
     }
 

@@ -303,6 +303,57 @@ final class SessionController: ObservableObject {
         Task { await runProcessor(sessionId: sessionId, retry: retry) }
     }
 
+    /// Rebuild the bounded local outline and selected evidence without asking
+    /// for upload consent or consulting today's provider/speech settings.
+    func rebuildLocalExport(sessionId: String) {
+        guard !isBusy, !isRecording, !startInFlight else {
+            statusLine = isBusy ? "Already processing a session" : "Stop recording before rebuilding the local export"
+            AgentLog.event("local_rebuild_ignored", ["reason": isBusy ? "busy" : "recording", "session": sessionId])
+            return
+        }
+        guard AgentLog.setSessionContext(sessionId) else {
+            statusLine = "Could not bind local rebuild diagnostics to this session"
+            AgentLog.event("local_rebuild_ignored", ["reason": "session_context", "session": sessionId])
+            return
+        }
+        guard processor != nil else {
+            statusLine = "Local export processor is not available"
+            AgentLog.clearSessionContext(matching: sessionId)
+            return
+        }
+        isBusy = true
+        lastSessionId = sessionId
+        AgentLog.event("local_rebuild_begin", ["session": sessionId])
+        Task { await runLocalExportRebuild(sessionId: sessionId) }
+    }
+
+    private func runLocalExportRebuild(sessionId: String) async {
+        defer {
+            isBusy = false
+            AgentLog.clearSessionContext(matching: sessionId)
+        }
+        do {
+            let pins = vault.loadPinTimes(sessionId: sessionId)
+            let result = try await processor!.rebuildLocalExport(
+                sessionId: sessionId,
+                pinTimes: pins
+            ) { [weak self] status, line in
+                AgentLog.event("pipeline_status", ["status": status.rawValue, "line": AgentLog.sanitize(line)])
+                self?.phase = status
+                self?.statusLine = line
+            }
+            manifest = result
+            lastSessionId = result.sessionId
+            phase = result.pipelineStatus
+            statusLine = "Local export rebuilt"
+            AgentLog.event("local_rebuild_ok", ["session": result.sessionId, "slices": String(result.slices.count)])
+        } catch {
+            lastError = error.localizedDescription
+            statusLine = error.localizedDescription
+            AgentLog.event("local_rebuild_fail", ["session": sessionId, "error": AgentLog.sanitize(error.localizedDescription)])
+        }
+    }
+
     /// A Retry Analysis run, with the last session the controller named before the retry started.
     private struct RetryOrigin {
         let lastSessionId: String?

@@ -230,6 +230,12 @@ Zip is built from an **explicit allow-list** of paths under `export/`, never by 
 - Copy: destination provider, endpoint, model; “stills and clip audio will leave this Mac”.
 - Approve / Cancel. Stored on the canonical manifest. Retry Analysis does not re-prompt unless destination or payload kind changed.
 
+### 4. Bounded local handoff outline (no provider required)
+- Every completed export includes a deterministic, bounded local timeline selected from Shots, Pins and score-ranked transcript passages. It is an extractive review aid, never a generated meeting summary.
+- The canonical manifest stores no export-relative media path in this outline. During projection, each selected passage may receive only an allow-listed existing export clip or still link; omitted evidence is removed before the HTML and zip are written.
+- The brief labels this material **Local timeline (review-only)**, preserves source wording, and does not infer decisions, owners or deadlines. A session with no usable local evidence says so explicitly.
+- **Rebuild local export** is an existing-session action. It uses the saved transcript, events and media already on disk, makes no provider request, and requires no upload consent. If the saved transcript cannot be recovered, it reports that recovery is required rather than silently inventing content.
+
 ---
 
 ## 6. Capture & Speech Pipeline
@@ -393,9 +399,10 @@ Module list is unchanged from the previous revision. Add `Export/ExportProjector
 
 `idle → recording ⇄ paused → transcribing → slicing → evaluating → synthesizing → completed`
 
-- API / auth / timeout: `analysis_status: offline_failed`; still build `export/` with `[Requires Manual Review - API Offline]`.
+- API / auth / timeout: `analysis_status: offline_failed`; still build `export/` with review-only local evidence. The fallback must not claim an API failure when no provider was selected or consent was not granted.
 - Retry Analysis: skip completed transcription/slicing; re-evaluate failed slices **only if** `upload_consent.approved` is still valid for that destination.
-- Cancelled or missing consent: skip evaluate, do not upload, still synthesize local export from shots.
+- Cancelled or missing consent: skip evaluate, do not upload, still synthesize the bounded local export from saved evidence.
+- Rebuild local export: reuse already saved local artifacts only; it neither creates a provider request nor changes upload-consent state.
 
 ---
 

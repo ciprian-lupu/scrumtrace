@@ -2,7 +2,7 @@
 
 Read this before changing product code, gates, remotes, or TCC/signing. The working spec is [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md). Mac debug loop: [AGENT_DEBUG.md](AGENT_DEBUG.md). Hardware results: [samples/GATE_LOG.md](samples/GATE_LOG.md) (empty until a Mac run).
 
-Snapshot date: **2026-09-14** (audit TASK-01–17 plus leftover *code* items closed; all-gate inspectors: `inspect_all_gates.py` / `mac_all_gates.sh`; user-approved main window and its review fixes recorded; user-approved multi-provider comparison recorded). Hardware gates still open. Update the snapshot when status in this file changes.
+Snapshot date: **2026-09-16** (audit TASK-01–17 plus leftover *code* items closed; bounded local outline/rebuild implementation added; all-gate inspectors: `inspect_all_gates.py` / `mac_all_gates.sh`; user-approved main window and its review fixes recorded; user-approved multi-provider comparison recorded). Hardware gates still open. Update the snapshot when status in this file changes.
 
 ## What this is
 
@@ -52,6 +52,8 @@ Hard rules:
 **Hardware gates are not closed.** `samples/GATE_LOG.md` has no PASS rows. No Mac has run Gate −0 after these fixes. Treat Record, pause, Whisper, and drift as **unproven** until that log is filled.
 
 Speaker review, Settings and menu stabilization were explicitly requested by the user on 2026-09-12 and are implemented and locally verified. Session-local diarization, manual names/corrections, timed clip transcripts and room/call mixing are within that approved scope. Native tests, Linux contracts, Settings and speaker-review UI checks pass; real multi-person accuracy and hardware gates remain open. The status-bar menu still needs a complete visual walkthrough. Still deferred: 60-minute drift claims and unrelated new product surfaces.
+
+The default bounded local handoff outline and **Rebuild local export** action are implemented and covered by native selector/outline tests. They are strictly local: they use saved transcript, Shot, Pin and export evidence, make no provider request, and do not alter upload consent. This is not a hardware gate and does not establish recording, transcription or media-playback behavior on a real capture.
 
 The user approved multi-provider comparison on 2026-09-13. Selected services evaluate identical prompt/JPEG/transcript inputs serially, with per-pair destination and SHA-256 provenance. Comparison excludes video. Retry preserves unchanged successes and refuses changed inputs. Live provider and hardware acceptance remain open.
 

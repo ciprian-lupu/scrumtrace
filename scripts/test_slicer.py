@@ -71,6 +71,9 @@ def main() -> None:
         120,
     )
     assert set(later_higher[0][3]) == {"archive/shots/001.png", "archive/shots/002.png"}
+    # The native regression is in LocalExportOutlineTests; this contract mirror
+    # keeps the center/containment invariant visible to the Linux gate too.
+    assert later_higher[0][0] <= 28 <= later_higher[0][1], "later higher-priority Shot must remain in the clamped clip"
     print("slicer cap ok")
 
 

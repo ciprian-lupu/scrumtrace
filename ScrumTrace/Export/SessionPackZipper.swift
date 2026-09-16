@@ -805,6 +805,28 @@ enum PackBudget {
             }
             return next
         }
+        if var brief = copy.handoffBrief {
+            for index in brief.passages.indices {
+                brief.passages[index].evidenceMedia = brief.passages[index].evidenceMedia.filter {
+                    !droppedHandoff($0, dropped: dropped)
+                }
+                brief.passages[index].evidenceState = brief.passages[index].evidenceMedia.isEmpty
+                    ? .transcriptOnly : .visualAndText
+            }
+            for index in brief.sections.indices {
+                let linked = brief.passages.filter { brief.sections[index].passageIDs.contains($0.id) }
+                if linked.contains(where: { $0.evidenceState == .visualAndText }) {
+                    brief.sections[index].evidenceState = .visualAndText
+                } else if !linked.isEmpty {
+                    brief.sections[index].evidenceState = .transcriptOnly
+                } else if !brief.sections[index].shotIDs.isEmpty {
+                    brief.sections[index].evidenceState = .noteOnly
+                } else {
+                    brief.sections[index].evidenceState = .unavailable
+                }
+            }
+            copy.handoffBrief = brief
+        }
         copy.omitted = omitted
         if dropped.contains("full_transcript.json") {
             copy.includeFullTranscriptInZip = false

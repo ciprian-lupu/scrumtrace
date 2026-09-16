@@ -99,6 +99,7 @@ struct SessionBriefRenderer {
             "{{TECH_STACK}}": HTMLEscaper.escape(manifest.productContext.techStack),
             "{{STATUS_HTML}}": presentation.statusHTML,
             "{{SUMMARY_HTML}}": presentation.summaryHTML,
+            "{{LOCAL_OUTLINE_HTML}}": presentation.localOutlineHTML,
             "{{SPEAKERS_HTML}}": presentation.speakersHTML,
             "{{DOWNLOADS_HTML}}": presentation.downloadsHTML,
             "{{REVIEW_OPEN}}": confirmed.isEmpty ? "open" : "",
@@ -439,10 +440,11 @@ struct SessionBriefRenderer {
         </header>
         <nav class="brief-nav" aria-label="Brief sections">
           <a href="#summary">Summary</a><a href="#decisions">Decisions</a><a href="#actions">Actions</a>
-          <a href="#questions">Questions</a><a href="#evidence">Evidence</a><a href="#transcript">Transcript</a><a href="#exports">Export</a>
+          <a href="#questions">Questions</a><a href="#local-outline">Timeline</a><a href="#evidence">Evidence</a><a href="#transcript">Transcript</a><a href="#exports">Export</a>
         </nav>
         {{STATUS_HTML}}
         {{SUMMARY_HTML}}
+        {{LOCAL_OUTLINE_HTML}}
         {{SPEAKERS_HTML}}
         {{TIMELINE_HTML}}
         <section id="evidence">

@@ -8,7 +8,13 @@ struct AgentContextRenderer {
         lines.append("Drop **this export folder** into a coding-agent workspace. Read this file first, then open the linked evidence. Do not guess facts that exist only in a screenshot or clip. Never open the private capture folder.")
         lines.append("")
         lines.append("## Product")
-        if let name = manifest.productContext.contextName {
+        let hasContext = !manifest.productContext.appName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || !manifest.productContext.repoURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || !manifest.productContext.techStack.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || manifest.productContext.contextName != nil
+        if !hasContext {
+            lines.append("Product context was not provided.")
+        } else if let name = manifest.productContext.contextName {
             lines.append("- Context: \(PromptTemplates.wrapUntrustedInline(name))")
         }
         lines.append("- App: \(PromptTemplates.wrapUntrustedInline(manifest.productContext.appName))")
@@ -16,6 +22,7 @@ struct AgentContextRenderer {
         lines.append("- Stack: \(PromptTemplates.wrapUntrustedInline(manifest.productContext.techStack))")
         lines.append("- Media duration: \(Self.clock(manifest.duration.mediaSeconds)) (wall \(Self.clock(manifest.duration.wallSeconds)), \(Self.pauseLabel(manifest.pauses.count)))")
         lines.append("")
+        appendLocalOutline(manifest, to: &lines)
         lines.append(ComparisonReport.markdown(manifest))
         let confirmed = manifest.tasks.filter { $0.status == .confirmed }
         let review = manifest.tasks.filter { $0.status == .needsReview }
@@ -74,6 +81,34 @@ struct AgentContextRenderer {
         lines.append("## Manifest")
         lines.append("All timestamps are `t_media`. Source of truth: `session.manifest.json`.")
         return lines.joined(separator: "\n")
+    }
+
+    private func appendLocalOutline(_ manifest: SessionManifest, to lines: inout [String]) {
+        guard let brief = manifest.handoffBrief else { return }
+        lines.append("## Local timeline")
+        lines.append("A selective, extractive outline from selected passages. It is review-only; static frames cannot prove a clip-only sequence.")
+        if let diagnostic = brief.evaluationDiagnostic {
+            lines.append("- Evaluation status: `\(diagnostic)`")
+        }
+        if brief.sections.isEmpty {
+            lines.append("_No intelligible selected passages were available. The export does not invent a procedure._")
+            lines.append("")
+            return
+        }
+        for section in brief.sections {
+            lines.append("")
+            lines.append("### \(PromptTemplates.wrapUntrustedInline(section.title))")
+            lines.append("- t_media \(Self.clock(section.startMedia))–\(Self.clock(section.endMedia)) · \(section.evidenceState.rawValue.replacingOccurrences(of: "_", with: " "))")
+            for id in section.passageIDs {
+                guard let passage = brief.passages.first(where: { $0.id == id }) else { continue }
+                let uncertainty = passage.uncertain ? " · speaker/source uncertain" : ""
+                lines.append("- [t_media \(Self.clock(passage.startMedia))–\(Self.clock(passage.endMedia)) · \(passage.source)\(uncertainty)]: \(PromptTemplates.wrapUntrustedInline(passage.text))")
+                for evidence in passage.evidenceMedia {
+                    lines.append("  - `\(PromptTemplates.wrapUntrustedInline(evidence))`")
+                }
+            }
+        }
+        lines.append("")
     }
 
     func prompt(manifest: SessionManifest, sessionURL: URL) -> String {

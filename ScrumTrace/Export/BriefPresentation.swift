@@ -64,6 +64,8 @@ struct BriefPresentation {
         let introduction: String
         if !confirmed.isEmpty {
             introduction = "Highlights from the selected evidence. Follow each item to its supporting clip, image and quotes."
+        } else if manifest.handoffBrief?.sections.isEmpty == false {
+            introduction = "A bounded local timeline is available below. It quotes selected passages and keeps every item review-only."
         } else if manifest.slices.contains(where: { $0.analysisStatus == .success }) {
             introduction = "No confirmed findings from this analysis. Check the review items before drawing conclusions."
         } else {
@@ -83,6 +85,32 @@ struct BriefPresentation {
           \(outcome(id: "questions", title: "Open questions", kinds: [.openQuestion], empty: "No open questions captured in confirmed evidence."))
         </div>
         """
+    }
+
+    var localOutlineHTML: String {
+        guard let brief = manifest.handoffBrief else { return "" }
+        let status = brief.evaluationDiagnostic.map { "<p class=\"muted\">Evaluation status: \(escape($0.replacingOccurrences(of: "_", with: " "))).</p>" } ?? ""
+        guard !brief.sections.isEmpty else {
+            return "<section id=\"local-outline\" class=\"brief-panel\"><h2>Local timeline</h2><p>No intelligible selected passages were available. This export does not invent a procedure.</p>\(status)</section>"
+        }
+        let sections = brief.sections.map { section -> String in
+            let selectedPassages: [HandoffPassage] = section.passageIDs.compactMap { id in
+                brief.passages.first(where: { passage in passage.id == id })
+            }
+            let passages = selectedPassages.map { passage -> String in
+                let source = passage.uncertain ? "\(passage.source) · uncertain" : passage.source
+                let evidenceState = escape(passage.evidenceState.rawValue.replacingOccurrences(of: "_", with: " "))
+                let links = passage.evidenceMedia.map { path in
+                    "<a class=\"export-link\" href=\"\(escape(path))\">\(path.hasSuffix(".mp4") ? "Video sample" : "Visual reference")</a>"
+                }.joined(separator: " ")
+                let evidence = links.isEmpty ? "" : "<p class=\"outline-evidence\">\(links)</p>"
+                return "<blockquote><span class=\"spk\">\(escape(source))</span><span class=\"when\">t_media \(Self.clock(passage.startMedia))–\(Self.clock(passage.endMedia)) · \(evidenceState)</span>\(escape(passage.text))</blockquote>\(evidence)"
+            }.joined()
+            let sectionState = escape(section.evidenceState.rawValue.replacingOccurrences(of: "_", with: " "))
+            let content = passages.isEmpty ? "<p class=\"muted\">Human note only; no selected transcript passage.</p>" : passages
+            return "<article class=\"outline-section\"><h3>\(escape(section.title))</h3><p class=\"muted\">t_media \(Self.clock(section.startMedia))–\(Self.clock(section.endMedia)) · \(sectionState)</p>\(content)</article>"
+        }.joined()
+        return "<section id=\"local-outline\" class=\"brief-panel\"><h2>Local timeline</h2><p>Selective, extractive passages from selected evidence. Review before treating speech as a fact; static frames cannot prove a clip-only sequence.</p>\(status)\(sections)</section>"
     }
 
     private func outcome(id: String, title: String, kinds: [TaskKind], empty: String) -> String {
@@ -146,6 +174,14 @@ struct BriefPresentation {
         """
     }
 
+    private static func clock(_ seconds: TimeInterval) -> String {
+        let total = Int(seconds.rounded())
+        let h = total / 3600
+        let m = (total % 3600) / 60
+        let s = total % 60
+        return h > 0 ? String(format: "%d:%02d:%02d", h, m, s) : String(format: "%d:%02d", m, s)
+    }
+
     static let css = """
     header.slate{grid-template-columns:minmax(0,1fr);align-items:start;gap:16px}
     header.slate h1{overflow-wrap:anywhere}header.slate h1 em{font:14px var(--mono,monospace);line-height:1.6;letter-spacing:normal}
@@ -160,6 +196,7 @@ struct BriefPresentation {
     .brief-list p{font-size:.9rem;color:var(--muted);margin:6px 0}.muted{color:var(--muted)}
     .take h3{font-size:1.4rem;line-height:1.3;margin:12px 0}.take h3,.brief-list a,.meta a,figcaption{overflow-wrap:anywhere}.clip-transcript{width:100%;margin-top:14px}
     .clip-transcript summary{cursor:pointer;padding:10px 0}.clip-meta{font-size:.85rem;color:var(--muted)}
+    .outline-section{border-top:1px solid var(--line);padding-top:14px;margin-top:16px}.outline-section h3{margin:0 0 6px;overflow-wrap:anywhere}.outline-evidence{display:flex;flex-wrap:wrap;gap:8px}
     @media(max-width:900px){.status-grid,.outcome-grid{grid-template-columns:1fr}.shell{padding:24px 5vw 60px;margin-left:12px}.sprocket{display:none}}
     """
 }

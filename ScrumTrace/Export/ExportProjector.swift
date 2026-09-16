@@ -172,6 +172,15 @@ struct ExportProjector {
         projected.shots = projectedShots
         projected.slices = projectedSlices
         projected.tasks = projectedTasks
+        // The input fingerprint is canonical-only provenance, never handoff
+        // metadata. The public brief already carries its bounded versions.
+        projected.localExportGeneration = nil
+        projected.handoffBrief = projectHandoffBrief(
+            manifest.handoffBrief,
+            slices: projectedSlices,
+            shots: projectedShots,
+            sessionURL: sessionURL
+        )
         projected.includeFullTranscriptInZip = includeFullTranscript
 
         if includeFullTranscript {
@@ -191,6 +200,53 @@ struct ExportProjector {
         )
         try writeProjectionManifest(projected, sessionURL: sessionURL)
         return ExportProjection(manifest: projected, omitted: projected.omitted)
+    }
+
+    /// Rebind local-outline references after the actual projection decided
+    /// which clips and stills survived. This is the sole place where the
+    /// bounded brief receives media links; archive paths never cross here.
+    private func projectHandoffBrief(
+        _ brief: HandoffBrief?,
+        slices: [SliceRecord],
+        shots: [ShotRecord],
+        sessionURL: URL
+    ) -> HandoffBrief? {
+        guard var brief else { return nil }
+        func evidence(sliceIDs: [String], shotIDs: [String]) -> [String] {
+            let fromSlices = slices.filter { sliceIDs.contains($0.sliceId) }.flatMap { slice in
+                [slice.exportClipPath, slice.clipPath].compactMap { $0 } + slice.stills
+            }
+            let fromShots = shots.filter { shotIDs.contains($0.id) }.flatMap { shot in
+                [shot.exportPath, shot.annotatedPath, shot.rawPath].compactMap { $0 }
+            }
+            var seen = Set<String>()
+            return (fromSlices + fromShots).compactMap { path in
+                guard let rel = ExportRel.handoffPath(path),
+                      ExportRel.existingSessionFile(ExportRel.sessionPath(rel), sessionURL: sessionURL) != nil,
+                      seen.insert(rel).inserted else { return nil }
+                return rel
+            }
+        }
+        for index in brief.passages.indices {
+            let links = evidence(sliceIDs: brief.passages[index].sliceIDs, shotIDs: brief.passages[index].shotIDs)
+            brief.passages[index].evidenceMedia = links
+            brief.passages[index].evidenceState = links.isEmpty ? .transcriptOnly : .visualAndText
+        }
+        for index in brief.sections.indices {
+            let section = brief.sections[index]
+            let linked = brief.passages.filter { section.passageIDs.contains($0.id) }
+            let hasVisual = linked.contains { $0.evidenceState == .visualAndText }
+            if hasVisual {
+                brief.sections[index].evidenceState = .visualAndText
+            } else if !linked.isEmpty {
+                brief.sections[index].evidenceState = .transcriptOnly
+            } else if !section.shotIDs.isEmpty {
+                brief.sections[index].evidenceState = .noteOnly
+            } else {
+                brief.sections[index].evidenceState = .unavailable
+            }
+        }
+        return brief
     }
 
     /// C2/D5: rebuild `export/` from this projection. Stale `full_transcript.json`

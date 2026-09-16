@@ -59,6 +59,8 @@ final class SessionProcessor: @unchecked Sendable {
         var manifest = try vault.loadManifest(id: sessionId)
         manifest.slices = []
         manifest.tasks = []
+        manifest.handoffBrief = nil
+        manifest.localExportGeneration = nil
         manifest.completedStages.removeAll { $0 == .slicing || $0 == .evaluating || $0 == .synthesizing || $0 == .completed }
         manifest.markCompleted(.transcribing)
         manifest.pipelineStatus = .transcribing
@@ -421,6 +423,76 @@ final class SessionProcessor: @unchecked Sendable {
                                       transcript: transcript, timing: &timing, onStatus: onStatus)
     }
 
+    /// Explicitly rebuilds only the local selection, clips, bounded outline,
+    /// and export for a completed session. It never prepares Whisper, invokes
+    /// diarization, asks for consent, or constructs an AI provider.
+    func rebuildLocalExport(
+        sessionId: String,
+        pinTimes: [TimeInterval],
+        onStatus: @escaping @MainActor (PipelineStatus, String) -> Void
+    ) async throws -> SessionManifest {
+        let sessionURL = vault.sessionURL(id: sessionId)
+        try requireUsableSession(sessionURL, id: sessionId)
+        var manifest = try vault.loadManifest(id: sessionId)
+        guard let transcript = SpeakerTimeline.load(sessionURL: sessionURL),
+              transcript.hasTimedSegments, !transcript.needsTranscriptionRetry else {
+            throw SettingsValidationError("Transcription recovery is required before rebuilding this local export.")
+        }
+        await onStatus(.slicing, "Rebuilding local evidence selection…")
+        refreshShotsFromDisk(sessionId: sessionId, manifest: &manifest)
+        let slices = slicer.slice(
+            shots: manifest.shots,
+            pins: pinTimes,
+            transcript: transcript,
+            mediaDuration: manifest.duration.mediaSeconds
+        )
+        var rebuilt: [SliceRecord] = []
+        for slice in slices {
+            guard ExportRel.existingSessionFile(ScrumTracePath.sessionMovie, sessionURL: sessionURL) != nil else {
+                rebuilt.append(slice.withExistingMedia(sessionURL: sessionURL))
+                continue
+            }
+            do {
+                let clipped = try await exporter.export(
+                    sessionURL: sessionURL,
+                    slice: slice,
+                    mediaDuration: manifest.duration.mediaSeconds
+                )
+                rebuilt.append(clipped.withExistingMedia(sessionURL: sessionURL))
+            } catch {
+                // A failed new clip must not inherit a same-ordinal old clip.
+                var failed = slice
+                failed.clipPath = nil
+                failed.exportClipPath = nil
+                rebuilt.append(failed.withExistingMedia(sessionURL: sessionURL))
+            }
+        }
+        manifest.slices = rebuilt
+        // Different slices are different provider inputs. Preserve neither a
+        // provider finding nor its fingerprint under a reused ordinal.
+        manifest.tasks = []
+        for index in manifest.slices.indices {
+            manifest.slices[index].analysisStatus = .skipped
+            manifest.slices[index].serviceEvaluations = []
+            manifest.slices[index].mediaSent = nil
+        }
+        manifest.completedStages.removeAll { $0 == .evaluating || $0 == .synthesizing || $0 == .completed }
+        manifest.markCompleted(.slicing)
+        mergeUncoveredReview(manifest: &manifest, kept: [])
+        buildLocalBrief(manifest: &manifest, transcript: transcript)
+        try vault.write(manifest: &manifest)
+        var timing = PipelineTiming.load(sessionURL: sessionURL) ?? PipelineTiming()
+        await onStatus(.synthesizing, "Writing rebuilt local export…")
+        return try await finishExport(
+            sessionId: sessionId,
+            sessionURL: sessionURL,
+            manifest: &manifest,
+            transcript: transcript,
+            timing: &timing,
+            onStatus: onStatus
+        )
+    }
+
     /// Local-only edits never call a provider or rerun task synthesis. Names
     /// apply to this recording only. Reanalysis is explicitly selected in UI.
     func updateSpeakers(sessionId: String, names: [String: String]?, assignments: [Int: String] = [:], reanalyze: Bool,
@@ -454,6 +526,7 @@ final class SessionProcessor: @unchecked Sendable {
                 manifest.slices[index] = try await exporter.export(sessionURL: sessionURL, slice: manifest.slices[index], mediaDuration: manifest.duration.mediaSeconds)
             }
         }
+        buildLocalBrief(manifest: &manifest, transcript: transcript)
         try vault.write(manifest: &manifest)
         var timing = PipelineTiming.load(sessionURL: sessionURL) ?? PipelineTiming()
         _ = try await finishExport(sessionId: sessionId, sessionURL: sessionURL, manifest: &manifest,
@@ -464,6 +537,7 @@ final class SessionProcessor: @unchecked Sendable {
     private func finishExport(sessionId: String, sessionURL: URL, manifest: inout SessionManifest,
                               transcript: FullTranscript, timing: inout PipelineTiming,
                               onStatus: @escaping @MainActor (PipelineStatus, String) -> Void) async throws -> SessionManifest {
+        buildLocalBrief(manifest: &manifest, transcript: transcript)
         let excerpts = excerptMap(manifest: manifest, transcript: transcript)
         let projector = ExportProjector()
         var projection = try projector.project(
@@ -649,6 +723,7 @@ final class SessionProcessor: @unchecked Sendable {
         manifest: inout SessionManifest,
         transcript: FullTranscript
     ) throws {
+        buildLocalBrief(manifest: &manifest, transcript: transcript)
         let excerpts = excerptMap(manifest: manifest, transcript: transcript)
         let projector = ExportProjector()
         var projection = try projector.project(
@@ -1371,6 +1446,49 @@ final class SessionProcessor: @unchecked Sendable {
         return text.count > 100 ? String(text.prefix(99)) + "…" : text
     }
 
+    private func buildLocalBrief(manifest: inout SessionManifest, transcript: FullTranscript) {
+        let builder = LocalBriefBuilder()
+        manifest.handoffBrief = builder.build(manifest: manifest, transcript: transcript)
+        manifest.localExportGeneration = builder.generation(manifest: manifest, transcript: transcript)
+        applyLocalBriefToReviewRows(manifest: &manifest)
+    }
+
+    /// Local fallback rows are useful pointers into the bounded outline, not
+    /// provider findings. Keep them review-only and never claim that speech
+    /// alone established an observed visual fact.
+    private func applyLocalBriefToReviewRows(manifest: inout SessionManifest) {
+        guard let brief = manifest.handoffBrief else { return }
+        let providerFailed = brief.evaluationDiagnostic == "provider_failure"
+        for index in manifest.tasks.indices where manifest.tasks[index].status == .needsReview && manifest.tasks[index].serviceId == nil {
+            let sliceID = manifest.tasks[index].sourceSliceId
+            guard let section = brief.sections.first(where: { $0.sliceIDs.contains(sliceID) }) else { continue }
+            let passage = section.passageIDs.compactMap { id in brief.passages.first { $0.id == id } }.first
+            let generic = manifest.tasks[index].title.hasPrefix("Unanalyzed slice") || manifest.tasks[index].title == "Marked moment"
+            if generic { manifest.tasks[index].title = section.title }
+            if manifest.tasks[index].stated.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, let passage {
+                manifest.tasks[index].stated = passage.text
+            }
+            if manifest.tasks[index].observed.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                manifest.tasks[index].observed = !manifest.tasks[index].evidenceMedia.isEmpty
+                    ? "A visual reference is selected for manual review."
+                    : "No exported visual reference is available for this passage."
+            }
+            manifest.tasks[index].inferred = "Local extractive passage; requires manual review."
+            if !providerFailed {
+                manifest.tasks[index].agentInstructions = manifest.tasks[index].agentInstructions
+                    .replacingOccurrences(of: "[Requires Manual Review - API Offline]", with: "[Requires Manual Review]")
+            }
+            if manifest.tasks[index].quotes.isEmpty, let passage {
+                manifest.tasks[index].quotes = [QuoteRecord(
+                    speaker: passage.uncertain ? "Speaker/source uncertain" : passage.source,
+                    text: passage.text,
+                    tMediaStart: passage.startMedia,
+                    tMediaEnd: passage.endMedia
+                )]
+            }
+        }
+    }
+
     private func fallbackTask(
         shot: ShotRecord,
         slice: SliceRecord,
@@ -1409,7 +1527,7 @@ final class SessionProcessor: @unchecked Sendable {
             observed: "Human-captured frame at t_media \(shot.tMedia)s.",
             stated: shot.note,
             inferred: error.map { "Analysis unavailable: \($0.localizedDescription)" } ?? "Requires manual review.",
-            agentInstructions: "[Requires Manual Review - API Offline] \(AgentInstructionTemplate.render(kind: .bug, product: product))",
+            agentInstructions: "[Requires Manual Review] \(AgentInstructionTemplate.render(kind: .bug, product: product))",
             quotes: [],
             evidenceMedia: uniquedPaths(evidence, sessionURL: sessionURL),
             confidence: 0
