@@ -1464,6 +1464,8 @@ def test_pipeline_timing_stays_in_archive() -> None:
     assert "styleMask: [.borderless, .nonactivatingPanel, .resizable]" in hud
     assert "performDrag(with: event)" in hud
     assert "sharingType = .none" in hud
+    shot_sharing = (ROOT / "ScrumTrace" / "UI" / "ShotNoteWindow.swift").read_text()
+    assert "sharingType = .none" in shot_sharing
     assert "aspectRatio = RecordingHUDLayout.baseSize" in hud
     assert "func setMinified(_ minified: Bool)" in hud
     assert "isMinified = false" in hud.split("func setVisible(")[1].split("func refresh()")[0]

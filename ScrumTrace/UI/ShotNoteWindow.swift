@@ -342,6 +342,8 @@ final class ShotNoteWindow: NSPanel, NSTextFieldDelegate {
         title = "ScrumTrace shot"
         isFloatingPanel = true
         level = .modalPanel
+        // Notes stay private: hidden from screen sharing and display capture.
+        sharingType = .none
         hidesOnDeactivate = false
         becomesKeyOnlyIfNeeded = true
         animationBehavior = .none
