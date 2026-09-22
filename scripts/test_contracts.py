@@ -1463,6 +1463,7 @@ def test_pipeline_timing_stays_in_archive() -> None:
     # Drag, edge-resize and minify never turn the HUD into a key or activating window.
     assert "styleMask: [.borderless, .nonactivatingPanel, .resizable]" in hud
     assert "performDrag(with: event)" in hud
+    assert "sharingType = .none" in hud
     assert "aspectRatio = RecordingHUDLayout.baseSize" in hud
     assert "func setMinified(_ minified: Bool)" in hud
     assert "isMinified = false" in hud.split("func setVisible(")[1].split("func refresh()")[0]

@@ -89,6 +89,8 @@ enum RecordingHUDLayout {
 /// whole pill scales, aspect locked), and minified to dot + clock with the
 /// chevron or a double-click. Its frame is remembered across recordings; each
 /// recording starts expanded so Stop is always one click away.
+/// It is excluded from screen sharing and display capture, so people on a
+/// call see the demo but never the pill.
 final class RecordingHUDWindow: NSPanel {
     private let controller: SessionController
     private let defaults: UserDefaults
@@ -133,6 +135,8 @@ final class RecordingHUDWindow: NSPanel {
         isFloatingPanel = true
         becomesKeyOnlyIfNeeded = false
         animationBehavior = .none
+        // Invisible to screen sharing (Meet, Teams, Zoom) and to any display capture.
+        sharingType = .none
         isMovableByWindowBackground = false
         minSize = RecordingHUDLayout.minSize()
         maxSize = RecordingHUDLayout.maxSize()

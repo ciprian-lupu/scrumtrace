@@ -100,6 +100,7 @@ final class RecordingHUDTests: XCTestCase {
             XCTAssertTrue(hud.styleMask.contains(.borderless))
             XCTAssertFalse(hud.canBecomeKey)
             XCTAssertFalse(hud.canBecomeMain)
+            XCTAssertEqual(hud.sharingType, .none, "Screen sharing in Meet, Teams or Zoom never shows the pill")
             XCTAssertFalse(hud.isMovableByWindowBackground, "The content view drags the panel itself so a double-click can minify it")
             XCTAssertEqual(hud.minSize, Layout.minSize())
             XCTAssertEqual(hud.maxSize, Layout.maxSize())
