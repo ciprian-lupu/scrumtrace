@@ -70,6 +70,7 @@ samples/mock-session/      Phase -1 export pack + HANDOFF_LOG.md
 ScrumTrace/                Swift app (sandbox off)
   App/                     settings, delegate + MainWindowPresenter, entry
   UI/                      menu bar, HUD, Shot, hotkeys, settings
+    RecordingHUDWindow.swift draggable, edge-resizable, minifiable recording pill (frame in `scrumtrace.hud.frame`)
     MainWindow.swift       sections, split view, live banner, Dock seam
     OverviewView.swift     readiness, Start recording, needs attention
     RecordingsView.swift   session table, detail, actions, export/ drag
