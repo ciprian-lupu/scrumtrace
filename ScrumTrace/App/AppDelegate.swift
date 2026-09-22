@@ -86,6 +86,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             showMainWindow(source: .launch)
         }
         OnboardingWindow.presentIfNeeded()
+        // A previous process died while transcribing, slicing, evaluating or synthesizing: finish that recording now.
+        controller.resumeInterruptedSession()
     }
 
     func applicationWillTerminate(_ notification: Notification) {

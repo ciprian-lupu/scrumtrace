@@ -557,10 +557,26 @@ final class MenuBarController: NSObject {
         controller.relaunchForPermissions()
     }
     @objc private func quit() {
-        AgentLog.event("menu_quit", [:])
+        AgentLog.event("menu_quit", ["busy": controller.isBusy ? "1" : "0"])
+        if controller.isBusy, !Self.confirmQuitWhileProcessing(statusLine: controller.statusLine) {
+            AgentLog.event("menu_quit_cancelled", [:])
+            return
+        }
         // applicationWillTerminate freezes writers. Do not start the
         // transcription pipeline — that would run Whisper/AI on a dying process.
         NSApp.terminate(nil)
+    }
+
+    /// Quit chosen while a recording is still being processed. True when the user quits anyway; the next launch
+    /// resumes the session (`SessionController.resumeInterruptedSession`).
+    private static func confirmQuitWhileProcessing(statusLine: String) -> Bool {
+        let alert = NSAlert()
+        alert.messageText = "A recording is still being processed"
+        alert.informativeText = "\(statusLine)\n\nQuitting stops it. The next launch of ScrumTrace picks the recording up where it stopped."
+        alert.addButton(withTitle: "Keep processing")
+        alert.addButton(withTitle: "Quit anyway")
+        NSApp.activate(ignoringOtherApps: true)
+        return alert.runModal() == .alertSecondButtonReturn
     }
     @objc private func openRecent(_ sender: NSMenuItem) {
         guard let id = sender.representedObject as? String else { return }

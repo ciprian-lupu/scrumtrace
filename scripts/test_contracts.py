@@ -1464,6 +1464,17 @@ def test_pipeline_timing_stays_in_archive() -> None:
     assert "styleMask: [.borderless, .nonactivatingPanel, .resizable]" in hud
     assert "performDrag(with: event)" in hud
     assert "sharingType = .none" in hud
+    # A quit, crash or reinstall during processing must not strand a recording at "transcribing".
+    controller_src = (ROOT / "ScrumTrace" / "Processing" / "SessionController.swift").read_text()
+    assert "func resumeInterruptedSession() -> Bool" in controller_src
+    assert "autoResumableStatuses: Set<PipelineStatus> = [.transcribing, .slicing, .evaluating, .synthesizing]" in controller_src
+    delegate_src = (ROOT / "ScrumTrace" / "App" / "AppDelegate.swift").read_text()
+    assert "controller.resumeInterruptedSession()" in delegate_src.split("func applicationDidFinishLaunching")[1].split("func applicationWillTerminate")[0]
+    menu_quit = (ROOT / "ScrumTrace" / "UI" / "MenuBarController.swift").read_text().split("func quit()")[1].split("func openRecent")[0]
+    assert "confirmQuitWhileProcessing" in menu_quit
+    gate01 = (ROOT / "scripts" / "mac_gate01.sh").read_text()
+    assert "SCRUMTRACE_FORCE_INSTALL" in gate01
+    assert gate01.index("SCRUMTRACE_FORCE_INSTALL") < gate01.index("xcodebuild")
     shot_sharing = (ROOT / "ScrumTrace" / "UI" / "ShotNoteWindow.swift").read_text()
     assert "sharingType = .none" in shot_sharing
     assert "aspectRatio = RecordingHUDLayout.baseSize" in hud
@@ -3674,6 +3685,7 @@ def test_main_window_docs_match_the_build() -> None:
         ("MenuBarController.swift", "runMeetingNoticeAlert"): "meeting notice",
         ("MenuBarController.swift", "presentStartBlocked"): "Cannot start recording",
         ("MenuBarController.swift", "checkUpdates"): "update result",
+        ("MenuBarController.swift", "confirmQuitWhileProcessing"): "quit confirmation",
         ("CaptureAreaPicker.swift", "begin"): "capture-area picker",
         ("ProductContextViews.swift", "present"): "recording-context window",
         ("SessionController.swift", "requestUploadConsent"): "upload consent",

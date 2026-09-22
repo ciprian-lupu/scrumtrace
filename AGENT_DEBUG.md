@@ -26,6 +26,7 @@ Useful events (technical fields only — no titles, URLs, notes, transcripts, or
 - Capture: `recorder_sckit_*`, `recorder_first_sample`, `mic_*`, `capture_write_fail`, `capture_stream_failed`, `wav_ahead_frames`
 - Pause / privacy: `hotkey_pause`, `pause_ok`, `resume_ok`, `resume_blocked`, `privacy_trip`, `privacy_clear`, `privacy_pause`, `privacy_resume`
 - Shot / pin / PTT: `hotkey_shot`, `hotkey_pin`, `shot_*`, `pin_*`, `talk_press`, `talk_release`, `talk_start_fail`, `talk_abort`, `talk_transcribe_*`
+- Interrupted processing: `interrupted_session` at launch names the last unfinished status; `resume_interrupted` follows when the launch finishes it on its own (then the usual `retry_begin` / `processor_*` rows), `resume_interrupted_skipped` when a start was in flight, `menu_quit` with `busy=1` and `menu_quit_cancelled` for the Quit confirmation. `mac_gate01.sh` exits 3 instead of replacing a processing app unless `SCRUMTRACE_FORCE_INSTALL=1`.
 - Pipeline: `processor_begin`, `processor_ok`, `processor_fail`, `pipeline_status` (every HUD line after Stop — this is how to debug a stuck “Transcribing” state), `whisper_prepare_*`, `whisper_file_*`, `whisper_pass_*`, `extract_audio_*`, `slice_done`, `eval_*`, `zip_ok`, `consent_result`, `retry_*`
 - UI: `menu_*`, `hud_*`, `settings_open`, `settings_action`, `meeting_notice`, `meta_frontmost` (bundle id + has_url only)
 

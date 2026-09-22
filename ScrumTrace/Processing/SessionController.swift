@@ -85,8 +85,36 @@ final class SessionController: ObservableObject {
             case .recording, .paused, .transcribing, .slicing, .evaluating, .synthesizing, .offlineFailed:
                 statusLine = "Last session is unfinished — Retry Analysis to finish"
                 AgentLog.event("interrupted_session", ["status": recent.pipelineStatus.rawValue])
+                if Self.autoResumableStatuses.contains(recent.pipelineStatus) {
+                    interruptedSessionId = recent.sessionId
+                }
             }
         }
+    }
+
+    /// Pipeline states a killed process leaves behind that Retry Analysis finishes on its own: the archive is complete,
+    /// only the processing stopped. A crash while recording or a run that already failed offline stays a manual Retry.
+    static let autoResumableStatuses: Set<PipelineStatus> = [.transcribing, .slicing, .evaluating, .synthesizing]
+
+    /// The newest session when a previous process died mid-pipeline (the app was quit, killed or reinstalled while
+    /// transcribing). Cleared once `resumeInterruptedSession()` has started the retry.
+    private(set) var interruptedSessionId: String?
+
+    /// Finishes the session a previous process left mid-pipeline. The app calls this once after launch, so a quit,
+    /// crash or reinstall during transcription no longer leaves a recording stuck until someone finds Retry Analysis.
+    /// True when a retry started.
+    @discardableResult
+    func resumeInterruptedSession() -> Bool {
+        guard let id = interruptedSessionId else { return false }
+        guard !isBusy, !isRecording, !startInFlight else {
+            AgentLog.event("resume_interrupted_skipped", ["session": id, "reason": isBusy ? "busy" : "recording"])
+            return false
+        }
+        interruptedSessionId = nil
+        AgentLog.event("resume_interrupted", ["session": id])
+        statusLine = "Finishing the interrupted session…"
+        retryAnalysis(sessionId: id)
+        return true
     }
 
     var isRecording: Bool {

@@ -992,6 +992,7 @@ and these checks have not been run on a Mac:
    start recording* (Start from the status-bar menu and ⌘N), the update result (Check for updates in
    the status-bar menu, then switch away before it answers), the capture-area picker (Start, and Select
    area on screen…), the recording-context window, the upload consent alert (Stop & process),
+   the quit confirmation (Quit in the status-bar menu while a recording is being processed),
    *Recording did not start*, the first-run permissions window (`OnboardingWindow.focus`, on a
    first launch and from Show first-run permissions in Settings → General; note which of the two
    windows ends up in front) and the transcription review window (Review transcription results in

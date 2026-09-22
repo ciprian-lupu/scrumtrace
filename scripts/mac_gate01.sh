@@ -14,6 +14,36 @@ if [[ "${1:-}" == *Release* || "${SCRUMTRACE_CONFIGURATION:-Debug}" == "Release"
   exit 2
 fi
 
+# Never replace or restart the app while it is still transcribing, slicing, evaluating or synthesizing a
+# recording: a killed pipeline leaves that recording unfinished until the next launch resumes it.
+# SCRUMTRACE_FORCE_INSTALL=1 overrides for a deliberate interruption.
+if pgrep -x ScrumTrace >/dev/null 2>&1 && [[ "${SCRUMTRACE_FORCE_INSTALL:-}" != "1" ]]; then
+  BUSY_SESSION="$(python3 - "$HOME/Movies/ScrumTrace/sessions" <<'PY'
+import json, os, sys
+root = sys.argv[1]
+try:
+    ids = sorted(d for d in os.listdir(root) if os.path.isdir(os.path.join(root, d)))
+except OSError:
+    sys.exit(0)
+for session in reversed(ids):
+    path = os.path.join(root, session, "session.manifest.json")
+    try:
+        with open(path) as fh:
+            status = json.load(fh).get("pipeline_status", "")
+    except (OSError, ValueError):
+        continue
+    if status in ("transcribing", "slicing", "evaluating", "synthesizing"):
+        print(f"{session} ({status})")
+    break
+PY
+)"
+  if [[ -n "$BUSY_SESSION" ]]; then
+    echo "ScrumTrace is running and still processing $BUSY_SESSION." >&2
+    echo "Wait for it to finish, or rerun with SCRUMTRACE_FORCE_INSTALL=1 to interrupt it (the next launch resumes it)." >&2
+    exit 3
+  fi
+fi
+
 echo "machine=$(scutil --get ComputerName 2>/dev/null || uname -n)"
 echo "macos=$(sw_vers -productVersion)"
 echo "chip=$(sysctl -n machdep.cpu.brand_string)"
