@@ -1752,7 +1752,7 @@ final class ContractTests: XCTestCase {
         }
     }
 
-    func testMergedOverlappingShotsUnionStills() {
+    func testOverlongOverlappingShotsDoNotMergeOrLoseEvidence() {
         let shots = [
             ShotRecord(
                 id: "shot-001",
@@ -1777,20 +1777,35 @@ final class ContractTests: XCTestCase {
             transcript: FullTranscript(sessionId: "s", language: "en", segments: []),
             mediaDuration: 120
         )
-        XCTAssertEqual(slices.count, 1)
-        XCTAssertEqual(
-            Set(slices[0].stills),
-            [
-                "archive/shots/001.png",
-                "archive/shots/002.annotated.png",
-                "archive/shots/002.png"
-            ]
-        )
+        XCTAssertEqual(slices.count, 2)
+        XCTAssertEqual(Set(slices[0].stills), ["archive/shots/001.png"])
+        XCTAssertEqual(Set(slices[1].stills), ["archive/shots/002.annotated.png", "archive/shots/002.png"])
         XCTAssertEqual(slices[0].associatedShotId, "shot-001")
+        XCTAssertEqual(slices[1].associatedShotId, "shot-002")
+        XCTAssertEqual(slices[0].anchorIds, ["shot-001"])
+        XCTAssertEqual(slices[1].anchorIds, ["shot-002"])
+        XCTAssertLessThanOrEqual(slices[0].endMedia - slices[0].startMedia, MediaBudget.clipMaxDuration)
+        XCTAssertLessThanOrEqual(slices[1].endMedia - slices[1].startMedia, MediaBudget.clipMaxDuration)
         XCTAssertEqual(
             MeetingSlicer.unionStills(["a.png", "b.png"], ["b.png", "c.png"]),
             ["a.png", "b.png", "c.png"]
         )
+    }
+
+    func testLaterHigherPriorityAnchorKeepsItsIdentityWhenWindowsMerge() {
+        let shot = ShotRecord(id: "shot-later", tMedia: 14, rawPath: "archive/shots/later.png", annotatedPath: nil, note: "", source: .typed)
+        let slices = MeetingSlicer().slice(
+            shots: [shot],
+            pins: [10],
+            transcript: FullTranscript(sessionId: "s", language: "en", segments: []),
+            mediaDuration: 120
+        )
+        XCTAssertEqual(slices.count, 1)
+        XCTAssertEqual(slices[0].trigger, .shot)
+        XCTAssertEqual(slices[0].associatedShotId, "shot-later")
+        XCTAssertTrue(slices[0].anchorIds.contains("shot-later"))
+        XCTAssertEqual(slices[0].anchorIds.count, 2)
+        XCTAssertEqual(Set(slices[0].stills), ["archive/shots/later.png"])
     }
 
     func testSlicerDoesNotInventMissingStills() {
@@ -3159,6 +3174,16 @@ final class ContractTests: XCTestCase {
             AgentContextRenderer.handoffAgentInstructions("plain draft"),
             PromptTemplates.wrapUntrustedInline("plain draft")
         )
+    }
+
+    func testInlineUntrustedTextCannotCreateMarkdownLinksOrRawHTML() {
+        let wrapped = PromptTemplates.wrapUntrustedInline("[open](../../archive) <img src=x onerror=1>\nnext")
+        XCTAssertTrue(wrapped.hasPrefix("<untrusted_meeting_data>"))
+        XCTAssertTrue(wrapped.hasSuffix("</untrusted_meeting_data>"))
+        XCTAssertTrue(wrapped.contains("&#91;open&#93;(../../archive)"))
+        XCTAssertTrue(wrapped.contains("&lt;img src=x onerror=1&gt; next"))
+        XCTAssertFalse(wrapped.contains("[open]"))
+        XCTAssertFalse(wrapped.contains("<img"))
     }
 
     func testPrivacyOverlayIgnoresMenuBarItemsButTripsOnRealWindows() {

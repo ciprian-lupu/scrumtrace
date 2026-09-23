@@ -126,6 +126,16 @@ struct ExportProjector {
                 }
             }
             copy.stills = exportStills
+            copy.stillEvidence = slice.stillEvidence.compactMap { evidence in
+                guard let projectedPath = placed[evidence.path], exportStills.contains(projectedPath) else { return nil }
+                var projectedEvidence = evidence
+                projectedEvidence.path = projectedPath
+                return projectedEvidence
+            }
+            if copy.stillEvidence.count < slice.stillEvidence.count,
+               !copy.evidenceGaps.contains("generated_still_not_exported") {
+                copy.evidenceGaps.append("generated_still_not_exported")
+            }
             projectedSlices.append(copy)
         }
 
@@ -172,6 +182,9 @@ struct ExportProjector {
         projected.shots = projectedShots
         projected.slices = projectedSlices
         projected.tasks = projectedTasks
+        projected.localProcedure = projectLocalProcedure(
+            manifest.localProcedure, placed: placed, sessionURL: sessionURL
+        )
         projected.includeFullTranscriptInZip = includeFullTranscript
 
         if includeFullTranscript {
@@ -196,6 +209,66 @@ struct ExportProjector {
     /// C2/D5: rebuild `export/` from this projection. Stale `full_transcript.json`
     /// and orphan `media/` from a prior run must not survive into the zip.
     /// Never touches `archive/` or the canonical session-root manifest.
+    private func projectLocalProcedure(
+        _ procedure: LocalProcedure?,
+        placed: [String: String],
+        sessionURL: URL
+    ) -> LocalProcedure? {
+        guard var copy = procedure else { return nil }
+        let placedValues = Set(placed.values)
+        func resolve(_ paths: [String]) -> (kept: [String], omitted: Int) {
+            var kept: [String] = []
+            var seen = Set<String>()
+            var omitted = 0
+            for source in paths {
+                let candidate = placed[source] ?? placed[ExportRel.sessionPath(source)]
+                guard let candidate,
+                      !candidate.hasPrefix("/"),
+                      let safe = ExportRel.handoffPath(candidate),
+                      placedValues.contains(safe),
+                      ExportRel.existingSessionFile(ExportRel.sessionPath(safe), sessionURL: sessionURL) != nil else {
+                    omitted += 1
+                    continue
+                }
+                if seen.insert(safe).inserted { kept.append(safe) }
+            }
+            return (kept, omitted)
+        }
+        for index in copy.steps.indices {
+            let result = resolve(copy.steps[index].evidencePaths)
+            copy.steps[index].evidencePaths = result.kept
+            if result.omitted > 0 {
+                copy.steps[index].missingEvidenceReasons.append("Some associated media was omitted or unavailable in this export.")
+            }
+        }
+        copy.evidenceTimes = copy.evidenceTimes.compactMap { evidence in
+            let result = resolve([evidence.path])
+            guard let path = result.kept.first else { return nil }
+            var projectedEvidence = evidence
+            projectedEvidence.path = path
+            return projectedEvidence
+        }
+        for index in copy.anchors.indices {
+            let hadPaths = !copy.anchors[index].evidencePaths.isEmpty
+            let result = resolve(copy.anchors[index].evidencePaths)
+            copy.anchors[index].evidencePaths = result.kept
+            if result.omitted > 0 {
+                copy.anchors[index].missingEvidenceReasons.append("Some associated media was omitted or unavailable in this export.")
+            }
+            if hadPaths && result.kept.isEmpty {
+                copy.anchors[index].outcome = "evidence_omitted"
+            } else if hadPaths && result.omitted > 0 {
+                copy.anchors[index].outcome = "evidence_partially_available"
+            }
+        }
+        copy.serializedByteCount = (try? JSONEncoder.sorted.encode(copy).count)
+            ?? (copy.limits.maxSerializedBytes + 1)
+        if copy.serializedByteCount > copy.limits.maxSerializedBytes {
+            copy.sizeLimitExceeded = true
+        }
+        return copy
+    }
+
     private func resetExportTree(sessionURL: URL) throws {
         guard ExportRel.isUsableSessionRoot(sessionURL) else {
             throw SessionVaultError.writeFailed("session folder")

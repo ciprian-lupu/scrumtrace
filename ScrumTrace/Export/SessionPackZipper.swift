@@ -6,6 +6,7 @@ struct SessionPackZipper {
         var zipURL: URL
         var byteCount: Int
         var omitted: [OmittedAsset]
+        var folderByteCount: Int = 0
     }
 
     /// Zip is built from `export/` only. Files are deleted from export (not archive)
@@ -167,7 +168,8 @@ struct SessionPackZipper {
             return Result(
                 zipURL: zipURL,
                 byteCount: discardPackIfOverBudget(sessionURL: sessionURL),
-                omitted: omitted
+                omitted: omitted,
+                folderByteCount: PackBudget.exportFolderBytes(sessionURL: sessionURL)
             )
         }
         if omitted.contains(where: { !$0.path.isEmpty }) {
@@ -187,20 +189,23 @@ struct SessionPackZipper {
                     return Result(
                         zipURL: zipURL,
                         byteCount: discardPackIfOverBudget(sessionURL: sessionURL),
-                        omitted: omitted
+                        omitted: omitted,
+                        folderByteCount: PackBudget.exportFolderBytes(sessionURL: sessionURL)
                     )
                 }
                 return Result(
                     zipURL: zipURL,
                     byteCount: discardPackIfOverBudget(sessionURL: sessionURL),
-                    omitted: omitted
+                    omitted: omitted,
+                    folderByteCount: PackBudget.exportFolderBytes(sessionURL: sessionURL)
                 )
             }
         }
         return Result(
             zipURL: zipURL,
             byteCount: discardPackIfOverBudget(sessionURL: sessionURL),
-            omitted: omitted
+            omitted: omitted,
+            folderByteCount: PackBudget.exportFolderBytes(sessionURL: sessionURL)
         )
     }
 
@@ -762,6 +767,11 @@ enum PackBudget {
                 }
                 return keptShotTwin(path)
             }
+            next.stillEvidence = slice.stillEvidence.filter { !droppedHandoff($0.path, dropped: dropped) }
+            if next.stillEvidence.count < slice.stillEvidence.count,
+               !next.evidenceGaps.contains("generated_still_omitted_by_pack_budget") {
+                next.evidenceGaps.append("generated_still_omitted_by_pack_budget")
+            }
             return next
         }
         copy.shots = copy.shots.map { shot in
@@ -804,6 +814,41 @@ enum PackBudget {
                 next.status = .needsReview
             }
             return next
+        }
+        if let procedure = copy.localProcedure {
+            var updatedProcedure = procedure
+            updatedProcedure.steps = procedure.steps.map { step in
+                var next = step
+                next.evidencePaths = step.evidencePaths.compactMap { path in
+                    if !droppedHandoff(path, dropped: dropped) { return path }
+                    return keptShotTwin(path)
+                }
+                if next.evidencePaths.count < step.evidencePaths.count {
+                    next.missingEvidenceReasons.append("One or more linked evidence files were omitted by the pack budget.")
+                }
+                return next
+            }
+            updatedProcedure.anchors = procedure.anchors.map { anchor in
+                var next = anchor
+                next.evidencePaths = anchor.evidencePaths.compactMap { path in
+                    if !droppedHandoff(path, dropped: dropped) { return path }
+                    return keptShotTwin(path)
+                }
+                if next.evidencePaths.count < anchor.evidencePaths.count {
+                    next.missingEvidenceReasons.append("One or more linked evidence files were omitted by the pack budget.")
+                    next.outcome = next.evidencePaths.isEmpty ? "evidence_omitted" : "evidence_partially_available"
+                }
+                return next
+            }
+            updatedProcedure.evidenceTimes = procedure.evidenceTimes.filter {
+                !droppedHandoff($0.path, dropped: dropped)
+            }
+            updatedProcedure.serializedByteCount = (try? JSONEncoder.sorted.encode(updatedProcedure).count)
+                ?? (updatedProcedure.limits.maxSerializedBytes + 1)
+            if updatedProcedure.serializedByteCount > updatedProcedure.limits.maxSerializedBytes {
+                updatedProcedure.sizeLimitExceeded = true
+            }
+            copy.localProcedure = updatedProcedure
         }
         copy.omitted = omitted
         if dropped.contains("full_transcript.json") {

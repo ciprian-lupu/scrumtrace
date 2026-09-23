@@ -17,6 +17,7 @@ struct AgentContextRenderer {
         lines.append("- Media duration: \(Self.clock(manifest.duration.mediaSeconds)) (wall \(Self.clock(manifest.duration.wallSeconds)), \(Self.pauseLabel(manifest.pauses.count)))")
         lines.append("")
         lines.append(ComparisonReport.markdown(manifest))
+        lines.append(contentsOf: localProcedureLines(manifest.localProcedure, sessionURL: sessionURL, omitted: manifest.omitted))
         let confirmed = manifest.tasks.filter { $0.status == .confirmed }
         let review = manifest.tasks.filter { $0.status == .needsReview }
         lines.append("## Confirmed findings by service/model")
@@ -57,23 +58,55 @@ struct AgentContextRenderer {
             }
         }
         lines.append("")
-        if let transcript = SpeakerTimeline.load(sessionURL: sessionURL) {
-            lines.append("## Speakers in selected excerpts")
-            lines.append("Speaker labels are estimates unless reviewed. Names were supplied for this session; overlapping voices do not establish who said an individual word.")
-            for task in manifest.tasks {
-                guard let slice = manifest.slices.first(where: { $0.sliceId == task.sourceSliceId }) else { continue }
-                let turns = SpeakerTimeline.turns(in: transcript, start: slice.startMedia, end: slice.endMedia)
-                guard !turns.isEmpty else { continue }
-                lines.append("### \(PromptTemplates.wrapUntrustedInline(task.taskId))")
-                for turn in turns {
-                    lines.append("- [t_media \(String(format: "%.1f", turn.start))s–\(String(format: "%.1f", turn.end))s] \(PromptTemplates.wrapUntrustedInline(SpeakerTimeline.displaySpeaker(turn, in: transcript))): \(PromptTemplates.wrapUntrustedInline(turn.text))")
-                }
-            }
-            lines.append("")
-        }
         lines.append("## Manifest")
         lines.append("All timestamps are `t_media`. Source of truth: `session.manifest.json`.")
         return lines.joined(separator: "\n")
+    }
+
+    private func localProcedureLines(_ procedure: LocalProcedure?, sessionURL: URL, omitted: [OmittedAsset]) -> [String] {
+        guard let procedure else { return ["", "## Local procedure outline", "_Not generated for this legacy session._"] }
+        var lines = ["", "## Local procedure outline", "Extractive local draft · \(procedure.steps.count) passages · \(procedure.anchors.count) human anchors · \(procedure.selectedWindowCount) selected windows"]
+        lines.append("Every passage requires human semantic review. Chronology does not establish dependency, and window overlap does not prove that a visual action is shown.")
+        if procedure.partial { lines.append("_Partial outline: \(procedure.omittedEntryCount) transcript entries omitted or unavailable; unsupported structure is not inferred._") }
+        if procedure.sizeLimitExceeded { lines.append("_The serialized local outline exceeded its configured size limit; this export is not marked ready._") }
+        lines.append("Transcript status: `\(procedure.transcriptStatus)` · algorithm `\(procedure.algorithmVersion)`")
+        for step in procedure.steps {
+            let quote = PromptTemplates.wrapUntrustedInline(step.excerpt)
+            let kindLabel = step.kind == "action_excerpt" ? "Extracted action" : "Review passage"
+            let speaker = PromptTemplates.wrapUntrustedInline(step.speaker ?? "unknown")
+            lines.append("- **\(step.order). [\(Self.clock(step.start))–\(Self.clock(step.end))] \(kindLabel)** — “\(quote)”")
+            lines.append("  - Citation: \(PromptTemplates.wrapUntrustedInline(step.source)) at t_media \(Self.clock(step.start))–\(Self.clock(step.end)). Speaker: \(speaker) (attribution may be uncertain).")
+            if !step.shotIds.isEmpty { lines.append("  - Related human captures: \(step.shotIds.map(PromptTemplates.wrapUntrustedInline).joined(separator: ", ")). Visual meaning has not been reviewed by this generator.") }
+            if !step.missingEvidenceReasons.isEmpty { lines.append("  - Gap: \(step.missingEvidenceReasons.map(PromptTemplates.wrapUntrustedInline).joined(separator: "; "))") }
+            let evidence = step.evidencePaths.compactMap { sourcePath -> (String, LocalProcedureEvidenceTime?)? in
+                guard let path = ExportRel.packMediaHandoff(sourcePath, sessionURL: sessionURL, omitted: omitted) else { return nil }
+                return (path, procedure.evidenceTimes.first { $0.path == sourcePath })
+            }
+            let evidenceLinks = evidence.map { path, timestamp -> String in
+                let destination = Self.markdownLocalDestination(path)
+                let timing = timestamp.map {
+                    " · generated still requested at t_media \(Self.clock($0.requestedMedia)), captured at t_media \(Self.clock($0.actualMedia))"
+                } ?? ""
+                let link = path.hasSuffix(".jpg") || path.hasSuffix(".jpeg") || path.hasSuffix(".png")
+                    ? "![](<\(destination)>)"
+                    : "[clip](<\(destination)>)"
+                return link + timing
+            }.joined(separator: ", ")
+            if !evidenceLinks.isEmpty { lines.append("  - Available export evidence: \(evidenceLinks)") }
+        }
+        lines.append("### Anchor inventory")
+        for anchor in procedure.anchors {
+            lines.append("- \(PromptTemplates.wrapUntrustedInline(anchor.kind)) [\(PromptTemplates.wrapUntrustedInline(anchor.id))] at \(Self.clock(anchor.time)): \(PromptTemplates.wrapUntrustedInline(anchor.outcome)); steps \(anchor.representedStepIds.count), windows \(anchor.representedSliceIds.count).")
+            if !anchor.missingEvidenceReasons.isEmpty {
+                lines.append("  - Gap: \(anchor.missingEvidenceReasons.map(PromptTemplates.wrapUntrustedInline).joined(separator: "; "))")
+            }
+        }
+        return lines
+    }
+
+    private static func markdownLocalDestination(_ path: String) -> String {
+        let allowed = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~/")
+        return path.addingPercentEncoding(withAllowedCharacters: allowed) ?? ""
     }
 
     func prompt(manifest: SessionManifest, sessionURL: URL) -> String {

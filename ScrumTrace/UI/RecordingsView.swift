@@ -14,6 +14,7 @@ enum RecordingAction: String, CaseIterable, Identifiable, Sendable {
     case openBrief
     case copyExportPath
     case retryAnalysis
+    case regenerateLocalExport
     case reviewSpeakers
     case revealArchive
     case revealFolder
@@ -24,7 +25,7 @@ enum RecordingAction: String, CaseIterable, Identifiable, Sendable {
     /// A session whose manifest was read, in menu order.
     static let readableActions: [RecordingAction] = [
         .revealExport, .openInClaude, .openInChatGPT, .openBrief, .copyExportPath,
-        .retryAnalysis, .reviewSpeakers, .revealArchive, .delete
+        .retryAnalysis, .regenerateLocalExport, .reviewSpeakers, .revealArchive, .delete
     ]
 
     /// A session whose manifest could not be read: nothing that trusts its contents.
@@ -38,6 +39,7 @@ enum RecordingAction: String, CaseIterable, Identifiable, Sendable {
         case .openBrief: return "Open brief"
         case .copyExportPath: return "Copy export path"
         case .retryAnalysis: return "Retry analysis"
+        case .regenerateLocalExport: return "Regenerate local export"
         case .reviewSpeakers: return "Review speakers…"
         case .revealArchive: return "Reveal archive…"
         case .revealFolder: return "Reveal folder…"
@@ -52,6 +54,7 @@ enum RecordingAction: String, CaseIterable, Identifiable, Sendable {
         case .openBrief: return "doc.richtext"
         case .copyExportPath: return "doc.on.clipboard"
         case .retryAnalysis: return "arrow.clockwise"
+        case .regenerateLocalExport: return "arrow.clockwise.circle"
         case .reviewSpeakers: return "person.2"
         case .revealArchive: return "archivebox"
         case .revealFolder: return "folder.badge.questionmark"
@@ -62,7 +65,7 @@ enum RecordingAction: String, CaseIterable, Identifiable, Sendable {
     /// Actions that change a session or show its private files wait for recording and analysis to finish.
     var needsIdleCapture: Bool {
         switch self {
-        case .retryAnalysis, .reviewSpeakers, .revealArchive, .revealFolder, .delete:
+        case .retryAnalysis, .regenerateLocalExport, .reviewSpeakers, .revealArchive, .revealFolder, .delete:
             return true
         case .revealExport, .openInClaude, .openInChatGPT, .openBrief, .copyExportPath:
             return false
@@ -72,7 +75,7 @@ enum RecordingAction: String, CaseIterable, Identifiable, Sendable {
     /// A separator goes above this action in menus.
     var startsGroup: Bool {
         switch self {
-        case .retryAnalysis, .revealArchive, .delete: return true
+        case .retryAnalysis, .regenerateLocalExport, .revealArchive, .delete: return true
         default: return false
         }
     }
@@ -86,6 +89,7 @@ enum RecordingAction: String, CaseIterable, Identifiable, Sendable {
         case .openBrief: return "main_open_brief"
         case .copyExportPath: return "main_copy_export_path"
         case .retryAnalysis: return "main_retry"
+        case .regenerateLocalExport: return "main_local_export"
         case .reviewSpeakers: return "main_review_speakers"
         case .revealArchive: return "main_reveal_archive"
         case .revealFolder: return "main_reveal_folder"
@@ -401,6 +405,7 @@ struct RecordingsDependencies {
     /// False when the brief is not a usable export file.
     var openBrief: @MainActor (String) -> Bool
     var retryAnalysis: @MainActor (String) -> Void
+    var regenerateLocalExport: @MainActor (String) -> Void = { _ in }
     /// Puts the validated folder's path on the pasteboard. The path is never logged.
     var copyExportPath: @MainActor (URL) -> Bool
     var revealArchive: @MainActor (String) -> Bool
@@ -444,6 +449,7 @@ struct RecordingsDependencies {
                 return NSWorkspace.shared.open(url)
             },
             retryAnalysis: { controller.retryAnalysis(sessionId: $0) },
+            regenerateLocalExport: { controller.regenerateLocalExport(sessionId: $0) },
             copyExportPath: { folder in
                 let pasteboard = NSPasteboard.general
                 pasteboard.clearContents()
@@ -876,7 +882,7 @@ final class RecordingsModel: ObservableObject {
             // The session being recorded or analysed is held only as long as that runs, which the busy check covers.
             // The vault still refuses a folder a live recording.lock names.
             return nil
-        case .revealExport, .copyExportPath, .retryAnalysis, .revealArchive, .revealFolder:
+        case .revealExport, .copyExportPath, .retryAnalysis, .regenerateLocalExport, .revealArchive, .revealFolder:
             return nil
         }
     }
@@ -921,6 +927,11 @@ final class RecordingsModel: ObservableObject {
         case .retryAnalysis:
             log(action, id)
             dependencies.retryAnalysis(id)
+            reloadDetail(id)
+            refresh()
+        case .regenerateLocalExport:
+            log(action, id)
+            dependencies.regenerateLocalExport(id)
             reloadDetail(id)
             refresh()
         case .reviewSpeakers:
@@ -1524,7 +1535,7 @@ struct RecordingsView: View {
             toolbarButton(.retryAnalysis)
 
             Menu {
-                selectionMenuItems([.reviewSpeakers, .revealArchive, .revealFolder])
+                selectionMenuItems([.regenerateLocalExport, .reviewSpeakers, .revealArchive, .revealFolder])
             } label: {
                 Label("More actions", systemImage: "ellipsis.circle")
             }
