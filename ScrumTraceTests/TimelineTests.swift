@@ -123,6 +123,24 @@ final class TimelineTests: XCTestCase {
         XCTAssertEqual(crop.height, 720)
     }
 
+    func testCaptureWindowTargetLabels() {
+        let titled = CaptureWindowTarget(windowID: 42, processID: 7, appName: "Keynote", windowTitle: " Sprint 12 ")
+        XCTAssertEqual(titled.label, "Keynote: Sprint 12")
+        // The menu and status line name the app only, never the window title.
+        XCTAssertEqual(titled.summary, "Window: Keynote")
+        let untitled = CaptureWindowTarget(windowID: 43, processID: 7, appName: "Keynote", windowTitle: "")
+        XCTAssertEqual(untitled.label, "Keynote")
+        let long = CaptureWindowTarget(
+            windowID: 44,
+            processID: 8,
+            appName: "Safari",
+            windowTitle: String(repeating: "x", count: 300)
+        )
+        let row = CaptureWindowChooser.rowTitle(long)
+        XCTAssertEqual(row.count, CaptureWindowChooser.maxLabelLength)
+        XCTAssertTrue(row.hasSuffix("…"))
+    }
+
     func testScrubbedURLDropsQueryAndFragment() {
         let cleaned = MetadataSampler.scrubbedURLString(
             "https://example.com/path?token=SECRETXYZ#frag"

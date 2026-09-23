@@ -3687,6 +3687,7 @@ def test_main_window_docs_match_the_build() -> None:
         ("MenuBarController.swift", "checkUpdates"): "update result",
         ("MenuBarController.swift", "confirmQuitWhileProcessing"): "quit confirmation",
         ("CaptureAreaPicker.swift", "begin"): "capture-area picker",
+        ("CaptureWindowChooser.swift", "choose"): "window chooser",
         ("ProductContextViews.swift", "present"): "recording-context window",
         ("SessionController.swift", "requestUploadConsent"): "upload consent",
         ("SessionController.swift", "presentStartFailureAlert"): "Recording did not start",
@@ -3808,6 +3809,57 @@ def test_macos26_sdk_apis_are_compiler_guarded() -> None:
     assert checked >= 1, "expected at least the StableWindowToolbar sharedBackgroundVisibility call"
 
 
+def test_single_window_capture_never_widens() -> None:
+    """Window mode records, snaps and samples only the chosen window, with no fallback to the display."""
+    recorder = (ROOT / "ScrumTrace" / "Capture" / "SessionRecorder.swift").read_text()
+    start_fn = recorder.split("func start(shouldPauseCapture")[1].split("func abortFailedStart")[0]
+    assert "captureWindow: CaptureWindowTarget? = nil" in start_fn
+    assert "SCContentFilter(desktopIndependentWindow: window)" in start_fn
+    window_branch = start_fn.split("if let captureWindow {")[1].split("} else {")[0]
+    assert "throw SessionRecorderError.writerFailed" in window_branch
+    assert "SCContentFilter(display:" not in window_branch
+    assert "self.windowFilter = captureWindow == nil ? nil : filter" in start_fn
+    still = recorder.split("func captureWindowStill")[1].split("private static func windowPixelSize")[0]
+    assert "SCScreenshotManager.captureImage(contentFilter: filter" in still
+    assert "CGDisplayCreateImage" not in still
+
+    controller = (ROOT / "ScrumTrace" / "Processing" / "SessionController.swift").read_text()
+    start_async = controller.split("private func startRecordingAsync(")[1].split("abandonedId = nil")[0]
+    assert "captureWindow: window" in start_async
+    assert start_async.index("sampler.restrictedProcessID") < start_async.index("recorder.start(")
+    assert start_async.index("recordingWindow = window") < start_async.index("recorder.start(")
+    shot = controller.split("// Window mode: the Shot is the recorded window only.")[1].split("guard let image = snapped")[0]
+    window_shot = shot.split("if recordingWindow != nil {")[1].split("} else {\n            snapped = ScreenSnap.capture(area:")[0]
+    assert "ScreenSnap.capture(windowOf: recorder)" in window_shot
+    assert "snapped = nil" in window_shot
+    assert "capture(area:" not in window_shot
+
+    sampler = (ROOT / "ScrumTrace" / "Capture" / "MetadataSampler.swift").read_text()
+    sample_fn = sampler.split("func sample(")[1].split("func readFrontmost")[0]
+    assert sample_fn.count("frontmostIsRecorded()") == 2
+    assert sample_fn.index("frontmostIsRecorded()") < sample_fn.index("self.readFrontmost()")
+    assert sample_fn.rindex("frontmostIsRecorded()") > sample_fn.index("self.readFrontmost()")
+
+    menu = (ROOT / "ScrumTrace" / "UI" / "MenuBarController.swift").read_text()
+    start_menu = menu.split("func start()")[1].split("func presentMeetingNotice")[0]
+    assert "CaptureWindowChooser.present" in start_menu
+    assert "startRecording(product: product, window: window)" in start_menu
+    assert start_menu.index("CaptureWindowChooser.present") < start_menu.index("CaptureAreaPicker.present")
+    assert '"Record a single window"' in menu
+
+    chooser = (ROOT / "ScrumTrace" / "UI" / "CaptureWindowChooser.swift").read_text()
+    present = chooser.split("static func present")[1].split("static func candidates")[0]
+    assert present.index("screenGrantedAtLaunch") < present.index("SCShareableContent")
+    assert "Task.detached" in present
+    assert "app.bundleIdentifier != own" in chooser
+    # AgentLog carries no titles: the chooser logs a count and a result only.
+    for call in re.findall(r'AgentLog\.event\("window_chooser"[^)]*\)', chooser, re.S):
+        assert "title" not in call.lower() and "appName" not in call
+
+    settings_ui = (ROOT / "ScrumTrace" / "UI" / "SettingsView.swift").read_text()
+    assert 'Toggle("Record a single window"' in settings_ui
+
+
 def main() -> None:
     test_export_has_no_archive_and_no_tokens()
     test_agent_context_uses_export_relative_paths()
@@ -3837,6 +3889,7 @@ def main() -> None:
     test_overview_card_and_window_wording()
     test_main_window_docs_match_the_build()
     test_delete_retry_race_and_closing_dialog()
+    test_single_window_capture_never_widens()
     print("contract tests ok")
 
 

@@ -13,6 +13,7 @@ final class MetadataSampler: @unchecked Sendable {
     private let timeoutQueue = DispatchQueue(label: "com.str8minds.ScrumTrace.metadata.timeout", qos: .userInitiated)
     private let lock = NSLock()
     private var suspended = false
+    private var onlyProcessID: pid_t?
 
     var isSuspended: Bool {
         get {
@@ -25,6 +26,30 @@ final class MetadataSampler: @unchecked Sendable {
             suspended = newValue
             lock.unlock()
         }
+    }
+
+    /// Window mode: sample nothing unless this process is in front, so titles and URLs of apps that are not
+    /// recorded never reach events.jsonl or a provider. Nil samples whatever is in front.
+    var restrictedProcessID: pid_t? {
+        get {
+            lock.lock()
+            defer { lock.unlock() }
+            return onlyProcessID
+        }
+        set {
+            lock.lock()
+            onlyProcessID = newValue
+            lock.unlock()
+        }
+    }
+
+    private func frontmostIsRecorded() -> Bool {
+        guard let pid = restrictedProcessID else { return true }
+        #if os(macOS)
+        return NSWorkspace.shared.frontmostApplication?.processIdentifier == pid
+        #else
+        return false
+        #endif
     }
 
     @discardableResult
@@ -42,8 +67,13 @@ final class MetadataSampler: @unchecked Sendable {
                     once.resume(continuation, nil)
                     return
                 }
+                // Checked before and after the AX read: an app switch during the read must not leak a title.
+                guard self.frontmostIsRecorded() else {
+                    once.resume(continuation, nil)
+                    return
+                }
                 let meta = self.readFrontmost()
-                if self.isSuspended {
+                if self.isSuspended || !self.frontmostIsRecorded() {
                     once.resume(continuation, nil)
                     return
                 }

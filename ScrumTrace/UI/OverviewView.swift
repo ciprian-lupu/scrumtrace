@@ -526,7 +526,7 @@ struct OverviewDependencies {
             isRecordingActive: { controller.isRecording || controller.startInFlight },
             lastError: { controller.lastError },
             retentionDays: { settings.retentionDays },
-            captureAreaSummary: { settings.captureArea.summary },
+            captureAreaSummary: { settings.captureSummary },
             sessionsFolder: { CapturePermissions.scrubHome(vault.rootURL.path) },
             updates: .live,
             startRecording: startRecording,

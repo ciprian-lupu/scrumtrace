@@ -138,6 +138,17 @@ final class AppSettings: ObservableObject {
         didSet { persistCaptureArea() }
     }
 
+    /// Start asks for one window instead of opening the capture-area picker. The window itself is chosen per
+    /// recording, because window IDs do not survive a relaunch.
+    @Published var recordSingleWindow: Bool {
+        didSet { defaults.set(recordSingleWindow, forKey: Keys.recordSingleWindow) }
+    }
+
+    /// Menu and overview text for what the next recording captures.
+    var captureSummary: String {
+        recordSingleWindow ? "Single window" : captureArea.summary
+    }
+
     @Published var showCursor: Bool {
         didSet { defaults.set(showCursor, forKey: Keys.showCursor) }
     }
@@ -216,6 +227,7 @@ final class AppSettings: ObservableObject {
         } else {
             self.captureArea = .entireDisplay
         }
+        self.recordSingleWindow = defaults.bool(forKey: Keys.recordSingleWindow)
         self.showCursor = defaults.object(forKey: Keys.showCursor) as? Bool ?? true
         self.includeMicrophone = defaults.object(forKey: Keys.includeMicrophone) as? Bool ?? true
         self.showInDockWhileWindowOpen = defaults.object(forKey: Keys.showInDock) as? Bool ?? true
@@ -711,6 +723,7 @@ final class AppSettings: ObservableObject {
         static let retentionDays = "scrumtrace.retentionDays"
         static let meetingNotice = "scrumtrace.meetingNoticeAccepted"
         static let captureArea = "scrumtrace.captureArea"
+        static let recordSingleWindow = "scrumtrace.recordSingleWindow"
         static let showCursor = "scrumtrace.showCursor"
         static let includeMicrophone = "scrumtrace.includeMicrophone"
         static let showInDock = "scrumtrace.showInDock"
