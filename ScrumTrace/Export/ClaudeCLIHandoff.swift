@@ -139,11 +139,11 @@ enum ClaudeCLIHandoff {
       set exe to item 1 of argv
       set flag to item 2 of argv
       set sessionId to item 3 of argv
-      set kind to item 4 of argv
+      set cliKind to item 4 of argv
       set cliBin to item 5 of argv
       tell application "Terminal"
         activate
-        do script (quoted form of exe & " " & quoted form of flag & " " & quoted form of sessionId & " " & quoted form of kind & " " & quoted form of cliBin)
+        do script (quoted form of exe & " " & quoted form of flag & " " & quoted form of sessionId & " " & quoted form of cliKind & " " & quoted form of cliBin)
       end tell
     end run
     """

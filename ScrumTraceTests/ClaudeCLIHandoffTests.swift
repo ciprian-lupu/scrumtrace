@@ -194,6 +194,50 @@ final class ClaudeCLIHandoffTests: XCTestCase {
         }
     }
 
+    /// Runs the real script through osascript with the Terminal step swapped for `return`, so a runtime
+    /// AppleScript error (a reserved word such as `kind` used as a variable) fails here, not on a user's Mac.
+    func testAppleScriptRunsWithRealArguments() throws {
+        let script = ClaudeCLIHandoff.appleScriptSource
+        let lines = script.components(separatedBy: "\n")
+        guard let tell = lines.firstIndex(where: { $0.contains("tell application \"Terminal\"") }),
+              let end = lines.firstIndex(where: { $0.trimmingCharacters(in: .whitespaces) == "end tell" }),
+              let doScript = lines[tell..<end].first(where: { $0.contains("do script ") }) else {
+            return XCTFail("script must tell Terminal to do script")
+        }
+        let expression = doScript.components(separatedBy: "do script ").last ?? ""
+        let probe = (Array(lines[..<tell]) + ["  return " + expression] + Array(lines[(end + 1)...]))
+            .joined(separator: "\n")
+        let executable = URL(fileURLWithPath: "/Applications/ScrumTrace.app/Contents/MacOS/ScrumTrace")
+        for cli in LocalCodingCLI.allCases {
+            let binary = URL(fileURLWithPath: "/usr/local/bin/\(cli.executableName)")
+            let plan = ClaudeCLIHandoff.invocation(
+                executable: executable,
+                sessionId: "20260101-abcdef",
+                cli: cli,
+                binary: binary
+            )
+            var arguments = plan.arguments
+            arguments[1] = probe
+            let process = Process()
+            process.executableURL = plan.executable
+            process.arguments = arguments
+            let output = Pipe()
+            let errors = Pipe()
+            process.standardOutput = output
+            process.standardError = errors
+            try process.run()
+            process.waitUntilExit()
+            let stderr = String(data: errors.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+            XCTAssertEqual(process.terminationStatus, 0, "\(cli): \(stderr)")
+            let command = String(data: output.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            XCTAssertEqual(
+                command,
+                "'\(executable.path)' '\(ClaudeCLIHandoff.execFlag)' '20260101-abcdef' '\(cli.rawValue)' '\(binary.path)'"
+            )
+        }
+    }
+
     @MainActor
     func testOpenInClaudeWithoutSessionSetsStatus() throws {
         let id = "ScrumTrace.ClaudeCLI.\(UUID().uuidString)"
