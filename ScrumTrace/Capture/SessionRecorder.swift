@@ -95,6 +95,8 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
     private var wavFramesWritten: AVAudioFramePosition = 0
     private var loggedWavAhead = false
     private var micWatchTimer: DispatchSourceTimer?
+    /// Window mode only. Shots reuse it so a still never shows more than the movie.
+    private var windowFilter: SCContentFilter?
 
     init(sessionURL: URL, clock: ClockSynchronizer) {
         self.sessionURL = sessionURL
@@ -129,6 +131,7 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
 
     func start(shouldPauseCapture: @escaping @Sendable () -> Bool = { false },
                captureArea: CaptureArea = .entireDisplay,
+               captureWindow: CaptureWindowTarget? = nil,
                showCursor: Bool = true,
                includeMicrophone: Bool = true) async throws {
         // Never call SCShareableContent unless Screen Recording was attached
@@ -144,11 +147,12 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             throw SessionRecorderError.permissionDenied
         }
         try await requestPermission(includeMicrophone: includeMicrophone)
+        let region = captureWindow == nil && !captureArea.isEntireDisplay
         AgentLog.event("recorder_sckit_begin", [
-            "area": captureArea.isEntireDisplay ? "full" : "region",
-            "display": captureArea.isEntireDisplay ? "all" : String(captureArea.displayID),
-            "width": String(captureArea.isEntireDisplay ? 0 : Int(captureArea.widthPoints.rounded())),
-            "height": String(captureArea.isEntireDisplay ? 0 : Int(captureArea.heightPoints.rounded())),
+            "area": captureWindow != nil ? "window" : (region ? "region" : "full"),
+            "display": captureWindow != nil ? "window" : (region ? String(captureArea.displayID) : "all"),
+            "width": String(region ? Int(captureArea.widthPoints.rounded()) : 0),
+            "height": String(region ? Int(captureArea.heightPoints.rounded()) : 0),
             "cursor": showCursor ? "1" : "0",
             "mic": includeMicrophone ? "1" : "0"
         ])
@@ -166,20 +170,34 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             }
             throw SessionRecorderError.writerFailed(error.localizedDescription)
         }
-        guard let display = Self.display(in: content, matching: captureArea) else {
-            throw SessionRecorderError.writerFailed("No display available for capture.")
-        }
-        let regionFitsDisplay = !captureArea.isEntireDisplay
-            && display.displayID == captureArea.displayID
-        let rawSize = regionFitsDisplay
-            ? captureArea.pixelSize(
-                displayPixelWidth: display.width,
-                displayPixelHeight: display.height
-            )
-            : (width: display.width, height: display.height)
-        let size = Self.evenCaptureSize(width: rawSize.width, height: rawSize.height)
-        let excluded = content.applications.filter { app in
-            app.bundleIdentifier == Bundle.main.bundleIdentifier
+        let filter: SCContentFilter
+        let size: (width: Int, height: Int)
+        var regionFitsDisplay = false
+        if let captureWindow {
+            // Only this window reaches the movie, even when another window covers it or it moves to
+            // another display. No fallback to the display: a closed window fails the start instead.
+            guard let window = content.windows.first(where: { $0.windowID == captureWindow.windowID }) else {
+                throw SessionRecorderError.writerFailed("The chosen window is no longer open. Start again and pick it.")
+            }
+            filter = SCContentFilter(desktopIndependentWindow: window)
+            size = Self.windowPixelSize(filter: filter, fallbackFrame: window.frame)
+        } else {
+            guard let display = Self.display(in: content, matching: captureArea) else {
+                throw SessionRecorderError.writerFailed("No display available for capture.")
+            }
+            regionFitsDisplay = !captureArea.isEntireDisplay
+                && display.displayID == captureArea.displayID
+            let rawSize = regionFitsDisplay
+                ? captureArea.pixelSize(
+                    displayPixelWidth: display.width,
+                    displayPixelHeight: display.height
+                )
+                : (width: display.width, height: display.height)
+            size = Self.evenCaptureSize(width: rawSize.width, height: rawSize.height)
+            let excluded = content.applications.filter { app in
+                app.bundleIdentifier == Bundle.main.bundleIdentifier
+            }
+            filter = SCContentFilter(display: display, excludingApplications: excluded, exceptingWindows: [])
         }
 
         clock.markRecordingStarted()
@@ -190,12 +208,15 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             try syncWriter {
                 try self.prepareWriters(width: size.width, height: size.height)
             }
-            let filter = SCContentFilter(display: display, excludingApplications: excluded, exceptingWindows: [])
             let config = SCStreamConfiguration()
             config.width = size.width
             config.height = size.height
             if regionFitsDisplay {
                 config.sourceRect = captureArea.sourceRect()
+            }
+            if captureWindow != nil {
+                // A window resized mid-recording is scaled into the fixed movie size, aspect ratio kept.
+                config.scalesToFit = true
             }
             config.minimumFrameInterval = CMTime(
                 value: Int64(MediaBudget.archiveFrameStep),
@@ -241,6 +262,7 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             syncWriter {
                 self.microphoneWav = mic
                 self.stream = stream
+                self.windowFilter = captureWindow == nil ? nil : filter
                 self.started = true
                 if pauseNow {
                     self.paused = true
@@ -267,6 +289,31 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             await abortFailedStart()
             throw error
         }
+    }
+
+    /// True while this recorder captures one window. Shots must then come from `captureWindowStill`.
+    var capturesSingleWindow: Bool {
+        syncWriter { windowFilter != nil }
+    }
+
+    /// Shot in window mode: the recorded window only, never the display around it. Nil when the window is gone.
+    func captureWindowStill() async -> CGImage? {
+        guard let filter = syncWriter({ windowFilter }) else { return nil }
+        let size = Self.windowPixelSize(filter: filter, fallbackFrame: filter.contentRect)
+        let config = SCStreamConfiguration()
+        config.width = size.width
+        config.height = size.height
+        config.showsCursor = false
+        return try? await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
+    }
+
+    private static func windowPixelSize(filter: SCContentFilter, fallbackFrame: CGRect) -> (width: Int, height: Int) {
+        let rect = filter.contentRect.isEmpty ? fallbackFrame : filter.contentRect
+        let scale = filter.pointPixelScale > 0 ? CGFloat(filter.pointPixelScale) : 2
+        return evenCaptureSize(
+            width: Int((rect.width * scale).rounded()),
+            height: Int((rect.height * scale).rounded())
+        )
     }
 
     private static func display(in content: SCShareableContent, matching area: CaptureArea) -> SCDisplay? {

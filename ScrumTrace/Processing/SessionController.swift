@@ -25,6 +25,8 @@ final class SessionController: ObservableObject {
     let clock = ClockSynchronizer()
 
     private var recorder: SessionRecorder?
+    /// The window the current recording is limited to. Nil records the capture area.
+    private var recordingWindow: CaptureWindowTarget?
     private var processor: SessionProcessor?
     private var hudTimer: Timer?
     private var hudTickCount = 0
@@ -162,7 +164,7 @@ final class SessionController: ObservableObject {
         startRecording(product: settings.productContext)
     }
 
-    func startRecording(product: ProductContext) {
+    func startRecording(product: ProductContext, window: CaptureWindowTarget? = nil) {
         guard !isRecording, !isBusy, !startInFlight else {
             AgentLog.event("start_ignored", [
                 "recording": isRecording ? "1" : "0",
@@ -187,7 +189,7 @@ final class SessionController: ObservableObject {
         captureFreeze.markStartInFlight(true)
         statusLine = "Starting capture…"
         AgentLog.event("start_requested", [:])
-        Task { await startRecordingAsync(product: product) }
+        Task { await startRecordingAsync(product: product, window: window) }
     }
 
     func stopRecording() {
@@ -615,7 +617,7 @@ final class SessionController: ObservableObject {
         log(.stop, ["reason": "quit"])
     }
 
-    private func startRecordingAsync(product: ProductContext) async {
+    private func startRecordingAsync(product: ProductContext, window: CaptureWindowTarget?) async {
         defer { startInFlight = false }
         defer { captureFreeze.markStartInFlight(false) }
         guard !isRecording, !isBusy else {
@@ -647,6 +649,10 @@ final class SessionController: ObservableObject {
             // in MetadataSampler.readFrontmost. prompt:true lives only on
             // the Settings button. Screen Recording is preflighted above.
             let recorder = SessionRecorder(sessionURL: created.url, clock: clock)
+            // Window mode samples titles and URLs only while the recorded app is in front. Set before the
+            // first sample of this session; nil lifts the limit left by an earlier window recording.
+            sampler.restrictedProcessID = window.map { pid_t($0.processID) }
+            recordingWindow = window
             captureFreeze.attach(recorder)
             // Tick before startCapture: a credential app during the permission
             // sheet must freeze writers, not wait until start() returns (C1).
@@ -664,6 +670,7 @@ final class SessionController: ObservableObject {
             try await recorder.start(
                 shouldPauseCapture: pauseGate,
                 captureArea: settings.captureArea,
+                captureWindow: window,
                 showCursor: settings.showCursor,
                 includeMicrophone: settings.includeMicrophone
             )
@@ -672,7 +679,7 @@ final class SessionController: ObservableObject {
             lastSessionId = created.manifest.sessionId
             AgentLog.event("start_ok", [
                 "session": created.manifest.sessionId,
-                "area": settings.captureArea.isEntireDisplay ? "full" : "region"
+                "area": window != nil ? "window" : (settings.captureArea.isEntireDisplay ? "full" : "region")
             ])
             pinTimes = []
             pinTimesSessionId = created.manifest.sessionId
@@ -720,9 +727,13 @@ final class SessionController: ObservableObject {
                 // alone — that would clear a freeze that just posted (C1).
                 if unpauseCaptureIfPrivacyClear() {
                     phase = .recording
-                    statusLine = settings.captureArea.isEntireDisplay
-                        ? "Recording"
-                        : "Recording \(settings.captureArea.summary)"
+                    if let window {
+                        statusLine = "Recording \(window.summary)"
+                    } else {
+                        statusLine = settings.captureArea.isEntireDisplay
+                            ? "Recording"
+                            : "Recording \(settings.captureArea.summary)"
+                    }
                     NotificationCenter.default.post(
                         name: .scrumTraceCaptureGate,
                         object: CaptureSessionState.recording
@@ -1093,7 +1104,18 @@ final class SessionController: ObservableObject {
         }
         guard captureState.allowsNewCapture else { return }
         let media = clock.currentMediaSeconds()
-        guard let image = ScreenSnap.capture(area: settings.captureArea) else {
+        // Window mode: the Shot is the recorded window only. Never fall back to the display.
+        let snapped: NSImage?
+        if recordingWindow != nil {
+            if let recorder, recorder.capturesSingleWindow {
+                snapped = await ScreenSnap.capture(windowOf: recorder)
+            } else {
+                snapped = nil
+            }
+        } else {
+            snapped = ScreenSnap.capture(area: settings.captureArea)
+        }
+        guard let image = snapped else {
             lastError = "Could not capture the display."
             statusLine = "Shot failed: could not capture the display."
             AgentLog.event("shot_fail", ["reason": "display"])
@@ -1578,6 +1600,16 @@ enum ScreenSnap {
         guard let cg = image else { return nil }
         let cropped = crop(cg, to: area)
         let scaled = downscale(cropped, maxEdge: MediaBudget.stillMaxWidth)
+        return NSImage(cgImage: scaled, size: NSSize(width: scaled.width, height: scaled.height))
+        #else
+        return nil
+        #endif
+    }
+
+    static func capture(windowOf recorder: SessionRecorder) async -> NSImage? {
+        #if os(macOS)
+        guard let cg = await recorder.captureWindowStill() else { return nil }
+        let scaled = downscale(cg, maxEdge: MediaBudget.stillMaxWidth)
         return NSImage(cgImage: scaled, size: NSSize(width: scaled.width, height: scaled.height))
         #else
         return nil

@@ -195,22 +195,27 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
             Section("Capture area") {
-                LabeledContent("Current", value: settings.captureArea.summary)
+                LabeledContent("Current", value: settings.captureSummary)
                 Button("Select area on screen…") {
                     AgentLog.event("settings_action", ["action": "select_area"])
                     guard controller.canChangeCaptureSettings else { return }
                     CaptureAreaPicker.present(current: settings.captureArea) { area in
                         guard controller.canChangeCaptureSettings else { return }
                         settings.captureArea = area
+                        settings.recordSingleWindow = false
                     }
                 }
                 .disabled(!controller.canChangeCaptureSettings)
                 Button("Use entire display") {
                     AgentLog.event("settings_action", ["action": "area_full"])
                     settings.captureArea = .entireDisplay
+                    settings.recordSingleWindow = false
                 }
-                .disabled(!controller.canChangeCaptureSettings || settings.captureArea.isEntireDisplay)
-                Text("Default is the whole display. Start recording opens a macOS-style overlay: drag a rectangle, move or resize it, then Record or Return on that display. A saved region here is the starting box.")
+                .disabled(!controller.canChangeCaptureSettings
+                    || (settings.captureArea.isEntireDisplay && !settings.recordSingleWindow))
+                Toggle("Record a single window", isOn: $settings.recordSingleWindow)
+                    .disabled(!controller.canChangeCaptureSettings)
+                Text("Default is the whole display. Start recording opens a macOS-style overlay: drag a rectangle, move or resize it, then Record or Return on that display. A saved region here is the starting box. With Record a single window on, Start lists the open windows instead: only the one you pick is recorded, Shots show only that window, and window titles and URLs are noted only while its app is in front.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

@@ -93,7 +93,7 @@ final class MenuBarController: NSObject {
             controller.privacy.isCurrentlyTripped ? "priv" : "ok",
             readiness.menuLabel,
             controller.lastError == nil ? "ok" : "err",
-            controller.settings.captureArea.summary
+            controller.settings.captureSummary
         ].joined(separator: "|")
         if signature != lastMenuSignature && !isMenuOpen {
             lastMenuSignature = signature
@@ -123,7 +123,7 @@ final class MenuBarController: NSObject {
             menu.addItem(actionItem("Stop & process", #selector(stop)))
         } else {
             let start = actionItem(
-                "Start recording — \(controller.settings.captureArea.summary)",
+                "Start recording — \(controller.settings.captureSummary)",
                 #selector(start)
             )
             start.isEnabled = !controller.isBusy && !controller.startInFlight && !isPreparingRecording
@@ -133,7 +133,7 @@ final class MenuBarController: NSObject {
             }
             menu.addItem(start)
             let areaRoot = NSMenuItem(
-                title: "Capture area: \(controller.settings.captureArea.summary)",
+                title: "Capture area: \(controller.settings.captureSummary)",
                 action: nil,
                 keyEquivalent: ""
             )
@@ -143,8 +143,13 @@ final class MenuBarController: NSObject {
             change.isEnabled = controller.canChangeCaptureSettings
             areaMenu.addItem(change)
             let full = actionItem("Use entire display", #selector(useEntireDisplay))
-            full.isEnabled = controller.canChangeCaptureSettings && !controller.settings.captureArea.isEntireDisplay
+            full.isEnabled = controller.canChangeCaptureSettings
+                && (controller.settings.recordSingleWindow || !controller.settings.captureArea.isEntireDisplay)
             areaMenu.addItem(full)
+            let window = actionItem("Record a single window", #selector(recordSingleWindow))
+            window.isEnabled = controller.canChangeCaptureSettings
+            window.state = controller.settings.recordSingleWindow ? .on : .off
+            areaMenu.addItem(window)
             areaRoot.submenu = areaMenu
             menu.addItem(areaRoot)
         }
@@ -289,6 +294,7 @@ final class MenuBarController: NSObject {
         CaptureAreaPicker.present(current: controller.settings.captureArea) { [weak self] area in
             guard let self, self.controller.canChangeCaptureSettings else { return }
             self.controller.settings.captureArea = area
+            self.controller.settings.recordSingleWindow = false
             self.rebuild()
         }
     }
@@ -297,6 +303,15 @@ final class MenuBarController: NSObject {
         guard controller.canChangeCaptureSettings else { return }
         AgentLog.event("menu_area_full", [:])
         controller.settings.captureArea = .entireDisplay
+        controller.settings.recordSingleWindow = false
+        rebuild()
+    }
+
+    /// The window itself is picked at Start, because window IDs do not outlive the app.
+    @objc private func recordSingleWindow() {
+        guard controller.canChangeCaptureSettings else { return }
+        AgentLog.event("menu_area_window", [:])
+        controller.settings.recordSingleWindow = true
         rebuild()
     }
 
@@ -314,7 +329,8 @@ final class MenuBarController: NSObject {
     /// Asks whether the user will tell participants. Tests replace it so the Start flow stops there without an alert.
     var askMeetingNotice: @MainActor () -> Bool = MenuBarController.runMeetingNoticeAlert
 
-    /// Meeting notice, readiness, recording context, then the capture-area picker. `event` names the start row
+    /// Meeting notice, readiness, recording context, then the capture-area picker (the window chooser in
+    /// single-window mode). `event` names the start row
     /// written once the flow begins; nil when the caller already logged one.
     private func runStartFlow(logging event: String?) {
         guard controller.canChangeCaptureSettings, !isPreparingRecording else { return }
@@ -336,6 +352,16 @@ final class MenuBarController: NSObject {
             guard let product, self.controller.canChangeCaptureSettings else {
                 self.isPreparingRecording = false
                 self.rebuild()
+                return
+            }
+            if self.controller.settings.recordSingleWindow {
+                CaptureWindowChooser.present { [weak self] window in
+                    guard let self else { return }
+                    self.isPreparingRecording = false
+                    self.rebuild()
+                    guard let window, self.controller.canChangeCaptureSettings else { return }
+                    self.controller.startRecording(product: product, window: window)
+                }
                 return
             }
             CaptureAreaPicker.present(current: self.controller.settings.captureArea, mode: .record) { [weak self] outcome in

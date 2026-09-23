@@ -2166,6 +2166,26 @@ struct CaptureArea: Codable, Equatable, Sendable {
     }
 }
 
+/// One window chosen at Start. Only that window is recorded, Shots see only that window, and metadata is sampled
+/// only while its app is in front. Window IDs do not survive a relaunch, so this is never persisted.
+struct CaptureWindowTarget: Equatable, Sendable {
+    var windowID: UInt32
+    var processID: Int32
+    var appName: String
+    var windowTitle: String
+
+    /// Chooser row. Shown on screen only, never written to AgentLog (no titles there).
+    var label: String {
+        let title = windowTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        return title.isEmpty ? appName : "\(appName): \(title)"
+    }
+
+    /// Status line and menu text. App name only, so a private tab title is not repeated in the menu bar.
+    var summary: String {
+        "Window: \(appName)"
+    }
+}
+
 struct ProductContext: Codable, Sendable, Hashable {
     var appName: String
     var repoURL: String
