@@ -2846,7 +2846,7 @@ def test_write_contained_data_refuses_directory_symlinks() -> None:
     assert "prepareContainedWrite" in export_fn
     assert "isAllowedClipDest" in export_fn
     assert export_fn.index("isAllowedClipDest") < export_fn.index("prepareContainedWrite")
-    assert "writeContainedData(jpeg, relative: stillRelative" in export_fn
+    assert "writeContainedData(frame.jpeg, relative: stillRelative" in export_fn
     assert "copyContainedToTemporaryFile" in export_fn
     assert "extractStill(source: movieCopy" in export_fn
     vault = (ROOT / "ScrumTrace" / "Storage" / "SessionVault.swift").read_text()
