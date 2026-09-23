@@ -2037,14 +2037,18 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "omitted: omitted" in agent.split("private func taskBlock")[1].split("private func displayPath")[0]
     assert "remain in archive/" not in processor
     assert "applyExportEvidence" in processor
-    assert processor.count("EvidenceValidator.applyExportEvidence") == 4
-    for chunk in processor.split("EvidenceValidator.applyExportEvidence")[1:]:
+    evidence_calls = processor.split("EvidenceValidator.applyExportEvidence")[1:]
+    assert evidence_calls
+    finish_export = processor.split("private func finishExport")[1].split("private func throwIfExportEscapes")[0]
+    incomplete_handoff = processor.split("private func writeIncompleteHandoff")[1].split("private func writeExportDocuments")[0]
+    assert "EvidenceValidator.applyExportEvidence" in finish_export
+    assert "EvidenceValidator.applyExportEvidence" in incomplete_handoff
+    for chunk in evidence_calls:
         head = chunk.split(")")[0]
         assert "transcript: transcript" in head
         assert "omitted: projection.manifest.omitted" in head
-    assert processor.count("slices: projection.manifest.slices") == 4
-    assert processor.count("shots: projection.manifest.shots") == 4
-    assert processor.count("omitted: projection.manifest.omitted") == 4
+        assert "slices: projection.manifest.slices" in head
+        assert "shots: projection.manifest.shots" in head
     assert "mergeCanonicalStatuses" in processor
     assert "canonical: manifest.tasks" in processor
     assert "projected: projection.manifest.tasks" in processor
@@ -2183,7 +2187,7 @@ def test_phase45_clip_consent_and_budget() -> None:
     eval_gate = processor.split("if needsEvaluate")[1].split("await onStatus(.synthesizing")[0]
     assert "hasCompleted(.transcribing)" in eval_gate
     assert eval_gate.index("hasCompleted(.transcribing)") < eval_gate.index("uploadConsent.approved")
-    incomplete = processor.split("Transcription incomplete")[1].split("Writing AGENT_CONTEXT.md")[0]
+    incomplete = processor.split("Transcription is incomplete")[1].split("Writing AGENT_CONTEXT.md")[0]
     assert "return manifest" in incomplete
     assert "pipelineStatus = .transcribing" in incomplete
     assert "writeIncompleteHandoff" in incomplete
