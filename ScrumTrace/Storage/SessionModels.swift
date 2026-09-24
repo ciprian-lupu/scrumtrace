@@ -1,4 +1,5 @@
 import CoreGraphics
+import CryptoKit
 import Darwin
 import Foundation
 
@@ -2247,17 +2248,21 @@ struct SliceRecord: Codable, Sendable, Identifiable, Hashable {
     var analysisStatus: SliceAnalysisStatus
     var score: Double
     var mediaSent: [String]? = nil
+    var anchorIds: [String] = []
+    var stillEvidence: [SliceStillEvidence] = []
+    var evidenceGaps: [String] = []
     /// Per-destination state is canonical for comparison sessions. The legacy
     /// `analysis_status` remains as a conservative compatibility summary.
     var serviceEvaluations: [SliceServiceEvaluation] = []
 
     var id: String { sliceId }
 
-    init(sliceId: String, startMedia: TimeInterval, endMedia: TimeInterval, trigger: SliceTrigger, associatedShotId: String?, clipPath: String?, exportClipPath: String? = nil, stills: [String], analysisStatus: SliceAnalysisStatus, score: Double, mediaSent: [String]? = nil, serviceEvaluations: [SliceServiceEvaluation] = []) {
+    init(sliceId: String, startMedia: TimeInterval, endMedia: TimeInterval, trigger: SliceTrigger, associatedShotId: String?, clipPath: String?, exportClipPath: String? = nil, stills: [String], analysisStatus: SliceAnalysisStatus, score: Double, mediaSent: [String]? = nil, serviceEvaluations: [SliceServiceEvaluation] = [], anchorIds: [String] = [], stillEvidence: [SliceStillEvidence] = [], evidenceGaps: [String] = []) {
         self.sliceId = sliceId; self.startMedia = startMedia; self.endMedia = endMedia
         self.trigger = trigger; self.associatedShotId = associatedShotId; self.clipPath = clipPath
         self.exportClipPath = exportClipPath; self.stills = stills; self.analysisStatus = analysisStatus
-        self.score = score; self.mediaSent = mediaSent; self.serviceEvaluations = serviceEvaluations
+        self.score = score; self.mediaSent = mediaSent; self.serviceEvaluations = serviceEvaluations; self.anchorIds = anchorIds
+        self.stillEvidence = stillEvidence; self.evidenceGaps = evidenceGaps
     }
 
     /// Drop clip/still paths that were never written (failed encode or still grab).
@@ -2265,11 +2270,15 @@ struct SliceRecord: Codable, Sendable, Identifiable, Hashable {
         var copy = self
         if let clip = clipPath, ExportRel.existingSessionFile(clip, sessionURL: sessionURL) == nil {
             copy.clipPath = nil
+            if !copy.evidenceGaps.contains("clip_unavailable") { copy.evidenceGaps.append("clip_unavailable") }
         }
         if let exported = exportClipPath, ExportRel.existingSessionFile(exported, sessionURL: sessionURL) == nil {
             copy.exportClipPath = nil
         }
         copy.stills = stills.filter { ExportRel.existingSessionFile($0, sessionURL: sessionURL) != nil }
+        copy.stillEvidence = stillEvidence.filter {
+            copy.stills.contains($0.path) && ExportRel.existingSessionFile($0.path, sessionURL: sessionURL) != nil
+        }
         return copy
     }
 
@@ -2286,6 +2295,9 @@ struct SliceRecord: Codable, Sendable, Identifiable, Hashable {
         case score
         case mediaSent = "media_sent"
         case serviceEvaluations = "service_evaluations"
+        case anchorIds = "anchor_ids"
+        case stillEvidence = "still_evidence"
+        case evidenceGaps = "evidence_gaps"
     }
 
     init(from decoder: Decoder) throws {
@@ -2302,6 +2314,21 @@ struct SliceRecord: Codable, Sendable, Identifiable, Hashable {
         score = try c.decode(Double.self, forKey: .score)
         mediaSent = try c.decodeIfPresent([String].self, forKey: .mediaSent)
         serviceEvaluations = try c.decodeIfPresent([SliceServiceEvaluation].self, forKey: .serviceEvaluations) ?? []
+        anchorIds = try c.decodeIfPresent([String].self, forKey: .anchorIds) ?? []
+        stillEvidence = try c.decodeIfPresent([SliceStillEvidence].self, forKey: .stillEvidence) ?? []
+        evidenceGaps = try c.decodeIfPresent([String].self, forKey: .evidenceGaps) ?? []
+    }
+}
+
+struct SliceStillEvidence: Codable, Sendable, Hashable {
+    var path: String
+    var requestedMedia: TimeInterval
+    var actualMedia: TimeInterval
+
+    enum CodingKeys: String, CodingKey {
+        case path
+        case requestedMedia = "requested_media"
+        case actualMedia = "actual_media"
     }
 }
 
@@ -2724,6 +2751,7 @@ struct PipelineTiming: Codable, Sendable, Hashable {
     var whisperSources: [String]
     var whisperIncomplete: Bool
     var zipBytes: Int?
+    var exportFolderBytes: Int?
     var omittedCount: Int
 
     enum CodingKeys: String, CodingKey {
@@ -2731,6 +2759,7 @@ struct PipelineTiming: Codable, Sendable, Hashable {
         case whisperSources = "whisper_sources"
         case whisperIncomplete = "whisper_incomplete"
         case zipBytes = "zip_bytes"
+        case exportFolderBytes = "export_folder_bytes"
         case omittedCount = "omitted_count"
     }
 
@@ -2739,12 +2768,14 @@ struct PipelineTiming: Codable, Sendable, Hashable {
         whisperSources: [String] = [],
         whisperIncomplete: Bool = false,
         zipBytes: Int? = nil,
+        exportFolderBytes: Int? = nil,
         omittedCount: Int = 0
     ) {
         self.whisperWallSeconds = whisperWallSeconds
         self.whisperSources = whisperSources
         self.whisperIncomplete = whisperIncomplete
         self.zipBytes = zipBytes
+        self.exportFolderBytes = exportFolderBytes
         self.omittedCount = omittedCount
     }
 
@@ -2754,6 +2785,7 @@ struct PipelineTiming: Codable, Sendable, Hashable {
         whisperSources = try container.decodeIfPresent([String].self, forKey: .whisperSources) ?? []
         whisperIncomplete = try container.decodeIfPresent(Bool.self, forKey: .whisperIncomplete) ?? false
         zipBytes = try container.decodeIfPresent(Int.self, forKey: .zipBytes)
+        exportFolderBytes = try container.decodeIfPresent(Int.self, forKey: .exportFolderBytes)
         omittedCount = try container.decodeIfPresent(Int.self, forKey: .omittedCount) ?? 0
     }
 
@@ -2763,6 +2795,7 @@ struct PipelineTiming: Codable, Sendable, Hashable {
         try container.encode(whisperSources, forKey: .whisperSources)
         try container.encode(whisperIncomplete, forKey: .whisperIncomplete)
         try container.encodeIfPresent(zipBytes, forKey: .zipBytes)
+        try container.encodeIfPresent(exportFolderBytes, forKey: .exportFolderBytes)
         try container.encode(omittedCount, forKey: .omittedCount)
     }
 
@@ -2812,6 +2845,8 @@ struct SessionManifest: Codable, Sendable {
     var omitted: [OmittedAsset]
     var captureEnvironment: SessionEnvironment? = nil
     var importOrigin: SessionImportOrigin? = nil
+    /// Absent on legacy manifests until local outline generation has actually run.
+    var localProcedure: LocalProcedure? = nil
 
     enum CodingKeys: String, CodingKey {
         case manifestVersion = "manifest_version"
@@ -2830,6 +2865,7 @@ struct SessionManifest: Codable, Sendable {
         case omitted
         case captureEnvironment = "capture_environment"
         case importOrigin = "import_origin"
+        case localProcedure = "local_procedure"
     }
 
     static func makeNew(sessionId: String, product: ProductContext) -> SessionManifest {
@@ -2847,7 +2883,8 @@ struct SessionManifest: Codable, Sendable {
             completedStages: [],
             includeFullTranscriptInZip: false,
             uploadConsent: .denied,
-            omitted: []
+            omitted: [],
+            localProcedure: nil
         )
     }
 
@@ -2859,6 +2896,659 @@ struct SessionManifest: Codable, Sendable {
         if !completedStages.contains(stage) {
             completedStages.append(stage)
         }
+    }
+}
+
+struct LocalProcedureLimits: Codable, Sendable, Hashable {
+    var maxEntries: Int
+    var maxQuoteCharacters: Int
+    var maxQuoteBytes: Int
+    var maxSerializedBytes: Int
+
+    enum CodingKeys: String, CodingKey {
+        case maxEntries = "max_entries"
+        case maxQuoteCharacters = "max_quote_characters"
+        case maxQuoteBytes = "max_quote_bytes"
+        case maxSerializedBytes = "max_serialized_bytes"
+    }
+}
+
+struct LocalProcedureExclusion: Codable, Sendable, Hashable {
+    var sourceIndex: Int?
+    var start: TimeInterval?
+    var end: TimeInterval?
+    var reason: String
+
+    enum CodingKeys: String, CodingKey {
+        case sourceIndex = "source_index"
+        case start, end, reason
+    }
+}
+
+struct LocalProcedureEvidenceTime: Codable, Sendable, Hashable {
+    var path: String
+    var requestedMedia: TimeInterval
+    var actualMedia: TimeInterval
+
+    enum CodingKeys: String, CodingKey {
+        case path
+        case requestedMedia = "requested_media"
+        case actualMedia = "actual_media"
+    }
+}
+
+/// Extractive, review-only procedure map. It is independent of task and clip caps.
+struct LocalProcedure: Codable, Sendable, Hashable {
+    var schemaVersion: Int
+    var algorithmVersion: String
+    var inputFingerprint: String
+    var transcriptStatus: String
+    var partial: Bool
+    var chapters: [LocalProcedureChapter]
+    var steps: [LocalProcedureStep]
+    var anchors: [LocalProcedureAnchor]
+    var evidenceTimes: [LocalProcedureEvidenceTime]
+    var exclusions: [LocalProcedureExclusion]
+    var limits: LocalProcedureLimits
+    var candidateCount: Int
+    var selectedWindowCount: Int
+    var omittedEntryCount: Int
+    var serializedByteCount: Int
+    var sizeLimitExceeded: Bool
+    var generatedAtVersion: String { algorithmVersion }
+
+    enum CodingKeys: String, CodingKey {
+        case schemaVersion = "schema_version"
+        case algorithmVersion = "algorithm_version"
+        case inputFingerprint = "input_fingerprint"
+        case transcriptStatus = "transcript_status"
+        case partial, chapters, steps, anchors, exclusions, limits
+        case evidenceTimes = "evidence_times"
+        case candidateCount = "candidate_count"
+        case selectedWindowCount = "selected_window_count"
+        case omittedEntryCount = "omitted_entry_count"
+        case serializedByteCount = "serialized_byte_count"
+        case sizeLimitExceeded = "size_limit_exceeded"
+    }
+
+    init(
+        schemaVersion: Int,
+        algorithmVersion: String,
+        inputFingerprint: String,
+        transcriptStatus: String,
+        partial: Bool,
+        chapters: [LocalProcedureChapter],
+        steps: [LocalProcedureStep],
+        anchors: [LocalProcedureAnchor],
+        evidenceTimes: [LocalProcedureEvidenceTime],
+        exclusions: [LocalProcedureExclusion],
+        limits: LocalProcedureLimits,
+        candidateCount: Int,
+        selectedWindowCount: Int,
+        omittedEntryCount: Int,
+        serializedByteCount: Int,
+        sizeLimitExceeded: Bool
+    ) {
+        self.schemaVersion = schemaVersion
+        self.algorithmVersion = algorithmVersion
+        self.inputFingerprint = inputFingerprint
+        self.transcriptStatus = transcriptStatus
+        self.partial = partial
+        self.chapters = chapters
+        self.steps = steps
+        self.anchors = anchors
+        self.evidenceTimes = evidenceTimes
+        self.exclusions = exclusions
+        self.limits = limits
+        self.candidateCount = candidateCount
+        self.selectedWindowCount = selectedWindowCount
+        self.omittedEntryCount = omittedEntryCount
+        self.serializedByteCount = serializedByteCount
+        self.sizeLimitExceeded = sizeLimitExceeded
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        schemaVersion = try c.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? 1
+        algorithmVersion = try c.decodeIfPresent(String.self, forKey: .algorithmVersion) ?? "legacy-local-procedure"
+        inputFingerprint = try c.decodeIfPresent(String.self, forKey: .inputFingerprint) ?? ""
+        transcriptStatus = try c.decodeIfPresent(String.self, forKey: .transcriptStatus) ?? "unknown"
+        partial = try c.decodeIfPresent(Bool.self, forKey: .partial) ?? true
+        chapters = try c.decodeIfPresent([LocalProcedureChapter].self, forKey: .chapters) ?? []
+        steps = try c.decodeIfPresent([LocalProcedureStep].self, forKey: .steps) ?? []
+        anchors = try c.decodeIfPresent([LocalProcedureAnchor].self, forKey: .anchors) ?? []
+        evidenceTimes = try c.decodeIfPresent([LocalProcedureEvidenceTime].self, forKey: .evidenceTimes) ?? []
+        exclusions = try c.decodeIfPresent([LocalProcedureExclusion].self, forKey: .exclusions) ?? []
+        limits = try c.decodeIfPresent(LocalProcedureLimits.self, forKey: .limits)
+            ?? LocalProcedureLimits(maxEntries: 0, maxQuoteCharacters: 0, maxQuoteBytes: 0, maxSerializedBytes: 0)
+        candidateCount = try c.decodeIfPresent(Int.self, forKey: .candidateCount) ?? 0
+        selectedWindowCount = try c.decodeIfPresent(Int.self, forKey: .selectedWindowCount) ?? 0
+        omittedEntryCount = try c.decodeIfPresent(Int.self, forKey: .omittedEntryCount) ?? 0
+        serializedByteCount = try c.decodeIfPresent(Int.self, forKey: .serializedByteCount) ?? 0
+        sizeLimitExceeded = try c.decodeIfPresent(Bool.self, forKey: .sizeLimitExceeded) ?? true
+    }
+}
+
+struct LocalProcedureChapter: Codable, Sendable, Hashable {
+    var id: String
+    var start: TimeInterval
+    var end: TimeInterval
+    var label: String
+}
+
+struct LocalProcedureStep: Codable, Sendable, Hashable, Identifiable {
+    var id: String
+    var chapterId: String
+    var order: Int
+    var kind: String
+    var excerpt: String
+    var start: TimeInterval
+    var end: TimeInterval
+    var speaker: String?
+    var source: String
+    var shotIds: [String]
+    var pinIds: [String]
+    var sliceIds: [String]
+    var evidencePaths: [String]
+    var reviewState: String
+    var missingEvidenceReasons: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case chapterId = "chapter_id"
+        case order, kind, excerpt, start, end, speaker, source
+        case shotIds = "shot_ids"
+        case pinIds = "pin_ids"
+        case sliceIds = "slice_ids"
+        case evidencePaths = "evidence_paths"
+        case reviewState = "review_state"
+        case missingEvidenceReasons = "missing_evidence_reasons"
+    }
+}
+
+struct LocalProcedureAnchor: Codable, Sendable, Hashable, Identifiable {
+    var id: String
+    var kind: String
+    var time: TimeInterval
+    var representedStepIds: [String]
+    var representedSliceIds: [String]
+    var evidencePaths: [String]
+    var missingEvidenceReasons: [String]
+    var outcome: String
+
+    enum CodingKeys: String, CodingKey {
+        case id, kind, time
+        case representedStepIds = "represented_step_ids"
+        case representedSliceIds = "represented_slice_ids"
+        case evidencePaths = "evidence_paths"
+        case missingEvidenceReasons = "missing_evidence_reasons"
+        case outcome
+    }
+
+    init(id: String, kind: String, time: TimeInterval, representedStepIds: [String], representedSliceIds: [String], evidencePaths: [String] = [], missingEvidenceReasons: [String] = [], outcome: String) {
+        self.id = id
+        self.kind = kind
+        self.time = time
+        self.representedStepIds = representedStepIds
+        self.representedSliceIds = representedSliceIds
+        self.evidencePaths = evidencePaths
+        self.missingEvidenceReasons = missingEvidenceReasons
+        self.outcome = outcome
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        kind = try c.decode(String.self, forKey: .kind)
+        time = try c.decode(TimeInterval.self, forKey: .time)
+        representedStepIds = try c.decodeIfPresent([String].self, forKey: .representedStepIds) ?? []
+        representedSliceIds = try c.decodeIfPresent([String].self, forKey: .representedSliceIds) ?? []
+        evidencePaths = try c.decodeIfPresent([String].self, forKey: .evidencePaths) ?? []
+        missingEvidenceReasons = try c.decodeIfPresent([String].self, forKey: .missingEvidenceReasons) ?? []
+        outcome = try c.decodeIfPresent(String.self, forKey: .outcome) ?? "unknown"
+    }
+}
+
+/// Deterministic, bounded local extraction. It never paraphrases speech or
+/// claims that chronology proves a dependency.
+enum LocalProcedureBuilder {
+    static let version = "local-procedure-3"
+    static let maxEntries = 128
+    static let maxQuoteCharacters = 320
+    static let maxQuoteBytes = 64 * 1024
+    static let maxSerializedBytes = 512 * 1024
+    private static let maxExclusionRows = 128
+
+    static func fingerprint(
+        transcript: FullTranscript,
+        shots: [ShotRecord],
+        pins: [TimeInterval],
+        duration: TimeInterval,
+        context: ProductContext,
+        slices: [SliceRecord] = [],
+        mediaIdentities: [String: String] = [:]
+    ) -> String {
+        let canonicalTranscript = canonicalized(transcript)
+        let canonicalShots = shots.sorted {
+            if $0.tMedia != $1.tMedia { return $0.tMedia < $1.tMedia }
+            return $0.id < $1.id
+        }
+        let pinValues = pins.filter(\.isFinite).sorted()
+        let canonicalSlices = slices
+            .filter { $0.startMedia.isFinite && $0.endMedia.isFinite && $0.endMedia > $0.startMedia }
+            .sorted {
+                if $0.startMedia != $1.startMedia { return $0.startMedia < $1.startMedia }
+                return $0.sliceId < $1.sliceId
+            }
+            .map { slice in
+                [
+                    slice.sliceId,
+                    timeToken(slice.startMedia),
+                    timeToken(slice.endMedia),
+                    slice.trigger.rawValue,
+                    slice.associatedShotId ?? "",
+                    slice.anchorIds.sorted().joined(separator: ",")
+                ].joined(separator: "|")
+            }
+            .joined(separator: "\n")
+        let encoder = JSONEncoder.sorted
+        let transcriptBytes = (try? encoder.encode(canonicalTranscript)) ?? Data()
+        let shotBytes = (try? encoder.encode(canonicalShots)) ?? Data()
+        let contextBytes = (try? encoder.encode(context)) ?? Data()
+        let identityBytes = (try? encoder.encode(mediaIdentities)) ?? Data()
+        let pinText = pinValues.map(timeToken).joined(separator: ",")
+        let components = [
+            version,
+            transcriptBytes.base64EncodedString(),
+            shotBytes.base64EncodedString(),
+            pinText,
+            timeToken(duration),
+            contextBytes.base64EncodedString(),
+            canonicalSlices,
+            identityBytes.base64EncodedString()
+        ]
+        let bytes = Data(components.joined(separator: "\u{0}").utf8)
+        return SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined()
+    }
+
+    static func pinRows(_ pins: [TimeInterval]) -> [(id: String, time: TimeInterval)] {
+        var duplicateOrdinal: [String: Int] = [:]
+        return pins.filter(\.isFinite).sorted().map { time in
+            let token = timeToken(time)
+            let occurrence = duplicateOrdinal[token, default: 0]
+            duplicateOrdinal[token] = occurrence + 1
+            return (id: "pin-" + stableID("\(token)|\(occurrence)"), time: time)
+        }
+    }
+
+    static func build(
+        transcript: FullTranscript,
+        shots: [ShotRecord],
+        pins: [TimeInterval],
+        slices: [SliceRecord],
+        duration: TimeInterval,
+        context: ProductContext,
+        mediaIdentities: [String: String] = [:]
+    ) -> LocalProcedure {
+        let duration = duration.isFinite ? max(0, duration) : 0
+        let pinTimes = pins.filter { $0.isFinite && $0 >= 0 && $0 <= duration }.sorted()
+        let pinRows = pinRows(pinTimes)
+        let shotRows = shots
+            .filter { $0.tMedia.isFinite && $0.tMedia >= 0 && $0.tMedia <= duration }
+            .sorted { $0.tMedia == $1.tMedia ? $0.id < $1.id : $0.tMedia < $1.tMedia }
+        let validSlices = slices.filter {
+            $0.startMedia.isFinite && $0.endMedia.isFinite && $0.startMedia >= 0
+                && $0.endMedia > $0.startMedia && $0.endMedia <= duration
+        }
+        let indexedSegments = transcript.segments.enumerated().sorted { lhs, rhs in
+            segmentOrder(lhs.element, rhs.element)
+        }
+        let validSegments = indexedSegments.filter { _, segment in
+            !segment.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                && segment.start.isFinite && segment.end.isFinite
+                && segment.start >= 0 && segment.end > segment.start && segment.end <= duration
+        }
+
+        var steps: [LocalProcedureStep] = []
+        var exclusions: [LocalProcedureExclusion] = []
+        var omittedCount = 0
+        var quoteBytes = 0
+        func exclude(_ item: LocalProcedureExclusion) {
+            omittedCount += 1
+            if exclusions.count < maxExclusionRows { exclusions.append(item) }
+        }
+
+        for (index, segment) in indexedSegments where !validSegments.contains(where: { $0.offset == index }) {
+            let text = segment.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            let reason: String
+            if text.isEmpty { reason = "empty_source_text" }
+            else if !segment.start.isFinite || !segment.end.isFinite { reason = "invalid_timestamp" }
+            else if segment.start < 0 || segment.end > duration { reason = "outside_media_bounds" }
+            else if segment.end <= segment.start { reason = "non_positive_time_range" }
+            else { reason = "invalid_source_segment" }
+            exclude(LocalProcedureExclusion(
+                sourceIndex: index,
+                start: segment.start.isFinite ? segment.start : nil,
+                end: segment.end.isFinite ? segment.end : nil,
+                reason: reason
+            ))
+        }
+        for pin in pins where !pin.isFinite || pin < 0 || pin > duration {
+            exclude(LocalProcedureExclusion(sourceIndex: nil, start: nil, end: nil, reason: "pin_outside_media_bounds"))
+        }
+
+        // Preserve separately labeled human notes before transcript passages when
+        // the bounded entry budget is tight; the anchor inventory always survives.
+        for shot in shotRows {
+            let note = shot.note.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !note.isEmpty else { continue }
+            let excerpt = boundedExtractive(note, characters: maxQuoteCharacters)
+            let bytes = excerpt.utf8.count
+            guard steps.count < maxEntries, quoteBytes + bytes <= maxQuoteBytes else {
+                exclude(LocalProcedureExclusion(sourceIndex: nil, start: shot.tMedia, end: shot.tMedia, reason: "shot_note_entry_limit"))
+                continue
+            }
+            quoteBytes += bytes
+            let identity = "shot-note|\(shot.id)|\(timeToken(shot.tMedia))|\(normalizedText(note))"
+            let relatedSlices = validSlices.filter { $0.startMedia <= shot.tMedia && $0.endMedia >= shot.tMedia }.map(\.sliceId)
+            steps.append(LocalProcedureStep(
+                id: "step-" + stableID(identity),
+                chapterId: chapterID(for: shot.tMedia, duration: duration),
+                order: 0,
+                kind: "review_passage",
+                excerpt: excerpt,
+                start: shot.tMedia,
+                end: shot.tMedia,
+                speaker: nil,
+                source: "human_shot_note",
+                shotIds: [shot.id],
+                pinIds: [],
+                sliceIds: relatedSlices,
+                evidencePaths: sourceEvidencePaths(shotIDs: [shot.id], slices: validSlices.filter { relatedSlices.contains($0.sliceId) }, shots: shotRows),
+                reviewState: "manual_review_required",
+                missingEvidenceReasons: ["Human note is unverified interpretation; the image has not been semantically reviewed."]
+                    + evidenceGapDescriptions(validSlices.filter { relatedSlices.contains($0.sliceId) })
+            ))
+        }
+
+        let cues = #"(?i)\b(then|next|first|second|third|finally|after that|click|select|open|choose|enter|type|save|press|go to|scroll|submit|return|confirm|verify|result|should|appears|shows|run|execute|configure|import|deploy|prepare|install|must|requires|apoi|după aceea|dupa aceea|următorul|urmatorul|mai întâi|mai intai|în final|in final|apasă|apasa|selectează|selecteaza|deschide|alege|introdu|scrie|salvează|salveaza|accesează|acceseaza|trimite|verifică|verifica|ar trebui|apare|afișează|afiseaza|rezultatul|rulează|ruleaza|execută|executa|configurează|configureaza|importă|importa|trebuie|necesită|necesita)\b"#
+        var occurrenceByIdentity: [String: Int] = [:]
+        for (sourceIndex, segment) in validSegments {
+            let sourceText = segment.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            let excerpt = boundedExtractive(sourceText, characters: maxQuoteCharacters)
+            let identity = segmentIdentity(segment)
+            let occurrence = occurrenceByIdentity[identity, default: 0]
+            occurrenceByIdentity[identity] = occurrence + 1
+            let stableSourceID = "\(identity)|\(occurrence)"
+            let bytes = excerpt.utf8.count
+            guard steps.count < maxEntries, quoteBytes + bytes <= maxQuoteBytes else {
+                exclude(LocalProcedureExclusion(sourceIndex: sourceIndex, start: segment.start, end: segment.end, reason: steps.count >= maxEntries ? "entry_limit" : "quote_byte_limit"))
+                continue
+            }
+            quoteBytes += bytes
+            let relatedShots = shotRows.filter {
+                abs($0.tMedia - segment.start) <= 12 || ($0.tMedia >= segment.start && $0.tMedia <= segment.end)
+            }.map(\.id)
+            let relatedPins = pinRows.filter { $0.time >= segment.start - 12 && $0.time <= segment.end + 12 }.map(\.id)
+            let relatedSlices = validSlices.filter { $0.startMedia <= segment.end && $0.endMedia >= segment.start }.map(\.sliceId)
+            let commandSyntax = #"(?<!\w)(--[A-Za-z][A-Za-z0-9_-]*|[A-Za-z_][A-Za-z0-9_]*=)"#
+            let action = sourceText.range(of: cues, options: .regularExpression) != nil
+                || sourceText.range(of: commandSyntax, options: .regularExpression) != nil
+            steps.append(LocalProcedureStep(
+                id: "step-" + stableID("transcript|\(stableSourceID)"),
+                chapterId: chapterID(for: segment.start, duration: duration),
+                order: 0,
+                kind: action ? "action_excerpt" : "review_passage",
+                excerpt: excerpt,
+                start: segment.start,
+                end: segment.end,
+                speaker: boundedMetadata(SpeakerTimeline.displaySpeaker(segment, in: transcript), characters: 128),
+                source: boundedMetadata(segment.source ?? "transcript", characters: 64) ?? "transcript",
+                shotIds: relatedShots,
+                pinIds: relatedPins,
+                sliceIds: relatedSlices,
+                evidencePaths: sourceEvidencePaths(shotIDs: relatedShots, slices: validSlices.filter { relatedSlices.contains($0.sliceId) }, shots: shotRows),
+                reviewState: "manual_review_required",
+                missingEvidenceReasons: (relatedShots.isEmpty ? ["No human Shot is associated with this passage; visual support is unreviewed."] : [])
+                    + evidenceGapDescriptions(validSlices.filter { relatedSlices.contains($0.sliceId) })
+            ))
+        }
+
+        if !(transcript.untimedText ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            exclude(LocalProcedureExclusion(sourceIndex: nil, start: nil, end: nil, reason: "untimed_text_has_no_t_media_citation"))
+        }
+
+        steps.sort {
+            if $0.start != $1.start { return $0.start < $1.start }
+            return $0.id < $1.id
+        }
+        for index in steps.indices { steps[index].order = index + 1 }
+        let chapters = makeChapters(duration: duration)
+        var anchors: [LocalProcedureAnchor] = []
+        for shot in shotRows {
+            let related = steps.filter { $0.shotIds.contains(shot.id) }
+            let matchingSlices = validSlices.filter { $0.startMedia <= shot.tMedia && $0.endMedia >= shot.tMedia }
+            let evidence = sourceEvidencePaths(shotIDs: [shot.id], slices: matchingSlices, shots: shotRows)
+            anchors.append(LocalProcedureAnchor(
+                id: shot.id, kind: "shot", time: shot.tMedia,
+                representedStepIds: related.map(\.id),
+                representedSliceIds: matchingSlices.map(\.sliceId),
+                evidencePaths: evidence,
+                missingEvidenceReasons: (evidence.isEmpty ? ["No media path is associated with this Shot anchor."] : [])
+                    + evidenceGapDescriptions(matchingSlices),
+                outcome: matchingSlices.isEmpty ? (related.isEmpty ? "anchor_retained_without_step_or_window" : "anchor_retained_without_window") : (evidence.isEmpty ? "window_selected_without_media_path" : "selected_window")
+            ))
+        }
+        for pin in pinRows {
+            let related = steps.filter { $0.pinIds.contains(pin.id) }
+            let matchingSlices = validSlices.filter { $0.startMedia <= pin.time && $0.endMedia >= pin.time }
+            let evidence = sourceEvidencePaths(shotIDs: [], slices: matchingSlices, shots: shotRows)
+            anchors.append(LocalProcedureAnchor(
+                id: pin.id, kind: "pin", time: pin.time,
+                representedStepIds: related.map(\.id),
+                representedSliceIds: matchingSlices.map(\.sliceId),
+                evidencePaths: evidence,
+                missingEvidenceReasons: (evidence.isEmpty ? ["No selected media path is associated with this Pin anchor."] : [])
+                    + evidenceGapDescriptions(matchingSlices),
+                outcome: matchingSlices.isEmpty ? (related.isEmpty ? "anchor_retained_without_step_or_window" : "anchor_retained_without_window") : (evidence.isEmpty ? "window_selected_without_media_path" : "selected_window")
+            ))
+        }
+        anchors.sort { $0.time == $1.time ? $0.id < $1.id : $0.time < $1.time }
+
+        let transcriptStatus: String
+        if !validSegments.isEmpty { transcriptStatus = "timed_transcript" }
+        else if !(transcript.untimedText ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { transcriptStatus = "untimed_text_review_only" }
+        else if transcript.hasUsableText { transcriptStatus = "untimed_text_review_only" }
+        else if transcript.transcriptionAnalysis?.contains(where: { $0.status == "no_speech" }) == true { transcriptStatus = "no_speech" }
+        else { transcriptStatus = "no_usable_transcript" }
+        let uncoveredAnchors = anchors.contains { $0.outcome != "selected_window" || $0.evidencePaths.isEmpty }
+        let actionWithoutWindow = steps.contains { $0.kind == "action_excerpt" && $0.sliceIds.isEmpty }
+        let limited = omittedCount > 0 || !transcript.hasTimedSegments || uncoveredAnchors || actionWithoutWindow
+        var timedEvidence = validSlices.flatMap(\.stillEvidence)
+            .filter { item in
+                item.requestedMedia.isFinite && item.actualMedia.isFinite
+                    && item.actualMedia >= 0 && item.actualMedia <= duration
+                    && !item.path.hasPrefix("/")
+                    && ExportRel.normalizedComponents(item.path)?.first == "archive"
+            }
+            .sorted { lhs, rhs in
+                if lhs.actualMedia == rhs.actualMedia { return lhs.path < rhs.path }
+                return lhs.actualMedia < rhs.actualMedia
+            }
+        var timedEvidenceKeys = Set<String>()
+        timedEvidence = timedEvidence.filter {
+            timedEvidenceKeys.insert("\($0.path)|\(timeToken($0.actualMedia))").inserted
+        }
+        var procedure = LocalProcedure(
+            schemaVersion: 1,
+            algorithmVersion: version,
+            inputFingerprint: fingerprint(
+                transcript: transcript, shots: shotRows, pins: pinTimes, duration: duration,
+                context: context, slices: validSlices, mediaIdentities: mediaIdentities
+            ),
+            transcriptStatus: transcriptStatus,
+            partial: limited,
+            chapters: chapters,
+            steps: steps,
+            anchors: anchors,
+            evidenceTimes: timedEvidence.map {
+                LocalProcedureEvidenceTime(path: $0.path, requestedMedia: $0.requestedMedia, actualMedia: $0.actualMedia)
+            },
+            exclusions: exclusions,
+            limits: LocalProcedureLimits(
+                maxEntries: maxEntries, maxQuoteCharacters: maxQuoteCharacters,
+                maxQuoteBytes: maxQuoteBytes, maxSerializedBytes: maxSerializedBytes
+            ),
+            candidateCount: validSegments.count,
+            selectedWindowCount: Set(validSlices.map(\.sliceId)).count,
+            omittedEntryCount: omittedCount,
+            serializedByteCount: 0,
+            sizeLimitExceeded: false
+        )
+
+        var serializedBytes = (try? JSONEncoder.sorted.encode(procedure).count) ?? maxSerializedBytes + 1
+        while serializedBytes > maxSerializedBytes, !procedure.steps.isEmpty {
+            let index = procedure.steps.lastIndex(where: { $0.kind == "review_passage" }) ?? procedure.steps.indices.last!
+            let removed = procedure.steps.remove(at: index)
+            procedure.omittedEntryCount += 1
+            procedure.partial = true
+            if procedure.exclusions.count < maxExclusionRows {
+                procedure.exclusions.append(LocalProcedureExclusion(sourceIndex: nil, start: removed.start, end: removed.end, reason: "serialized_size_limit"))
+            }
+            for stepIndex in procedure.steps.indices { procedure.steps[stepIndex].order = stepIndex + 1 }
+            for anchorIndex in procedure.anchors.indices {
+                procedure.anchors[anchorIndex].representedStepIds.removeAll { $0 == removed.id }
+                if procedure.anchors[anchorIndex].representedStepIds.isEmpty && procedure.anchors[anchorIndex].representedSliceIds.isEmpty {
+                    procedure.anchors[anchorIndex].outcome = "anchor_retained_without_step_or_window"
+                }
+            }
+            serializedBytes = (try? JSONEncoder.sorted.encode(procedure).count) ?? maxSerializedBytes + 1
+        }
+        procedure.serializedByteCount = serializedBytes
+        procedure.sizeLimitExceeded = serializedBytes > maxSerializedBytes
+        procedure.serializedByteCount = (try? JSONEncoder.sorted.encode(procedure).count) ?? maxSerializedBytes + 1
+        if procedure.serializedByteCount > maxSerializedBytes { procedure.sizeLimitExceeded = true }
+        return procedure
+    }
+
+    private static func sourceEvidencePaths(shotIDs: [String], slices: [SliceRecord], shots: [ShotRecord]) -> [String] {
+        let shotPaths = shots.filter { shotIDs.contains($0.id) }.flatMap(\.stillCandidates)
+        let slicePaths = slices.flatMap { slice in
+            [slice.clipPath].compactMap { $0 } + slice.stills
+        }
+        var seen = Set<String>()
+        return (shotPaths + slicePaths).compactMap { path in
+            guard !path.hasPrefix("/"), let parts = ExportRel.normalizedComponents(path),
+                  parts.first == "archive", seen.insert(path).inserted else { return nil }
+            return path
+        }
+    }
+
+    private static func evidenceGapDescriptions(_ slices: [SliceRecord]) -> [String] {
+        let descriptions: [String: String] = [
+            "clip_encode_failed": "Clip encoding failed for a selected window.",
+            "clip_unavailable": "The selected clip is unavailable.",
+            "still_extraction_failed": "Generated still extraction failed for a selected window.",
+            "generated_still_not_exported": "A generated still was not included in this export.",
+            "generated_still_omitted_by_pack_budget": "A generated still was omitted by the pack size budget."
+        ]
+        return Set(slices.flatMap(\.evidenceGaps)).sorted().map {
+            descriptions[$0] ?? "Additional media evidence is unavailable."
+        }
+    }
+
+    private static func canonicalized(_ transcript: FullTranscript) -> FullTranscript {
+        var copy = transcript
+        copy.segments = transcript.segments.map { segment in
+            var item = segment
+            item.words.sort {
+                if $0.start != $1.start { return $0.start < $1.start }
+                if $0.end != $1.end { return $0.end < $1.end }
+                return $0.text < $1.text
+            }
+            return item
+        }.sorted(by: segmentOrder)
+        return copy
+    }
+
+    private static func segmentOrder(_ lhs: TranscriptSegment, _ rhs: TranscriptSegment) -> Bool {
+        let left = segmentIdentity(lhs)
+        let right = segmentIdentity(rhs)
+        if lhs.start.isFinite && rhs.start.isFinite && lhs.start != rhs.start { return lhs.start < rhs.start }
+        if lhs.end.isFinite && rhs.end.isFinite && lhs.end != rhs.end { return lhs.end < rhs.end }
+        return left < right
+    }
+
+    private static func segmentIdentity(_ segment: TranscriptSegment) -> String {
+        [
+            segment.source ?? "transcript",
+            timeToken(segment.start),
+            timeToken(segment.end),
+            normalizedText(segment.text),
+            segment.speaker ?? "",
+            (segment.speakerCandidates ?? []).sorted().joined(separator: ","),
+            segment.words.map { "\(timeToken($0.start))|\(timeToken($0.end))|\(normalizedText($0.text))" }.joined(separator: ";")
+        ].joined(separator: "|")
+    }
+
+    private static func normalizedText(_ text: String) -> String {
+        text.precomposedStringWithCanonicalMapping
+            .components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+    }
+
+    private static func boundedExtractive(_ value: String, characters: Int) -> String {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count > characters else { return trimmed }
+        let prefix = String(trimmed.prefix(characters))
+        if let range = prefix.range(of: #"\s+\S*$"#, options: .regularExpression) {
+            let beforeLastWord = String(prefix[..<range.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+            if !beforeLastWord.isEmpty { return beforeLastWord }
+        }
+        return prefix.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func boundedMetadata(_ value: String?, characters: Int) -> String? {
+        guard let value else { return nil }
+        return boundedExtractive(value, characters: characters)
+    }
+
+    private static func makeChapters(duration: TimeInterval) -> [LocalProcedureChapter] {
+        guard duration.isFinite, duration > 0 else { return [] }
+        let count = min(12, max(1, Int(ceil(duration / 600))))
+        return (0..<count).map { index in
+            let start = duration * Double(index) / Double(count)
+            let end = duration * Double(index + 1) / Double(count)
+            return LocalProcedureChapter(
+                id: "chapter-" + stableID("\(timeToken(start))|\(timeToken(end))"),
+                start: start, end: end,
+                label: "Recording section \(index + 1) (chronological navigation)"
+            )
+        }
+    }
+
+    private static func chapterID(for time: TimeInterval, duration: TimeInterval) -> String {
+        makeChapters(duration: duration)
+            .first(where: { time >= $0.start && (time < $0.end || time == duration) })?.id ?? ""
+    }
+
+    private static func timeToken(_ value: TimeInterval) -> String {
+        guard value.isFinite else { return String(value) }
+        return String(format: "%.3f", locale: Locale(identifier: "en_US_POSIX"), value)
+    }
+
+    private static func stableID(_ value: String) -> String {
+        SHA256.hash(data: Data(value.precomposedStringWithCanonicalMapping.utf8))
+            .prefix(10).map { String(format: "%02x", $0) }.joined()
+    }
+}
+
+extension JSONEncoder {
+    static var sorted: JSONEncoder {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        return encoder
     }
 }
 

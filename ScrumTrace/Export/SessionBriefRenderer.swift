@@ -79,8 +79,7 @@ struct SessionBriefRenderer {
         }
         js += Self.speakerJS
         css += Self.speakerCSS + BriefPresentation.css
-        let transcript = SpeakerTimeline.load(sessionURL: sessionURL)
-        let presentation = BriefPresentation(manifest: manifest, transcript: transcript, sessionURL: sessionURL)
+        let presentation = BriefPresentation(manifest: manifest, transcript: nil, sessionURL: sessionURL)
         let confirmed = manifest.tasks.filter { $0.status == .confirmed }
         let review = manifest.tasks.filter { $0.status == .needsReview }
         let replacements: [String: String] = [
@@ -102,11 +101,11 @@ struct SessionBriefRenderer {
             "{{SPEAKERS_HTML}}": presentation.speakersHTML,
             "{{DOWNLOADS_HTML}}": presentation.downloadsHTML,
             "{{REVIEW_OPEN}}": confirmed.isEmpty ? "open" : "",
-            "{{TASKS_HTML}}": confirmed.isEmpty ? "<p class=\"muted\">No confirmed findings. Review the captured evidence below.</p>" : groupedTaskCards(confirmed, excerpts: excerpts, sessionURL: sessionURL, omitted: manifest.omitted, manifest: manifest, transcript: transcript),
-            "{{NEEDS_REVIEW_HTML}}": review.isEmpty ? "<p class=\"muted\">No items need review.</p>" : groupedTaskCards(review, excerpts: excerpts, sessionURL: sessionURL, omitted: manifest.omitted, manifest: manifest, transcript: transcript),
+            "{{TASKS_HTML}}": confirmed.isEmpty ? "<p class=\"muted\">No confirmed findings. Review the captured evidence below.</p>" : groupedTaskCards(confirmed, excerpts: excerpts, sessionURL: sessionURL, omitted: manifest.omitted, manifest: manifest, procedure: manifest.localProcedure),
+            "{{NEEDS_REVIEW_HTML}}": review.isEmpty ? "<p class=\"muted\">No items need review.</p>" : groupedTaskCards(review, excerpts: excerpts, sessionURL: sessionURL, omitted: manifest.omitted, manifest: manifest, procedure: manifest.localProcedure),
             "{{TIMELINE_HTML}}": timeline(manifest),
             "{{SHOTS_HTML}}": shots(manifest, sessionURL: sessionURL),
-            "{{TRANSCRIPT_HTML}}": transcriptHTML(manifest: manifest, excerpts: excerpts, sessionURL: sessionURL, transcript: transcript) + fullTranscriptHTML(manifest: manifest, sessionURL: sessionURL),
+            "{{TRANSCRIPT_HTML}}": transcriptHTML(manifest: manifest, excerpts: excerpts, sessionURL: sessionURL, procedure: manifest.localProcedure) + fullTranscriptHTML(manifest: manifest, sessionURL: sessionURL),
             "{{CONFIRMED_COUNT}}": "\(confirmed.count)",
             "{{REVIEW_COUNT}}": "\(review.count)",
             "{{OMITTED_HTML}}": omittedHTML(manifest)
@@ -139,8 +138,10 @@ struct SessionBriefRenderer {
         return output
     }
 
-    private func taskCard(_ task: TaskRecord, excerpts: [String: String], sessionURL: URL, omitted: [OmittedAsset], slice: SliceRecord?, transcript: FullTranscript?) -> String {
-        let turns = transcript.flatMap { value in slice.map { SpeakerTimeline.turns(in: value, start: $0.startMedia, end: $0.endMedia) } } ?? []
+    private func taskCard(_ task: TaskRecord, excerpts: [String: String], sessionURL: URL, omitted: [OmittedAsset], slice: SliceRecord?, procedure: LocalProcedure?) -> String {
+        let turns = slice.map { value in
+            (procedure?.steps ?? []).filter { $0.sliceIds.contains(value.sliceId) }
+        } ?? []
         let sanitized = PromptTemplates.sanitizeUntrusted(task.agentInstructions)
         let serviceStatus = slice?.serviceEvaluations.first(where: { $0.serviceId == task.serviceId })?.status ?? slice?.analysisStatus
         let instructions = serviceStatus == .skipped
@@ -195,13 +196,13 @@ struct SessionBriefRenderer {
           <div class="evidence">\(media)</div>
           <details class="clip-transcript" id="transcript-\(HTMLEscaper.escape(task.taskId))" open>
             <summary>Transcript for this clip</summary>
-            \(transcriptRows(task: task, slice: slice, transcript: transcript, sessionURL: sessionURL, omitted: omitted))
+            \(transcriptRows(task: task, slice: slice, procedure: procedure, sessionURL: sessionURL, omitted: omitted))
           </details>
         </article>
         """
     }
 
-    private func groupedTaskCards(_ tasks: [TaskRecord], excerpts: [String: String], sessionURL: URL, omitted: [OmittedAsset], manifest: SessionManifest, transcript: FullTranscript?) -> String {
+    private func groupedTaskCards(_ tasks: [TaskRecord], excerpts: [String: String], sessionURL: URL, omitted: [OmittedAsset], manifest: SessionManifest, procedure: LocalProcedure?) -> String {
         let groups = Dictionary(grouping: tasks) { task in
             task.serviceId ?? "local"
         }
@@ -210,17 +211,17 @@ struct SessionBriefRenderer {
             let name = first?.serviceName ?? "Local review"
             let model = first?.serviceModel ?? "No model"
             let cards = (groups[key] ?? []).map { task in
-                taskCard(task, excerpts: excerpts, sessionURL: sessionURL, omitted: omitted, slice: manifest.slices.first { $0.sliceId == task.sourceSliceId }, transcript: transcript)
+                taskCard(task, excerpts: excerpts, sessionURL: sessionURL, omitted: omitted, slice: manifest.slices.first { $0.sliceId == task.sourceSliceId }, procedure: procedure)
             }.joined()
             return "<section class=\"model-results\"><h3>\(HTMLEscaper.escape(name)) <span class=\"muted\">· \(HTMLEscaper.escape(model))</span></h3>\(cards)</section>"
         }.joined()
     }
 
-    private func transcriptHTML(manifest: SessionManifest, excerpts: [String: String], sessionURL: URL, transcript: FullTranscript?) -> String {
+    private func transcriptHTML(manifest: SessionManifest, excerpts: [String: String], sessionURL: URL, procedure: LocalProcedure?) -> String {
         let available = manifest.tasks.filter { task in
-            guard task.status != .dropped, let transcript,
+            guard task.status != .dropped,
                   let slice = manifest.slices.first(where: { $0.sliceId == task.sourceSliceId }) else { return false }
-            return !SpeakerTimeline.turns(in: transcript, start: slice.startMedia, end: slice.endMedia).isEmpty
+            return (procedure?.steps ?? []).contains { $0.sliceIds.contains(slice.sliceId) }
         }
         guard !available.isEmpty else {
             return "<p class=\"muted\">No transcript excerpts are available in this pack. Use Retry Analysis in ScrumTrace if speech was recorded.</p>"
@@ -253,26 +254,26 @@ struct SessionBriefRenderer {
         return "<details class=\"clip-transcript\"><summary>Full transcript · included in this export</summary><p class=\"muted\">Only passages within selected clips can play video here.</p>\(rows)</details>"
     }
 
-    private func transcriptRows(task: TaskRecord, slice: SliceRecord?, transcript: FullTranscript?, sessionURL: URL, omitted: [OmittedAsset]) -> String {
-        guard let transcript, let slice else {
-            return "<p class=\"muted\">No transcript is available for this clip.</p>"
-        }
-        let turns = SpeakerTimeline.turns(in: transcript, start: slice.startMedia, end: slice.endMedia)
-        guard !turns.isEmpty else {
-            return "<p class=\"muted\">No transcript passages within this clip. The recording is still available above.</p>"
+    private func transcriptRows(task: TaskRecord, slice: SliceRecord?, procedure: LocalProcedure?, sessionURL: URL, omitted: [OmittedAsset]) -> String {
+        guard let slice else { return "<p class=\"muted\">No selected evidence window is available.</p>" }
+        let passages = (procedure?.steps ?? []).filter { $0.sliceIds.contains(slice.sliceId) }.sorted { $0.order < $1.order }
+        guard !passages.isEmpty else {
+            return "<p class=\"muted\">No persisted local transcript excerpt is linked to this clip. The recording is still available above.</p>"
         }
         let clip = task.evidenceMedia.compactMap { ExportRel.packMediaHandoff($0, sessionURL: sessionURL, omitted: omitted) }.first { $0.hasSuffix(".mp4") }
-        let rows = turns.map { turn -> String in
-            let label = SpeakerTimeline.displaySpeaker(turn, in: transcript)
-            let content = "<span class=\"turn-meta\">t_media \(Self.clock(turn.start))–\(Self.clock(turn.end)) · \(HTMLEscaper.escape(label))</span><span>\(HTMLEscaper.escape(turn.text))</span>"
+        let rows = passages.map { step -> String in
+            let label = step.speaker ?? "unknown"
+            let content = "<span class=\"turn-meta\">t_media \(Self.clock(step.start))–\(Self.clock(step.end)) · \(HTMLEscaper.escape(step.source)) · \(HTMLEscaper.escape(label))</span><span>\(HTMLEscaper.escape(step.excerpt))</span>"
             if let clip {
-                let start = String(format: "%.3f", locale: Locale(identifier: "en_US_POSIX"), max(0, turn.start - slice.startMedia))
-                let end = String(format: "%.3f", locale: Locale(identifier: "en_US_POSIX"), max(0, turn.end - slice.startMedia))
+                let startSeconds = min(max(0, step.start - slice.startMedia), slice.endMedia - slice.startMedia)
+                let endSeconds = min(slice.endMedia - slice.startMedia, max(startSeconds, step.end - slice.startMedia))
+                let start = String(format: "%.3f", locale: Locale(identifier: "en_US_POSIX"), startSeconds)
+                let end = String(format: "%.3f", locale: Locale(identifier: "en_US_POSIX"), endSeconds)
                 return "<button class=\"transcript-turn\" data-clip=\"\(HTMLEscaper.escape(clip))\" data-start=\"\(start)\" data-end=\"\(end)\" data-speaker=\"\(HTMLEscaper.escape(label))\">\(content)</button>"
             }
             return "<p class=\"transcript-turn\">\(content)</p>"
         }.joined()
-        return "<p class=\"muted\">Selected clip only · speaker labels are estimates unless reviewed.</p>\(rows)"
+        return "<p class=\"muted\">Persisted extractive passages · speaker attribution may be uncertain.</p>\(rows)"
     }
 
     private func timeline(_ manifest: SessionManifest) -> String {

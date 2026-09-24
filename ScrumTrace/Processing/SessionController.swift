@@ -363,6 +363,27 @@ final class SessionController: ObservableObject {
         Task { await runProcessor(sessionId: sessionId, retry: retry) }
     }
 
+    func regenerateLocalExport(sessionId: String) {
+        if (try? vault.loadManifest(id: sessionId).importOrigin?.kind) == .imported {
+            statusLine = "Use Analyze a copy in Recordings to preserve the imported results."
+            return
+        }
+        guard !isBusy, !isRecording, !startInFlight else {
+            statusLine = isBusy ? "Already processing a session" : "Stop recording before regenerating the local export"
+            return
+        }
+        guard AgentLog.setSessionContext(sessionId) else {
+            statusLine = "Could not bind retry diagnostics to this session"
+            return
+        }
+        isBusy = true
+        statusLine = "Regenerating local export without transcription or provider calls…"
+        AgentLog.event("local_export_begin", ["session": sessionId])
+        let retry = RetryOrigin(lastSessionId: lastSessionId)
+        lastSessionId = sessionId
+        Task { await runProcessor(sessionId: sessionId, retry: retry, localOnly: true) }
+    }
+
     /// A Retry Analysis run, with the last session the controller named before the retry started.
     private struct RetryOrigin {
         let lastSessionId: String?
@@ -978,7 +999,7 @@ final class SessionController: ObservableObject {
         (try? FileManager.default.attributesOfItem(atPath: url.path)) != nil
     }
 
-    private func runProcessor(sessionId: String, retry: RetryOrigin? = nil) async {
+    private func runProcessor(sessionId: String, retry: RetryOrigin? = nil, localOnly: Bool = false) async {
         isBusy = true
         defer {
             AgentLog.clearSessionContext(matching: sessionId)
@@ -1008,14 +1029,17 @@ final class SessionController: ObservableObject {
                     local = memory
                 }
             }
-            let services = settings.comparisonServiceConfigurations
+            let services = localOnly ? [] : settings.comparisonServiceConfigurations
             if var local {
                 local.includeFullTranscriptInZip = settings.includeFullTranscriptInZip
                 let destinations = services.map(\.destination)
                 let hasAPIKey = services.contains { !$0.configuration.apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
                 // No key means nothing can leave this Mac; asking a first-time
                 // local-only user to approve an upload would only confuse them.
-                if services.isEmpty {
+                if localOnly {
+                    // Preserve the session's explicit consent record, but bypass
+                    // every provider/consent branch for this local regeneration.
+                } else if services.isEmpty {
                     local.uploadConsent = .denied
                 } else if !hasAPIKey {
                     local.uploadConsent.approved = false
@@ -1053,7 +1077,9 @@ final class SessionController: ObservableObject {
             let defaultSpeech = settings.selectedTranscriptionServiceConfiguration()
             let hasReusablePrimary = processor!.hasValidPrimaryTranscript(sessionId: sessionId)
             let whisperModel: String
-            if let speech = defaultSpeech, speech.service.backend == .openAITranscription {
+            if localOnly {
+                whisperModel = settings.whisperModel
+            } else if let speech = defaultSpeech, speech.service.backend == .openAITranscription {
                 if hasReusablePrimary {
                     // Retry Analysis is deterministic with respect to the
                     // selected primary. Do not re-consent or make a new cloud
@@ -1084,9 +1110,10 @@ final class SessionController: ObservableObject {
                 sessionId: sessionId,
                 pinTimes: pins,
                 configuration: services.first?.configuration ?? settings.providerConfiguration(includeKey: false),
-                serviceConfigurations: services,
+                serviceConfigurations: localOnly ? nil : services,
                 whisperModel: whisperModel,
                 identifySpeakers: settings.identifySpeakers,
+                localOnly: localOnly,
                 onStatus: { [weak self] status, line in
                     AgentLog.event("pipeline_status", [
                         "status": status.rawValue,
@@ -1104,7 +1131,7 @@ final class SessionController: ObservableObject {
                 manifest = result
                 lastSessionId = result.sessionId
                 phase = result.pipelineStatus
-                vault.revealInFinder(sessionId: result.sessionId)
+                if !localOnly { vault.revealInFinder(sessionId: result.sessionId) }
             } else {
                 AgentLog.event("processor_fail", ["session": sessionId, "error": "processor_missing"])
             }

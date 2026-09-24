@@ -942,6 +942,7 @@ final class MainWindowTests: XCTestCase {
                 return true
             },
             retryAnalysis: { recorder.record("retryAnalysis \($0)") },
+            regenerateLocalExport: { recorder.record("regenerateLocalExport \($0)") },
             copyExportPath: { folder in
                 // The folder is `<session>/export`; record the session it belongs to.
                 recorder.record("copyExportPath \(folder.deletingLastPathComponent().lastPathComponent)")
@@ -1103,7 +1104,7 @@ final class MainWindowTests: XCTestCase {
 
             XCTAssertFalse(model.performOnSelection(.revealExport), "Nothing is selected")
             navigation.selectedSessionId = f.completed
-            let immediate: [RecordingAction] = [.revealExport, .openInClaude, .openInChatGPT, .openBrief, .copyExportPath, .retryAnalysis]
+            let immediate: [RecordingAction] = [.revealExport, .openInClaude, .openInChatGPT, .openBrief, .copyExportPath, .retryAnalysis, .regenerateLocalExport]
             for action in immediate {
                 XCTAssertTrue(model.isEnabled(action), "\(action)")
                 XCTAssertNil(model.unavailableReason(action), "\(action)")
@@ -1117,7 +1118,8 @@ final class MainWindowTests: XCTestCase {
                 "chatgpt \(f.completed)",
                 "openBrief \(f.completed)",
                 "copyExportPath \(f.completed)",
-                "retryAnalysis \(f.completed)"
+                "retryAnalysis \(f.completed)",
+                "regenerateLocalExport \(f.completed)"
             ])
             XCTAssertNil(model.message)
 
@@ -1127,10 +1129,10 @@ final class MainWindowTests: XCTestCase {
             XCTAssertTrue(model.performOnSelection(.revealArchive))
             let reveal = try XCTUnwrap(model.pendingPrivateReveal)
             XCTAssertEqual(reveal, PrivateRevealRequest(sessionId: f.completed, action: .revealArchive))
-            XCTAssertEqual(recorder.calls.count, 6, "Reveal archive… waits for the warning")
+            XCTAssertEqual(recorder.calls.count, 7, "Reveal archive… waits for the warning")
             model.cancelPrivateReveal()
             XCTAssertNil(model.pendingPrivateReveal)
-            XCTAssertEqual(recorder.calls.count, 6, "Cancelling the warning reveals nothing")
+            XCTAssertEqual(recorder.calls.count, 7, "Cancelling the warning reveals nothing")
             XCTAssertTrue(model.performOnSelection(.revealArchive))
             model.confirmPrivateReveal(reveal)
             XCTAssertNil(model.pendingPrivateReveal)
@@ -1151,7 +1153,7 @@ final class MainWindowTests: XCTestCase {
             XCTAssertFalse(model.perform(.reviewSpeakers, on: f.unfinished), "No full transcript to review")
             XCTAssertEqual(model.unavailableReason(.reviewSpeakers, for: unfinished), "This recording has no transcript to review yet.")
             XCTAssertFalse(model.perform(.revealExport, on: "2026-01-01-0000-absent"), "Only listed sessions")
-            XCTAssertEqual(recorder.calls.count, 8)
+            XCTAssertEqual(recorder.calls.count, 9)
 
             model.startRecording()
             XCTAssertEqual(recorder.calls.last, "startRecording")
@@ -1159,11 +1161,11 @@ final class MainWindowTests: XCTestCase {
             let rows = try mainEventRows(in: f)
             XCTAssertEqual(rows.compactMap { $0["event"] }, [
                 "main_reveal_export", "main_claude", "main_chatgpt", "main_open_brief", "main_copy_export_path",
-                "main_retry", "main_review_speakers", "main_reveal_archive", "main_reveal_export", "main_start"
+                "main_retry", "main_local_export", "main_review_speakers", "main_reveal_archive", "main_reveal_export", "main_start"
             ])
             XCTAssertEqual(
                 rows.map { $0["session"] ?? "" },
-                Array(repeating: f.completed, count: 8) + [f.unfinished, ""]
+                Array(repeating: f.completed, count: 9) + [f.unfinished, ""]
             )
         }
     }
@@ -1700,7 +1702,7 @@ final class MainWindowTests: XCTestCase {
                 XCTAssertEqual(model.library.entries.map(\.id), [f.unfinished, f.completed, f.corrupt])
                 let completed = try XCTUnwrap(model.entry(id: f.completed))
                 let unreadable = try XCTUnwrap(model.entry(id: f.corrupt))
-                let gated: [RecordingAction] = [.retryAnalysis, .delete, .reviewSpeakers, .revealArchive, .openPrivateArchiveInCodex]
+                let gated: [RecordingAction] = [.retryAnalysis, .regenerateLocalExport, .delete, .reviewSpeakers, .revealArchive, .openPrivateArchiveInCodex]
                 let handoff: [RecordingAction] = [.revealExport, .openInClaude, .openInChatGPT, .openBrief, .copyExportPath]
                 for action in gated + handoff {
                     XCTAssertTrue(model.isEnabled(action, for: completed), "idle \(action)")
