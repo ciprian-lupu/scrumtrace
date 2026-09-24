@@ -66,7 +66,17 @@ enum PromptTemplates {
 
     /// Inline form for AGENT_CONTEXT.md list items (D13).
     static func wrapUntrustedInline(_ body: String) -> String {
-        "<untrusted_meeting_data>\(sanitizeUntrusted(body))</untrusted_meeting_data>"
+        let flattened = sanitizeUntrusted(body).components(separatedBy: .newlines).joined(separator: " ")
+        let safe = flattened
+            .replacingOccurrences(of: "&", with: "&amp;")
+            .replacingOccurrences(of: "<", with: "&lt;")
+            .replacingOccurrences(of: ">", with: "&gt;")
+            // Markdown recognizes links before decoding entities. Keep
+            // transcript text visible while preventing it from creating a
+            // clickable path inside the wrapper.
+            .replacingOccurrences(of: "[", with: "&#91;")
+            .replacingOccurrences(of: "]", with: "&#93;")
+        return "<untrusted_meeting_data>\(safe)</untrusted_meeting_data>"
     }
 
     static func sanitizeUntrusted(_ body: String) -> String {

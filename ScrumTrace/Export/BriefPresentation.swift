@@ -13,7 +13,22 @@ struct BriefPresentation {
 
     var statusHTML: String {
         let speech: String
-        if let transcript, transcript.hasUsableText {
+        if let procedure = manifest.localProcedure {
+            switch procedure.transcriptStatus {
+            case "timed_transcript":
+                speech = procedure.partial
+                    ? "Timed transcript available · local outline is partial and needs review."
+                    : "Timed transcript available · local outline needs human semantic review."
+            case "untimed_text_review_only":
+                speech = "Transcript text has no usable media timing · it was not asserted as a timed procedure."
+            case "no_speech":
+                speech = "No speech detected in the captured audio."
+            default:
+                speech = manifest.hasCompleted(.transcribing)
+                    ? "No usable transcript · captured anchors remain available for review."
+                    : "Transcription incomplete · use Retry Analysis in ScrumTrace."
+            }
+        } else if let transcript, transcript.hasUsableText {
             speech = transcript.needsTranscriptionRetry || !manifest.hasCompleted(.transcribing)
                 ? "Partial transcript · retry the missing source in ScrumTrace."
                 : "Transcript available · \(transcript.segments.count) \(transcript.segments.count == 1 ? "passage" : "passages")."
@@ -44,6 +59,8 @@ struct BriefPresentation {
             analysis = "Local export only · sending evidence for AI analysis was not approved."
         } else if manifest.slices.isEmpty {
             analysis = "No evidence windows were selected for AI analysis."
+        } else if manifest.localProcedure != nil {
+            analysis = "Provider analysis not run or unavailable. A local extractive outline is available for human review."
         } else {
             analysis = "AI analysis has not completed. Review the session in ScrumTrace."
         }
@@ -60,17 +77,19 @@ struct BriefPresentation {
     }
 
     var summaryHTML: String {
-        if !ComparisonReport.rows(manifest).isEmpty { return ComparisonReport.html(manifest) }
+        if !ComparisonReport.rows(manifest).isEmpty { return localProcedureHTML + ComparisonReport.html(manifest) }
         let introduction: String
         if !confirmed.isEmpty {
             introduction = "Highlights from the selected evidence. Follow each item to its supporting clip, image and quotes."
         } else if manifest.slices.contains(where: { $0.analysisStatus == .success }) {
             introduction = "No confirmed findings from this analysis. Check the review items before drawing conclusions."
+        } else if manifest.localProcedure != nil {
+            introduction = "Provider findings are separate. The local extractive outline needs human review and does not establish a complete procedure."
         } else {
             introduction = "A discussion summary is not available because AI analysis has not completed. Captures and notes remain available for review."
         }
         let highlights = confirmed.prefix(5).map { linkedItem($0, includeStatement: false) }.joined()
-        return """
+        return localProcedureHTML + """
         <section id="summary" class="brief-panel" aria-labelledby="summary-title">
           <h2 id="summary-title">Session summary</h2>
           <p>\(escape(introduction))</p>
@@ -83,6 +102,40 @@ struct BriefPresentation {
           \(outcome(id: "questions", title: "Open questions", kinds: [.openQuestion], empty: "No open questions captured in confirmed evidence."))
         </div>
         """
+    }
+
+    private var localProcedureHTML: String {
+        guard let procedure = manifest.localProcedure else { return "" }
+        let rows = procedure.steps.map { step in
+            let citation = "t_media \(clock(step.start))–\(clock(step.end)) · \(step.source) · \(step.reviewState)"
+            let gaps = step.missingEvidenceReasons.isEmpty ? "" : "<p class=\"muted\">Gap: \(escape(step.missingEvidenceReasons.joined(separator: "; ")))</p>"
+            let label = escape(step.kind.replacingOccurrences(of: "_", with: " "))
+            let evidence = step.evidencePaths.compactMap { sourcePath -> (String, LocalProcedureEvidenceTime?)? in
+                guard let path = ExportRel.packMediaHandoff(sourcePath, sessionURL: sessionURL, omitted: manifest.omitted) else { return nil }
+                return (path, procedure.evidenceTimes.first { $0.path == sourcePath })
+            }.map { path, timestamp -> String in
+                let rel = escape(path)
+                let timing = timestamp.map {
+                    "<span class=\"muted\">Generated still requested at t_media \(escape(clock($0.requestedMedia))); captured at t_media \(escape(clock($0.actualMedia))).</span>"
+                } ?? ""
+                if path.hasSuffix(".jpg") || path.hasSuffix(".jpeg") || path.hasSuffix(".png") {
+                    return "<span><a class=\"still\" href=\"\(rel)\" data-lightbox><img src=\"\(rel)\" alt=\"Available visual evidence for passage \(step.order)\"></a>\(timing)</span>"
+                }
+                return "<span><a href=\"\(rel)\">Available clip evidence</a>\(timing)</span>"
+            }.joined(separator: " ")
+            let media = evidence.isEmpty ? "" : "<div class=\"evidence\">\(evidence)</div>"
+            return "<li><strong>\(step.order). \(label)</strong> <span class=\"when\">\(escape(citation))</span><blockquote>\(escape(step.excerpt))</blockquote>\(media)\(gaps)</li>"
+        }.joined()
+        let partial = (procedure.partial || procedure.sizeLimitExceeded)
+            ? "<p class=\"muted\">Partial outline · \(procedure.omittedEntryCount) entries omitted/unavailable. This is not a completeness claim.</p>"
+                + (procedure.sizeLimitExceeded ? "<p class=\"muted\">The configured local outline size limit was exceeded; this export is not marked ready.</p>" : "")
+            : ""
+        return "<section id=\"local-outline\" class=\"brief-panel\"><h2>Local extractive outline</h2><p>\(procedure.steps.count) passages · \(procedure.anchors.count) human anchors · \(procedure.selectedWindowCount) selected windows. Chronology and window overlap do not prove semantic order or visual coverage.</p>\(partial)<ol>\(rows)</ol></section>"
+    }
+
+    private func clock(_ seconds: TimeInterval) -> String {
+        let value = max(0, Int(seconds.rounded(.down)))
+        return String(format: "%02d:%02d:%02d", value / 3600, (value / 60) % 60, value % 60)
     }
 
     private func outcome(id: String, title: String, kinds: [TaskKind], empty: String) -> String {
@@ -103,9 +156,20 @@ struct BriefPresentation {
     }
 
     var speakersHTML: String {
-        // Only participants represented in selected excerpts belong in the brief.
-        // Do not leak names from unrelated parts of the private transcript.
-        guard let transcript else { return "" }
+        // Normal export rendering uses persisted, projected local excerpts. It
+        // does not reopen the private archive to reconstruct transcript turns.
+        guard let transcript else {
+            let count = Set((manifest.localProcedure?.steps ?? []).compactMap(\.speaker)).count
+            let summary = count == 0
+                ? "No speaker labels were stored with the selected local passages."
+                : "\(count) source speaker \(count == 1 ? "label appears" : "labels appear") in the selected local passages; identities are not independently verified."
+            return """
+            <section id="speakers" class="brief-panel" aria-labelledby="speakers-title">
+              <h2 id="speakers-title">Speakers in selected evidence</h2>
+              <p class="muted">\(escape(summary))</p>
+            </section>
+            """
+        }
         let turns = manifest.tasks.filter { $0.status != .dropped }.flatMap { task -> [TranscriptSegment] in
             guard let slice = manifest.slices.first(where: { $0.sliceId == task.sourceSliceId }) else { return [] }
             return SpeakerTimeline.turns(in: transcript, start: slice.startMedia, end: slice.endMedia)

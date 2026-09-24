@@ -306,10 +306,40 @@ final class SpeakerTests: XCTestCase {
         manifest.slices = [SliceRecord(sliceId: "s1", startMedia: 1.5, endMedia: 3.5, trigger: .pin, associatedShotId: nil, clipPath: "archive/media-work/s1/clip.mp4", exportClipPath: "export/media/s1/clip.mp4", stills: [], analysisStatus: .skipped, score: 1)]
         manifest.tasks = [TaskRecord(taskId: "TASK-01", sourceSliceId: "s1", kind: .improvement, status: .needsReview, title: "Fixture", observed: "", stated: "", inferred: "", agentInstructions: "", quotes: [], evidenceMedia: ["export/media/s1/clip.mp4"], confidence: 0)]
         try ExportRel.writeContainedData(Data("fixture-video".utf8), relative: "export/media/s1/clip.mp4", sessionURL: root)
-        var input = transcript([segment(0, 5, "PRIVATE_BEFORE selected PRIVATE_AFTER", words: [.init(start: 0, end: 1, text: "PRIVATE_BEFORE"), .init(start: 2, end: 3, text: "selected"), .init(start: 4, end: 5, text: "PRIVATE_AFTER")])])
-        input = SpeakerTimeline.assigning(input, intervals: [.init(start: 0, end: 5, speakerID: "one")], source: "room")
-        input = SpeakerTimeline.names(["room_speaker_1": "<script>alert(1)</script>"], appliedTo: input)
-        try SpeakerTimeline.save(input, sessionURL: root)
+        let privateTranscript = SpeakerTimeline.names(
+            ["room_speaker_1": "<script>alert(1)</script>"],
+            appliedTo: SpeakerTimeline.assigning(
+                transcript([
+                    segment(0, 1, "PRIVATE_BEFORE", words: [.init(start: 0, end: 1, text: "PRIVATE_BEFORE")]),
+                    segment(2, 3, "selected", words: [.init(start: 2, end: 3, text: "selected")]),
+                    segment(4, 5, "PRIVATE_AFTER", words: [.init(start: 4, end: 5, text: "PRIVATE_AFTER")])
+                ]),
+                intervals: [.init(start: 0, end: 5, speakerID: "one")],
+                source: "room"
+            )
+        )
+        try SpeakerTimeline.save(privateTranscript, sessionURL: root)
+        // The renderer receives only the persisted export-safe outline. The
+        // private transcript has additional speech outside the selected clip.
+        let projectedTranscript = SpeakerTimeline.names(
+            ["room_speaker_1": "<script>alert(1)</script>"],
+            appliedTo: SpeakerTimeline.assigning(
+                transcript([segment(2, 3, "selected", words: [.init(start: 2, end: 3, text: "selected")])]),
+                intervals: [.init(start: 2, end: 3, speakerID: "one")],
+                source: "room"
+            )
+        )
+        manifest.localProcedure = LocalProcedureBuilder.build(
+            transcript: projectedTranscript,
+            shots: manifest.shots,
+            pins: [],
+            slices: manifest.slices,
+            duration: manifest.duration.mediaSeconds,
+            context: .empty
+        )
+        var projectedProcedure = try XCTUnwrap(manifest.localProcedure)
+        projectedProcedure.steps[0].evidencePaths = ["export/media/s1/clip.mp4"]
+        manifest.localProcedure = projectedProcedure
         let html = SessionBriefRenderer().render(manifest: manifest, excerpts: [:], sessionURL: root)
         XCTAssertTrue(html.contains("data-start=\"0.500\""))
         XCTAssertTrue(html.contains("data-clip=\"media/s1/clip.mp4\""))
@@ -320,6 +350,10 @@ final class SpeakerTests: XCTestCase {
         let context = AgentContextRenderer().render(manifest: manifest, sessionURL: root)
         XCTAssertTrue(context.contains("selected"))
         XCTAssertFalse(context.contains("PRIVATE_BEFORE"))
+        XCTAssertTrue(context.contains("[clip](<media/s1/clip.mp4>)"))
+        XCTAssertFalse(context.contains("[clip](<<untrusted_meeting_data>"))
+        XCTAssertTrue(context.contains("<untrusted_meeting_data>&lt;script&gt;alert(1)&lt;/script&gt;"))
+        XCTAssertFalse(context.contains("<script>alert(1)</script>"))
         manifest.omitted = [OmittedAsset(path: "media/s1/clip.mp4", reason: "test")]
         let omittedHTML = SessionBriefRenderer().render(manifest: manifest, excerpts: [:], sessionURL: root)
         XCTAssertFalse(omittedHTML.contains("data-clip=\"media/s1/clip.mp4\""))

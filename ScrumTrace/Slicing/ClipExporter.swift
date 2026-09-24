@@ -47,16 +47,24 @@ struct ClipExporter {
         } catch {
             throw SessionRecorderError.writerFailed("Slice clip_path escaped the session folder.")
         }
-        try await reencode(
-            source: movieCopy,
-            destRelative: prepared,
-            slice: slice,
-            mediaDuration: mediaDuration,
-            sessionURL: sessionURL
-        )
-
         var updated = slice
         updated.clipPath = prepared
+        do {
+            try await reencode(
+                source: movieCopy,
+                destRelative: prepared,
+                slice: slice,
+                mediaDuration: mediaDuration,
+                sessionURL: sessionURL
+            )
+        } catch {
+            if ExportRel.existingSessionFile(prepared, sessionURL: sessionURL) == nil {
+                updated.clipPath = nil
+            }
+            if !updated.evidenceGaps.contains("clip_encode_failed") {
+                updated.evidenceGaps.append("clip_encode_failed")
+            }
+        }
         guard prepared.hasSuffix("/clip.mp4") else {
             return updated
         }
@@ -64,24 +72,43 @@ struct ClipExporter {
         guard stillRelative != containedClip else {
             return updated
         }
+        let hasHumanStill = slice.stills.contains { path in
+            guard let parts = ExportRel.normalizedComponents(path), parts.contains("shots") else { return false }
+            return ExportRel.existingSessionFile(path, sessionURL: sessionURL) != nil
+        }
+        guard !hasHumanStill else { return updated }
         // Midpoint can sit on a cut or black frame. Retry nearby times so a
         // clip-only task still has a pack still (C5 / Gate 4).
         let stillTimes = [
             (slice.startMedia + slice.endMedia) / 2,
             slice.startMedia + 0.5,
             max(slice.startMedia, slice.endMedia - 0.5)
-        ]
+        ].filter { $0.isFinite && $0 >= slice.startMedia && $0 <= slice.endMedia && $0 <= mediaDuration }
+        var extracted = false
         for time in stillTimes {
             do {
-                let jpeg = try await extractStill(source: movieCopy, at: time)
-                try ExportRel.writeContainedData(jpeg, relative: stillRelative, sessionURL: sessionURL)
+                let frame = try await extractStill(source: movieCopy, at: time)
+                guard frame.actualMedia.isFinite,
+                      frame.actualMedia >= slice.startMedia,
+                      frame.actualMedia <= slice.endMedia,
+                      frame.actualMedia <= mediaDuration else { continue }
+                try ExportRel.writeContainedData(frame.jpeg, relative: stillRelative, sessionURL: sessionURL)
                 if !updated.stills.contains(stillRelative) {
                     updated.stills.insert(stillRelative, at: 0)
                 }
+                updated.stillEvidence.removeAll { $0.path == stillRelative }
+                updated.stillEvidence.insert(
+                    SliceStillEvidence(path: stillRelative, requestedMedia: time, actualMedia: frame.actualMedia),
+                    at: 0
+                )
+                extracted = true
                 break
             } catch {
                 continue
             }
+        }
+        if !extracted && !updated.evidenceGaps.contains("still_extraction_failed") {
+            updated.evidenceGaps.append("still_extraction_failed")
         }
         return updated
     }
@@ -521,14 +548,18 @@ struct ClipExporter {
             .concatenating(CGAffineTransform(translationX: tx, y: ty))
     }
 
-    private func extractStill(source: URL, at media: TimeInterval) async throws -> Data {
+    private func extractStill(source: URL, at media: TimeInterval) async throws -> (jpeg: Data, actualMedia: TimeInterval) {
         let asset = AVURLAsset(url: source)
         let generator = AVAssetImageGenerator(asset: asset)
         generator.appliesPreferredTrackTransform = true
         generator.maximumSize = CGSize(width: MediaBudget.stillMaxWidth, height: MediaBudget.stillMaxWidth)
+        generator.requestedTimeToleranceBefore = .zero
+        generator.requestedTimeToleranceAfter = .zero
         let time = CMTime(seconds: media, preferredTimescale: 600)
         // macOS 13+: async image(at:). Do not use the cancelled CGImage copy API.
-        let cgImage = try await generator.image(at: time).image
+        let frame = try await generator.image(at: time)
+        let cgImage = frame.image
+        let actualMedia = CMTimeGetSeconds(frame.actualTime)
         #if os(macOS)
         let bitmap = NSBitmapImageRep(cgImage: cgImage)
         guard let jpeg = bitmap.representation(
@@ -537,7 +568,7 @@ struct ClipExporter {
         ) else {
             throw SessionRecorderError.writerFailed("JPEG encode failed.")
         }
-        return jpeg
+        return (jpeg, actualMedia)
         #else
         throw SessionRecorderError.writerFailed("JPEG encode requires macOS.")
         #endif

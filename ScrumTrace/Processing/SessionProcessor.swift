@@ -1,4 +1,5 @@
 import AVFoundation
+import CryptoKit
 import CoreMedia
 import Foundation
 
@@ -80,11 +81,14 @@ final class SessionProcessor: @unchecked Sendable {
         serviceConfigurations: [AIServiceConfiguration]? = nil,
         whisperModel: String,
         identifySpeakers: Bool = false,
+        localOnly: Bool = false,
         onStatus: @escaping @MainActor (PipelineStatus, String) -> Void
     ) async throws -> SessionManifest {
         let sessionURL = vault.sessionURL(id: sessionId)
         try requireUsableSession(sessionURL, id: sessionId)
         var manifest = try vault.loadManifest(id: sessionId)
+        let recordedPins = vault.loadPinTimes(sessionId: sessionId)
+        let effectivePins = recordedPins.isEmpty ? pinTimes : recordedPins
         if writtenTranscript?.sessionId != sessionId {
             writtenTranscript = nil
         }
@@ -128,7 +132,7 @@ final class SessionProcessor: @unchecked Sendable {
         }
 
         var justFinishedTranscribing = false
-        if !manifest.hasCompleted(.transcribing) {
+        if !localOnly && !manifest.hasCompleted(.transcribing) {
             await onStatus(.transcribing, "Loading Whisper model…")
             manifest.pipelineStatus = .transcribing
             try vault.write(manifest: &manifest)
@@ -146,7 +150,7 @@ final class SessionProcessor: @unchecked Sendable {
                 transcript.transcriptionAnalysis = analysis
                 AgentLog.event("whisper_previous_retained", ["session": sessionId])
             }
-            if identifySpeakers, !transcribed.incomplete {
+            if identifySpeakers, !localOnly, !transcribed.incomplete {
                 await onStatus(.transcribing, "Identifying speakers locally (first use downloads models)…")
                 transcript = await SpeakerDiarizer.shared.analyze(transcript, sessionURL: sessionURL)
             }
@@ -184,12 +188,15 @@ final class SessionProcessor: @unchecked Sendable {
             try vault.write(manifest: &manifest)
         }
 
-        if identifySpeakers, manifest.hasCompleted(.transcribing),
+        if identifySpeakers, !localOnly, manifest.hasCompleted(.transcribing),
            let archived = SpeakerTimeline.load(sessionURL: sessionURL), archived.speakerAnalysis == nil {
             await onStatus(.transcribing, "Identifying speakers locally (first use downloads models)…")
             let analyzed = await SpeakerDiarizer.shared.analyze(archived, sessionURL: sessionURL)
             try SpeakerTimeline.save(analyzed, sessionURL: sessionURL)
             writtenTranscript = analyzed
+        }
+        if localOnly && !manifest.hasCompleted(.transcribing) {
+            await onStatus(.transcribing, "Local-only export uses the existing transcript; transcription was not rerun.")
         }
         let transcript = loadTranscript(sessionURL: sessionURL, sessionId: sessionId)
         var recoveredReadableTranscript = false
@@ -225,15 +232,31 @@ final class SessionProcessor: @unchecked Sendable {
         }
 
         try requireUsableSession(sessionURL, id: sessionId)
+        refreshShotsFromDisk(sessionId: sessionId, manifest: &manifest)
+        let identitiesBeforeSlicing = localShotMediaIdentities(shots: manifest.shots, sessionURL: sessionURL)
+        let fingerprintBeforeSlicing = LocalProcedureBuilder.fingerprint(
+            transcript: transcript, shots: manifest.shots, pins: effectivePins,
+            duration: manifest.duration.mediaSeconds, context: manifest.productContext,
+            slices: manifest.slices, mediaIdentities: identitiesBeforeSlicing
+        )
+        let localInputsChanged = manifest.localProcedure?.inputFingerprint != fingerprintBeforeSlicing
+        if localInputsChanged {
+            invalidateStaleProviderResults(manifest: &manifest)
+            manifest.localProcedure = nil
+            manifest.completedStages.removeAll {
+                $0 == .slicing || $0 == .evaluating || $0 == .synthesizing || $0 == .completed
+            }
+            manifest.slices = []
+            try vault.write(manifest: &manifest)
+        }
         if !manifest.hasCompleted(.slicing) {
-            let hasHumanAnchors = !manifest.shots.isEmpty || !pinTimes.isEmpty
+            let hasHumanAnchors = !manifest.shots.isEmpty || !effectivePins.isEmpty
             if manifest.hasCompleted(.transcribing) || hasHumanAnchors {
-                refreshShotsFromDisk(sessionId: sessionId, manifest: &manifest)
                 await onStatus(.slicing, "Cutting evidence windows to the media budget")
                 manifest.pipelineStatus = .slicing
                 let slices = slicer.slice(
                     shots: manifest.shots,
-                    pins: pinTimes,
+                    pins: effectivePins,
                     transcript: transcript,
                     mediaDuration: manifest.duration.mediaSeconds
                 )
@@ -265,11 +288,19 @@ final class SessionProcessor: @unchecked Sendable {
                     "session": sessionId,
                     "clips": String(exported.count),
                     "shots": String(manifest.shots.count),
-                    "pins": String(pinTimes.count)
+                    "pins": String(effectivePins.count)
                 ])
                 try vault.write(manifest: &manifest)
             }
         }
+
+        // Build from the refreshed inventory and final selected windows. This
+        // state is deliberately separate from the eight task rows and twelve
+        // clips, and is regenerated whenever any source fingerprint changes.
+        try refreshLocalProcedure(
+            sessionId: sessionId, sessionURL: sessionURL, manifest: &manifest,
+            transcript: transcript, pins: effectivePins
+        )
 
         try requireUsableSession(sessionURL, id: sessionId)
         let comparisonServices = serviceConfigurations ?? []
@@ -290,6 +321,16 @@ final class SessionProcessor: @unchecked Sendable {
                 // Retry Analysis transcribes first. Do not mark evaluating
                 // complete from an empty transcript that Whisper never produced.
                 // Synthesize is also withheld until transcribing completes (below).
+            } else if localOnly {
+                await onStatus(.evaluating, "Local-only export — provider evaluation disabled")
+                // Existing successful findings survive only while their inputs
+                // remain current; this branch never creates a provider.
+                if manifest.slices.contains(where: { $0.analysisStatus != .success }) {
+                    abandonEvaluate(manifest: &manifest, failedStatus: .skipped, markOffline: false)
+                } else {
+                    manifest.markCompleted(.evaluating)
+                }
+                try vault.write(manifest: &manifest)
             } else if !manifest.uploadConsent.approved {
                 await onStatus(.evaluating, "Upload not approved — local export only")
                 abandonEvaluate(manifest: &manifest, failedStatus: .skipped, markOffline: false)
@@ -339,7 +380,7 @@ final class SessionProcessor: @unchecked Sendable {
                 resetEvalAuthGate()
                 await onStatus(.evaluating, "Evaluating slices with the configured model")
                 manifest.pipelineStatus = .evaluating
-                let provider = AIEngine.make(configuration: configuration)
+                let provider = providerFactory(configuration)
                 var tasks = manifest.tasks.filter { task in
                     manifest.slices.first { $0.sliceId == task.sourceSliceId }?.analysisStatus == .success
                 }
@@ -390,35 +431,24 @@ final class SessionProcessor: @unchecked Sendable {
 
         try requireUsableSession(sessionURL, id: sessionId)
         if !manifest.hasCompleted(.transcribing) {
-            let hasHumanAnchors = !manifest.shots.isEmpty || !pinTimes.isEmpty
-                || manifest.hasCompleted(.slicing)
-            if !hasHumanAnchors {
-                // Do not stamp synthesizing/completed while Whisper never produced
-                // a usable pass and there are no shots. Retry Analysis transcribes first (D14).
-                // Still write a local export/ so Stop is not a dead folder.
-                await onStatus(
-                    .transcribing,
-                    "Transcription incomplete — local export written. Use Retry Analysis."
-                )
-                manifest.pipelineStatus = .transcribing
-                try writeIncompleteHandoff(
-                    sessionURL: sessionURL,
-                    manifest: &manifest,
-                    transcript: transcript
-                )
-                try vault.write(manifest: &manifest)
-                return manifest
-            }
             await onStatus(
-                .synthesizing,
-                "Transcript unavailable — writing export from shots. Retry Analysis to transcribe again."
+                .transcribing,
+                "Transcription is incomplete — the local export is available, and Retry Analysis can continue."
             )
+            manifest.pipelineStatus = .transcribing
+            try vault.write(manifest: &manifest)
+            try await writeIncompleteHandoff(
+                sessionId: sessionId, sessionURL: sessionURL, manifest: &manifest,
+                transcript: transcript, pins: effectivePins, timing: &timing, onStatus: onStatus
+            )
+            try vault.write(manifest: &manifest)
+            return manifest
         } else {
             await onStatus(.synthesizing, "Writing AGENT_CONTEXT.md and SESSION_BRIEF.html")
         }
         manifest.pipelineStatus = .synthesizing
         return try await finishExport(sessionId: sessionId, sessionURL: sessionURL, manifest: &manifest,
-                                      transcript: transcript, timing: &timing, onStatus: onStatus)
+                                      transcript: transcript, pins: effectivePins, timing: &timing, onStatus: onStatus)
     }
 
     /// Local-only edits never call a provider or rerun task synthesis. Names
@@ -457,14 +487,16 @@ final class SessionProcessor: @unchecked Sendable {
         try vault.write(manifest: &manifest)
         var timing = PipelineTiming.load(sessionURL: sessionURL) ?? PipelineTiming()
         _ = try await finishExport(sessionId: sessionId, sessionURL: sessionURL, manifest: &manifest,
-                                   transcript: transcript, timing: &timing, onStatus: onStatus)
+                                   transcript: transcript, pins: vault.loadPinTimes(sessionId: sessionId),
+                                   timing: &timing, onStatus: onStatus)
         return transcript
     }
 
     private func finishExport(sessionId: String, sessionURL: URL, manifest: inout SessionManifest,
-                              transcript: FullTranscript, timing: inout PipelineTiming,
+                              transcript: FullTranscript, pins: [TimeInterval], timing: inout PipelineTiming,
                               onStatus: @escaping @MainActor (PipelineStatus, String) -> Void) async throws -> SessionManifest {
-        let excerpts = excerptMap(manifest: manifest, transcript: transcript)
+        try refreshLocalProcedure(sessionId: sessionId, sessionURL: sessionURL, manifest: &manifest, transcript: transcript, pins: pins)
+        let excerpts = excerptMap(manifest: manifest)
         let projector = ExportProjector()
         var projection = try projector.project(
             sessionURL: sessionURL,
@@ -507,7 +539,8 @@ final class SessionProcessor: @unchecked Sendable {
         var zipResult = SessionPackZipper.Result(
             zipURL: sessionURL.appendingPathComponent(ScrumTracePath.packZip),
             byteCount: 0,
-            omitted: projection.omitted
+            omitted: projection.omitted,
+            folderByteCount: PackBudget.exportFolderBytes(sessionURL: sessionURL)
         )
         do {
             zipResult = try zipper.zip(sessionURL: sessionURL, manifest: projection.manifest)
@@ -520,6 +553,7 @@ final class SessionProcessor: @unchecked Sendable {
             zipResult.byteCount = zipper.discardPackIfOverBudget(sessionURL: sessionURL)
         }
         var zipBytes = zipResult.byteCount
+        var folderBytes = zipResult.folderByteCount
         for pass in 0..<3 {
             projection.manifest = PackBudget.stripOmitted(zipResult.omitted, from: projection.manifest)
             projection.manifest.omitted = zipResult.omitted
@@ -549,9 +583,11 @@ final class SessionProcessor: @unchecked Sendable {
             } catch {
                 try throwIfExportEscapes(sessionURL: sessionURL, error)
                 zipBytes = zipResult.byteCount
+                folderBytes = PackBudget.exportFolderBytes(sessionURL: sessionURL)
                 break
             }
-            if zipBytes <= MediaBudget.maxZipBytes {
+            folderBytes = PackBudget.exportFolderBytes(sessionURL: sessionURL)
+            if zipBytes <= MediaBudget.maxZipBytes && folderBytes <= MediaBudget.maxZipBytes {
                 break
             }
             if pass == 2 { break }
@@ -562,6 +598,7 @@ final class SessionProcessor: @unchecked Sendable {
                 zipResult.omitted.append(
                     OmittedAsset(path: "session-pack.zip", reason: "zip failed: \(error.localizedDescription)")
                 )
+                zipResult.folderByteCount = PackBudget.exportFolderBytes(sessionURL: sessionURL)
                 projection.manifest = PackBudget.stripOmitted(zipResult.omitted, from: projection.manifest)
                 projection.manifest.omitted = zipResult.omitted
                 projection.manifest.tasks = EvidenceValidator.applyExportEvidence(
@@ -582,7 +619,36 @@ final class SessionProcessor: @unchecked Sendable {
                 break
             }
         }
+        if Set(projection.manifest.omitted) != Set(zipResult.omitted) {
+            projection.manifest = PackBudget.stripOmitted(zipResult.omitted, from: projection.manifest)
+            projection.manifest.omitted = zipResult.omitted
+            projection.manifest.tasks = EvidenceValidator.applyExportEvidence(
+                tasks: projection.manifest.tasks,
+                sessionURL: sessionURL,
+                transcript: transcript,
+                slices: projection.manifest.slices,
+                shots: projection.manifest.shots,
+                omitted: projection.manifest.omitted
+            )
+            try writeExportDocuments(
+                sessionURL: sessionURL,
+                projected: projection.manifest,
+                excerpts: excerpts,
+                projector: projector
+            )
+            try zipper.writeOmittedMarkdown(sessionURL: sessionURL, omitted: zipResult.omitted)
+            do {
+                zipBytes = try zipper.writeZip(
+                    sessionURL: sessionURL,
+                    includeFullTranscript: projection.manifest.includeFullTranscriptInZip
+                )
+            } catch {
+                try throwIfExportEscapes(sessionURL: sessionURL, error)
+                zipBytes = 0
+            }
+        }
         zipBytes = zipper.discardPackIfOverBudget(sessionURL: sessionURL)
+        folderBytes = PackBudget.exportFolderBytes(sessionURL: sessionURL)
         // writeZip can recreate an over-budget pack after zip() already
         // omitted. Discard removes that file; OMITTED.md / AGENT_CONTEXT
         // must not still imply the zip is in the folder (Gate 6).
@@ -608,7 +674,28 @@ final class SessionProcessor: @unchecked Sendable {
             )
             try zipper.writeOmittedMarkdown(sessionURL: sessionURL, omitted: zipResult.omitted)
         }
+        folderBytes = PackBudget.exportFolderBytes(sessionURL: sessionURL)
+        if folderBytes > MediaBudget.maxZipBytes,
+           !zipResult.omitted.contains(where: { ExportRel.toExportRoot($0.path) == "export-folder" }) {
+            zipResult.omitted.append(
+                OmittedAsset(
+                    path: "export-folder",
+                    reason: "Export folder still exceeds 35 MB after the final document rewrite."
+                )
+            )
+            zipResult.omitted = Array(Set(zipResult.omitted)).sorted { $0.path < $1.path }
+            projection.manifest.omitted = zipResult.omitted
+            try writeExportDocuments(
+                sessionURL: sessionURL,
+                projected: projection.manifest,
+                excerpts: excerpts,
+                projector: projector
+            )
+            try zipper.writeOmittedMarkdown(sessionURL: sessionURL, omitted: zipResult.omitted)
+            folderBytes = PackBudget.exportFolderBytes(sessionURL: sessionURL)
+        }
         timing.zipBytes = zipBytes
+        timing.exportFolderBytes = folderBytes
         timing.omittedCount = zipResult.omitted.count
         AgentLog.event("zip_ok", [
             "session": sessionId,
@@ -629,7 +716,14 @@ final class SessionProcessor: @unchecked Sendable {
             : .completed
         manifest.markCompleted(.completed)
         try vault.write(manifest: &manifest)
-        await onStatus(manifest.pipelineStatus, "Session pack ready")
+        let exportReady = zipBytes > 0
+            && zipBytes <= MediaBudget.maxZipBytes
+            && folderBytes <= MediaBudget.maxZipBytes
+            && projection.manifest.localProcedure?.sizeLimitExceeded != true
+        await onStatus(
+            manifest.pipelineStatus,
+            exportReady ? "Session pack ready" : "Local export has size or evidence gaps"
+        )
         return manifest
     }
 
@@ -642,14 +736,92 @@ final class SessionProcessor: @unchecked Sendable {
         }
     }
 
+    private func localShotMediaIdentities(shots: [ShotRecord], sessionURL: URL) -> [String: String] {
+        var identities: [String: String] = [:]
+        for shot in shots.sorted(by: { $0.id < $1.id }) {
+            for path in shot.stillCandidates.sorted() {
+                guard let bytes = ExportRel.readContainedData(relative: path, sessionURL: sessionURL) else { continue }
+                let digest = SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined()
+                identities["\(shot.id)|\(path)"] = digest
+            }
+        }
+        return identities
+    }
+
+    private func invalidateStaleProviderResults(manifest: inout SessionManifest) {
+        manifest.tasks.removeAll()
+        for index in manifest.slices.indices {
+            manifest.slices[index].analysisStatus = .skipped
+            manifest.slices[index].mediaSent = []
+            manifest.slices[index].serviceEvaluations = manifest.slices[index].serviceEvaluations.map { evaluation in
+                var stale = evaluation
+                stale.status = .skipped
+                stale.inputFingerprint = nil
+                stale.diagnostic = "source_fingerprint_changed"
+                return stale
+            }
+        }
+        manifest.completedStages.removeAll {
+            $0 == .evaluating || $0 == .synthesizing || $0 == .completed
+        }
+    }
+
+    /// Build from the latest disk snapshot, then verify every source again
+    /// immediately before committing the derived outline.
+    private func refreshLocalProcedure(
+        sessionId: String,
+        sessionURL: URL,
+        manifest: inout SessionManifest,
+        transcript: FullTranscript,
+        pins: [TimeInterval]
+    ) throws {
+        let latestTranscript = SpeakerTimeline.load(sessionURL: sessionURL) ?? transcript
+        var latestManifest = try vault.loadManifest(id: sessionId)
+        refreshShotsFromDisk(sessionId: sessionId, manifest: &latestManifest)
+        let eventPins = vault.loadPinTimes(sessionId: sessionId)
+        let currentPins = eventPins.isEmpty ? pins : eventPins
+        let identities = localShotMediaIdentities(shots: latestManifest.shots, sessionURL: sessionURL)
+        let expected = LocalProcedureBuilder.fingerprint(
+            transcript: latestTranscript, shots: latestManifest.shots, pins: currentPins,
+            duration: latestManifest.duration.mediaSeconds, context: latestManifest.productContext,
+            slices: latestManifest.slices, mediaIdentities: identities
+        )
+        guard expected == LocalProcedureBuilder.fingerprint(
+            transcript: transcript, shots: manifest.shots, pins: pins,
+            duration: manifest.duration.mediaSeconds, context: manifest.productContext,
+            slices: manifest.slices,
+            mediaIdentities: localShotMediaIdentities(shots: manifest.shots, sessionURL: sessionURL)
+        ) else {
+            throw SessionRecorderError.writerFailed("Session inputs changed during local outline generation; retry export.")
+        }
+        if latestManifest.localProcedure?.inputFingerprint != expected {
+            invalidateStaleProviderResults(manifest: &latestManifest)
+            latestManifest.localProcedure = nil
+            latestManifest.localProcedure = LocalProcedureBuilder.build(
+                transcript: latestTranscript, shots: latestManifest.shots, pins: currentPins,
+                slices: latestManifest.slices, duration: latestManifest.duration.mediaSeconds,
+                context: latestManifest.productContext, mediaIdentities: identities
+            )
+            manifest = latestManifest
+            try vault.write(manifest: &manifest)
+        } else {
+            manifest = latestManifest
+        }
+    }
+
     /// Folder handoff when Whisper did not finish. Does not mark synthesizing
     /// or completed, so Retry Analysis can transcribe again (D14).
     private func writeIncompleteHandoff(
+        sessionId: String,
         sessionURL: URL,
         manifest: inout SessionManifest,
-        transcript: FullTranscript
-    ) throws {
-        let excerpts = excerptMap(manifest: manifest, transcript: transcript)
+        transcript: FullTranscript,
+        pins: [TimeInterval],
+        timing: inout PipelineTiming,
+        onStatus: @escaping @MainActor (PipelineStatus, String) -> Void
+    ) async throws {
+        try refreshLocalProcedure(sessionId: sessionId, sessionURL: sessionURL, manifest: &manifest, transcript: transcript, pins: pins)
+        let excerpts = excerptMap(manifest: manifest)
         let projector = ExportProjector()
         var projection = try projector.project(
             sessionURL: sessionURL,
@@ -664,7 +836,6 @@ final class SessionProcessor: @unchecked Sendable {
             shots: projection.manifest.shots,
             omitted: projection.manifest.omitted
         )
-        manifest.omitted = projection.omitted
         try writeExportDocuments(
             sessionURL: sessionURL,
             projected: projection.manifest,
@@ -672,22 +843,120 @@ final class SessionProcessor: @unchecked Sendable {
             projector: projector
         )
         try zipper.writeOmittedMarkdown(sessionURL: sessionURL, omitted: projection.omitted)
+        var zipResult = SessionPackZipper.Result(
+            zipURL: sessionURL.appendingPathComponent(ScrumTracePath.packZip),
+            byteCount: 0,
+            omitted: projection.omitted,
+            folderByteCount: PackBudget.exportFolderBytes(sessionURL: sessionURL)
+        )
         do {
-            let bytes = try zipper.writeZip(
+            zipResult = try zipper.zip(sessionURL: sessionURL, manifest: projection.manifest)
+        } catch {
+            try throwIfExportEscapes(sessionURL: sessionURL, error)
+            zipResult.omitted.append(OmittedAsset(path: "session-pack.zip", reason: "zip failed: \(error.localizedDescription)"))
+            zipResult.byteCount = zipper.discardPackIfOverBudget(sessionURL: sessionURL)
+            zipResult.folderByteCount = PackBudget.exportFolderBytes(sessionURL: sessionURL)
+        }
+        projection.manifest = PackBudget.stripOmitted(zipResult.omitted, from: projection.manifest)
+        projection.manifest.omitted = zipResult.omitted
+        projection.manifest.tasks = EvidenceValidator.applyExportEvidence(
+            tasks: projection.manifest.tasks,
+            sessionURL: sessionURL,
+            transcript: transcript,
+            slices: projection.manifest.slices,
+            shots: projection.manifest.shots,
+            omitted: projection.manifest.omitted
+        )
+        try writeExportDocuments(
+            sessionURL: sessionURL,
+            projected: projection.manifest,
+            excerpts: excerpts,
+            projector: projector
+        )
+        try zipper.writeOmittedMarkdown(sessionURL: sessionURL, omitted: zipResult.omitted)
+        var zipBytes = 0
+        do {
+            zipBytes = try zipper.writeZip(
                 sessionURL: sessionURL,
                 includeFullTranscript: false
             )
-            AgentLog.event("incomplete_handoff", [
-                "session": manifest.sessionId,
-                "bytes": String(bytes)
-            ])
         } catch {
-            AgentLog.event("incomplete_handoff", [
-                "session": manifest.sessionId,
-                "bytes": "0",
-                "error": AgentLog.sanitize(error.localizedDescription)
-            ])
+            try throwIfExportEscapes(sessionURL: sessionURL, error)
+            zipResult.omitted.append(OmittedAsset(path: "session-pack.zip", reason: "zip failed: \(error.localizedDescription)"))
         }
+        var folderBytes = PackBudget.exportFolderBytes(sessionURL: sessionURL)
+        if zipBytes > MediaBudget.maxZipBytes || folderBytes > MediaBudget.maxZipBytes {
+            zipResult = try zipper.zip(sessionURL: sessionURL, manifest: projection.manifest)
+            projection.manifest = PackBudget.stripOmitted(zipResult.omitted, from: projection.manifest)
+            projection.manifest.omitted = zipResult.omitted
+            projection.manifest.tasks = EvidenceValidator.applyExportEvidence(
+                tasks: projection.manifest.tasks,
+                sessionURL: sessionURL,
+                transcript: transcript,
+                slices: projection.manifest.slices,
+                shots: projection.manifest.shots,
+                omitted: projection.manifest.omitted
+            )
+            try writeExportDocuments(
+                sessionURL: sessionURL,
+                projected: projection.manifest,
+                excerpts: excerpts,
+                projector: projector
+            )
+            try zipper.writeOmittedMarkdown(sessionURL: sessionURL, omitted: zipResult.omitted)
+            do {
+                zipBytes = try zipper.writeZip(sessionURL: sessionURL, includeFullTranscript: false)
+            } catch {
+                try throwIfExportEscapes(sessionURL: sessionURL, error)
+                zipBytes = 0
+            }
+            folderBytes = PackBudget.exportFolderBytes(sessionURL: sessionURL)
+        }
+        zipBytes = zipper.discardPackIfOverBudget(sessionURL: sessionURL)
+        folderBytes = PackBudget.exportFolderBytes(sessionURL: sessionURL)
+        if zipBytes == 0 || folderBytes > MediaBudget.maxZipBytes {
+            if zipBytes == 0 && !zipResult.omitted.contains(where: { ExportRel.toExportRoot($0.path) == "session-pack.zip" }) {
+                zipResult.omitted.append(OmittedAsset(path: "session-pack.zip", reason: "Pack could not be kept within the 35 MB limit."))
+            }
+            if folderBytes > MediaBudget.maxZipBytes && !zipResult.omitted.contains(where: { ExportRel.toExportRoot($0.path) == "export-folder" }) {
+                zipResult.omitted.append(OmittedAsset(path: "export-folder", reason: "Export folder remains over the 35 MB limit."))
+            }
+            zipResult.omitted = Array(Set(zipResult.omitted)).sorted { $0.path < $1.path }
+            projection.manifest.omitted = zipResult.omitted
+            try writeExportDocuments(
+                sessionURL: sessionURL,
+                projected: projection.manifest,
+                excerpts: excerpts,
+                projector: projector
+            )
+            try zipper.writeOmittedMarkdown(sessionURL: sessionURL, omitted: zipResult.omitted)
+            folderBytes = PackBudget.exportFolderBytes(sessionURL: sessionURL)
+        }
+        timing.zipBytes = zipBytes
+        timing.exportFolderBytes = folderBytes
+        timing.omittedCount = zipResult.omitted.count
+        try timing.write(sessionURL: sessionURL)
+        manifest.omitted = zipResult.omitted
+        manifest.tasks = EvidenceValidator.mergeCanonicalStatuses(
+            canonical: manifest.tasks,
+            projected: projection.manifest.tasks
+        )
+        let exportReady = zipBytes > 0
+            && zipBytes <= MediaBudget.maxZipBytes
+            && folderBytes <= MediaBudget.maxZipBytes
+            && projection.manifest.localProcedure?.sizeLimitExceeded != true
+        await onStatus(
+            .transcribing,
+            exportReady
+                ? "Transcription is incomplete; the local export is available and Retry Analysis can continue."
+                : "Transcription is incomplete; the local export has size or evidence gaps, and Retry Analysis can continue."
+        )
+        AgentLog.event("incomplete_handoff", [
+            "session": manifest.sessionId,
+            "bytes": String(zipBytes),
+            "folder_bytes": String(folderBytes),
+            "omitted": String(zipResult.omitted.count)
+        ])
     }
 
     private func writeExportDocuments(
@@ -1809,16 +2078,15 @@ final class SessionProcessor: @unchecked Sendable {
         }
     }
 
-    private func excerptMap(manifest: SessionManifest, transcript: FullTranscript) -> [String: String] {
+    private func excerptMap(manifest: SessionManifest) -> [String: String] {
+        guard let procedure = manifest.localProcedure else { return [:] }
         var map: [String: String] = [:]
         for task in manifest.tasks {
-            if let slice = manifest.slices.first(where: { $0.sliceId == task.sourceSliceId }) {
-                map[task.taskId] = TranscriptQuery.excerpt(
-                    from: transcript,
-                    start: slice.startMedia,
-                    end: slice.endMedia
-                )
-            }
+            let passages = procedure.steps
+                .filter { $0.sliceIds.contains(task.sourceSliceId) }
+                .sorted { $0.order < $1.order }
+                .map(\.excerpt)
+            if !passages.isEmpty { map[task.taskId] = passages.joined(separator: "\n") }
         }
         return map
     }
