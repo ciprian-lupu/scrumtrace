@@ -472,6 +472,7 @@ struct SessionPackZipper {
 
 enum PackBudget {
     static let protectedNames: Set<String> = [
+        "TRANSFER_REVIEW.md",
         "AGENT_CONTEXT.md",
         "SESSION_BRIEF.html",
         "session.manifest.json",
@@ -589,10 +590,11 @@ enum PackBudget {
     /// Explicit members under `export/` — never the session root, never `archive/`.
     /// `full_transcript.json` is only listed when the user opted it into the pack.
     /// Membership is resolved-path containment, not a string prefix strip.
-    static func allowList(exportDir: URL, includeFullTranscript: Bool = false) -> [String] {
-        removeEscapingExportLinks(exportDir: exportDir)
+    static func allowList(exportDir: URL, includeFullTranscript: Bool = false, removeLinks: Bool = true) -> [String] {
+        if removeLinks { removeEscapingExportLinks(exportDir: exportDir) }
         let sessionRoot = exportDir.deletingLastPathComponent()
         let named = [
+            "TRANSFER_REVIEW.md",
             "AGENT_CONTEXT.md",
             "SESSION_BRIEF.html",
             "AGENT_PROMPT.txt",
@@ -621,8 +623,10 @@ enum PackBudget {
             // Enumerator follows a directory symlink. Delete it instead of
             // walking `export/media` → `archive/` (C2).
             if (try? root.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
-                try? ExportRel.removeItemIfRegularFile(root, sessionRoot: sessionRoot)
-                ExportRel.unlinkLastComponentUnfollowed(root)
+                if removeLinks {
+                    try? ExportRel.removeItemIfRegularFile(root, sessionRoot: sessionRoot)
+                    ExportRel.unlinkLastComponentUnfollowed(root)
+                }
                 continue
             }
             guard let enumerator = FileManager.default.enumerator(

@@ -183,9 +183,12 @@ final class MenuBarController: NSObject {
         let claude = actionItem("Open last session in Claude", #selector(openLastInClaude))
         claude.isEnabled = controller.lastSessionId != nil
         menu.addItem(claude)
-        let chatGPT = actionItem("Open last session in ChatGPT", #selector(openLastInChatGPT))
+        let chatGPT = actionItem("Open last export in Codex", #selector(openLastInChatGPT))
         chatGPT.isEnabled = controller.lastSessionId != nil
         menu.addItem(chatGPT)
+        let codexArchive = actionItem("Open last archive in Codex…", #selector(openLastArchiveInCodex))
+        codexArchive.isEnabled = controller.lastSessionId != nil && controller.canChangeCaptureSettings
+        menu.addItem(codexArchive)
         let recent = NSMenuItem(title: "Recent", action: nil, keyEquivalent: "")
         let recentMenu = NSMenu()
         recentMenu.autoenablesItems = false
@@ -234,15 +237,19 @@ final class MenuBarController: NSObject {
                 claudeItem.representedObject = session.sessionId
                 claudeItem.target = self
                 let chatGPTItem = NSMenuItem(
-                    title: "Open in ChatGPT",
+                    title: "Open export in Codex",
                     action: #selector(openRecentInChatGPT(_:)),
                     keyEquivalent: ""
                 )
                 chatGPTItem.representedObject = session.sessionId
                 chatGPTItem.target = self
+                let archiveItem = actionItem("Open archive in Codex…", #selector(openRecentArchiveInCodex(_:)))
+                archiveItem.representedObject = session.sessionId
+                archiveItem.isEnabled = controller.canChangeCaptureSettings
                 sub.addItem(revealItem)
                 sub.addItem(claudeItem)
                 sub.addItem(chatGPTItem)
+                sub.addItem(archiveItem)
                 sub.addItem(retryItem)
                 sub.addItem(compareItem)
                 item.submenu = sub
@@ -495,6 +502,10 @@ final class MenuBarController: NSObject {
         AgentLog.event("menu_chatgpt", [:])
         controller.openInChatGPT()
     }
+    @objc private func openLastArchiveInCodex() {
+        AgentLog.event("menu_codex_archive", [:])
+        controller.openPrivateArchiveInCodex()
+    }
     @objc private func revealLog() {
         AgentLog.event("menu_reveal_log", [:])
         AgentLog.reveal()
@@ -632,6 +643,12 @@ final class MenuBarController: NSObject {
         guard let id = sender.representedObject as? String else { return }
         AgentLog.event("menu_chatgpt", ["session": id])
         controller.openInChatGPT(sessionId: id)
+    }
+
+    @objc private func openRecentArchiveInCodex(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? String else { return }
+        AgentLog.event("menu_codex_archive", ["session": id])
+        controller.openPrivateArchiveInCodex(sessionId: id)
     }
 }
 
