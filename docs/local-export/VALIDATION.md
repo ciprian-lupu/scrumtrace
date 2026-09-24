@@ -120,3 +120,9 @@ Current evidence classification:
 Do not write PASS rows to `samples/GATE_LOG.md` from old recordings, Linux tests, synthetic duration, or Xcode CI. A private mechanical replay pass is not a semantic-acceptance or hardware-gate pass.
 
 Public PR report contains aggregate counts and limitations only. Private metrics, saved exports, snapshots, logs, and corpus mapping remain outside Git. Check the staged diff before publication. If a real fixture is inaccessible, retain that acceptance as pending; do not invent results.
+
+## 8. Integration with transfer and the earlier local-export PR (2026-09-24)
+
+The develop integration retains PR #11's transfer and Codex actions alongside local-only regeneration. Imported originals are refused by both Retry analysis and Regenerate local export; Analyze a copy remains the supported path. PR #12's useful action vocabulary and command/parameter syntax detection were carried into `LocalProcedureBuilder`, with a moved-timeline procedural walkthrough regression. The overlapping PR #12 builder and window planner were not copied because PR #14 already supplies bounded steps and coverage-aware selection. The extraction version is now `local-procedure-3` so regenerated sessions do not reuse an older outline fingerprint.
+
+The integrated tree passed `bash scripts/run_linux_tests.sh` using the pinned Pillow 12.3.0 in a temporary Python environment. `xcodebuild build` and `build-for-testing` passed on macOS without launching the installed app. Native tests in this combined tree were compiled but not executed locally while the user's ScrumTrace app remained in use. Human semantic review, an export-only consumer exercise, and capture hardware gates remain open.
