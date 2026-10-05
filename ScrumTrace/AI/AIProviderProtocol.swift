@@ -77,10 +77,11 @@ enum AIProviderError: LocalizedError {
     }
 
     static func isAuthFailure(_ error: Error) -> Bool {
-        (error as? AIProviderError)?.isAuthFailure == true
+        (error as? AIProviderError)?.isAuthFailure == true || (error as? LocalAgentError) == .signInRequired
     }
 
     static func diagnosticCode(_ error: Error) -> String {
+        if let local = error as? LocalAgentError { return local.diagnosticCode }
         if error is ComparisonInputError { return "comparison_input_changed" }
         guard let providerError = error as? AIProviderError else {
             return "provider_error"
@@ -127,7 +128,7 @@ enum ProviderWireMedia {
         switch kind {
         case .google:
             return true
-        case .openaiCompatible, .anthropic:
+        case .openaiCompatible, .anthropic, .claudeSubscription, .codexSubscription:
             return false
         }
     }
@@ -162,6 +163,8 @@ enum AIEngine {
             return AnthropicClient(configuration: configuration)
         case .google:
             return GoogleClient(configuration: configuration)
+        case .claudeSubscription, .codexSubscription:
+            return LocalSubscriptionClient(configuration: configuration)
         }
     }
 }

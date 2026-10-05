@@ -140,7 +140,7 @@ struct OverviewReadiness: Equatable, Sendable {
                 speechModelReady: transcriber.isReady(for: model),
                 speechModelLoading: transcriber.isPreparing,
                 aiServiceSelected: settings.connectionLibrary.selected != nil,
-                aiKeySaved: settings.hasSavedAPIKey,
+                aiKeySaved: settings.provider.usesSubscription || settings.hasSavedAPIKey,
                 aiConfigurationValid: settings.configurationIssue == nil,
                 aiSummary: settings.configurationSummary,
                 meetingNoticeAccepted: settings.meetingNoticeAccepted

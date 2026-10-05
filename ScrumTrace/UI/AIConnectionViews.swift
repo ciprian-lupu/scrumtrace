@@ -25,7 +25,7 @@ struct AIConnectionsSettingsView: View {
             if let issue = settings.connectionLibraryIssue {
                 Text(issue).foregroundStyle(.red)
             } else if settings.connectionLibrary.connections.isEmpty {
-                Text("No saved services yet. Add one to store a key, or record without AI.")
+                Text("No saved services yet. Add an API or subscription service, or record without AI.")
                     .foregroundStyle(.secondary)
             } else {
                 Picker("Active service", selection: activeServiceBinding) {
@@ -154,12 +154,22 @@ private struct AIConnectionNameEditor: View {
         VStack(alignment: .leading, spacing: 16) {
             Text(isNew ? "New service" : "Rename service").font(.title2)
             Form {
+                if isNew {
+                    Picker("Backend", selection: $connection.provider) {
+                        ForEach(AIProviderKind.allCases) { kind in Text(kind.title).tag(kind) }
+                    }
+                    .onChange(of: connection.provider) { _, kind in
+                        connection.baseURL = kind.defaultBaseURL
+                        connection.model = kind.defaultModel
+                        if connection.name.isEmpty { connection.name = kind.title }
+                    }
+                }
                 TextField("Service name", text: $connection.name)
                     .accessibilityIdentifier("ai.connection.name")
             }
             .textFieldStyle(.roundedBorder)
             Text(isNew
-                 ? "Use a name you will recognize, such as Hive or DeepSeek. You can set the endpoint, model, and key after saving."
+                 ? "Choose an API provider or your local Claude Code / Codex subscription. You can adjust the service after saving."
                  : "This only changes the name. The endpoint, model, and key stay with this service.")
                 .font(.caption)
                 .foregroundStyle(.secondary)

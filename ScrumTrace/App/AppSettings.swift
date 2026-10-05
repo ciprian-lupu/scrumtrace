@@ -5,6 +5,18 @@ enum AIProviderKind: String, Codable, CaseIterable, Identifiable, Sendable {
     case openaiCompatible = "openai_compatible"
     case anthropic
     case google
+    case claudeSubscription = "claude_subscription"
+    case codexSubscription = "codex_subscription"
+
+    var localCLI: LocalCodingCLI? {
+        switch self {
+        case .claudeSubscription: return .claude
+        case .codexSubscription: return .chatGPT
+        default: return nil
+        }
+    }
+    var usesSubscription: Bool { localCLI != nil }
+    var requiresAPIKey: Bool { !usesSubscription }
 
     var id: String { rawValue }
 
@@ -13,6 +25,8 @@ enum AIProviderKind: String, Codable, CaseIterable, Identifiable, Sendable {
         case .openaiCompatible: return "OpenAI-compatible"
         case .anthropic: return "Anthropic"
         case .google: return "Google"
+        case .claudeSubscription: return "Claude Code — subscription"
+        case .codexSubscription: return "Codex / ChatGPT — subscription"
         }
     }
 
@@ -21,6 +35,7 @@ enum AIProviderKind: String, Codable, CaseIterable, Identifiable, Sendable {
         case .openaiCompatible: return "gpt-4o"
         case .anthropic: return "claude-sonnet-5"
         case .google: return "gemini-2.5-flash"
+        case .claudeSubscription, .codexSubscription: return ""
         }
     }
 
@@ -29,6 +44,8 @@ enum AIProviderKind: String, Codable, CaseIterable, Identifiable, Sendable {
         case .openaiCompatible: return "https://api.openai.com"
         case .anthropic: return "https://api.anthropic.com"
         case .google: return "https://generativelanguage.googleapis.com"
+        case .claudeSubscription: return "https://claude.ai"
+        case .codexSubscription: return "https://chatgpt.com"
         }
     }
 }
@@ -528,7 +545,7 @@ final class AppSettings: ObservableObject {
                 kind: connection.provider,
                 baseURL: connection.baseURL.trimmingCharacters(in: .whitespacesAndNewlines),
                 model: connection.model.trimmingCharacters(in: .whitespacesAndNewlines),
-                apiKey: storedAPIKey(for: connection) ?? "",
+                apiKey: connection.provider.requiresAPIKey ? (storedAPIKey(for: connection) ?? "") : "",
                 acceptsText: true,
                 acceptsImages: true,
                 acceptsVideo: false
@@ -621,7 +638,7 @@ final class AppSettings: ObservableObject {
 
     func providerConfiguration(includeKey: Bool = true) -> AIProviderConfiguration {
         var key = ""
-        if includeKey,
+        if includeKey, provider.requiresAPIKey,
            let selected = connectionLibrary.selected,
            (try? ProviderEndpoint.requireHTTPSOrLocal(baseURL)) != nil {
             key = storedAPIKey(for: selected) ?? ""
@@ -649,6 +666,11 @@ final class AppSettings: ObservableObject {
             return "No service selected. Add one to use AI analysis. Recording and local export remain available."
         }
         if let configurationIssue { return configurationIssue }
+        if let cli = provider.localCLI {
+            return ClaudeCLIHandoff.executable(for: cli) == nil
+                ? "Install \(cli.executableName), then sign in with your subscription."
+                : "Local agent installed. Check sign-in or test the connection in AI settings. Subscription limits apply."
+        }
         return hasSavedAPIKey
             ? "Configured locally. Key validity and model availability have not been checked online."
             : "No saved key for this service. Recording and local export remain available."
@@ -761,6 +783,12 @@ struct SettingsValidationError: LocalizedError {
 
 extension AIProviderConfiguration {
     func validate() throws {
+        if kind.usesSubscription {
+            guard baseURL == kind.defaultBaseURL else {
+                throw SettingsValidationError("Use provider defaults for this subscription service.")
+            }
+            return
+        }
         _ = try ProviderEndpoint.requireHTTPSOrLocal(baseURL)
         guard !model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw SettingsValidationError("Enter the model ID supplied by your provider.")

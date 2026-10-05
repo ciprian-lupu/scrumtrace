@@ -12,7 +12,7 @@ enum AIConnectionTest {
     static func run(configuration: AIProviderConfiguration) async throws -> ProviderPingResult {
         try configuration.validate()
         let key = configuration.apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !key.isEmpty else { throw AIProviderError.missingAPIKey }
+        guard configuration.kind.usesSubscription || !key.isEmpty else { throw AIProviderError.missingAPIKey }
         let started = Date()
         let text: String
         switch configuration.kind {
@@ -22,6 +22,8 @@ enum AIConnectionTest {
             text = try await pingAnthropic(configuration, key: key)
         case .google:
             text = try await pingGoogle(configuration, key: key)
+        case .claudeSubscription, .codexSubscription:
+            text = try await LocalSubscriptionClient(configuration: configuration).complete(system: "Reply briefly.", prompt: prompt)
         }
         let preview = sanitizePreview(text)
         guard !preview.isEmpty else { throw AIProviderError.emptyResponse }
@@ -32,6 +34,7 @@ enum AIConnectionTest {
     }
 
     static func userMessage(for error: Error) -> String {
+        if let local = error as? LocalAgentError { return local.localizedDescription }
         if let validation = error as? SettingsValidationError {
             return validation.localizedDescription
         }

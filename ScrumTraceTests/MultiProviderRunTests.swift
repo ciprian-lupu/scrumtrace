@@ -63,6 +63,16 @@ final class MultiProviderRunTests: XCTestCase {
             sessionURL: vault.sessionURL(id: manifest.sessionId), services: services) { _, _ in }
     }
 
+    func testSubscriptionServiceIsEvaluatedWithoutAPIKey() async throws {
+        var local = service("local", kind: .codexSubscription, key: "")
+        local.service.baseURL = AIProviderKind.codexSubscription.defaultBaseURL
+        local.configuration.baseURL = local.service.baseURL
+        try await run([local])
+        let calls = await recorder.recorded()
+        XCTAssertEqual(calls.count, 2)
+        XCTAssertTrue(manifest.slices.allSatisfy { $0.serviceEvaluations.first?.status == .success })
+    }
+
     func testIdenticalInputsAcrossProvidersAndUniqueFindingsAcrossSlices() async throws {
         try await run([service("gpt"), service("claude-sonnet-4-20250514", kind: .anthropic), service("gemini", kind: .google)])
         let calls = await recorder.recorded()

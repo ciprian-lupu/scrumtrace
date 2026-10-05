@@ -363,7 +363,7 @@ final class SessionProcessor: @unchecked Sendable {
                     "error": "model_refused"
                 ])
                 try vault.write(manifest: &manifest)
-            } else if configuration.apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            } else if configuration.kind.requiresAPIKey && configuration.apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 await onStatus(.evaluating, "API key missing — local export only")
                 // Local-only is a valid outcome, not a failed session. Retry
                 // re-evaluates skipped slices once a key is saved.
@@ -1195,7 +1195,7 @@ final class SessionProcessor: @unchecked Sendable {
             // that may have another model added on Retry.
             config.acceptsVideo = false
             let invalid: String? = {
-                if config.apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return "key_missing" }
+                if config.kind.requiresAPIKey && config.apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return "key_missing" }
                 if config.kind == .anthropic && (config.model.isEmpty || AIProviderConfiguration.isRetiredAnthropic(config.model)) { return "model_refused" }
                 if !config.acceptsText || !config.acceptsImages { return "comparison_requires_text_and_images" }
                 do { try config.validate() } catch { return "configuration_invalid" }

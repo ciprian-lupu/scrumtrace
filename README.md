@@ -112,6 +112,20 @@ The exported brief shows speaker labels and clickable passages within each selec
 
 In **AI**, save each provider as a named service (Hive, DeepSeek, OpenAI, and so on) with its own endpoint, model, and key. Only explicitly checked services are used for comparison analysis. Saved keys are not displayed again. The previous single provider setting is imported once. **Logs** filters the current run and can export diagnostics. **General** explains retention: completed recordings are removed on the next launch when their retention period expires; **Forever** keeps them.
 
+### Use your Claude or ChatGPT subscription for analysis
+
+In **Settings → AI → New service…**, choose **Claude Code — subscription** or **Codex / ChatGPT — subscription** and give it a name. Check the service in the comparison list to use it for analysis. API services can remain saved alongside subscription services.
+
+Install the corresponding `claude` or `codex` command on this Mac and sign in once with `claude auth login` or `codex login`. Use **Check subscription sign-in**, then **Test current settings**. No API key is required; an API-key login is rejected for a subscription service. Leave Model blank for the agent default, or enter a model available to your account. The ordinary Claude/ChatGPT desktop chat app alone does not provide this automatic integration; the installed Claude Code/Codex command does.
+
+After Stop, approved analysis runs automatically and returns results into the usual brief and comparison. The local command sends the same text and JPEG evidence to its provider; computation is not offline and subscription limits apply. ScrumTrace does not read or copy login tokens. It stages only the prepared analysis input in a temporary folder, excludes video, and removes the temporary files when the run ends. Existing manual **Open export in…** actions remain separate.
+
+On another Mac, pull `develop` and build/install the updated app using the Mac runbook above. Install current Claude Code and/or Codex CLIs and sign in on that Mac; subscription sign-ins are not transferred with this repository. In Settings → AI, add the subscription service, check its sign-in, test the connection, and select it for comparison. Keep Local WhisperKit selected in Speech. The installed app must be updated before the new service choices appear.
+
+**Speech and AI are separate stages.** Keep **Settings → Speech → Local WhisperKit** for recording-to-text, then select **Claude Code (subscription)** or **Codex (subscription)** in **Settings → AI** for analysis. Whisper reads the captured audio locally; these subscription adapters receive the resulting text and JPEGs. They do not replace Whisper or perform independent audio transcription. Text-only corrections cannot establish what was actually spoken and must remain separate from the original timed transcript.
+
+References: [Codex saved authentication](https://developers.openai.com/codex/noninteractive), [Claude subscription usage](https://support.claude.com/en/articles/15036540-use-the-claude-agent-sdk-with-your-claude-plan).
+
 ## Hotkeys
 
 | Action | Key | While paused |

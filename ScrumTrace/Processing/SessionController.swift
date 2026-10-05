@@ -1033,15 +1033,15 @@ final class SessionController: ObservableObject {
             if var local {
                 local.includeFullTranscriptInZip = settings.includeFullTranscriptInZip
                 let destinations = services.map(\.destination)
-                let hasAPIKey = services.contains { !$0.configuration.apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-                // No key means nothing can leave this Mac; asking a first-time
+                let canUseService = services.contains { $0.configuration.kind.usesSubscription || !$0.configuration.apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+                // Without a key or subscription service, nothing can leave this Mac; asking a first-time
                 // local-only user to approve an upload would only confuse them.
                 if localOnly {
                     // Preserve the session's explicit consent record, but bypass
                     // every provider/consent branch for this local regeneration.
                 } else if services.isEmpty {
                     local.uploadConsent = .denied
-                } else if !hasAPIKey {
+                } else if !canUseService {
                     local.uploadConsent.approved = false
                     AgentLog.event("consent_skipped", ["reason": "key_missing"])
                 } else if !local.uploadConsent.approved || local.uploadConsent.needsReprompt(destinations: destinations) {

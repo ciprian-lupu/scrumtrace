@@ -336,10 +336,19 @@ struct SettingsView: View {
                         Text(kind.title).tag(kind)
                     }
                 }
-                TextField("Endpoint", text: $settings.baseURL)
+                if settings.provider.usesSubscription {
+                    LocalSubscriptionSettingsView(kind: settings.provider)
+                        .id(settings.provider)
+                    Text("Uses your saved subscription sign-in through the local agent. AI processing runs on the provider’s servers and counts toward your plan limits. No API key is needed. Leave Model blank to use the agent’s default.")
+                        .font(.caption).foregroundStyle(.secondary)
+                } else {
+                    TextField("Endpoint", text: $settings.baseURL)
+                }
                 TextField("Model", text: $settings.model)
-                Text("These fields belong to the selected service. Enter an API root; OpenAI-compatible and Anthropic endpoints may end in /v1. Hive: https://api.thehive.ai and a Playground / Service V3 secret key (not a V2 project token).")
-                    .font(.caption).foregroundStyle(.secondary)
+                if !settings.provider.usesSubscription {
+                    Text("These fields belong to the selected service. Enter an API root; OpenAI-compatible and Anthropic endpoints may end in /v1. Hive: https://api.thehive.ai and a Playground / Service V3 secret key (not a V2 project token).")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
                 HStack {
                     Button("Validate configuration") {
                         settings.refreshKeyStatus()
@@ -364,38 +373,40 @@ struct SettingsView: View {
                             .foregroundStyle(.red)
                     }
                 }
-                LabeledContent("Saved key", value: settings.hasSavedAPIKey ? "Stored for this service" : "Not saved for this service")
-                SecureField(settings.hasSavedAPIKey ? "Replacement API key" : "API key (Keychain)", text: $settings.apiKeyDraft)
-                Text("Saved in this Mac’s Keychain for the selected service. A saved key is never displayed here. Switching services uses that service’s key only.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Button("Save key") {
-                    do {
-                        try settings.saveAPIKey()
-                        keyStatus = "Key saved on this Mac. Online validity has not been checked."
-                        AgentLog.event("settings_action", ["action": "save_key"])
-                    } catch {
-                        keyStatus = error.localizedDescription
-                        AgentLog.event("settings_action", [
-                            "action": "save_key_fail",
-                            "error": AgentLog.sanitize(error.localizedDescription)
-                        ])
+                if !settings.provider.usesSubscription {
+                    LabeledContent("Saved key", value: settings.hasSavedAPIKey ? "Stored for this service" : "Not saved for this service")
+                    SecureField(settings.hasSavedAPIKey ? "Replacement API key" : "API key (Keychain)", text: $settings.apiKeyDraft)
+                    Text("Saved in this Mac’s Keychain for the selected service. A saved key is never displayed here. Switching services uses that service’s key only.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Button("Save key") {
+                        do {
+                            try settings.saveAPIKey()
+                            keyStatus = "Key saved on this Mac. Online validity has not been checked."
+                            AgentLog.event("settings_action", ["action": "save_key"])
+                        } catch {
+                            keyStatus = error.localizedDescription
+                            AgentLog.event("settings_action", [
+                                "action": "save_key_fail",
+                                "error": AgentLog.sanitize(error.localizedDescription)
+                            ])
+                        }
                     }
-                }
-                .disabled(
-                    settings.connectionLibrary.selected == nil
-                        || settings.apiKeyDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                        || settings.configurationIssue != nil
-                )
-                if settings.hasSavedAPIKey {
-                    Button("Remove saved key…", role: .destructive) { removingKey = true }
-                }
-                if settings.connectionLibrary.selected == nil {
-                    Text("Select or add a service to save a key. You can still record and produce a local export.")
-                        .font(.caption).foregroundStyle(.secondary)
-                } else if !settings.hasSavedAPIKey {
-                    Text("AI is not configured for this service. You can still record and produce a local export.")
-                        .font(.caption).foregroundStyle(.secondary)
+                    .disabled(
+                        settings.connectionLibrary.selected == nil
+                            || settings.apiKeyDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                            || settings.configurationIssue != nil
+                    )
+                    if settings.hasSavedAPIKey {
+                        Button("Remove saved key…", role: .destructive) { removingKey = true }
+                    }
+                    if settings.connectionLibrary.selected == nil {
+                        Text("Select or add a service to save a key. You can still record and produce a local export.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    } else if !settings.hasSavedAPIKey {
+                        Text("AI is not configured for this service. You can still record and produce a local export.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
                 }
                 if !keyStatus.isEmpty {
                     Text(keyStatus)
@@ -405,7 +416,9 @@ struct SettingsView: View {
             }
             .disabled(settings.connectionLibrary.selected == nil)
             Section("Test connection") {
-                Text("Sends a one-word ping with the selected service’s endpoint, model, and key. Nothing from a meeting is uploaded. A typed key that is not saved yet is used for this test only.")
+                Text(settings.provider.usesSubscription
+                     ? "Sends a one-word ping through your signed-in local agent. Uses your subscription allowance; no meeting content is sent."
+                     : "Sends a one-word ping with the selected service’s endpoint, model, and key. Nothing from a meeting is uploaded. A typed key that is not saved yet is used for this test only.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Button(testingConnection ? "Testing…" : "Test current settings") {
@@ -416,7 +429,7 @@ struct SettingsView: View {
                     Text(connectionLine)
                         .font(.caption)
                         .textSelection(.enabled)
-                        .foregroundStyle(connectionLine.hasPrefix("Key accepted") ? Color.secondary : Color.red)
+                        .foregroundStyle((connectionLine.hasPrefix("Key accepted") || connectionLine.hasPrefix("Subscription connected")) ? Color.secondary : Color.red)
                 }
             }
             Section("Comparison input") {
@@ -436,6 +449,14 @@ struct SettingsView: View {
         }
         .formStyle(.grouped)
         .disabled(!controller.canChangeCaptureSettings)
+        .onChange(of: settings.connectionLibrary.selectedID) { _, _ in
+            keyStatus = ""
+            connectionLine = ""
+        }
+        .onChange(of: settings.provider) { _, _ in
+            keyStatus = ""
+            connectionLine = ""
+        }
     }
 
     private var generalTab: some View {
@@ -542,7 +563,7 @@ struct SettingsView: View {
         !testingConnection
             && settings.connectionLibrary.selected != nil
             && settings.configurationIssue == nil
-            && (settings.hasSavedAPIKey
+            && (settings.provider.usesSubscription || settings.hasSavedAPIKey
                 || !settings.apiKeyDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
     }
 
@@ -565,7 +586,9 @@ struct SettingsView: View {
             defer { testingConnection = false }
             do {
                 let result = try await AIConnectionTest.run(configuration: configuration)
-                connectionLine = AIConnectionTest.successLine(result: result, model: configuration.model)
+                connectionLine = configuration.kind.usesSubscription
+                    ? "Subscription connected. \(configuration.kind.title) replied “\(result.replyPreview)”."
+                    : AIConnectionTest.successLine(result: result, model: configuration.model)
                 AgentLog.event("settings_action", [
                     "action": "test_llm_ok",
                     "ms": String(result.elapsedMs)

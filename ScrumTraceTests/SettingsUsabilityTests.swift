@@ -31,6 +31,26 @@ final class SettingsUsabilityTests: XCTestCase {
     }
 
     @MainActor
+    func testSubscriptionServiceSurvivesRelaunchWithoutReadingKeys() throws {
+        try withSettings { settings, defaults, keys in
+            for existing in settings.connectionLibrary.connections {
+                try settings.setComparisonIncluded(false, id: existing.id)
+            }
+            let service = try settings.addAIConnection(name: "My Max", provider: .claudeSubscription)
+            try settings.setComparisonIncluded(true, id: service.id)
+            let reads = keys.reads
+            XCTAssertEqual(settings.providerConfiguration().apiKey, "")
+            XCTAssertTrue(settings.comparisonServiceConfigurations.contains { $0.service.id == service.id && $0.configuration.apiKey.isEmpty })
+            XCTAssertEqual(keys.reads, reads)
+            let reloaded = AppSettings(defaults: defaults, keyStore: keys.store)
+            XCTAssertEqual(reloaded.provider, .claudeSubscription)
+            XCTAssertNil(reloaded.configurationIssue)
+            XCTAssertEqual(reloaded.model, "")
+            XCTAssertFalse(reloaded.configurationSummary.contains("No saved key"))
+        }
+    }
+
+    @MainActor
     func testFreshInstallHasDefaultServiceAndNoKey() throws {
         try withSettings { settings, _, keys in
             XCTAssertEqual(settings.connectionLibrary.connections.count, 1)
