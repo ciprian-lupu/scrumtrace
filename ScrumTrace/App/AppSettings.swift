@@ -8,6 +8,8 @@ enum AIProviderKind: String, Codable, CaseIterable, Identifiable, Sendable {
     case claudeSubscription = "claude_subscription"
     case codexSubscription = "codex_subscription"
 
+    static let subscriptionChoices: [AIProviderKind] = [.claudeSubscription, .codexSubscription]
+
     var localCLI: LocalCodingCLI? {
         switch self {
         case .claudeSubscription: return .claude
@@ -539,8 +541,20 @@ final class AppSettings: ObservableObject {
         transcriptionLibrary = library
     }
 
+    var subscriptionConnections: [SavedAIConnection] {
+        connectionLibrary.connections.filter { $0.provider.usesSubscription }
+    }
+
+    /// Preserve legacy settings for old recordings, but never present or send to them.
+    func selectSubscriptionForEditing() throws {
+        guard connectionLibraryIssue == nil else { return }
+        if let selected = connectionLibrary.selected, !selected.provider.usesSubscription {
+            try selectAIConnection(id: subscriptionConnections.first?.id)
+        }
+    }
+
     var comparisonServiceConfigurations: [AIServiceConfiguration] {
-        connectionLibrary.connections.filter(\.isIncludedInComparison).map { connection in
+        subscriptionConnections.filter(\.isIncludedInComparison).map { connection in
             let configuration = AIProviderConfiguration(
                 kind: connection.provider,
                 baseURL: connection.baseURL.trimmingCharacters(in: .whitespacesAndNewlines),

@@ -501,3 +501,11 @@ The user clarified the naming and archive workflow on 2026-09-15: one project pe
 ### User-approved subscription analysis — 2026-10-02
 
 Claude Code and Codex subscription services are additional adapters behind the existing AIProvider contract. They invoke installed local CLIs with saved subscription authentication, consume prepared text/JPEG evidence, and decode results with the existing candidate parser. They do not provide offline inference or video support. Existing API adapters remain supported. Settings offers service selection, installation/sign-in checks, and a one-word connection test; no API key is required for these services. Upload consent, evidence validation, per-service retry records and comparison input fingerprints still apply. Blank model means the CLI default, which may change with a CLI/provider update; choose an explicit model for repeatable model comparisons.
+
+### User-approved recording audio mute — 2026-10-07
+
+Independent all-audio and microphone mute controls in the recording HUD leave video, metadata and media time running. Write PCM silence before either audio persistence path; retain host-time mute intervals for late buffers and preserve the mic-only choice across an all-audio mute cycle. Effective mic mute blocks Hold-to-Talk and discards an active voice note. Pause remains the existing all-source capture gate. Mutes are session-local and reset on a new recording. This affects ScrumTrace capture, not system volume or another app’s microphone. Native tests and visual HUD inspection do not establish live hardware acceptance.
+
+### User-approved subscription-only AI settings — 2026-10-07
+
+Settings → AI offers only Claude Code and Codex / ChatGPT subscriptions. Remove API-key/endpoint controls and legacy backend choices from that tab. Preserve legacy stored values for decoding/history, but exclude their services from new analysis/comparison configurations even before Settings is opened. Do not silently enable a replacement subscription. Speech/transcription settings are separate.

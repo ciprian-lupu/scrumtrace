@@ -110,13 +110,13 @@ WhisperKit's prefill cache is disabled for decoding because it produced empty 30
 
 The exported brief shows speaker labels and clickable passages within each selected clip. Estimates, unclear passages and overlapping voices remain marked for review. Use headphones to reduce call audio leaking into the room microphone. Real multi-person accuracy and long-run synchronization still need hardware validation; local tests do not close those gates.
 
-In **AI**, save each provider as a named service (Hive, DeepSeek, OpenAI, and so on) with its own endpoint, model, and key. Only explicitly checked services are used for comparison analysis. Saved keys are not displayed again. The previous single provider setting is imported once. **Logs** filters the current run and can export diagnostics. **General** explains retention: completed recordings are removed on the next launch when their retention period expires; **Forever** keeps them.
+In **AI**, save Claude Code or Codex / ChatGPT as named subscription services. Only explicitly checked services are used for comparison analysis. Legacy API services stay stored for compatibility but are hidden and excluded from automatic analysis. **Logs** filters the current run and can export diagnostics. **General** explains retention: completed recordings are removed on the next launch when their retention period expires; **Forever** keeps them.
 
 ### Use your Claude or ChatGPT subscription for analysis
 
-In **Settings → AI → New service…**, choose **Claude Code — subscription** or **Codex / ChatGPT — subscription** and give it a name. Check the service in the comparison list to use it for analysis. API services can remain saved alongside subscription services.
+In **Settings → AI → New service…**, choose **Claude Code — subscription** or **Codex / ChatGPT — subscription** and give it a name. Check the service in the comparison list to use it for analysis. Only these two subscription providers are offered.
 
-Install the corresponding `claude` or `codex` command on this Mac and sign in once with `claude auth login` or `codex login`. Use **Check subscription sign-in**, then **Test current settings**. No API key is required; an API-key login is rejected for a subscription service. Leave Model blank for the agent default, or enter a model available to your account. The ordinary Claude/ChatGPT desktop chat app alone does not provide this automatic integration; the installed Claude Code/Codex command does.
+Install the corresponding `claude` or `codex` command on this Mac and sign in once with `claude auth login` or `codex login`. Use **Check subscription sign-in**, then **Test connection**. No API key is required; an API-key login is rejected for a subscription service. Leave Model blank for the agent default, or enter a model available to your account. The ordinary Claude/ChatGPT desktop chat app alone does not provide this automatic integration; the installed Claude Code/Codex command does.
 
 After Stop, approved analysis runs automatically and returns results into the usual brief and comparison. The local command sends the same text and JPEG evidence to its provider; computation is not offline and subscription limits apply. ScrumTrace does not read or copy login tokens. It stages only the prepared analysis input in a temporary folder, excludes video, and removes the temporary files when the run ends. Existing manual **Open export in…** actions remain separate.
 
@@ -125,6 +125,10 @@ On another Mac, pull `develop` and build/install the updated app using the Mac r
 **Speech and AI are separate stages.** Keep **Settings → Speech → Local WhisperKit** for recording-to-text, then select **Claude Code (subscription)** or **Codex (subscription)** in **Settings → AI** for analysis. Whisper reads the captured audio locally; these subscription adapters receive the resulting text and JPEGs. They do not replace Whisper or perform independent audio transcription. Text-only corrections cannot establish what was actually spoken and must remain separate from the original timed transcript.
 
 References: [Codex saved authentication](https://developers.openai.com/codex/noninteractive), [Claude subscription usage](https://support.claude.com/en/articles/15036540-use-the-claude-agent-sdk-with-your-claude-plan).
+
+### Mute during recording
+
+The recording bar offers **Mute all** (system audio and microphone) and **Mute mic** (microphone only). Click again to unmute; orange labels indicate a muted state. Both controls remain accessible when the bar is minified. Unmuting all keeps your separate mic choice, so a phone call does not accidentally put your microphone back into the recording. Video and the recording clock continue; muted audio is replaced with silence. These controls affect ScrumTrace’s recording only, not your call or Mac volume. Hold-to-Talk is blocked while the mic is effectively muted, and an active voice note is discarded when you mute. Both mutes reset for each new recording. Use **Pause** to stop capturing everything.
 
 ## Hotkeys
 

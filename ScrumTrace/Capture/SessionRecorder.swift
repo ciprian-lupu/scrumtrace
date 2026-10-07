@@ -43,6 +43,7 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
     private var converter: AVAudioConverter?
     private var engine: AVAudioEngine?
     private var engineConfigObserver: NSObjectProtocol?
+    private var audioMute = RecordingAudioMute()
     private var paused = false
     private var started = false
     private var microphoneWav = false
@@ -424,6 +425,13 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
 
     /// Dual-pass Whisper needs this before `stopCapture` / `finishWriting`.
     /// Quit only waits 5s; the layout must already be on disk (Gate 3).
+    func setAudioMuted(all: Bool, microphone: Bool) {
+        syncWriter {
+            self.audioMute.set(all: all, microphone: microphone,
+                at: CMTimeGetSeconds(CMClockGetTime(CMClockGetHostTimeClock())))
+        }
+    }
+
     func persistCaptureLayout(microphoneWav: Bool? = nil) throws {
         let snapshot = syncWriter { (self.microphoneWav, self.wavStartMediaSeconds) }
         let mic = microphoneWav ?? snapshot.0
@@ -609,15 +617,32 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             AgentLog.event("resume_edge_drop", ["type": String(type.rawValue)])
             return
         }
+        var audioSample = sampleBuffer
+        let isMicrophone: Bool
+        if #available(macOS 15.0, *) { isMicrophone = type == .microphone }
+        else { isMicrophone = false }
+        if type == .audio || isMicrophone {
+            let duration = CMTimeGetSeconds(CMSampleBufferGetDuration(sampleBuffer))
+            if audioMute.shouldSilence(microphone: isMicrophone,
+                                       start: CMTimeGetSeconds(host), duration: duration) {
+                guard let silent = RecordingAudioMute.silentCopy(of: sampleBuffer) else {
+                    failCaptureWrite("Could not safely mute captured audio.")
+                    return
+                }
+                audioSample = silent
+            }
+        }
         switch type {
         case .screen:
             appendVideo(sampleBuffer, sampleClock: sampleClock)
         case .audio:
+            let sampleBuffer = audioSample
             appendAudioToMovie(sampleBuffer, sampleClock: sampleClock)
             if !microphoneWav {
                 writeWav(from: sampleBuffer, sampleClock: sampleClock)
             }
         case .microphone:
+            let sampleBuffer = audioSample
             writeWav(from: sampleBuffer, sampleClock: sampleClock)
         @unknown default:
             break
@@ -1304,6 +1329,11 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
                 if let host, self.clock.isInsidePause(hostTime: host) {
                     AgentLog.event("resume_edge_drop", ["type": "engine"])
                     return
+                }
+                if self.audioMute.shouldSilence(microphone: true,
+                    start: host.map(CMTimeGetSeconds) ?? .nan,
+                    duration: Double(copy.frameLength) / copy.format.sampleRate) {
+                    RecordingAudioMute.silencePCM(copy)
                 }
                 self.writeEngineBuffer(copy, hostTime: host)
             }

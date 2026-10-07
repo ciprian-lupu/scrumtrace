@@ -16,6 +16,28 @@ final class SessionController: ObservableObject {
     @Published var isBusy = false
     @Published var suppressHUD = false
     @Published private(set) var startInFlight = false
+    @Published private(set) var allAudioMuted = false
+    @Published private(set) var microphoneMuted = false
+    var isMicrophoneEffectivelyMuted: Bool { allAudioMuted || microphoneMuted }
+
+    func toggleAllAudioMute() {
+        guard phase == .recording || phase == .paused else { return }
+        allAudioMuted.toggle()
+        applyAudioMute()
+    }
+
+    func toggleMicrophoneMute() {
+        guard phase == .recording || phase == .paused else { return }
+        microphoneMuted.toggle()
+        applyAudioMute()
+    }
+
+    private func applyAudioMute() {
+        recorder?.setAudioMuted(all: allAudioMuted, microphone: microphoneMuted)
+        shotWindow?.setMicrophoneMuted(isMicrophoneEffectivelyMuted)
+        AgentLog.event("audio_mute", ["all": allAudioMuted ? "1" : "0", "mic": microphoneMuted ? "1" : "0"])
+    }
+
 
     let settings: AppSettings
     let vault: SessionVault
@@ -740,6 +762,8 @@ final class SessionController: ObservableObject {
             manifest = createdManifest
             lastMetaSignature = ""
             pausedByPrivacy = false
+            allAudioMuted = false
+            microphoneMuted = false
             clock.reset()
             // Do not touch Accessibility on Record. Silent AX checks belong
             // in MetadataSampler.readFrontmost. prompt:true lives only on
@@ -1298,6 +1322,7 @@ final class SessionController: ObservableObject {
                 annotatedPath: annotatedPath
             )
         }
+        shotWindow?.setMicrophoneMuted(isMicrophoneEffectivelyMuted)
         shotWindow?.show()
     }
 

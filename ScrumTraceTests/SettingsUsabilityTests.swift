@@ -227,7 +227,7 @@ final class SettingsUsabilityTests: XCTestCase {
     }
 
     @MainActor
-    func testComparisonSelectionKeepsActiveEditorAndSeparateKeychainServices() throws {
+    func testLegacyAPIServicesRemainStoredButAreExcludedFromAnalysis() throws {
         try withSettings { settings, _, keys in
             let openAI = try XCTUnwrap(settings.connectionLibrary.selected)
             settings.apiKeyDraft = "fixture-openai-key"
@@ -240,9 +240,39 @@ final class SettingsUsabilityTests: XCTestCase {
             try settings.selectAIConnection(id: openAI.id)
 
             XCTAssertEqual(settings.connectionLibrary.selectedID, openAI.id, "Editing remains single-service")
-            XCTAssertEqual(Set(settings.comparisonServiceConfigurations.map { $0.service.id }), Set([openAI.id, google.id]))
+            XCTAssertTrue(settings.comparisonServiceConfigurations.isEmpty, "Legacy API selections must never run hidden behind the subscription-only UI")
             XCTAssertEqual(keys.values[AppSettings.connectionKeyAccount(id: openAI.id)], "fixture-openai-key")
             XCTAssertEqual(keys.values[AppSettings.connectionKeyAccount(id: google.id)], "fixture-google-key")
+        }
+    }
+
+    @MainActor
+    func testSubscriptionOnlyEditorMigratesSelectionWithoutDeletingLegacySettings() throws {
+        try withSettings { settings, defaults, keys in
+            let legacy = try XCTUnwrap(settings.connectionLibrary.selected)
+            let claude = try settings.addAIConnection(name: "Claude", provider: .claudeSubscription)
+            let chatGPT = try settings.addAIConnection(name: "ChatGPT", provider: .codexSubscription)
+            for service in [legacy, claude, chatGPT] { try settings.setComparisonIncluded(true, id: service.id) }
+            try settings.selectAIConnection(id: legacy.id)
+            try settings.selectSubscriptionForEditing()
+            XCTAssertEqual(settings.connectionLibrary.selectedID, claude.id)
+            XCTAssertEqual(Set(settings.subscriptionConnections.map(\.id)), Set([claude.id, chatGPT.id]))
+            XCTAssertEqual(Set(settings.comparisonServiceConfigurations.map { $0.service.id }), Set([claude.id, chatGPT.id]))
+            XCTAssertTrue(settings.connectionLibrary.connections.contains { $0.id == legacy.id })
+            let reloaded = AppSettings(defaults: defaults, keyStore: keys.store)
+            XCTAssertEqual(reloaded.connectionLibrary.selectedID, claude.id)
+            XCTAssertEqual(Set(AIProviderKind.subscriptionChoices), Set([.claudeSubscription, .codexSubscription]))
+        }
+    }
+
+    @MainActor
+    func testLegacyOnlyEditorBecomesUnselectedWithoutAutomaticallyEnablingUploads() throws {
+        try withSettings { settings, _, _ in
+            let count = settings.connectionLibrary.connections.count
+            try settings.selectSubscriptionForEditing()
+            XCTAssertNil(settings.connectionLibrary.selectedID)
+            XCTAssertTrue(settings.comparisonServiceConfigurations.isEmpty)
+            XCTAssertEqual(settings.connectionLibrary.connections.count, count)
         }
     }
 

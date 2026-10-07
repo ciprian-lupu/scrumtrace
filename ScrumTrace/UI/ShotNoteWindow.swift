@@ -112,6 +112,13 @@ final class ShotTalkState: ObservableObject {
     @Published var note = ""
     @Published var holdingTalk = false
     @Published var canTalk = true
+    var microphoneMuted = false
+
+    func setMicrophoneMuted(_ muted: Bool) {
+        microphoneMuted = muted
+        applyCaptureGate()
+    }
+
     @Published var source: ShotSource = .typed
     @Published var talkError: String?
     @Published var isTranscribing = false
@@ -144,15 +151,15 @@ final class ShotTalkState: ObservableObject {
         // gate so we do not read MainActor `phase` off-thread (C1).
         let allowed = posted?.allowsNewCapture ?? allowsNewCapture()
         if Thread.isMainThread {
-            canTalk = allowed
-            if !allowed {
+            canTalk = allowed && !microphoneMuted
+            if !canTalk {
                 abortTalk()
             }
         } else {
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                self.canTalk = allowed
-                if !allowed {
+                self.canTalk = allowed && !self.microphoneMuted
+                if !self.canTalk {
                     self.abortTalk()
                 }
             }
@@ -181,6 +188,7 @@ final class ShotTalkState: ObservableObject {
     }
 
     func startTalk() {
+        guard !microphoneMuted else { return }
         guard !holdingTalk, recorder == nil else { return }
         guard allowsNewCapture() else {
             AgentLog.event("talk_start_fail", ["reason": "paused"])
@@ -386,6 +394,11 @@ final class ShotNoteWindow: NSPanel, NSTextFieldDelegate {
     deinit {
         talk.abortTalk()
         observers.forEach { NotificationCenter.default.removeObserver($0) }
+    }
+
+    func setMicrophoneMuted(_ muted: Bool) {
+        talk.setMicrophoneMuted(muted)
+        refreshChrome()
     }
 
     func show() {

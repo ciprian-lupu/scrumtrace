@@ -72,17 +72,7 @@ struct SettingsView: View {
             keyStatus = ""
             connectionLine = ""
         }
-        .alert("Remove saved key?", isPresented: $removingKey) {
-            Button("Remove key", role: .destructive) {
-                do {
-                    try settings.removeSavedAPIKey()
-                    keyStatus = "Key removed. Recording and local export are still available."
-                } catch { keyStatus = error.localizedDescription }
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("This removes the key for the selected service from this Mac. You will need to enter it again to use AI analysis.")
-        }
+
     }
 
     private var speechTab: some View {
@@ -326,111 +316,30 @@ struct SettingsView: View {
                      ? "Choose a project name on first open. Export and archive analyses reuse that recording's project, with separate task prompts. You send the prompt yourself."
                      : "Starts Codex CLI in Terminal using your existing login. Install the codex command and allow ScrumTrace to control Terminal when macOS asks.")
                     .font(.caption).foregroundStyle(.secondary)
-                Text("Open archive in Codex always uses the desktop app and adds the original source to the shared project. Claude and the Terminal option use only export/. These handoffs do not use the API key below.")
+                Text("Open archive in Codex always uses the desktop app and adds the original source to the shared project. Claude and the Terminal option use only export/. These handoffs are separate from automatic subscription analysis.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             AIConnectionsSettingsView(settings: settings, controller: controller)
-            Section("Selected service") {
-                Picker("Backend", selection: $settings.provider) {
-                    ForEach(AIProviderKind.allCases) { kind in
-                        Text(kind.title).tag(kind)
+            Section("Selected subscription") {
+                if settings.connectionLibrary.selected?.provider.usesSubscription == true {
+                    LabeledContent("Subscription", value: settings.provider.title)
+                    LocalSubscriptionSettingsView(kind: settings.provider).id(settings.provider)
+                    TextField("Model (optional)", text: $settings.model)
+                    Text("Leave Model blank to use the CLI default. Analysis uses your subscription on the provider’s servers. Whisper handles transcription locally.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    if let issue = settings.configurationIssue {
+                        Text(issue).font(.caption).foregroundStyle(.red)
                     }
-                }
-                if settings.provider.usesSubscription {
-                    LocalSubscriptionSettingsView(kind: settings.provider)
-                        .id(settings.provider)
-                    Text("Uses your saved subscription sign-in through the local agent. AI processing runs on the provider’s servers and counts toward your plan limits. No API key is needed. Leave Model blank to use the agent’s default.")
+                    Button(testingConnection ? "Testing…" : "Test connection") { testCurrentSettings() }
+                        .disabled(!canTestConnection)
+                    Text("The connection test sends a one-word ping, with no recording content.")
                         .font(.caption).foregroundStyle(.secondary)
                 } else {
-                    TextField("Endpoint", text: $settings.baseURL)
-                }
-                TextField("Model", text: $settings.model)
-                if !settings.provider.usesSubscription {
-                    Text("These fields belong to the selected service. Enter an API root; OpenAI-compatible and Anthropic endpoints may end in /v1. Hive: https://api.thehive.ai and a Playground / Service V3 secret key (not a V2 project token).")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-                HStack {
-                    Button("Validate configuration") {
-                        settings.refreshKeyStatus()
-                        keyStatus = settings.configurationSummary
-                    }
-                    Button("Use provider defaults") { settings.applyProviderDefaults() }
-                }
-                if let issue = settings.configurationIssue {
-                    Text(issue).font(.caption).foregroundStyle(.red)
-                }
-                if settings.provider == .anthropic {
-                    Text("Documented Messages models: claude-sonnet-5, claude-opus-5, claude-haiku-4-5. Retired claude-3-5 and claude-3-7 ids are refused.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    if settings.model.isEmpty {
-                        Text("Anthropic stays off until you set a currently documented Messages model.")
-                            .font(.caption)
-                            .foregroundStyle(.red)
-                    } else if AIProviderConfiguration.isRetiredAnthropic(settings.model) {
-                        Text("This model id is retired (2025–2026). Anthropic calls are refused.")
-                            .font(.caption)
-                            .foregroundStyle(.red)
-                    }
-                }
-                if !settings.provider.usesSubscription {
-                    LabeledContent("Saved key", value: settings.hasSavedAPIKey ? "Stored for this service" : "Not saved for this service")
-                    SecureField(settings.hasSavedAPIKey ? "Replacement API key" : "API key (Keychain)", text: $settings.apiKeyDraft)
-                    Text("Saved in this Mac’s Keychain for the selected service. A saved key is never displayed here. Switching services uses that service’s key only.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Button("Save key") {
-                        do {
-                            try settings.saveAPIKey()
-                            keyStatus = "Key saved on this Mac. Online validity has not been checked."
-                            AgentLog.event("settings_action", ["action": "save_key"])
-                        } catch {
-                            keyStatus = error.localizedDescription
-                            AgentLog.event("settings_action", [
-                                "action": "save_key_fail",
-                                "error": AgentLog.sanitize(error.localizedDescription)
-                            ])
-                        }
-                    }
-                    .disabled(
-                        settings.connectionLibrary.selected == nil
-                            || settings.apiKeyDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                            || settings.configurationIssue != nil
-                    )
-                    if settings.hasSavedAPIKey {
-                        Button("Remove saved key…", role: .destructive) { removingKey = true }
-                    }
-                    if settings.connectionLibrary.selected == nil {
-                        Text("Select or add a service to save a key. You can still record and produce a local export.")
-                            .font(.caption).foregroundStyle(.secondary)
-                    } else if !settings.hasSavedAPIKey {
-                        Text("AI is not configured for this service. You can still record and produce a local export.")
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
-                }
-                if !keyStatus.isEmpty {
-                    Text(keyStatus)
-                        .font(.caption)
+                    Text("Add or select a Claude or ChatGPT subscription above.")
                         .foregroundStyle(.secondary)
                 }
-            }
-            .disabled(settings.connectionLibrary.selected == nil)
-            Section("Test connection") {
-                Text(settings.provider.usesSubscription
-                     ? "Sends a one-word ping through your signed-in local agent. Uses your subscription allowance; no meeting content is sent."
-                     : "Sends a one-word ping with the selected service’s endpoint, model, and key. Nothing from a meeting is uploaded. A typed key that is not saved yet is used for this test only.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Button(testingConnection ? "Testing…" : "Test current settings") {
-                    testCurrentSettings()
-                }
-                .disabled(!canTestConnection)
-                if !connectionLine.isEmpty {
-                    Text(connectionLine)
-                        .font(.caption)
-                        .textSelection(.enabled)
-                        .foregroundStyle((connectionLine.hasPrefix("Key accepted") || connectionLine.hasPrefix("Subscription connected")) ? Color.secondary : Color.red)
-                }
+                if !connectionLine.isEmpty { Text(connectionLine).font(.caption).textSelection(.enabled) }
+                if !keyStatus.isEmpty { Text(keyStatus).font(.caption).foregroundStyle(.red) }
             }
             Section("Comparison input") {
                 Text("All selected services receive the same transcript excerpts, notes, product context and up to four JPEG stills per slice. Video is excluded so models can be compared on identical evidence.")
@@ -449,6 +358,11 @@ struct SettingsView: View {
         }
         .formStyle(.grouped)
         .disabled(!controller.canChangeCaptureSettings)
+        .onAppear {
+            guard controller.canChangeCaptureSettings else { return }
+            do { try settings.selectSubscriptionForEditing() }
+            catch { keyStatus = error.localizedDescription }
+        }
         .onChange(of: settings.connectionLibrary.selectedID) { _, _ in
             keyStatus = ""
             connectionLine = ""
@@ -563,17 +477,11 @@ struct SettingsView: View {
         !testingConnection
             && settings.connectionLibrary.selected != nil
             && settings.configurationIssue == nil
-            && (settings.provider.usesSubscription || settings.hasSavedAPIKey
-                || !settings.apiKeyDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            && settings.provider.usesSubscription
     }
 
     private func configurationForConnectionTest() -> AIProviderConfiguration {
-        var configuration = settings.providerConfiguration()
-        let draft = settings.apiKeyDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !draft.isEmpty {
-            configuration.apiKey = draft
-        }
-        return configuration
+        settings.providerConfiguration(includeKey: false)
     }
 
     private func testCurrentSettings() {

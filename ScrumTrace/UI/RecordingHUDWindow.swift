@@ -106,6 +106,8 @@ final class RecordingHUDWindow: NSPanel {
     private let pinButton = HUDTextButton(title: "Pin")
     private let pauseButton = HUDTextButton(title: "Pause")
     private let stopButton = HUDTextButton(title: "Stop")
+    private let allMuteButton = HUDTextButton(title: "Mute all")
+    private let micMuteButton = HUDTextButton(title: "Mute mic")
     private let minifyButton = HUDSymbolButton(symbol: "chevron.left", help: "Minify")
     private let expandButton = HUDSymbolButton(symbol: "chevron.right", help: "Expand")
     private var dividerHeight: NSLayoutConstraint?
@@ -204,6 +206,23 @@ final class RecordingHUDWindow: NSPanel {
         pinButton.isHidden = !controls
         pauseButton.isHidden = !controls
         stopButton.isHidden = !controls
+        allMuteButton.isHidden = busy || starting
+        micMuteButton.isHidden = busy || starting
+        allMuteButton.isEnabled = controller.phase == .recording || controller.phase == .paused
+        micMuteButton.isEnabled = allMuteButton.isEnabled
+        allMuteButton.setLabel(controller.allAudioMuted ? "Unmute all" : "Mute all")
+        micMuteButton.setLabel(controller.microphoneMuted ? "Unmute mic" : "Mute mic")
+        allMuteButton.contentTintColor = controller.allAudioMuted ? .systemOrange : nil
+        allMuteButton.toolTip = controller.allAudioMuted
+            ? "All recorded audio is muted. Click to restore system audio and the previous mic state."
+            : "Mute system audio and microphone in this recording. Video continues."
+        micMuteButton.toolTip = controller.allAudioMuted
+            ? "All audio is muted. This sets the mic state to use when all audio is unmuted."
+            : "Mute only your microphone in this recording. System audio and video continue."
+        allMuteButton.setAccessibilityValue(controller.allAudioMuted ? "All audio muted" : "All-audio mute off")
+        micMuteButton.setAccessibilityValue(controller.isMicrophoneEffectivelyMuted ? "Microphone muted" : "Microphone mute off")
+        allMuteButton.setMutedAppearance(controller.allAudioMuted)
+        micMuteButton.setMutedAppearance(controller.isMicrophoneEffectivelyMuted)
         minifyButton.isHidden = isMinified
         expandButton.isHidden = !isMinified
         shotButton.isEnabled = controller.captureState.allowsNewCapture
@@ -306,6 +325,8 @@ final class RecordingHUDWindow: NSPanel {
         pinButton.apply(scale: next)
         pauseButton.apply(scale: next)
         stopButton.apply(scale: next)
+        allMuteButton.apply(scale: next)
+        micMuteButton.apply(scale: next)
         minifyButton.apply(scale: next)
         expandButton.apply(scale: next)
         dot.apply(scale: next)
@@ -347,6 +368,12 @@ final class RecordingHUDWindow: NSPanel {
         pinButton.action = #selector(pinClicked)
         pauseButton.target = self
         pauseButton.action = #selector(pauseClicked)
+        allMuteButton.target = self
+        allMuteButton.action = #selector(allMuteClicked)
+        allMuteButton.setAccessibilityIdentifier("hud.mute.all")
+        micMuteButton.target = self
+        micMuteButton.action = #selector(micMuteClicked)
+        micMuteButton.setAccessibilityIdentifier("hud.mute.mic")
         stopButton.target = self
         stopButton.action = #selector(stopClicked)
         minifyButton.target = self
@@ -360,6 +387,8 @@ final class RecordingHUDWindow: NSPanel {
         stack.addArrangedSubview(divider)
         stack.addArrangedSubview(shotButton)
         stack.addArrangedSubview(pinButton)
+        stack.addArrangedSubview(allMuteButton)
+        stack.addArrangedSubview(micMuteButton)
         stack.addArrangedSubview(pauseButton)
         stack.addArrangedSubview(stopButton)
         stack.addArrangedSubview(statusLabel)
@@ -398,6 +427,9 @@ final class RecordingHUDWindow: NSPanel {
         AgentLog.event("hud_pin", [:])
         controller.pin()
     }
+
+    @objc private func allMuteClicked() { controller.toggleAllAudioMute(); refresh() }
+    @objc private func micMuteClicked() { controller.toggleMicrophoneMute(); refresh() }
 
     @objc private func pauseClicked() {
         AgentLog.event("hud_pause", [:])
@@ -495,6 +527,11 @@ private final class HUDLabel: NSTextField {
 private final class HUDTextButton: NSButton {
     private let ink = NSColor(red: 0.97, green: 0.93, blue: 0.86, alpha: 0.9)
     private var label = ""
+    private var mutedAppearance = false
+    func setMutedAppearance(_ muted: Bool) {
+        mutedAppearance = muted
+        setLabel(label)
+    }
     private var scale: CGFloat = 1
 
     init(title: String) {
@@ -515,7 +552,7 @@ private final class HUDTextButton: NSButton {
             string: text,
             attributes: [
                 .font: NSFont.systemFont(ofSize: 11 * scale, weight: .semibold),
-                .foregroundColor: ink
+                .foregroundColor: mutedAppearance ? NSColor.systemOrange : ink
             ]
         )
     }

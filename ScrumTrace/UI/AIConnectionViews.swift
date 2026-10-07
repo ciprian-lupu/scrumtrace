@@ -14,7 +14,7 @@ struct AIConnectionsSettingsView: View {
     @State private var message = ""
 
     private var selected: SavedAIConnection? {
-        settings.connectionLibrary.selected
+        settings.connectionLibrary.selected.flatMap { $0.provider.usesSubscription ? $0 : nil }
     }
 
     var body: some View {
@@ -24,20 +24,20 @@ struct AIConnectionsSettingsView: View {
                 .foregroundStyle(.secondary)
             if let issue = settings.connectionLibraryIssue {
                 Text(issue).foregroundStyle(.red)
-            } else if settings.connectionLibrary.connections.isEmpty {
-                Text("No saved services yet. Add an API or subscription service, or record without AI.")
+            } else if settings.subscriptionConnections.isEmpty {
+                Text("Add Claude or ChatGPT using your local subscription sign-in.")
                     .foregroundStyle(.secondary)
             } else {
                 Picker("Active service", selection: activeServiceBinding) {
                     Text("No service").tag("")
-                    ForEach(settings.connectionLibrary.connections) { connection in
+                    ForEach(settings.subscriptionConnections) { connection in
                         Text(connection.name).tag(connection.id)
                     }
                 }
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Include in multi-model comparison")
                         .font(.subheadline.weight(.medium))
-                    ForEach(settings.connectionLibrary.connections) { connection in
+                    ForEach(settings.subscriptionConnections) { connection in
                         Toggle(isOn: Binding(
                             get: { connection.isIncludedInComparison },
                             set: { included in
@@ -63,9 +63,9 @@ struct AIConnectionsSettingsView: View {
                     editor = AIConnectionNameRequest(
                         connection: SavedAIConnection(
                             name: "",
-                            provider: .openaiCompatible,
-                            baseURL: AIProviderKind.openaiCompatible.defaultBaseURL,
-                            model: AIProviderKind.openaiCompatible.defaultModel
+                            provider: .claudeSubscription,
+                            baseURL: AIProviderKind.claudeSubscription.defaultBaseURL,
+                            model: AIProviderKind.claudeSubscription.defaultModel
                         ),
                         isNew: true
                     )
@@ -114,13 +114,13 @@ struct AIConnectionsSettingsView: View {
             }
             Button("Cancel", role: .cancel) { deleting = nil }
         } message: {
-            Text("Remove “\(deleting?.name ?? "")” and its saved key from this Mac? Other services are unchanged.")
+            Text("Remove “\(deleting?.name ?? "")” from ScrumTrace? Your CLI sign-in stays unchanged.")
         }
     }
 
     private var activeServiceBinding: Binding<String> {
         Binding(
-            get: { settings.connectionLibrary.selectedID ?? "" },
+            get: { selected?.id ?? "" },
             set: { newValue in
                 do {
                     try settings.selectAIConnection(id: newValue.isEmpty ? nil : newValue)
@@ -156,7 +156,7 @@ private struct AIConnectionNameEditor: View {
             Form {
                 if isNew {
                     Picker("Backend", selection: $connection.provider) {
-                        ForEach(AIProviderKind.allCases) { kind in Text(kind.title).tag(kind) }
+                        ForEach(AIProviderKind.subscriptionChoices) { kind in Text(kind.title).tag(kind) }
                     }
                     .onChange(of: connection.provider) { _, kind in
                         connection.baseURL = kind.defaultBaseURL
@@ -169,8 +169,8 @@ private struct AIConnectionNameEditor: View {
             }
             .textFieldStyle(.roundedBorder)
             Text(isNew
-                 ? "Choose an API provider or your local Claude Code / Codex subscription. You can adjust the service after saving."
-                 : "This only changes the name. The endpoint, model, and key stay with this service.")
+                 ? "Choose Claude Code or Codex / ChatGPT using your local subscription."
+                 : "This only changes the name. The subscription and model stay with this service.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
             if !message.isEmpty {

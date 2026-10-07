@@ -62,9 +62,7 @@ def test_retired_anthropic_ids() -> None:
     assert "claude-3-7" in settings
     assert "claude-sonnet-5" in settings
     ui = (ROOT / "ScrumTrace" / "UI" / "SettingsView.swift").read_text()
-    assert "claude-sonnet-5" in ui
-    assert "claude-opus-5" in ui
-    assert "claude-haiku-4-5" in ui
+    assert "LocalSubscriptionSettingsView" in ui  # API model hints are no longer offered in Settings.
     processor = (ROOT / "ScrumTrace" / "Processing" / "SessionProcessor.swift").read_text()
     assert "isRetiredAnthropic" in processor
 
@@ -1913,8 +1911,13 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "enum SystemPrivacySettings" in controller_src
     assert 'Section("Comparison input")' in settings
     assert "no — identical input comparison" in settings
-    assert "Save key" in settings
-    assert "Key saved on this Mac" in settings
+    ai_settings = settings.split("private var aiTab:")[1].split("private var generalTab:")[0]
+    assert "LocalSubscriptionSettingsView" in ai_settings
+    assert "SecureField" not in ai_settings
+    assert 'TextField("Endpoint"' not in ai_settings
+    subscription_ui = (ROOT / "ScrumTrace" / "UI" / "AIConnectionViews.swift").read_text()
+    assert "AIProviderKind.subscriptionChoices" in subscription_ui
+    assert "ForEach(settings.subscriptionConnections)" in subscription_ui
     models = (ROOT / "ScrumTrace" / "Storage" / "SessionModels.swift").read_text()
     assert "func needsReprompt" in models
     assert "func handoffPath" in models
@@ -3247,8 +3250,8 @@ def test_ai_connection_library() -> None:
     assert "connectionLibrary.selected" in settings.split("func providerConfiguration")[1].split("var configurationIssue")[0]
     ui = (ROOT / "ScrumTrace" / "UI" / "SettingsView.swift").read_text()
     assert "AIConnectionsSettingsView" in ui
-    assert "Stored for this service" in ui
-    assert "Selected service" in ui
+    assert "Selected subscription" in ui
+    assert "Selected subscription" in ui
     views = (ROOT / "ScrumTrace" / "UI" / "AIConnectionViews.swift").read_text()
     assert "Active service" in views
     assert "No service" in views
