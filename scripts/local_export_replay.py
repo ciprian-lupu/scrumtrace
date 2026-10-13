@@ -185,7 +185,7 @@ def check_processor_events(log_path: Path, session_ids: set[str]) -> None:
         event = row.get("event")
         if event == "processor_begin":
             active.add(sid)
-        elif event in {"processor_ok", "processor_fail"}:
+        elif event in {"processor_ok", "processor_fail", "processor_deferred"}:
             active.discard(sid)
     if active:
         fail("A selected source has an unfinished processing event; private replay stopped.")

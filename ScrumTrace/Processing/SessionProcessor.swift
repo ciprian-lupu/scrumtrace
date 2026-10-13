@@ -19,6 +19,13 @@ final class SessionProcessor: @unchecked Sendable {
     /// Last transcript this processor wrote. `loadTranscript` prefers disk,
     /// then this, so a decode miss cannot slice as if the room was silent.
     private var writtenTranscript: FullTranscript?
+    /// When `process` entered packaging; `pipeline-timing.json` records the stage's seconds from it.
+    private var packagingStartedAt: Date?
+
+    private func recordPackagingSeconds(into timing: inout PipelineTiming) {
+        guard let packagingStartedAt else { return }
+        timing.stageSeconds[ProcessingStage.packaging.rawValue] = Date().timeIntervalSince(packagingStartedAt)
+    }
 
     init(vault: SessionVault, transcriber: WhisperTranscriber, providerFactory: @escaping @Sendable (AIProviderConfiguration) -> any AIProvider = { AIEngine.make(configuration: $0) }) {
         self.providerFactory = providerFactory
@@ -82,11 +89,13 @@ final class SessionProcessor: @unchecked Sendable {
         whisperModel: String,
         identifySpeakers: Bool = false,
         localOnly: Bool = false,
-        onStatus: @escaping @MainActor (PipelineStatus, String) -> Void
+        onStatus: @escaping @MainActor (PipelineStatus, String) -> Void,
+        onEvent: @escaping @MainActor (ProcessingEvent) -> Void = { _ in }
     ) async throws -> SessionManifest {
         let sessionURL = vault.sessionURL(id: sessionId)
         try requireUsableSession(sessionURL, id: sessionId)
         var manifest = try vault.loadManifest(id: sessionId)
+        packagingStartedAt = nil
         let recordedPins = vault.loadPinTimes(sessionId: sessionId)
         let effectivePins = recordedPins.isEmpty ? pinTimes : recordedPins
         if writtenTranscript?.sessionId != sessionId {
@@ -132,16 +141,22 @@ final class SessionProcessor: @unchecked Sendable {
         }
 
         var justFinishedTranscribing = false
+        var diarizedArchive = false
         if !localOnly && !manifest.hasCompleted(.transcribing) {
             await onStatus(.transcribing, "Loading Whisper model…")
             manifest.pipelineStatus = .transcribing
             try vault.write(manifest: &manifest)
             let whisperStarted = Date()
-            let transcribed = await transcribe(
+            try Task.checkCancellation()
+            let transcribed = try await transcribe(
                 sessionURL: sessionURL,
                 model: whisperModel,
-                onStatus: onStatus
+                onStatus: onStatus,
+                onEvent: onEvent
             )
+            // Finish later: WhisperKit checks cancellation per window but not after the last one, so a decode can
+            // return after the request. Nothing below may be written for a cancelled run.
+            try Task.checkCancellation()
             var transcript = transcribed.transcript
             transcript.sessionId = sessionId
             if transcribed.incomplete, let previous = SpeakerTimeline.load(sessionURL: sessionURL), previous.hasUsableText {
@@ -153,8 +168,14 @@ final class SessionProcessor: @unchecked Sendable {
             if identifySpeakers, !localOnly, !transcribed.incomplete {
                 await onStatus(.transcribing, "Identifying speakers locally (first use downloads models)…")
                 transcript = await SpeakerDiarizer.shared.analyze(transcript, sessionURL: sessionURL)
+                try Task.checkCancellation()
             }
             timing.whisperIncomplete = transcribed.incomplete
+            timing.whisperLoadSeconds = transcribed.modelLoadSeconds
+            if let load = transcribed.modelLoadSeconds {
+                timing.stageSeconds[ProcessingStage.loadingModel.rawValue] = load
+            }
+            timing.stageSeconds[ProcessingStage.transcribing.rawValue] = max(0, Date().timeIntervalSince(whisperStarted) - (transcribed.modelLoadSeconds ?? 0))
             try requireUsableSession(sessionURL, id: sessionId)
             let persistablePass = !(transcript.sources ?? []).isEmpty || !transcript.segments.isEmpty
             // A failed Whisper pass must not replace a transcript already on
@@ -190,13 +211,26 @@ final class SessionProcessor: @unchecked Sendable {
 
         if identifySpeakers, !localOnly, manifest.hasCompleted(.transcribing),
            let archived = SpeakerTimeline.load(sessionURL: sessionURL), archived.speakerAnalysis == nil {
+            try Task.checkCancellation()
+            if !justFinishedTranscribing {
+                await onEvent(.skipped(.loadingModel, reason: ProcessingSkipReason.alreadyDone.rawValue))
+                await onEvent(.stage(.transcribing))
+                diarizedArchive = true
+            }
             await onStatus(.transcribing, "Identifying speakers locally (first use downloads models)…")
             let analyzed = await SpeakerDiarizer.shared.analyze(archived, sessionURL: sessionURL)
+            try Task.checkCancellation()
             try SpeakerTimeline.save(analyzed, sessionURL: sessionURL)
             writtenTranscript = analyzed
         }
         if localOnly && !manifest.hasCompleted(.transcribing) {
             await onStatus(.transcribing, "Local-only export uses the existing transcript; transcription was not rerun.")
+            await onEvent(.skipped(.loadingModel, reason: ProcessingSkipReason.localOnly.rawValue))
+            await onEvent(.skipped(.transcribing, reason: ProcessingSkipReason.localOnly.rawValue))
+        } else if !(!localOnly && !manifest.hasCompleted(.transcribing)) && !justFinishedTranscribing && !diarizedArchive {
+            // A retry that found the transcript complete on disk.
+            await onEvent(.skipped(.loadingModel, reason: ProcessingSkipReason.alreadyDone.rawValue))
+            await onEvent(.skipped(.transcribing, reason: ProcessingSkipReason.alreadyDone.rawValue))
         }
         let transcript = loadTranscript(sessionURL: sessionURL, sessionId: sessionId)
         var recoveredReadableTranscript = false
@@ -252,6 +286,9 @@ final class SessionProcessor: @unchecked Sendable {
         if !manifest.hasCompleted(.slicing) {
             let hasHumanAnchors = !manifest.shots.isEmpty || !effectivePins.isEmpty
             if manifest.hasCompleted(.transcribing) || hasHumanAnchors {
+                try Task.checkCancellation()
+                let slicingStarted = Date()
+                await onEvent(.stage(.slicing))
                 await onStatus(.slicing, "Cutting evidence windows to the media budget")
                 manifest.pipelineStatus = .slicing
                 let slices = slicer.slice(
@@ -260,8 +297,10 @@ final class SessionProcessor: @unchecked Sendable {
                     transcript: transcript,
                     mediaDuration: manifest.duration.mediaSeconds
                 )
+                await onEvent(.progress(.count(done: 0, total: slices.count, unit: "clips")))
                 var exported: [SliceRecord] = []
-                for slice in slices {
+                for (index, slice) in slices.enumerated() {
+                    try Task.checkCancellation()
                     if ExportRel.existingSessionFile(ScrumTracePath.sessionMovie, sessionURL: sessionURL) != nil {
                         do {
                             let clipped = try await exporter.export(
@@ -270,6 +309,9 @@ final class SessionProcessor: @unchecked Sendable {
                                 mediaDuration: manifest.duration.mediaSeconds
                             )
                             exported.append(clipped.withExistingMedia(sessionURL: sessionURL))
+                        } catch is CancellationError {
+                            // Finish later: never record a slice without its clip because the run was asked to stop.
+                            throw CancellationError()
                         } catch {
                             // Keep the slice (shot stills, transcript window). One bad
                             // clip must not abort the session. Do not keep a stale
@@ -281,9 +323,11 @@ final class SessionProcessor: @unchecked Sendable {
                     } else {
                         exported.append(slice.withExistingMedia(sessionURL: sessionURL))
                     }
+                    await onEvent(.progress(.count(done: index + 1, total: slices.count, unit: "clips")))
                 }
                 manifest.slices = exported
                 manifest.markCompleted(.slicing)
+                timing.stageSeconds[ProcessingStage.slicing.rawValue] = Date().timeIntervalSince(slicingStarted)
                 AgentLog.event("slice_done", [
                     "session": sessionId,
                     "clips": String(exported.count),
@@ -291,7 +335,11 @@ final class SessionProcessor: @unchecked Sendable {
                     "pins": String(effectivePins.count)
                 ])
                 try vault.write(manifest: &manifest)
+            } else {
+                await onEvent(.skipped(.slicing, reason: ProcessingSkipReason.noAnchors.rawValue))
             }
+        } else {
+            await onEvent(.skipped(.slicing, reason: ProcessingSkipReason.alreadyDone.rawValue))
         }
 
         // Build from the refreshed inventory and final selected windows. This
@@ -321,7 +369,9 @@ final class SessionProcessor: @unchecked Sendable {
                 // Retry Analysis transcribes first. Do not mark evaluating
                 // complete from an empty transcript that Whisper never produced.
                 // Synthesize is also withheld until transcribing completes (below).
+                await onEvent(.skipped(.evaluating, reason: ProcessingSkipReason.transcriptionIncomplete.rawValue))
             } else if localOnly {
+                await onEvent(.skipped(.evaluating, reason: ProcessingSkipReason.localOnly.rawValue))
                 await onStatus(.evaluating, "Local-only export — provider evaluation disabled")
                 // Existing successful findings survive only while their inputs
                 // remain current; this branch never creates a provider.
@@ -332,6 +382,7 @@ final class SessionProcessor: @unchecked Sendable {
                 }
                 try vault.write(manifest: &manifest)
             } else if !manifest.uploadConsent.approved {
+                await onEvent(.skipped(.evaluating, reason: ProcessingSkipReason.consent.rawValue))
                 await onStatus(.evaluating, "Upload not approved — local export only")
                 abandonEvaluate(manifest: &manifest, failedStatus: .skipped, markOffline: false)
                 AgentLog.event("eval_done", [
@@ -342,17 +393,23 @@ final class SessionProcessor: @unchecked Sendable {
                 ])
                 try vault.write(manifest: &manifest)
             } else if isComparison {
+                try Task.checkCancellation()
+                let evaluatingStarted = Date()
+                await onEvent(.stage(.evaluating))
                 try await evaluateComparison(
                     manifest: &manifest,
                     transcript: transcript,
                     sessionURL: sessionURL,
                     services: comparisonServices,
-                    onStatus: onStatus
+                    onStatus: onStatus,
+                    onEvent: onEvent
                 )
+                timing.stageSeconds[ProcessingStage.evaluating.rawValue] = Date().timeIntervalSince(evaluatingStarted)
             } else if configuration.kind == .anthropic && (
                 configuration.model.isEmpty
                     || AIProviderConfiguration.isRetiredAnthropic(configuration.model)
             ) {
+                await onEvent(.skipped(.evaluating, reason: ProcessingSkipReason.modelRefused.rawValue))
                 await onStatus(.evaluating, "Anthropic model missing or retired — local export only")
                 abandonEvaluate(manifest: &manifest, failedStatus: .skipped, markOffline: false)
                 AgentLog.event("eval_done", [
@@ -364,6 +421,7 @@ final class SessionProcessor: @unchecked Sendable {
                 ])
                 try vault.write(manifest: &manifest)
             } else if configuration.kind.requiresAPIKey && configuration.apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                await onEvent(.skipped(.evaluating, reason: ProcessingSkipReason.keyMissing.rawValue))
                 await onStatus(.evaluating, "API key missing — local export only")
                 // Local-only is a valid outcome, not a failed session. Retry
                 // re-evaluates skipped slices once a key is saved.
@@ -377,6 +435,9 @@ final class SessionProcessor: @unchecked Sendable {
                 ])
                 try vault.write(manifest: &manifest)
             } else {
+                try Task.checkCancellation()
+                let evaluatingStarted = Date()
+                await onEvent(.stage(.evaluating))
                 resetEvalAuthGate()
                 await onStatus(.evaluating, "Evaluating slices with the configured model")
                 manifest.pipelineStatus = .evaluating
@@ -388,9 +449,11 @@ final class SessionProcessor: @unchecked Sendable {
                     $0.analysisStatus == .success
                 }
                 let toRun = manifest.slices.filter { $0.analysisStatus != .success }
+                await onEvent(.progress(.count(done: 0, total: toRun.count, unit: "provider calls")))
                 // Serial: a 401 must not leave other slices uploading stills (Gate 5).
                 // Persist after each slice so a crash does not re-upload successes (D14).
-                for slice in toRun {
+                for (index, slice) in toRun.enumerated() {
+                    try Task.checkCancellation()
                     let result = await self.evaluateSlice(
                         slice: slice,
                         manifest: manifest,
@@ -399,6 +462,8 @@ final class SessionProcessor: @unchecked Sendable {
                         provider: provider,
                         configuration: configuration
                     )
+                    // Finish later: a call the request interrupted stays pending instead of being persisted as failed.
+                    try Task.checkCancellation()
                     updatedSlices.append(result.0)
                     tasks.append(contentsOf: result.1)
                     // Unique IDs only — do not rank/drop until every slice is in
@@ -411,11 +476,13 @@ final class SessionProcessor: @unchecked Sendable {
                     // slice so a crash cannot drop extras that later ranking needs.
                     manifest.tasks = tasks
                     try vault.write(manifest: &manifest)
+                    await onEvent(.progress(.count(done: index + 1, total: toRun.count, unit: "provider calls")))
                 }
                 manifest.slices = updatedSlices.sorted { $0.sliceId < $1.sliceId }
                 mergeUncoveredReview(manifest: &manifest, kept: tasks)
                 let anyFailed = manifest.slices.contains { $0.analysisStatus == .offlineFailed }
                 manifest.markCompleted(.evaluating)
+                timing.stageSeconds[ProcessingStage.evaluating.rawValue] = Date().timeIntervalSince(evaluatingStarted)
                 if anyFailed {
                     manifest.pipelineStatus = .offlineFailed
                 }
@@ -427,9 +494,15 @@ final class SessionProcessor: @unchecked Sendable {
                 ])
                 try vault.write(manifest: &manifest)
             }
+        } else {
+            await onEvent(.skipped(.evaluating, reason: ProcessingSkipReason.alreadyDone.rawValue))
         }
 
         try requireUsableSession(sessionURL, id: sessionId)
+        // Packaging is never interrupted: the last cancellation check of the run is here.
+        try Task.checkCancellation()
+        packagingStartedAt = Date()
+        await onEvent(.stage(.packaging))
         if !manifest.hasCompleted(.transcribing) {
             await onStatus(
                 .transcribing,
@@ -697,6 +770,7 @@ final class SessionProcessor: @unchecked Sendable {
         timing.zipBytes = zipBytes
         timing.exportFolderBytes = folderBytes
         timing.omittedCount = zipResult.omitted.count
+        recordPackagingSeconds(into: &timing)
         AgentLog.event("zip_ok", [
             "session": sessionId,
             "bytes": String(zipBytes),
@@ -935,6 +1009,7 @@ final class SessionProcessor: @unchecked Sendable {
         timing.zipBytes = zipBytes
         timing.exportFolderBytes = folderBytes
         timing.omittedCount = zipResult.omitted.count
+        recordPackagingSeconds(into: &timing)
         try timing.write(sessionURL: sessionURL)
         manifest.omitted = zipResult.omitted
         manifest.tasks = EvidenceValidator.mergeCanonicalStatuses(
@@ -985,35 +1060,63 @@ final class SessionProcessor: @unchecked Sendable {
         }
     }
 
+    /// Throws only `CancellationError` (Finish later): every other failure is folded into `incomplete`, as before,
+    /// so a cancelled pass can never become a persistable partial transcript.
     private func transcribe(
         sessionURL: URL,
         model: String,
-        onStatus: @escaping @MainActor (PipelineStatus, String) -> Void
-    ) async -> (transcript: FullTranscript, incomplete: Bool) {
+        onStatus: @escaping @MainActor (PipelineStatus, String) -> Void,
+        onEvent: @escaping @MainActor (ProcessingEvent) -> Void = { _ in }
+    ) async throws -> (transcript: FullTranscript, incomplete: Bool, modelLoadSeconds: TimeInterval?) {
         let resolved = WhisperTranscriber.whisperKitModelName(model)
+        var modelLoadSeconds: TimeInterval?
         do {
             if !transcriber.isReady(for: model) {
+                await onEvent(.stage(.loadingModel))
+                let loadStarted = Date()
                 try await waitForPrepare(model: model, resolved: resolved, onStatus: onStatus)
+                modelLoadSeconds = Date().timeIntervalSince(loadStarted)
+            } else {
+                await onEvent(.skipped(.loadingModel, reason: ProcessingSkipReason.alreadyLoaded.rawValue))
             }
+            await onEvent(.stage(.transcribing))
             await onStatus(.transcribing, "Transcribing locally with WhisperKit")
+        } catch is CancellationError {
+            throw CancellationError()
         } catch {
             AgentLog.event("whisper_pass_fail", [
                 "source": "prepare",
                 "error": AgentLog.sanitize(error.localizedDescription)
             ])
-            return (FullTranscript(sessionId: "", language: "en", segments: []), true)
+            return (FullTranscript(sessionId: "", language: "en", segments: []), true, modelLoadSeconds)
         }
         let layout = CaptureAudioLayout.load(sessionURL: sessionURL)
         let wavExists = ExportRel.existingSessionFile(ScrumTracePath.audioWav, sessionURL: sessionURL) != nil
         let movieExists = ExportRel.existingSessionFile(ScrumTracePath.sessionMovie, sessionURL: sessionURL) != nil
         let wav = sessionURL.appendingPathComponent(ScrumTracePath.audioWav)
         let movie = sessionURL.appendingPathComponent(ScrumTracePath.sessionMovie)
+        let wantsMoviePass = layout.systemAudioInMovie && (layout.microphoneWav || !wavExists)
+        // Real progress: seconds of audio decoded out of the inputs this run will decode. A pass that is silent,
+        // missing or fails still counts its seconds as done so the bar reaches the end.
+        let willDecodeMovie = movieExists && layout.shouldTranscribeMovie(wavExists: wavExists, movieExists: movieExists)
+        let wavSeconds = wavExists ? ((try? await WhisperTranscriber.audioSeconds(of: wav)) ?? 0) : 0
+        let movieSeconds = willDecodeMovie ? ((try? await WhisperTranscriber.audioSeconds(of: movie)) ?? 0) : 0
+        let totalSeconds = wavSeconds + movieSeconds
+        let passCount = (wavExists ? 1 : 0) + (willDecodeMovie ? 1 : 0)
+        let report: @Sendable (Double) -> Void = { done in
+            guard totalSeconds > 0 else { return }
+            Task { @MainActor in
+                onEvent(.progress(.audioSeconds(done: min(done, totalSeconds), total: totalSeconds, passes: passCount)))
+            }
+        }
         var passes: [TranscriptQuery.SourcePass] = []
         var requiredFailed = false
         if wavExists {
             do {
                 let speaker = layout.microphoneWav ? "room" : "system"
-                let wavTranscript = try await transcriber.transcribeFile(at: wav, sessionURL: sessionURL)
+                let wavTranscript = try await transcriber.transcribeFile(at: wav, sessionURL: sessionURL, onProgress: { done, _ in
+                    report(min(done, wavSeconds))
+                })
                 requiredFailed = requiredFailed || wavTranscript.needsTranscriptionRetry
                 passes.append(
                     TranscriptQuery.SourcePass(
@@ -1026,6 +1129,8 @@ final class SessionProcessor: @unchecked Sendable {
                     "source": "wav",
                     "segments": String(wavTranscript.segments.count)
                 ])
+            } catch is CancellationError {
+                throw CancellationError()
             } catch {
                 // Keep shots/clips; Retry Analysis can transcribe again.
                 requiredFailed = true
@@ -1034,8 +1139,8 @@ final class SessionProcessor: @unchecked Sendable {
                     "error": AgentLog.sanitize(error.localizedDescription)
                 ])
             }
+            report(wavSeconds)
         }
-        let wantsMoviePass = layout.systemAudioInMovie && (layout.microphoneWav || !wavExists)
         if wantsMoviePass && !movieExists {
             requiredFailed = true
             AgentLog.event("whisper_pass_fail", [
@@ -1051,13 +1156,17 @@ final class SessionProcessor: @unchecked Sendable {
                 ])
             } else {
             do {
-                let movieTranscript = try await transcriber.transcribeMovieAudio(at: movie, sessionURL: sessionURL)
+                let movieTranscript = try await transcriber.transcribeMovieAudio(at: movie, sessionURL: sessionURL, onProgress: { done, _ in
+                    report(wavSeconds + min(done, movieSeconds))
+                })
                 requiredFailed = requiredFailed || movieTranscript.needsTranscriptionRetry
                 passes.append(TranscriptQuery.SourcePass(speaker: "system", transcript: movieTranscript))
                 AgentLog.event("whisper_pass_ok", [
                     "source": "movie",
                     "segments": String(movieTranscript.segments.count)
                 ])
+            } catch is CancellationError {
+                throw CancellationError()
             } catch {
                 requiredFailed = true
                 AgentLog.event("whisper_pass_fail", [
@@ -1066,9 +1175,10 @@ final class SessionProcessor: @unchecked Sendable {
                 ])
             }
             }
+            report(totalSeconds)
         }
         if passes.isEmpty {
-            return (FullTranscript(sessionId: "", language: "en", segments: []), true)
+            return (FullTranscript(sessionId: "", language: "en", segments: []), true, modelLoadSeconds)
         }
         var merged = TranscriptQuery.merge(passes, sessionId: "")
         let completedSources = Set(passes.map(\.speaker))
@@ -1078,7 +1188,7 @@ final class SessionProcessor: @unchecked Sendable {
         for source in expectedSources.subtracting(completedSources) {
             merged.transcriptionAnalysis?.append(TranscriptionAnalysis(source: source, status: "failed"))
         }
-        return (merged, requiredFailed)
+        return (merged, requiredFailed, modelLoadSeconds)
     }
 
     private func waitForPrepare(
@@ -1087,9 +1197,6 @@ final class SessionProcessor: @unchecked Sendable {
         onStatus: @escaping @MainActor (PipelineStatus, String) -> Void
     ) async throws {
         await onStatus(.transcribing, "Loading Whisper model (\(resolved))…")
-        let prepareTask = Task {
-            try await self.transcriber.prepare(model: model)
-        }
         let ticker = Task { @MainActor in
             var elapsed = 0
             while !Task.isCancelled && !self.transcriber.isReady(for: model) {
@@ -1103,9 +1210,12 @@ final class SessionProcessor: @unchecked Sendable {
             }
         }
         defer { ticker.cancel() }
+        // The prepare is a structured child: cancelling the group (Finish later, or the timeout) releases this
+        // caller through `CancellableAwait`, while the detached load inside the transcriber keeps going for the
+        // next caller.
         try await withThrowingTaskGroup(of: Void.self) { group in
             group.addTask {
-                try await prepareTask.value
+                try await self.transcriber.prepare(model: model)
             }
             group.addTask {
                 try await Task.sleep(
@@ -1180,7 +1290,8 @@ final class SessionProcessor: @unchecked Sendable {
         transcript: FullTranscript,
         sessionURL: URL,
         services: [AIServiceConfiguration],
-        onStatus: @escaping @MainActor (PipelineStatus, String) -> Void
+        onStatus: @escaping @MainActor (PipelineStatus, String) -> Void,
+        onEvent: @escaping @MainActor (ProcessingEvent) -> Void = { _ in }
     ) async throws {
         guard manifest.uploadConsent.approved,
               !manifest.uploadConsent.needsReprompt(destinations: services.map(\.destination)) else {
@@ -1189,6 +1300,9 @@ final class SessionProcessor: @unchecked Sendable {
         resetEvalAuthGate()
         manifest.pipelineStatus = .evaluating
         let cache = ComparisonInputCache(slices: manifest.slices)
+        let totalCalls = services.count * manifest.slices.count
+        var doneCalls = 0
+        await onEvent(.progress(.count(done: 0, total: totalCalls, unit: "provider calls")))
         for service in services {
             var config = service.configuration
             // A common wire contract is mandatory, including single-service runs
@@ -1208,12 +1322,19 @@ final class SessionProcessor: @unchecked Sendable {
                 }
                 AgentLog.event("eval_service", ["service": service.service.id, "status": "skipped", "error": invalid])
                 try vault.write(manifest: &manifest)
+                doneCalls += manifest.slices.count
+                await onEvent(.progress(.count(done: doneCalls, total: totalCalls, unit: "provider calls")))
                 continue
             }
             await onStatus(.evaluating, "Evaluating slices with \(service.service.name) — \(service.service.model)")
             let provider = ComparisonProvider(provider: providerFactory(config), cache: cache)
             for index in manifest.slices.indices {
-                guard !Self.completedEvaluation(manifest.slices[index], service: service) else { continue }
+                guard !Self.completedEvaluation(manifest.slices[index], service: service) else {
+                    doneCalls += 1
+                    await onEvent(.progress(.count(done: doneCalls, total: totalCalls, unit: "provider calls")))
+                    continue
+                }
+                try Task.checkCancellation()
                 let source = manifest.slices[index]
                 setServiceEvaluation(&manifest.slices[index], service: service, status: .pending, media: [])
                 try vault.write(manifest: &manifest)
@@ -1225,6 +1346,8 @@ final class SessionProcessor: @unchecked Sendable {
                     provider: provider,
                     configuration: config
                 )
+                // Finish later: the pending row stays pending; a retry evaluates it again.
+                try Task.checkCancellation()
                 let fingerprint = await cache.fingerprint(for: source.sliceId)
                 let diagnostic = await cache.diagnostic(for: source.sliceId)
                 setServiceEvaluation(&manifest.slices[index], service: service, status: result.0.analysisStatus,
@@ -1233,6 +1356,8 @@ final class SessionProcessor: @unchecked Sendable {
                 manifest.tasks.removeAll { $0.serviceId == service.service.id && $0.sourceSliceId == source.sliceId }
                 manifest.tasks.append(contentsOf: tagged(result.1, service: service))
                 try vault.write(manifest: &manifest)
+                doneCalls += 1
+                await onEvent(.progress(.count(done: doneCalls, total: totalCalls, unit: "provider calls")))
             }
         }
         for index in manifest.slices.indices { refreshLegacyStatus(&manifest.slices[index]) }

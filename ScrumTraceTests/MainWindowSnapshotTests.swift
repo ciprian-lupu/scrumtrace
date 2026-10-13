@@ -186,6 +186,35 @@ final class MainWindowSnapshotTests: XCTestCase {
             let idle = await waitUntil { presenter.overview.canStartRecording && recordings.canChangeSessions }
             XCTAssertTrue(idle, "The window follows the recording ending")
 
+            // The processing panel sits above the section while a recording picked up at launch is worked on, and
+            // stays, with Retry, when the run fails.
+            let t0 = Date()
+            var loading = ProcessingStatus(
+                sessionId: f.unfinished,
+                recordedAt: t0.addingTimeInterval(-21 * 24 * 3600),
+                mediaSeconds: 23,
+                origin: .launchResume,
+                history: ProcessingTimingHistory(modelLoadSeconds: [592.4, 686.5, 4.6], transcribeRates: [25], stageSeconds: [:]),
+                startedAt: t0.addingTimeInterval(-95)
+            )
+            loading.enter(.loadingModel, at: t0.addingTimeInterval(-94))
+            loading.now = t0
+            controller.setProcessingForTesting(loading)
+            controller.isBusy = true
+            try await render(window, as: "overview-processing", into: directory) {
+                !presenter.overview.canStartRecording && !recordings.canChangeSessions
+            }
+            var failed = loading
+            failed.enter(.transcribing, at: t0.addingTimeInterval(-10))
+            failed.update(progress: .audioSeconds(done: 9, total: 23))
+            failed.finish(.failed("session.mp4 is missing."), at: t0)
+            controller.setProcessingForTesting(failed)
+            controller.isBusy = false
+            try await render(window, as: "overview-processing-failed", into: directory) {
+                presenter.overview.canStartRecording && recordings.canChangeSessions
+            }
+            controller.setProcessingForTesting(nil)
+
             // Needs attention, Last recording and Storage sit below the readiness card.
             try await render(window, as: "overview-scrolled", into: directory, beforeCapture: scrollToBottom) {
                 presenter.overview.attention.unfinished.count == 3 && presenter.overview.attention.unreadableIds == [f.corrupt]
@@ -244,6 +273,23 @@ final class MainWindowSnapshotTests: XCTestCase {
                 presenter.navigation.settings.selectedTab == .speech && !recordings.canChangeSessions
             }
             controller.phase = .idle
+            // The same smallest window with the processing panel above Settings: the tab strip and the panel's buttons
+            // must both stay visible.
+            var packaging = ProcessingStatus(sessionId: f.unfinished, recordedAt: Date(), mediaSeconds: 1800, origin: .stop)
+            packaging.enter(.packaging)
+            controller.setProcessingForTesting(packaging)
+            controller.isBusy = true
+            try await render(
+                window,
+                as: "settings-minimum-processing",
+                into: directory,
+                size: MainWindowPresenter.minimumContentSize,
+                beforeCapture: widenSidebar
+            ) {
+                presenter.navigation.settings.selectedTab == .speech && !recordings.canChangeSessions
+            }
+            controller.isBusy = false
+            controller.setProcessingForTesting(nil)
             XCTAssertEqual(Set(library.entries.map(\.id)), [f.completed, f.unfinished, f.offlineFailed, f.interrupted, f.corrupt])
         }
     }

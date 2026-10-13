@@ -254,6 +254,9 @@ struct MainWindowView: View {
         } detail: {
             VStack(spacing: 0) {
                 MainLiveBanner(controller: controller)
+                // The processing panel observes the controller on its own, like the banner, so sections do not
+                // re-render with every tick. It never opens or fronts the window: it is only a view inside it.
+                ProcessingPanelView(controller: controller)
                 detail
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }

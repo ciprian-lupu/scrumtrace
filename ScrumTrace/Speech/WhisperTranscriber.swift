@@ -22,7 +22,21 @@ final class WhisperTranscriber: @unchecked Sendable {
 
     struct LoadedModel: @unchecked Sendable {
         var transcribe: (String, DecodingOptions) async throws -> [TranscriptionResult]
+        /// `WhisperKit.progress.fractionCompleted` of the decode in flight, read fresh each call because WhisperKit
+        /// replaces its `progress` per transcription. Nil when the loader keeps no figure (test fakes).
+        var fraction: @Sendable () -> Double?
+
+        init(
+            transcribe: @escaping (String, DecodingOptions) async throws -> [TranscriptionResult],
+            fraction: @escaping @Sendable () -> Double? = { nil }
+        ) {
+            self.transcribe = transcribe
+            self.fraction = fraction
+        }
     }
+
+    /// Seconds of audio decoded so far and the audio's total seconds, from a background queue, at most twice a second.
+    typealias ProgressSink = @Sendable (_ doneSeconds: Double, _ totalSeconds: Double) -> Void
 
     private var kit: LoadedModel?
     private let loadModel: @Sendable (String) async throws -> LoadedModel
@@ -31,6 +45,8 @@ final class WhisperTranscriber: @unchecked Sendable {
     private var ready = false
     private var loadedModel: String?
     private var language: SpeechLanguage = .automatic
+    /// Receives the wall seconds of every load this transcriber started itself (not one it only waited for).
+    private var modelLoadSink: (@Sendable (TimeInterval) -> Void)?
 
     init(loadModel: @escaping @Sendable (String) async throws -> LoadedModel = { try await WhisperTranscriber.loadWhisperKit($0) }) {
         self.loadModel = loadModel
@@ -39,6 +55,11 @@ final class WhisperTranscriber: @unchecked Sendable {
     var isReady: Bool { withStateLock { ready } }
     var loadedModelName: String? { withStateLock { loadedModel } }
     var isPreparing: Bool { withStateLock { preparing != nil } }
+
+    /// The processing panel's measured history records every load this process started.
+    func setModelLoadSink(_ sink: (@Sendable (TimeInterval) -> Void)?) {
+        withStateLock { modelLoadSink = sink }
+    }
 
     func isReady(for model: String) -> Bool {
         let resolved = Self.whisperKitModelName(model)
@@ -77,20 +98,28 @@ final class WhisperTranscriber: @unchecked Sendable {
             case .ready:
                 AgentLog.event("whisper_prepare_ok", ["model": resolved, "reuse": "1", "elapsed_ms": "0"])
                 return
-            case .wait(let pendingModel, let work):
+            case .wait(let pendingKey, let work):
                 AgentLog.event("whisper_prepare_wait", ["model": resolved])
-                do { try await work.value }
-                catch { if pendingModel == resolved { throw error } }
+                // The load is a detached task that keeps running when this caller is cancelled (Finish later):
+                // only the wait ends, and the next caller for the same model and source reuses the load.
+                do { try await CancellableAwait.value(of: work) }
+                catch is CancellationError { throw CancellationError() }
+                catch { if pendingKey == cacheKey { throw error } }
                 // Another model may have been loading. Re-evaluate the requested model.
                 try Task.checkCancellation()
             case .start(let work):
                 do {
-                    try await work.value
+                    try await CancellableAwait.value(of: work)
+                    let elapsed = Date().timeIntervalSince(started)
                     AgentLog.event("whisper_prepare_ok", [
                         "model": resolved, "reuse": "0",
-                        "elapsed_ms": String(Int(Date().timeIntervalSince(started) * 1000))
+                        "elapsed_ms": String(Int(elapsed * 1000))
                     ])
+                    withStateLock { modelLoadSink }?(elapsed)
                     return
+                } catch is CancellationError {
+                    // The load goes on without this caller; its own success or failure is logged when it ends.
+                    throw CancellationError()
                 } catch {
                     AgentLog.event("whisper_prepare_fail", ["model": resolved, "error": AgentLog.sanitize(error.localizedDescription)])
                     throw error
@@ -150,9 +179,12 @@ final class WhisperTranscriber: @unchecked Sendable {
             config = WhisperKitConfig(model: resolved, modelFolder: folder, tokenizerFolder: URL(fileURLWithPath: folder), verbose: false, logLevel: .error, prewarm: true, load: true, download: false)
         }
         let loaded = try await WhisperKit(config)
-        return LoadedModel { path, options in
-            try await loaded.transcribe(audioPath: path, decodeOptions: options)
-        }
+        return LoadedModel(
+            transcribe: { path, options in
+                try await loaded.transcribe(audioPath: path, decodeOptions: options)
+            },
+            fraction: { loaded.progress.fractionCompleted }
+        )
     }
 
     private func withStateLock<T>(_ body: () -> T) -> T {
@@ -161,7 +193,7 @@ final class WhisperTranscriber: @unchecked Sendable {
         return body()
     }
 
-    func transcribeFile(at url: URL, sessionURL: URL? = nil) async throws -> FullTranscript {
+    func transcribeFile(at url: URL, sessionURL: URL? = nil, onProgress: ProgressSink? = nil) async throws -> FullTranscript {
         let via = sessionURL == nil ? "tmp" : "session"
         let started = Date()
         AgentLog.event("whisper_file_begin", ["via": via])
@@ -204,7 +236,7 @@ final class WhisperTranscriber: @unchecked Sendable {
                 )
             }
             let options = Self.decodingOptions(language: withStateLock { language })
-            let results = try await local.transcribe(work.path, options)
+            let results = try await Self.decode(work, with: local, options: options, onProgress: onProgress)
             var segments: [TranscriptSegment] = []
             for result in results {
                 for segment in result.segments {
@@ -242,10 +274,48 @@ final class WhisperTranscriber: @unchecked Sendable {
         } catch {
             AgentLog.event("whisper_file_fail", [
                 "via": via,
-                "error": AgentLog.sanitize(error.localizedDescription)
+                "error": error is CancellationError ? "cancelled" : AgentLog.sanitize(error.localizedDescription)
             ])
             throw error
         }
+    }
+
+    /// Runs the decode and, when a sink is given, reports seconds of audio decoded out of the file's duration:
+    /// 0 before the decode, WhisperKit's fraction every half second while it runs (stale readings and anything at
+    /// or past 1 are ignored, because the kit's `progress` is replaced per call and not reset after an error), and
+    /// the full duration once it returns.
+    private static func decode(
+        _ work: URL,
+        with model: LoadedModel,
+        options: DecodingOptions,
+        onProgress: ProgressSink?
+    ) async throws -> [TranscriptionResult] {
+        guard let onProgress else {
+            return try await model.transcribe(work.path, options)
+        }
+        let duration = (try? await audioSeconds(of: work)) ?? 0
+        guard duration > 0 else {
+            return try await model.transcribe(work.path, options)
+        }
+        onProgress(0, duration)
+        let stale = model.fraction()
+        let poller = Task.detached { [fraction = model.fraction] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 500_000_000)
+                guard !Task.isCancelled, let value = fraction(), value.isFinite, value > 0, value < 1, value != stale else { continue }
+                onProgress(min(duration, value * duration), duration)
+            }
+        }
+        defer { poller.cancel() }
+        let results = try await model.transcribe(work.path, options)
+        onProgress(duration, duration)
+        return results
+    }
+
+    /// The audio's length in seconds. Processing uses it for the transcription total.
+    static func audioSeconds(of url: URL) async throws -> TimeInterval {
+        let seconds = CMTimeGetSeconds(try await AVURLAsset(url: url).load(.duration))
+        return seconds.isFinite ? max(0, seconds) : 0
     }
 
     func transcribeVoiceNote(at url: URL) async throws -> String {
@@ -255,7 +325,7 @@ final class WhisperTranscriber: @unchecked Sendable {
 
     /// System audio lives in `archive/session.mp4`. Extract AAC, then fall back to the movie path.
     /// Temp AAC is not under the session folder — do not pass `sessionURL` into that transcribe.
-    func transcribeMovieAudio(at movie: URL, sessionURL: URL) async throws -> FullTranscript {
+    func transcribeMovieAudio(at movie: URL, sessionURL: URL, onProgress: ProgressSink? = nil) async throws -> FullTranscript {
         try Self.refuseSymlinkMedia(movie, sessionRoot: sessionURL)
         let audioOffset = try await SpeechSignal.audioStart(movie)
         do {
@@ -263,11 +333,17 @@ final class WhisperTranscriber: @unchecked Sendable {
             do {
                 try await extractAudio(from: movie, to: dest)
                 defer { ExportRel.removePrivateTemporaryURL(dest) }
-                return SpeechSignal.shifted(try await transcribeFile(at: dest), by: audioOffset)
+                return SpeechSignal.shifted(try await transcribeFile(at: dest, onProgress: onProgress), by: audioOffset)
+            } catch is CancellationError {
+                // Finish later: no movie-copy fallback for a decode that was asked to stop.
+                ExportRel.removePrivateTemporaryURL(dest)
+                throw CancellationError()
             } catch {
                 AgentLog.event("extract_audio_fail", ["error": AgentLog.sanitize(error.localizedDescription)])
                 ExportRel.removePrivateTemporaryURL(dest)
             }
+        } catch is CancellationError {
+            throw CancellationError()
         } catch {
             AgentLog.event("extract_audio_fail", ["error": "temp_url"])
         }
@@ -277,7 +353,7 @@ final class WhisperTranscriber: @unchecked Sendable {
             prefix: "scrumtrace-movie"
         )
         defer { ExportRel.removePrivateTemporaryURL(movieCopy) }
-        return SpeechSignal.shifted(try await transcribeFile(at: movieCopy), by: audioOffset)
+        return SpeechSignal.shifted(try await transcribeFile(at: movieCopy, onProgress: onProgress), by: audioOffset)
     }
 
     func extractAudio(from movie: URL, to dest: URL) async throws {
@@ -356,6 +432,59 @@ final class WhisperTranscriber: @unchecked Sendable {
                 return trimmed
             }
             return "openai_whisper-\(trimmed)"
+        }
+    }
+}
+
+/// Awaits a task's result without tying the caller's cancellation to the task: a cancelled caller gets
+/// `CancellationError` at once and the task keeps running. Used for the detached speech-model load, which CoreML
+/// cannot stop part-way and which the next caller for the same model reuses.
+enum CancellableAwait {
+    private final class Once<T: Sendable>: @unchecked Sendable {
+        private let lock = NSLock()
+        private var continuation: CheckedContinuation<T, Error>?
+        private var pending: Result<T, Error>?
+
+        func store(_ continuation: CheckedContinuation<T, Error>) {
+            lock.lock()
+            if let pending {
+                self.pending = nil
+                lock.unlock()
+                continuation.resume(with: pending)
+                return
+            }
+            self.continuation = continuation
+            lock.unlock()
+        }
+
+        func resume(_ result: Result<T, Error>) {
+            lock.lock()
+            guard let continuation else {
+                if pending == nil { pending = result }
+                lock.unlock()
+                return
+            }
+            self.continuation = nil
+            lock.unlock()
+            continuation.resume(with: result)
+        }
+    }
+
+    static func value<T: Sendable>(of task: Task<T, Error>) async throws -> T {
+        let once = Once<T>()
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<T, Error>) in
+                once.store(continuation)
+                Task.detached {
+                    do {
+                        once.resume(.success(try await task.value))
+                    } catch {
+                        once.resume(.failure(error))
+                    }
+                }
+            }
+        } onCancel: {
+            once.resume(.failure(CancellationError()))
         }
     }
 }

@@ -75,6 +75,8 @@ struct AIProviderConfiguration: Sendable {
 final class AppSettings: ObservableObject {
     static let shared = AppSettings()
     private let defaults: UserDefaults
+    /// The store the processing panel's measured model loads live in (the same suite as every other setting).
+    var processingDefaults: UserDefaults { defaults }
     private let keyStore: SettingsKeyStore
     private let legacyCredentialScope: String
 

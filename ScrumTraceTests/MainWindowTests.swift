@@ -523,6 +523,63 @@ final class MainWindowTests: XCTestCase {
     }
 
     @MainActor
+    func testProcessingPanelSitsUnderTheBannerAndKeepsTheWindowStable() throws {
+        try withController { controller, log in
+            let presenter = MainWindowPresenter(controller: controller, frameAutosaveName: nil, isWindowOnScreen: ignoringOcclusion)
+            defer { presenter.window?.close() }
+            presenter.show()
+            let window = try XCTUnwrap(presenter.window)
+            spinRunLoop(for: 0.1)
+            let size = window.frame.size
+            var status = ProcessingStatus(sessionId: "2026-09-22-1255-8f816e", recordedAt: Date(), mediaSeconds: 23, origin: .launchResume)
+            status.enter(.loadingModel)
+            let state = ProcessingPanelState.make(status)
+            XCTAssertEqual(ProcessingPanelView.detailLine(state), "The first load after a restart usually takes 5 to 11 minutes on this Mac; later loads take a few seconds.")
+            var failed = status
+            failed.finish(.failed("session.mp4 is missing."))
+            XCTAssertEqual(ProcessingPanelView.detailLine(ProcessingPanelState.make(failed)), "session.mp4 is missing.")
+            var done = status
+            done.enter(.packaging)
+            done.finish(.done("Session pack ready"))
+            XCTAssertTrue(ProcessingPanelView.detailLine(ProcessingPanelState.make(done))?.hasPrefix("Session pack ready · ") == true)
+
+            // Shown with a run, hidden without one; the window keeps its size and minimum in every section.
+            for section in MainSection.allCases {
+                presenter.show(section: section)
+                for (shown, busy) in [(status, true), (failed, false), (done, false)] {
+                    controller.setProcessingForTesting(shown)
+                    controller.isBusy = busy
+                    spinRunLoop(for: 0.08)
+                    window.layoutIfNeeded()
+                    XCTAssertEqual(window.frame.size, size, "\(section) \(shown.outcome)")
+                    let clamped = presenter.windowWillResize(window, to: NSSize(width: 200, height: 150))
+                    XCTAssertEqual(
+                        window.contentRect(forFrameRect: NSRect(origin: .zero, size: clamped)).size,
+                        NSSize(width: 840, height: 620),
+                        "\(section) \(shown.outcome)"
+                    )
+                    XCTAssertTrue(controller.processingPanelShouldShow)
+                    writeSnapshot(of: window, named: "\(section.rawValue)-processing-\(busy ? "running" : "ended")")
+                }
+            }
+            controller.isBusy = false
+            controller.setProcessingForTesting(nil)
+            XCTAssertFalse(controller.processingPanelShouldShow)
+            spinRunLoop(for: 0.08)
+            XCTAssertEqual(window.frame.size, size)
+
+            // The panel's buttons are the controller's actions; Close logs and clears.
+            controller.setProcessingForTesting(failed)
+            let view = ProcessingPanelView(controller: controller)
+            view.close()
+            XCTAssertNil(controller.processing)
+            XCTAssertTrue(try logRows(at: log).contains { $0["event"] == "panel_close" && $0["session"] == "2026-09-22-1255-8f816e" })
+            view.finishLater()
+            XCTAssertNil(controller.processing, "Nothing to defer without a run")
+        }
+    }
+
+    @MainActor
     func testWindowStaysStableWhileSectionsAndTheBannerChange() throws {
         try withController { controller, _ in
             let presenter = MainWindowPresenter(controller: controller, frameAutosaveName: nil, isWindowOnScreen: ignoringOcclusion)
