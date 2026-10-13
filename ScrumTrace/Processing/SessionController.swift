@@ -49,6 +49,8 @@ final class SessionController: ObservableObject {
     private var recorder: SessionRecorder?
     /// The window the current recording is limited to. Nil records the capture area.
     private var recordingWindow: CaptureWindowTarget?
+    /// Display and region modes: the display pinned at Start. Shots read it; nil in window mode.
+    private var recordingDisplayID: UInt32?
     private var processor: SessionProcessor?
     private var hudTimer: Timer?
     private var hudTickCount = 0
@@ -773,6 +775,13 @@ final class SessionController: ObservableObject {
             // first sample of this session; nil lifts the limit left by an earlier window recording.
             sampler.restrictedProcessID = window.map { pid_t($0.processID) }
             recordingWindow = window
+            // Display and region modes: pin the one display now, before privacy and the recorder start, so
+            // titles and URLs are sampled only from windows on it and the recorder can only land on it.
+            let pinnedDisplayID: UInt32? = window == nil
+                ? CaptureDisplayResolver.pinnedDisplayID(for: settings.captureArea, mainID: UInt32(CGMainDisplayID()))
+                : nil
+            sampler.restrictedDisplayID = pinnedDisplayID
+            recordingDisplayID = pinnedDisplayID
             captureFreeze.attach(recorder)
             // Tick before startCapture: a credential app during the permission
             // sheet must freeze writers, not wait until start() returns (C1).
@@ -791,15 +800,20 @@ final class SessionController: ObservableObject {
                 shouldPauseCapture: pauseGate,
                 captureArea: settings.captureArea,
                 captureWindow: window,
+                pinnedDisplayID: pinnedDisplayID,
                 showCursor: settings.showCursor,
                 includeMicrophone: settings.includeMicrophone
             )
             abandonedId = nil
             self.recorder = recorder
             lastSessionId = created.manifest.sessionId
+            let captureSize = recorder.configuredCaptureSize
             AgentLog.event("start_ok", [
                 "session": created.manifest.sessionId,
-                "area": window != nil ? "window" : (settings.captureArea.isEntireDisplay ? "full" : "region")
+                "area": window != nil ? "window" : (settings.captureArea.isEntireDisplay ? "display" : "region"),
+                "display": window != nil ? "window" : String(recorder.recordedDisplayID ?? 0),
+                "width": String(captureSize?.width ?? 0),
+                "height": String(captureSize?.height ?? 0)
             ])
             pinTimes = []
             pinTimesSessionId = created.manifest.sessionId
@@ -850,7 +864,7 @@ final class SessionController: ObservableObject {
                     if let window {
                         statusLine = "Recording \(window.summary)"
                     } else {
-                        statusLine = settings.captureArea.isEntireDisplay
+                        statusLine = settings.captureArea.targetsMainDisplay
                             ? "Recording"
                             : "Recording \(settings.captureArea.summary)"
                     }
@@ -1239,7 +1253,7 @@ final class SessionController: ObservableObject {
                 snapped = nil
             }
         } else {
-            snapped = ScreenSnap.capture(area: settings.captureArea)
+            snapped = ScreenSnap.capture(area: settings.captureArea, displayID: recordingDisplayID)
         }
         guard let image = snapped else {
             lastError = "Could not capture the display."
@@ -1720,12 +1734,15 @@ private final class StopResumeOnce: @unchecked Sendable {
 }
 
 enum ScreenSnap {
-    static func capture(area: CaptureArea = .entireDisplay) -> NSImage? {
+    /// Still of the recorded display only. `displayID` is the id pinned at Start; nil (no recording pinned)
+    /// resolves the area the same way. There is no fallback to the main display and a failed crop fails the
+    /// Shot: a still must never show more than the movie.
+    static func capture(area: CaptureArea = .entireDisplay, displayID: UInt32? = nil) -> NSImage? {
         #if os(macOS)
-        let preferred = area.displayID == 0 ? CGMainDisplayID() : CGDirectDisplayID(area.displayID)
-        let image = CGDisplayCreateImage(preferred) ?? CGDisplayCreateImage(CGMainDisplayID())
-        guard let cg = image else { return nil }
-        let cropped = crop(cg, to: area)
+        let target = displayID
+            ?? CaptureDisplayResolver.pinnedDisplayID(for: area, mainID: UInt32(CGMainDisplayID()))
+        guard let cg = CGDisplayCreateImage(CGDirectDisplayID(target)) else { return nil }
+        guard let cropped = crop(cg, to: area) else { return nil }
         let scaled = downscale(cropped, maxEdge: MediaBudget.stillMaxWidth)
         return NSImage(cgImage: scaled, size: NSSize(width: scaled.width, height: scaled.height))
         #else
@@ -1743,10 +1760,11 @@ enum ScreenSnap {
         #endif
     }
 
-    static func crop(_ image: CGImage, to area: CaptureArea) -> CGImage {
+    /// Nil when the region cannot be cut out of the image; callers fail the Shot rather than widen it.
+    static func crop(_ image: CGImage, to area: CaptureArea) -> CGImage? {
         guard !area.isEntireDisplay else { return image }
         let rect = area.pixelCrop(imageWidth: image.width, imageHeight: image.height)
-        return image.cropping(to: rect) ?? image
+        return image.cropping(to: rect)
     }
 
     /// CG-09: Shot PNGs are capped at `stillMaxWidth` so 20 Retina captures

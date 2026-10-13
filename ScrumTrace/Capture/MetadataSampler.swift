@@ -14,6 +14,7 @@ final class MetadataSampler: @unchecked Sendable {
     private let lock = NSLock()
     private var suspended = false
     private var onlyProcessID: pid_t?
+    private var onlyDisplayID: UInt32?
 
     var isSuspended: Bool {
         get {
@@ -43,6 +44,22 @@ final class MetadataSampler: @unchecked Sendable {
         }
     }
 
+    /// Display and region modes: titles and URLs come only from the focused window whose centre lies on this
+    /// display, so a mail or chat window on an unrecorded monitor never reaches events.jsonl. Nil samples
+    /// any display. This narrows what is logged, never what pauses: PrivacyGuard still watches every display.
+    var restrictedDisplayID: UInt32? {
+        get {
+            lock.lock()
+            defer { lock.unlock() }
+            return onlyDisplayID
+        }
+        set {
+            lock.lock()
+            onlyDisplayID = newValue
+            lock.unlock()
+        }
+    }
+
     private func frontmostIsRecorded() -> Bool {
         guard let pid = restrictedProcessID else { return true }
         #if os(macOS)
@@ -50,6 +67,53 @@ final class MetadataSampler: @unchecked Sendable {
         #else
         return false
         #endif
+    }
+
+    /// Centre-point test in global top-left coordinates (what AX positions and `CGDisplayBounds` share).
+    /// A window spanning two displays belongs to the one holding its centre; an empty frame is never on a
+    /// display.
+    static func windowIsOnDisplay(windowFrame: CGRect, displayBounds: CGRect) -> Bool {
+        guard windowFrame.width > 0, windowFrame.height > 0, !displayBounds.isEmpty else { return false }
+        return displayBounds.contains(CGPoint(x: windowFrame.midX, y: windowFrame.midY))
+    }
+
+    /// True when no display gate is set, or the focused window's frame is readable and on the gated display.
+    /// An unreadable frame fails the gate: without a position the window cannot be shown to be recorded.
+    static func displayGateAllows(windowFrame: CGRect?, restrictedDisplayID: UInt32?, bounds: (UInt32) -> CGRect) -> Bool {
+        guard let restrictedDisplayID else { return true }
+        guard let windowFrame else { return false }
+        return windowIsOnDisplay(windowFrame: windowFrame, displayBounds: bounds(restrictedDisplayID))
+    }
+
+    private func focusedWindowIsOnRecordedDisplay(_ window: AXUIElement) -> Bool {
+        #if os(macOS)
+        return Self.displayGateAllows(
+            windowFrame: Self.axFrame(of: window),
+            restrictedDisplayID: restrictedDisplayID,
+            bounds: { CGDisplayBounds(CGDirectDisplayID($0)) }
+        )
+        #else
+        return restrictedDisplayID == nil
+        #endif
+    }
+
+    /// AX position and size of a window, global top-left origin. Nil when either attribute is unavailable.
+    private static func axFrame(of window: AXUIElement) -> CGRect? {
+        var positionRef: AnyObject?
+        var sizeRef: AnyObject?
+        guard AXUIElementCopyAttributeValue(window, kAXPositionAttribute as CFString, &positionRef) == .success,
+              AXUIElementCopyAttributeValue(window, kAXSizeAttribute as CFString, &sizeRef) == .success,
+              let positionValue = positionRef,
+              let sizeValue = sizeRef else {
+            return nil
+        }
+        var origin = CGPoint.zero
+        var size = CGSize.zero
+        guard AXValueGetValue(unsafeBitCast(positionValue, to: AXValue.self), .cgPoint, &origin),
+              AXValueGetValue(unsafeBitCast(sizeValue, to: AXValue.self), .cgSize, &size) else {
+            return nil
+        }
+        return CGRect(origin: origin, size: size)
     }
 
     @discardableResult
@@ -115,12 +179,21 @@ final class MetadataSampler: @unchecked Sendable {
         var windowTitle: String = (titleRef as? String) ?? ""
         if let window = windowRef {
             let windowElement = unsafeBitCast(window, to: AXUIElement.self)
+            // Display gate, checked before and after the title/URL read: a window dragged onto the
+            // unrecorded monitor mid-read must not leak its title. Off-display keeps the app name only.
+            guard focusedWindowIsOnRecordedDisplay(windowElement) else {
+                return isSuspended ? nil : NSWorkspaceFallback.frontmost()
+            }
             var winTitle: AnyObject?
             AXUIElementCopyAttributeValue(windowElement, kAXTitleAttribute as CFString, &winTitle)
             if let text = winTitle as? String, !text.isEmpty {
                 windowTitle = text
             }
-            if let url = Self.documentURL(from: windowElement) {
+            let url = Self.documentURL(from: windowElement)
+            guard focusedWindowIsOnRecordedDisplay(windowElement) else {
+                return isSuspended ? nil : NSWorkspaceFallback.frontmost()
+            }
+            if let url {
                 if isSuspended { return nil }
                 let bundle = NSWorkspaceFallback.frontmost()?.bundleIdentifier ?? ""
                 if isSuspended { return nil }
@@ -131,6 +204,9 @@ final class MetadataSampler: @unchecked Sendable {
                     url: url
                 )
             }
+        } else if restrictedDisplayID != nil {
+            // No focused window to place on a display: app name only.
+            return isSuspended ? nil : NSWorkspaceFallback.frontmost()
         }
         if isSuspended { return nil }
         let fallbackApp = NSWorkspaceFallback.frontmost()

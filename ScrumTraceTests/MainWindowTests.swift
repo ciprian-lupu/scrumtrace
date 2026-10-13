@@ -3585,7 +3585,7 @@ final class MainWindowTests: XCTestCase {
                 let overview = makeOverviewModel(recordings: recordings, state: state, recorder: recorder, evaluationInterval: .milliseconds(50))
                 XCTAssertEqual(navigation.section, .overview)
                 // The first frame already has the capture area, folder and retention; permissions wait for the section.
-                XCTAssertEqual(overview.captureAreaSummary, "Entire display")
+                XCTAssertEqual(overview.captureAreaSummary, "Main display")
                 XCTAssertEqual(overview.sessionsFolder, "~/Movies/ScrumTrace/sessions")
                 XCTAssertEqual(overview.retentionDays, 30)
                 XCTAssertNil(overview.readiness)
@@ -3949,7 +3949,7 @@ private final class OverviewState {
     var activeSessionId: String?
     var lastError: String?
     var retentionDays = 0
-    var captureArea = "Entire display"
+    var captureArea = "Main display"
     var update: UpdateChecker.Result?
     var readinessReads = 0
     var updateReads = 0

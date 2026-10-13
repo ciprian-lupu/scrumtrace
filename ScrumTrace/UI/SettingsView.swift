@@ -186,6 +186,28 @@ struct SettingsView: View {
             }
             Section("Capture area") {
                 LabeledContent("Current", value: settings.captureSummary)
+                Picker("Display", selection: Binding(
+                    get: { settings.selectedDisplayID },
+                    set: { id in
+                        AgentLog.event("settings_action", ["action": "area_display", "display": String(id)])
+                        guard controller.canChangeCaptureSettings else { return }
+                        settings.selectDisplay(id: id)
+                    }
+                )) {
+                    Text("Main display").tag(UInt32(0))
+                    ForEach(settings.connectedDisplays, id: \.id) { display in
+                        Text(CaptureDisplayResolver.label(for: display, among: settings.connectedDisplays))
+                            .tag(display.id)
+                    }
+                    if let missing = settings.savedDisplayNotConnected {
+                        Text("\(missing.displayName ?? "Display \(missing.displayID)") (not connected)")
+                            .tag(missing.displayID)
+                    }
+                }
+                .disabled(!controller.canChangeCaptureSettings)
+                .onReceive(NotificationCenter.default.publisher(for: NSApplication.didChangeScreenParametersNotification)) { _ in
+                    settings.refreshConnectedDisplays()
+                }
                 Button("Select area on screen…") {
                     AgentLog.event("settings_action", ["action": "select_area"])
                     guard controller.canChangeCaptureSettings else { return }
@@ -196,16 +218,16 @@ struct SettingsView: View {
                     }
                 }
                 .disabled(!controller.canChangeCaptureSettings)
-                Button("Use entire display") {
+                Button("Main display") {
                     AgentLog.event("settings_action", ["action": "area_full"])
                     settings.captureArea = .entireDisplay
                     settings.recordSingleWindow = false
                 }
                 .disabled(!controller.canChangeCaptureSettings
-                    || (settings.captureArea.isEntireDisplay && !settings.recordSingleWindow))
+                    || (settings.captureArea.targetsMainDisplay && !settings.recordSingleWindow))
                 Toggle("Record a single window", isOn: $settings.recordSingleWindow)
                     .disabled(!controller.canChangeCaptureSettings)
-                Text("Default is the whole display. Start recording opens a macOS-style overlay: drag a rectangle, move or resize it, then Record or Return on that display. A saved region here is the starting box. With Record a single window on, Start lists the open windows instead: only the one you pick is recorded, Shots show only that window, and window titles and URLs are noted only while its app is in front.")
+                Text("Default is the whole main display. Pick a display here, or in the overlay that Start recording opens on every screen: each overlay shows its screen name; drag a rectangle, move or resize it, then Record or Return on that display, or press Space or Entire Display for that whole screen. Only that display's screen is recorded; audio, Pause and the privacy pause stay the same, and window titles and URLs are noted only for windows on it. A saved region here is the starting box. With Record a single window on, Start lists the open windows instead: only the one you pick is recorded, Shots show only that window, and window titles and URLs are noted only while its app is in front.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
