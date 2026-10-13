@@ -3093,14 +3093,14 @@ def test_audit_leftovers_are_implemented() -> None:
     assert "captureArea:" in recorder
     settings = (ROOT / "ScrumTrace" / "UI" / "SettingsView.swift").read_text()
     assert "Select area on screen" in settings
-    assert "Use entire display" in settings
+    assert 'Button("Main display")' in settings
     assert "case capture" in settings
     assert (ROOT / "ScrumTrace" / "UI" / "CaptureAreaPicker.swift").exists()
     picker = (ROOT / "ScrumTrace" / "UI" / "CaptureAreaPicker.swift").read_text()
     assert "Drag to select the capture area" in picker
     assert "Return records this display" in picker
     assert "Return uses this display" in picker
-    assert "Space = entire display" in picker
+    assert "Space = this display" in picker
     assert '"Record"' in picker
     assert '"Use this area"' in picker
     assert '"Entire Display"' in picker
@@ -3108,7 +3108,7 @@ def test_audit_leftovers_are_implemented() -> None:
     assert "eventTracking" not in picker
     assert "nextEvent" not in picker
     assert "func confirmSelection(from preferred" in picker
-    assert "preferred?.proposedArea() ?? .entireDisplay" in picker
+    assert "preferred.proposedArea() ?? preferred.fullDisplayArea()" in picker
     assert "confirmSelection(from: window)" in picker
     assert "confirmSelection(from: key)" in picker
     assert "isKeyWindow" in picker
@@ -3118,11 +3118,13 @@ def test_audit_leftovers_are_implemented() -> None:
     assert "makeKey" not in moved
     mouse_down = picker.split("func mouseDown")[1].split("func mouseDragged")[0]
     assert "makeKey" in mouse_down
-    assert "NSScreen.main" in picker
+    # The starter overlay is the saved display or CGMainDisplayID(), never NSScreen.main (the key-window screen).
+    assert "CGMainDisplayID()" in picker
+    assert "NSScreen.main" not in picker
     assert "window?.makeKey()" in picker.split("window.onEdited")[1].split("orderFrontRegardless")[0]
     menu = (ROOT / "ScrumTrace" / "UI" / "MenuBarController.swift").read_text()
     assert "Start recording —" in menu
-    assert "Use entire display" in menu
+    assert '"Main display"' in menu
     start_menu = menu.split("func start()")[1].split("func presentMeetingNotice")[0]
     assert "CaptureAreaPicker.present" in start_menu
     assert "mode: .record" in start_menu
@@ -3872,6 +3874,97 @@ def test_single_window_capture_never_widens() -> None:
     assert 'Toggle("Record a single window"' in settings_ui
 
 
+def test_display_selection_never_widens() -> None:
+    """Display and region modes record, snap and sample one pinned display, with no fallback to another."""
+    models = (ROOT / "ScrumTrace" / "Storage" / "SessionModels.swift").read_text()
+    assert "enum CaptureDisplayResolver" in models
+    assert 'case displayName = "display_name"' in models
+    assert "static func fullDisplay(id: UInt32, name: String)" in models
+    resolver = models.split("enum CaptureDisplayResolver")[1].split("/// One window chosen at Start.")[0]
+    # Identity is the id: no name matching, no "first display" default.
+    assert "candidates.first(where: { $0.isMain })" in resolver
+    assert "$0.id == area.displayID" in resolver
+    assert "$0.name ==" not in resolver.split("static func label")[0]
+    assert "candidates.first)" not in resolver and "candidates[0]" not in resolver
+    assert "The chosen display is no longer connected" in resolver
+
+    recorder = (ROOT / "ScrumTrace" / "Capture" / "SessionRecorder.swift").read_text()
+    start_fn = recorder.split("func start(shouldPauseCapture")[1].split("func abortFailedStart")[0]
+    assert "pinnedDisplayID: UInt32? = nil" in start_fn
+    assert "content.displays.first)" not in recorder
+    assert "displays.first\n" not in recorder
+    display_branch = start_fn.split("} else {\n            // The pinned display only.")[1].split("clock.markRecordingStarted()")[0]
+    assert "CaptureDisplayResolver.resolve(captureArea, among: candidates)" in display_branch
+    assert "resolvedID == targetDisplayID" in display_branch
+    assert "throw SessionRecorderError.writerFailed(CaptureDisplayResolver.missingMessage)" in display_branch
+    assert "regionFitsDisplay = !captureArea.isEntireDisplay\n                && display.displayID == captureArea.displayID" in display_branch
+    begin = recorder.split('AgentLog.event("recorder_sckit_begin"')[1].split("let content")[0]
+    assert '"all"' not in begin
+    assert "display_name" not in recorder.split("AgentLog.event")[1] if "AgentLog.event" in recorder else True
+    layout = recorder.split("func persistCaptureLayout")[1].split("func stop()")[0]
+    assert "displayID: snapshot.2?.id" in layout
+    assert "captureWidth: snapshot.3?.width" in layout
+
+    controller = (ROOT / "ScrumTrace" / "Processing" / "SessionController.swift").read_text()
+    start_async = controller.split("private func startRecordingAsync(")[1].split("abandonedId = nil")[0]
+    # The display gate is pinned before the privacy guard and before the recorder, which must land on it.
+    assert "sampler.restrictedDisplayID = pinnedDisplayID" in start_async
+    assert start_async.index("sampler.restrictedDisplayID = pinnedDisplayID") < start_async.index("privacy.start()")
+    assert start_async.index("privacy.start()") < start_async.index("try await recorder.start(")
+    assert "pinnedDisplayID: pinnedDisplayID" in start_async
+    assert start_async.index("recordingDisplayID = pinnedDisplayID") < start_async.index("privacy.start()")
+    start_ok = controller.split('AgentLog.event("start_ok"')[1].split("pinTimes")[0]
+    assert '"display"' in start_ok and '"width"' in start_ok
+    assert '"all"' not in start_ok
+    snap = controller.split("enum ScreenSnap {")[1].split("static func capture(windowOf")[0]
+    assert "CGDisplayCreateImage(CGMainDisplayID())" not in snap
+    assert "?? CGDisplayCreateImage" not in snap
+    assert "guard let cropped = crop(cg, to: area) else { return nil }" in snap
+    crop_fn = controller.split("static func crop(_ image: CGImage, to area: CaptureArea) -> CGImage?")[1].split("static func downscale")[0]
+    assert "?? image" not in crop_fn
+    shot = controller.split("// Window mode: the Shot is the recorded window only.")[1].split("guard let image = snapped")[0]
+    assert "ScreenSnap.capture(area: settings.captureArea, displayID: recordingDisplayID)" in shot
+
+    sampler = (ROOT / "ScrumTrace" / "Capture" / "MetadataSampler.swift").read_text()
+    assert "var restrictedDisplayID: UInt32?" in sampler
+    read_fn = sampler.split("private func readFrontmost")[1].split("private static func documentURL")[0]
+    # Checked before and after the title/URL read, like the process gate.
+    assert read_fn.count("focusedWindowIsOnRecordedDisplay(windowElement)") == 2
+    assert read_fn.index("focusedWindowIsOnRecordedDisplay(windowElement)") < read_fn.index("kAXTitleAttribute as CFString, &winTitle")
+    assert read_fn.rindex("focusedWindowIsOnRecordedDisplay(windowElement)") > read_fn.index("Self.documentURL(from: windowElement)")
+    assert "kAXPositionAttribute" in sampler and "kAXSizeAttribute" in sampler
+    # The privacy guard is untouched by display selection.
+    privacy = (ROOT / "ScrumTrace" / "Capture" / "PrivacyGuard.swift").read_text()
+    assert "restrictedDisplayID" not in privacy and "DisplayCandidate" not in privacy
+
+    picker = (ROOT / "ScrumTrace" / "UI" / "CaptureAreaPicker.swift").read_text()
+    assert "finish(.entireDisplay)" not in picker
+    assert "return .entireDisplay" not in picker
+    assert "onUseEntire: ((CaptureArea) -> Void)?" in picker
+    assert "func fullDisplayArea() -> CaptureArea" in picker
+    assert "static func missingDisplayNotice" in picker
+    for call in re.findall(r'AgentLog\.event\("capture_area_picker"[^)]*\)', picker, re.S):
+        assert '"all"' not in call and "displayName" not in call and "localizedName" not in call
+
+    menu = (ROOT / "ScrumTrace" / "UI" / "MenuBarController.swift").read_text()
+    assert "didChangeScreenParametersNotification" in menu
+    assert "func selectDisplay(_ sender: NSMenuItem)" in menu
+    for call in re.findall(r'AgentLog\.event\("menu_area_display"[^)]*\)', menu, re.S):
+        assert "name" not in call.lower()
+    settings_ui = (ROOT / "ScrumTrace" / "UI" / "SettingsView.swift").read_text()
+    assert 'Picker("Display"' in settings_ui
+    assert "(not connected)" in settings_ui and "(not connected)" in menu
+    app_settings = (ROOT / "ScrumTrace" / "App" / "AppSettings.swift").read_text()
+    assert "func selectDisplay(id: UInt32)" in app_settings
+    assert "var savedDisplayNotConnected" in app_settings
+    # AgentLog never carries a display name (a label, not identity).
+    for path in ("Capture/SessionRecorder.swift", "Processing/SessionController.swift", "UI/MenuBarController.swift",
+                 "UI/SettingsView.swift", "UI/CaptureAreaPicker.swift"):
+        text = (ROOT / "ScrumTrace" / path).read_text()
+        for call in re.findall(r'AgentLog\.event\([^)]*\)', text, re.S):
+            assert "display_name" not in call and "displayName" not in call, path
+
+
 def main() -> None:
     test_export_has_no_archive_and_no_tokens()
     test_agent_context_uses_export_relative_paths()
@@ -3902,6 +3995,7 @@ def main() -> None:
     test_main_window_docs_match_the_build()
     test_delete_retry_race_and_closing_dialog()
     test_single_window_capture_never_widens()
+    test_display_selection_never_widens()
     print("contract tests ok")
 
 

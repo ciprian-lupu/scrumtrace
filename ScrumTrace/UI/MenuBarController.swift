@@ -18,6 +18,7 @@ final class MenuBarController: NSObject {
     private var lastMenuSignature = ""
     private var statusMenuItem: NSMenuItem?
     private var hudObserver: NSObjectProtocol?
+    private var screenObserver: NSObjectProtocol?
     private var lastStartEnabled: Bool?
     private let contextPresenter = RecordingContextPresenter()
     /// True while the recording-context window or the capture-area overlay of a Start is up.
@@ -53,6 +54,20 @@ final class MenuBarController: NSObject {
         ) { [weak self] _ in
             Task { @MainActor in
                 self?.sync()
+            }
+        }
+        // A display plugged in or removed changes the Display rows; the pinned recording target never changes.
+        screenObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didChangeScreenParametersNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                guard let self else { return }
+                self.controller.settings.refreshConnectedDisplays()
+                if !self.isMenuOpen {
+                    self.rebuild()
+                }
             }
         }
         Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
@@ -142,10 +157,34 @@ final class MenuBarController: NSObject {
             let change = actionItem("Select area on screen…", #selector(selectCaptureArea))
             change.isEnabled = controller.canChangeCaptureSettings
             areaMenu.addItem(change)
-            let full = actionItem("Use entire display", #selector(useEntireDisplay))
+            // "Main display" is disabled only when it is already the choice, so a named display can be reset.
+            let full = actionItem("Main display", #selector(useEntireDisplay))
             full.isEnabled = controller.canChangeCaptureSettings
-                && (controller.settings.recordSingleWindow || !controller.settings.captureArea.isEntireDisplay)
+                && (controller.settings.recordSingleWindow || !controller.settings.captureArea.targetsMainDisplay)
+            full.state = controller.settings.selectedDisplayID == 0 && !controller.settings.recordSingleWindow ? .on : .off
             areaMenu.addItem(full)
+            let displays = controller.settings.connectedDisplays
+            for display in displays {
+                let row = actionItem(
+                    CaptureDisplayResolver.label(for: display, among: displays),
+                    #selector(selectDisplay(_:))
+                )
+                row.representedObject = NSNumber(value: display.id)
+                row.isEnabled = controller.canChangeCaptureSettings
+                row.state = controller.settings.selectedDisplayID == display.id ? .on : .off
+                areaMenu.addItem(row)
+            }
+            if let missing = controller.settings.savedDisplayNotConnected {
+                let row = NSMenuItem(
+                    title: "\(missing.displayName ?? "Display \(missing.displayID)") (not connected)",
+                    action: nil,
+                    keyEquivalent: ""
+                )
+                row.isEnabled = false
+                row.state = .on
+                areaMenu.addItem(row)
+            }
+            areaMenu.addItem(.separator())
             let window = actionItem("Record a single window", #selector(recordSingleWindow))
             window.isEnabled = controller.canChangeCaptureSettings
             window.state = controller.settings.recordSingleWindow ? .on : .off
@@ -311,6 +350,15 @@ final class MenuBarController: NSObject {
         AgentLog.event("menu_area_full", [:])
         controller.settings.captureArea = .entireDisplay
         controller.settings.recordSingleWindow = false
+        rebuild()
+    }
+
+    /// One connected display as the whole-display capture area. The id is logged; names stay in the menu.
+    @objc private func selectDisplay(_ sender: NSMenuItem) {
+        guard controller.canChangeCaptureSettings,
+              let id = (sender.representedObject as? NSNumber)?.uint32Value else { return }
+        AgentLog.event("menu_area_display", ["display": String(id)])
+        controller.settings.selectDisplay(id: id)
         rebuild()
     }
 

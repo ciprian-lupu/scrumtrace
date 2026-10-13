@@ -2102,7 +2102,11 @@ struct PauseInterval: Codable, Sendable, Hashable {
     }
 }
 
-/// Display rectangle recorded into the archive movie. Default is the whole display.
+/// Display rectangle recorded into the archive movie. Default is the whole main display.
+///
+/// `displayID` is the identity of the display (`CGDirectDisplayID`); 0 means "the main display at Start"
+/// (`CGMainDisplayID()`). `displayName` is a label for menus and the overlay only: two identical monitors
+/// share a name, so it is never used to match a display.
 struct CaptureArea: Codable, Equatable, Sendable {
     var capturesFullDisplay: Bool
     var displayID: UInt32
@@ -2111,6 +2115,9 @@ struct CaptureArea: Codable, Equatable, Sendable {
     var widthPoints: Double
     var heightPoints: Double
     var backingScale: Double
+    /// `NSScreen.localizedName` when the area was picked. Optional so settings saved before display
+    /// selection existed still decode.
+    var displayName: String? = nil
 
     static let entireDisplay = CaptureArea(
         capturesFullDisplay: true,
@@ -2122,13 +2129,38 @@ struct CaptureArea: Codable, Equatable, Sendable {
         backingScale: 1
     )
 
+    /// The whole of one specific display.
+    static func fullDisplay(id: UInt32, name: String) -> CaptureArea {
+        CaptureArea(
+            capturesFullDisplay: true,
+            displayID: id,
+            originX: 0,
+            originY: 0,
+            widthPoints: 0,
+            heightPoints: 0,
+            backingScale: 1,
+            displayName: name.isEmpty ? nil : name
+        )
+    }
+
     var isEntireDisplay: Bool {
         capturesFullDisplay || widthPoints < 2 || heightPoints < 2
     }
 
+    /// True for the "main display" choice, which resolves to `CGMainDisplayID()` at Start.
+    var targetsMainDisplay: Bool {
+        displayID == 0
+    }
+
     var summary: String {
         if isEntireDisplay {
-            return "Entire display"
+            if targetsMainDisplay {
+                return "Main display"
+            }
+            if let displayName, !displayName.isEmpty {
+                return "Display: \(displayName)"
+            }
+            return "Display \(displayID)"
         }
         return "\(Int(widthPoints.rounded()))×\(Int(heightPoints.rounded())) region"
     }
@@ -2164,6 +2196,57 @@ struct CaptureArea: Codable, Equatable, Sendable {
         case widthPoints = "width_points"
         case heightPoints = "height_points"
         case backingScale = "backing_scale"
+        case displayName = "display_name"
+    }
+}
+
+/// One connected display as the menu, Settings, the overlay and the recorder see it.
+struct DisplayCandidate: Equatable, Sendable {
+    var id: UInt32
+    var name: String
+    /// Point size, for labels only.
+    var width: Int
+    var height: Int
+    /// `id == CGMainDisplayID()`: the display with the menu bar.
+    var isMain: Bool
+}
+
+enum CaptureDisplayResolution: Equatable, Sendable {
+    case display(UInt32)
+    case missing
+}
+
+/// Which connected display a `CaptureArea` records. Identity is the display ID only: a saved display that
+/// is not connected is `.missing`, never another display with the same name or "the first one".
+enum CaptureDisplayResolver {
+    static func resolve(_ area: CaptureArea, among candidates: [DisplayCandidate]) -> CaptureDisplayResolution {
+        if area.targetsMainDisplay {
+            guard let main = candidates.first(where: { $0.isMain }) else { return .missing }
+            return .display(main.id)
+        }
+        guard candidates.contains(where: { $0.id == area.displayID }) else { return .missing }
+        return .display(area.displayID)
+    }
+
+    /// The id the recorder must land on, computed before capture starts so the metadata gate and the
+    /// recorder agree. `mainID` is `CGMainDisplayID()` on a Mac.
+    static func pinnedDisplayID(for area: CaptureArea, mainID: UInt32) -> UInt32 {
+        area.targetsMainDisplay ? mainID : area.displayID
+    }
+
+    static let missingMessage = "The chosen display is no longer connected. Start again and pick a display."
+
+    /// Menu / overlay row text. Identical monitors get an index and a position so the rows differ.
+    static func label(for candidate: DisplayCandidate, among candidates: [DisplayCandidate]) -> String {
+        let sameName = candidates.filter { $0.name == candidate.name }
+        var text = candidate.name.isEmpty ? "Display \(candidate.id)" : candidate.name
+        if sameName.count > 1, let index = sameName.firstIndex(where: { $0.id == candidate.id }) {
+            text += " \(index + 1)"
+        }
+        if candidate.isMain {
+            text += " (main)"
+        }
+        return text
     }
 }
 
@@ -2674,21 +2757,39 @@ struct CaptureAudioLayout: Codable, Sendable, Hashable {
     var microphoneWav: Bool
     var systemAudioInMovie: Bool
     var wavStartMediaSeconds: TimeInterval?
+    /// Which display the archive movie shows and at what configured output size (after even-rounding and
+    /// the 3840×2160 cap). Private archive provenance; absent in files written before display selection.
+    var displayID: UInt32?
+    var displayName: String?
+    var captureWidth: Int?
+    var captureHeight: Int?
 
     init(
         microphoneWav: Bool,
         systemAudioInMovie: Bool,
-        wavStartMediaSeconds: TimeInterval? = nil
+        wavStartMediaSeconds: TimeInterval? = nil,
+        displayID: UInt32? = nil,
+        displayName: String? = nil,
+        captureWidth: Int? = nil,
+        captureHeight: Int? = nil
     ) {
         self.microphoneWav = microphoneWav
         self.systemAudioInMovie = systemAudioInMovie
         self.wavStartMediaSeconds = wavStartMediaSeconds
+        self.displayID = displayID
+        self.displayName = displayName
+        self.captureWidth = captureWidth
+        self.captureHeight = captureHeight
     }
 
     enum CodingKeys: String, CodingKey {
         case microphoneWav = "microphone_wav"
         case systemAudioInMovie = "system_audio_in_movie"
         case wavStartMediaSeconds = "wav_start_media_seconds"
+        case displayID = "display_id"
+        case displayName = "display_name"
+        case captureWidth = "capture_width"
+        case captureHeight = "capture_height"
     }
 
     static let both = CaptureAudioLayout(

@@ -102,7 +102,7 @@ final class TimelineTests: XCTestCase {
 
     func testCaptureAreaPixelSizeAndCrop() {
         XCTAssertTrue(CaptureArea.entireDisplay.isEntireDisplay)
-        XCTAssertEqual(CaptureArea.entireDisplay.summary, "Entire display")
+        XCTAssertEqual(CaptureArea.entireDisplay.summary, "Main display")
         let region = CaptureArea(
             capturesFullDisplay: false,
             displayID: 1,

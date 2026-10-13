@@ -35,6 +35,42 @@ enum CaptureAreaPicker {
     ) {
         CaptureAreaPickerController.shared.begin(current: current, mode: mode, completion: completion)
     }
+
+    /// Which overlay starts as the key window, so Return confirms it: the one carrying a saved region, else
+    /// the saved display, else the main display, else the first. Nil only when there are no screens.
+    static func starterIndex(screenIDs: [UInt32], regionIndex: Int?, current: CaptureArea, mainID: UInt32) -> Int? {
+        if let regionIndex, screenIDs.indices.contains(regionIndex) {
+            return regionIndex
+        }
+        if !current.targetsMainDisplay, let saved = screenIDs.firstIndex(of: current.displayID) {
+            return saved
+        }
+        if let main = screenIDs.firstIndex(of: mainID) {
+            return main
+        }
+        return screenIDs.isEmpty ? nil : 0
+    }
+
+    /// Overlay heading for one screen: name, point size, an index when two screens share a name, "(main)".
+    static func screenLabel(name: String, width: Int, height: Int, duplicateIndex: Int?, isMain: Bool) -> String {
+        var text = name.isEmpty ? "Display" : name
+        if let duplicateIndex {
+            text += " \(duplicateIndex)"
+        }
+        text += " · \(width)×\(height) pt"
+        if isMain {
+            text += " (main)"
+        }
+        return text
+    }
+
+    /// Shown on every overlay when the saved display is not connected, so a Start never silently records
+    /// another screen: the user confirms one of the connected screens explicitly.
+    static func missingDisplayNotice(current: CaptureArea, connectedIDs: [UInt32]) -> String? {
+        guard !current.targetsMainDisplay, !connectedIDs.contains(current.displayID) else { return nil }
+        let name = current.displayName.flatMap { $0.isEmpty ? nil : $0 } ?? "The saved display"
+        return "\(name) is not connected. Pick a display."
+    }
 }
 
 @MainActor
@@ -56,13 +92,33 @@ private final class CaptureAreaPickerController {
         self.mode = mode
         self.completion = completion
         NSApp.activate(ignoringOtherApps: true)
-        windows = NSScreen.screens.map { screen in
-            let window = CaptureAreaPickerWindow(screen: screen, current: current, mode: mode)
+        let screens = NSScreen.screens
+        let mainID = UInt32(CGMainDisplayID())
+        let ids = screens.map { CaptureAreaPickerWindow.displayID(of: $0) }
+        let notice = CaptureAreaPicker.missingDisplayNotice(current: current, connectedIDs: ids)
+        windows = screens.enumerated().map { index, screen in
+            let name = screen.localizedName
+            let sameName = screens.indices.filter { screens[$0].localizedName == name }
+            let label = CaptureAreaPicker.screenLabel(
+                name: name,
+                width: Int(screen.frame.width.rounded()),
+                height: Int(screen.frame.height.rounded()),
+                duplicateIndex: sameName.count > 1 ? (sameName.firstIndex(of: index) ?? 0) + 1 : nil,
+                isMain: ids[index] == mainID
+            )
+            let window = CaptureAreaPickerWindow(
+                screen: screen,
+                current: current,
+                mode: mode,
+                label: label,
+                notice: notice
+            )
             window.onUseSelection = { [weak self, weak window] in
                 self?.confirmSelection(from: window)
             }
-            window.onUseEntire = { [weak self] in
-                self?.finish(.entireDisplay)
+            // The whole of the screen this overlay covers, never a display-less `.entireDisplay`.
+            window.onUseEntire = { [weak self] area in
+                self?.finish(area)
             }
             window.onCancel = { [weak self] in
                 self?.cancel()
@@ -74,10 +130,17 @@ private final class CaptureAreaPickerController {
             window.orderFrontRegardless()
             return window
         }
-        let starter = windows.first(where: {
+        let regionIndex = windows.firstIndex(where: {
             if let area = $0.proposedArea(), !area.isEntireDisplay { return true }
             return false
-        }) ?? windows.first(where: { $0.screen == NSScreen.main }) ?? windows.first
+        })
+        let starterIndex = CaptureAreaPicker.starterIndex(
+            screenIDs: ids,
+            regionIndex: regionIndex,
+            current: current,
+            mainID: mainID
+        )
+        let starter = starterIndex.map { windows[$0] }
         starter?.makeKey()
         monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self else { return event }
@@ -86,10 +149,11 @@ private final class CaptureAreaPickerController {
                 self.cancel()
                 return nil
             case 49:
-                self.finish(.entireDisplay)
+                // Space: this display, the one under the key overlay.
+                self.confirmWholeDisplay(of: self.keyWindow())
                 return nil
             case 36, 76:
-                let key = self.windows.first(where: { $0.isKeyWindow })
+                let key = self.keyWindow()
                 self.confirmSelection(from: key)
                 return nil
             default:
@@ -109,7 +173,7 @@ private final class CaptureAreaPickerController {
         AgentLog.event("capture_area_picker", [
             "action": "confirm",
             "full": area.isEntireDisplay ? "1" : "0",
-            "display": area.isEntireDisplay ? "all" : String(area.displayID),
+            "display": String(area.displayID),
             "mode": mode == .record ? "record" : "choose"
         ])
         switch mode {
@@ -120,9 +184,23 @@ private final class CaptureAreaPickerController {
         }
     }
 
+    private func keyWindow() -> CaptureAreaPickerWindow? {
+        windows.first(where: { $0.isKeyWindow }) ?? windows.first
+    }
+
+    /// Entire Display button or Space: the screen of that overlay. Every path ends on a concrete display id.
+    private func confirmWholeDisplay(of window: CaptureAreaPickerWindow?) {
+        guard let window else {
+            cancel()
+            return
+        }
+        finish(window.fullDisplayArea())
+    }
+
     private func confirmSelection(from preferred: CaptureAreaPickerWindow? = nil) {
-        if preferred != nil {
-            finish(preferred?.proposedArea() ?? .entireDisplay)
+        if let preferred {
+            // Return on an overlay with no box: that overlay's whole display, not the main one.
+            finish(preferred.proposedArea() ?? preferred.fullDisplayArea())
             return
         }
         if let edited = lastEditedWindow?.proposedArea(), !edited.isEntireDisplay {
@@ -134,7 +212,7 @@ private final class CaptureAreaPickerController {
             finish(region)
             return
         }
-        finish(.entireDisplay)
+        confirmWholeDisplay(of: keyWindow())
     }
 
     private func cancel() {
@@ -159,17 +237,24 @@ private final class CaptureAreaPickerController {
 
 private final class CaptureAreaPickerWindow: NSWindow {
     var onUseSelection: (() -> Void)?
-    var onUseEntire: (() -> Void)?
+    var onUseEntire: ((CaptureArea) -> Void)?
     var onCancel: (() -> Void)?
     var onEdited: (() -> Void)?
     private let pickerView: CaptureAreaPickerView
 
-    init(screen: NSScreen, current: CaptureArea, mode: CaptureAreaPicker.Mode) {
+    static func displayID(of screen: NSScreen) -> UInt32 {
+        (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value
+            ?? UInt32(CGMainDisplayID())
+    }
+
+    init(screen: NSScreen, current: CaptureArea, mode: CaptureAreaPicker.Mode, label: String, notice: String?) {
         pickerView = CaptureAreaPickerView(
             frame: NSRect(origin: .zero, size: screen.frame.size),
             current: current,
             screen: screen,
-            mode: mode
+            mode: mode,
+            label: label,
+            notice: notice
         )
         super.init(
             contentRect: screen.frame,
@@ -188,8 +273,8 @@ private final class CaptureAreaPickerWindow: NSWindow {
         pickerView.onUseSelection = { [weak self] in
             self?.onUseSelection?()
         }
-        pickerView.onUseEntire = { [weak self] in
-            self?.onUseEntire?()
+        pickerView.onUseEntire = { [weak self] area in
+            self?.onUseEntire?(area)
         }
         pickerView.onCancel = { [weak self] in
             self?.onCancel?()
@@ -202,8 +287,23 @@ private final class CaptureAreaPickerWindow: NSWindow {
 
     override var canBecomeKey: Bool { true }
 
+    override func becomeKey() {
+        super.becomeKey()
+        pickerView.needsDisplay = true
+    }
+
+    override func resignKey() {
+        super.resignKey()
+        pickerView.needsDisplay = true
+    }
+
     func proposedArea() -> CaptureArea? {
         pickerView.proposedArea()
+    }
+
+    /// The whole of this overlay's screen.
+    func fullDisplayArea() -> CaptureArea {
+        pickerView.fullDisplayArea()
     }
 }
 
@@ -220,12 +320,16 @@ private enum CaptureDrag {
 
 private final class CaptureAreaPickerView: NSView {
     var onUseSelection: (() -> Void)?
-    var onUseEntire: (() -> Void)?
+    var onUseEntire: ((CaptureArea) -> Void)?
     var onCancel: (() -> Void)?
     var onEdited: (() -> Void)?
 
     private let screen: NSScreen
     private let mode: CaptureAreaPicker.Mode
+    /// Screen heading drawn on this overlay (name, size, main marker).
+    private let label: String
+    /// Missing-display message, the same on every overlay, or nil.
+    private let notice: String?
     private var liveRect: NSRect?
     private var drag: CaptureDrag = .none
     private var dragStart: NSPoint = .zero
@@ -236,9 +340,18 @@ private final class CaptureAreaPickerView: NSView {
     private let entireButton = NSButton()
     private let cancelButton = NSButton()
 
-    init(frame: NSRect, current: CaptureArea, screen: NSScreen, mode: CaptureAreaPicker.Mode) {
+    init(
+        frame: NSRect,
+        current: CaptureArea,
+        screen: NSScreen,
+        mode: CaptureAreaPicker.Mode,
+        label: String,
+        notice: String?
+    ) {
         self.screen = screen
         self.mode = mode
+        self.label = label
+        self.notice = notice
         self.liveRect = Self.rect(for: current, on: screen, in: frame) ?? frame
         super.init(frame: frame)
         wantsLayer = true
@@ -300,9 +413,9 @@ private final class CaptureAreaPickerView: NSView {
         let hintText: String
         switch mode {
         case .record:
-            hintText = "Drag to select the capture area. Drag the box or handles to adjust. Return records this display. Space = entire display. Esc cancels."
+            hintText = "Drag to select the capture area. Drag the box or handles to adjust. Return records this display. Space = this display. Esc cancels."
         case .choose:
-            hintText = "Drag to select the capture area. Drag the box or handles to adjust. Return uses this display. Space = entire display. Esc cancels."
+            hintText = "Drag to select the capture area. Drag the box or handles to adjust. Return uses this display. Space = this display. Esc cancels."
         }
         let hint = NSAttributedString(
             string: hintText,
@@ -313,6 +426,29 @@ private final class CaptureAreaPickerView: NSView {
         )
         let size = hint.size()
         hint.draw(at: NSPoint(x: bounds.midX - size.width / 2, y: bounds.maxY - 40))
+        // Which screen this overlay covers. The key overlay (the one Return confirms) is drawn solid, the
+        // others dimmed, so two monitors are never confused.
+        let isKey = window?.isKeyWindow ?? false
+        let heading = NSAttributedString(
+            string: isKey ? "▶ \(label)" : label,
+            attributes: [
+                .font: NSFont.systemFont(ofSize: 22, weight: .bold),
+                .foregroundColor: NSColor.white.withAlphaComponent(isKey ? 1 : 0.55)
+            ]
+        )
+        let headingSize = heading.size()
+        heading.draw(at: NSPoint(x: bounds.midX - headingSize.width / 2, y: bounds.maxY - 80))
+        if let notice {
+            let warning = NSAttributedString(
+                string: notice,
+                attributes: [
+                    .font: NSFont.systemFont(ofSize: 16, weight: .semibold),
+                    .foregroundColor: NSColor.systemYellow
+                ]
+            )
+            let warningSize = warning.size()
+            warning.draw(at: NSPoint(x: bounds.midX - warningSize.width / 2, y: bounds.maxY - 112))
+        }
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -381,6 +517,11 @@ private final class CaptureAreaPickerView: NSView {
 
     func proposedArea() -> CaptureArea? {
         area(from: liveRect)
+    }
+
+    /// The whole of this overlay's screen, carrying its display id and name.
+    func fullDisplayArea() -> CaptureArea {
+        CaptureArea.fullDisplay(id: CaptureAreaPickerWindow.displayID(of: screen), name: screen.localizedName)
     }
 
     private func setupButtons() {
@@ -459,7 +600,7 @@ private final class CaptureAreaPickerView: NSView {
     }
 
     @objc private func confirmEntire() {
-        onUseEntire?()
+        onUseEntire?(fullDisplayArea())
     }
 
     @objc private func cancelSelection() {
@@ -471,10 +612,10 @@ private final class CaptureAreaPickerView: NSView {
             return nil
         }
         if selection.width >= bounds.width - 2 && selection.height >= bounds.height - 2 {
-            return .entireDisplay
+            // A box covering the screen is that screen, with its display id, not a display-less default.
+            return fullDisplayArea()
         }
-        let displayID = (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?
-            .uint32Value ?? CGMainDisplayID()
+        let displayID = CaptureAreaPickerWindow.displayID(of: screen)
         let localYTop = bounds.height - selection.minY - selection.height
         return CaptureArea(
             capturesFullDisplay: false,
@@ -483,7 +624,8 @@ private final class CaptureAreaPickerView: NSView {
             originY: Double(max(0, localYTop)),
             widthPoints: Double(floor(selection.width / 2) * 2),
             heightPoints: Double(floor(selection.height / 2) * 2),
-            backingScale: Double(screen.backingScaleFactor)
+            backingScale: Double(screen.backingScaleFactor),
+            displayName: screen.localizedName
         )
     }
 
@@ -618,8 +760,7 @@ private final class CaptureAreaPickerView: NSView {
 
     private static func rect(for area: CaptureArea, on screen: NSScreen, in bounds: NSRect) -> NSRect? {
         guard !area.isEntireDisplay else { return nil }
-        let displayID = (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?
-            .uint32Value ?? 0
+        let displayID = CaptureAreaPickerWindow.displayID(of: screen)
         guard displayID == area.displayID else { return nil }
         let height = CGFloat(area.heightPoints)
         let width = CGFloat(area.widthPoints)

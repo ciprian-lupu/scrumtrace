@@ -1,3 +1,4 @@
+import AppKit
 import AVFoundation
 import CoreGraphics
 import CoreMedia
@@ -98,6 +99,10 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
     private var micWatchTimer: DispatchSourceTimer?
     /// Window mode only. Shots reuse it so a still never shows more than the movie.
     private var windowFilter: SCContentFilter?
+    /// Display and region modes: the one display in the movie, resolved once at Start and never changed.
+    private var recordedDisplay: (id: UInt32, name: String)?
+    /// Configured movie size (even-rounded, capped), written to capture-layout.json as provenance.
+    private var captureSize: (width: Int, height: Int)?
 
     init(sessionURL: URL, clock: ClockSynchronizer) {
         self.sessionURL = sessionURL
@@ -130,9 +135,13 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         syncWriter { captureWriteMessage }
     }
 
+    /// `pinnedDisplayID` is the display the controller already gated metadata on (nil in window mode). The
+    /// recorder must land on exactly that display; anything else fails the start, so the movie, the Shots
+    /// and the sampled titles always agree on one screen.
     func start(shouldPauseCapture: @escaping @Sendable () -> Bool = { false },
                captureArea: CaptureArea = .entireDisplay,
                captureWindow: CaptureWindowTarget? = nil,
+               pinnedDisplayID: UInt32? = nil,
                showCursor: Bool = true,
                includeMicrophone: Bool = true) async throws {
         // Never call SCShareableContent unless Screen Recording was attached
@@ -149,9 +158,11 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         }
         try await requestPermission(includeMicrophone: includeMicrophone)
         let region = captureWindow == nil && !captureArea.isEntireDisplay
+        let targetDisplayID = pinnedDisplayID
+            ?? CaptureDisplayResolver.pinnedDisplayID(for: captureArea, mainID: UInt32(CGMainDisplayID()))
         AgentLog.event("recorder_sckit_begin", [
-            "area": captureWindow != nil ? "window" : (region ? "region" : "full"),
-            "display": captureWindow != nil ? "window" : (region ? String(captureArea.displayID) : "all"),
+            "area": captureWindow != nil ? "window" : (region ? "region" : "display"),
+            "display": captureWindow != nil ? "window" : String(targetDisplayID),
             "width": String(region ? Int(captureArea.widthPoints.rounded()) : 0),
             "height": String(region ? Int(captureArea.heightPoints.rounded()) : 0),
             "cursor": showCursor ? "1" : "0",
@@ -174,6 +185,7 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         let filter: SCContentFilter
         let size: (width: Int, height: Int)
         var regionFitsDisplay = false
+        var chosenDisplay: (id: UInt32, name: String)?
         if let captureWindow {
             // Only this window reaches the movie, even when another window covers it or it moves to
             // another display. No fallback to the display: a closed window fails the start instead.
@@ -183,9 +195,20 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             filter = SCContentFilter(desktopIndependentWindow: window)
             size = Self.windowPixelSize(filter: filter, fallbackFrame: window.frame)
         } else {
-            guard let display = Self.display(in: content, matching: captureArea) else {
-                throw SessionRecorderError.writerFailed("No display available for capture.")
+            // The pinned display only. A display that went away between the overlay and this point fails
+            // the start; there is no fallback to another display (it would widen a region into a whole
+            // screen and record a monitor the user did not confirm).
+            let candidates = Self.displayCandidates(in: content)
+            guard case .display(let resolvedID) = CaptureDisplayResolver.resolve(captureArea, among: candidates),
+                  resolvedID == targetDisplayID,
+                  let display = content.displays.first(where: { $0.displayID == resolvedID }) else {
+                AgentLog.event("recorder_display_missing", ["display": String(targetDisplayID)])
+                throw SessionRecorderError.writerFailed(CaptureDisplayResolver.missingMessage)
             }
+            chosenDisplay = (
+                id: UInt32(display.displayID),
+                name: captureArea.displayName ?? candidates.first(where: { $0.id == resolvedID })?.name ?? ""
+            )
             regionFitsDisplay = !captureArea.isEntireDisplay
                 && display.displayID == captureArea.displayID
             let rawSize = regionFitsDisplay
@@ -264,6 +287,8 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
                 self.microphoneWav = mic
                 self.stream = stream
                 self.windowFilter = captureWindow == nil ? nil : filter
+                self.recordedDisplay = chosenDisplay
+                self.captureSize = size
                 self.started = true
                 if pauseNow {
                     self.paused = true
@@ -297,6 +322,16 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         syncWriter { windowFilter != nil }
     }
 
+    /// Display and region modes: the display in the movie. Nil in window mode or before start.
+    var recordedDisplayID: UInt32? {
+        syncWriter { recordedDisplay?.id }
+    }
+
+    /// Configured movie size once the stream is set up; nil before start.
+    var configuredCaptureSize: (width: Int, height: Int)? {
+        syncWriter { captureSize }
+    }
+
     /// Shot in window mode: the recorded window only, never the display around it. Nil when the window is gone.
     func captureWindowStill() async -> CGImage? {
         guard let filter = syncWriter({ windowFilter }) else { return nil }
@@ -317,13 +352,26 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         )
     }
 
-    private static func display(in content: SCShareableContent, matching area: CaptureArea) -> SCDisplay? {
-        if !area.isEntireDisplay {
-            if let match = content.displays.first(where: { $0.displayID == area.displayID }) {
-                return match
+    /// ScreenCaptureKit's display list as resolver candidates. Names come from the matching `NSScreen`.
+    private static func displayCandidates(in content: SCShareableContent) -> [DisplayCandidate] {
+        let mainID = UInt32(CGMainDisplayID())
+        let pairs = NSScreen.screens.compactMap { screen -> (UInt32, String)? in
+            guard let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber else {
+                return nil
             }
+            return (number.uint32Value, screen.localizedName)
         }
-        return content.displays.first
+        let names = Dictionary(pairs, uniquingKeysWith: { first, _ in first })
+        return content.displays.map { display in
+            let id = UInt32(display.displayID)
+            return DisplayCandidate(
+                id: id,
+                name: names[id] ?? "",
+                width: display.width,
+                height: display.height,
+                isMain: id == mainID
+            )
+        }
     }
 
     /// Even pixel size shared by SCStream and AVAssetWriter, capped at 3840×2160.
@@ -433,12 +481,19 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
     }
 
     func persistCaptureLayout(microphoneWav: Bool? = nil) throws {
-        let snapshot = syncWriter { (self.microphoneWav, self.wavStartMediaSeconds) }
+        let snapshot = syncWriter {
+            (self.microphoneWav, self.wavStartMediaSeconds, self.recordedDisplay, self.captureSize)
+        }
         let mic = microphoneWav ?? snapshot.0
+        // Display provenance rides along on every rewrite so a later audio-only update cannot drop it.
         let layout = CaptureAudioLayout(
             microphoneWav: mic,
             systemAudioInMovie: true,
-            wavStartMediaSeconds: snapshot.1
+            wavStartMediaSeconds: snapshot.1,
+            displayID: snapshot.2?.id,
+            displayName: snapshot.2.flatMap { $0.name.isEmpty ? nil : $0.name },
+            captureWidth: snapshot.3?.width,
+            captureHeight: snapshot.3?.height
         )
         try layout.write(sessionURL: sessionURL)
     }

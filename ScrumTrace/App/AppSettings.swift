@@ -1,5 +1,8 @@
 import Combine
 import Foundation
+#if canImport(AppKit)
+import AppKit
+#endif
 
 enum AIProviderKind: String, Codable, CaseIterable, Identifiable, Sendable {
     case openaiCompatible = "openai_compatible"
@@ -170,6 +173,63 @@ final class AppSettings: ObservableObject {
     /// Menu and overview text for what the next recording captures.
     var captureSummary: String {
         recordSingleWindow ? "Single window" : captureArea.summary
+    }
+
+    /// Connected displays for the menu's and Settings' Display rows. Read from AppKit at init and on
+    /// `refreshConnectedDisplays()`; tests assign fake rows. Never used to resolve a recording: the recorder
+    /// asks ScreenCaptureKit itself.
+    @Published var connectedDisplays: [DisplayCandidate] = AppSettings.currentDisplays()
+
+    /// Called on `NSApplication.didChangeScreenParametersNotification` by the owners of the menu and window.
+    func refreshConnectedDisplays() {
+        let next = AppSettings.currentDisplays()
+        if next != connectedDisplays {
+            connectedDisplays = next
+        }
+    }
+
+    static func currentDisplays() -> [DisplayCandidate] {
+        #if canImport(AppKit)
+        let mainID = UInt32(CGMainDisplayID())
+        return NSScreen.screens.compactMap { screen in
+            guard let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber else {
+                return nil
+            }
+            let id = number.uint32Value
+            return DisplayCandidate(
+                id: id,
+                name: screen.localizedName,
+                width: Int(screen.frame.width.rounded()),
+                height: Int(screen.frame.height.rounded()),
+                isMain: id == mainID
+            )
+        }
+        #else
+        return []
+        #endif
+    }
+
+    /// The saved display when it is not among `connectedDisplays`; the menu and Settings show it greyed.
+    var savedDisplayNotConnected: CaptureArea? {
+        guard !recordSingleWindow, !captureArea.targetsMainDisplay,
+              !connectedDisplays.contains(where: { $0.id == captureArea.displayID }) else { return nil }
+        return captureArea
+    }
+
+    /// Menu row / picker selection: 0 is "Main display", otherwise the display id the next recording targets.
+    var selectedDisplayID: UInt32 {
+        recordSingleWindow ? 0 : captureArea.displayID
+    }
+
+    /// Picks a connected display (or 0 for the main display) as the whole-display capture area.
+    func selectDisplay(id: UInt32) {
+        if id == 0 {
+            captureArea = .entireDisplay
+        } else {
+            let name = connectedDisplays.first(where: { $0.id == id })?.name ?? captureArea.displayName ?? ""
+            captureArea = .fullDisplay(id: id, name: name)
+        }
+        recordSingleWindow = false
     }
 
     @Published var showCursor: Bool {
