@@ -22,17 +22,23 @@ final class WhisperTranscriber: @unchecked Sendable {
 
     struct LoadedModel: @unchecked Sendable {
         var transcribe: (String, DecodingOptions) async throws -> [TranscriptionResult]
+        var transcriptionProgress: () -> Double? = { nil }
+
+        init(transcribe: @escaping (String, DecodingOptions) async throws -> [TranscriptionResult]) {
+            self.transcribe = transcribe
+        }
     }
 
     private var kit: LoadedModel?
-    private let loadModel: @Sendable (String) async throws -> LoadedModel
+    private let loadModel: (@Sendable (String) async throws -> LoadedModel)?
+    let progressReporter = ProcessingProgressReporter()
     private let lock = NSLock()
     private var preparing: (id: UUID, model: String, task: Task<Void, Error>)?
     private var ready = false
     private var loadedModel: String?
     private var language: SpeechLanguage = .automatic
 
-    init(loadModel: @escaping @Sendable (String) async throws -> LoadedModel = { try await WhisperTranscriber.loadWhisperKit($0) }) {
+    init(loadModel: (@Sendable (String) async throws -> LoadedModel)? = nil) {
         self.loadModel = loadModel
     }
 
@@ -111,13 +117,15 @@ final class WhisperTranscriber: @unchecked Sendable {
             if ready, loadedModel == resolved { return .ready }
             let id = UUID()
             let work = Task.detached {
+                let activity = self.progressReporter.begin("Preparing speech model…")
+                defer { self.progressReporter.end(activity) }
                 AgentLog.event("whisper_prepare_begin", ["model": resolved])
                 do {
                     let loaded: LoadedModel
-                    if case .standard = source {
-                        loaded = try await self.loadModel(model)
+                    if case .standard = source, let loadModel = self.loadModel {
+                        loaded = try await loadModel(model)
                     } else {
-                        loaded = try await Self.loadWhisperKit(model, source: source)
+                        loaded = try await Self.loadWhisperKit(model, source: source, reporter: self.progressReporter)
                     }
                     self.withStateLock {
                         self.kit = loaded
@@ -137,21 +145,49 @@ final class WhisperTranscriber: @unchecked Sendable {
         }
     }
 
-    private static func loadWhisperKit(_ resolved: String, source: WhisperModelSource = .standard) async throws -> LoadedModel {
+    private static func loadWhisperKit(_ resolved: String, source: WhisperModelSource = .standard, reporter: ProcessingProgressReporter) async throws -> LoadedModel {
         let downloadBase = Self.modelDownloadBase
         try FileManager.default.createDirectory(at: downloadBase, withIntermediateDirectories: true)
-        let config: WhisperKitConfig
+        let folder: String
+        let tokenizerFolder: URL?
         switch source {
         case .standard:
-            config = WhisperKitConfig(model: resolved, downloadBase: downloadBase, verbose: false, logLevel: .error, prewarm: true, load: true, download: true)
+            folder = try await downloadModel(resolved, repository: "argmaxinc/whisperkit-coreml", reporter: reporter).path
+            tokenizerFolder = nil
         case .repository(let repository):
-            config = WhisperKitConfig(model: resolved, downloadBase: downloadBase, modelRepo: repository, verbose: false, logLevel: .error, prewarm: true, load: true, download: true)
-        case .folder(let folder):
-            config = WhisperKitConfig(model: resolved, modelFolder: folder, tokenizerFolder: URL(fileURLWithPath: folder), verbose: false, logLevel: .error, prewarm: true, load: true, download: false)
+            folder = try await downloadModel(resolved, repository: repository, reporter: reporter).path
+            tokenizerFolder = nil
+        case .folder(let path):
+            folder = path
+            tokenizerFolder = URL(fileURLWithPath: path)
         }
+        let config = WhisperKitConfig(model: resolved, modelFolder: folder, tokenizerFolder: tokenizerFolder,
+                                      verbose: false, logLevel: .error, prewarm: false, load: false, download: false)
         let loaded = try await WhisperKit(config)
-        return LoadedModel { path, options in
+        let prewarm = reporter.begin("Preparing speech model for this Mac…")
+        do { try await loaded.prewarmModels() }
+        catch { reporter.end(prewarm); throw error }
+        reporter.end(prewarm)
+        let loading = reporter.begin("Loading speech model…")
+        do { try await loaded.loadModels() }
+        catch { reporter.end(loading); throw error }
+        reporter.end(loading)
+        var model = LoadedModel { path, options in
             try await loaded.transcribe(audioPath: path, decodeOptions: options)
+        }
+        model.transcriptionProgress = {
+            let progress = loaded.progress
+            return progress.totalUnitCount > 0 ? progress.fractionCompleted : nil
+        }
+        return model
+    }
+
+    private static func downloadModel(_ model: String, repository: String, reporter: ProcessingProgressReporter) async throws -> URL {
+        let activity = reporter.begin("Downloading speech model (cached files are reused)…")
+        defer { reporter.end(activity) }
+        return try await WhisperKit.download(variant: model, downloadBase: modelDownloadBase, from: repository) { progress in
+            guard progress.totalUnitCount > 0 else { return }
+            reporter.update(activity, fraction: progress.fractionCompleted)
         }
     }
 
@@ -164,6 +200,8 @@ final class WhisperTranscriber: @unchecked Sendable {
     func transcribeFile(at url: URL, sessionURL: URL? = nil) async throws -> FullTranscript {
         let via = sessionURL == nil ? "tmp" : "session"
         let started = Date()
+        let preparation = progressReporter.begin("Preparing audio for transcription…")
+        defer { progressReporter.end(preparation) }
         AgentLog.event("whisper_file_begin", ["via": via])
         do {
             try Self.refuseSymlinkMedia(url, sessionRoot: sessionURL)
@@ -204,6 +242,14 @@ final class WhisperTranscriber: @unchecked Sendable {
                 )
             }
             let options = Self.decodingOptions(language: withStateLock { language })
+            let transcription = progressReporter.begin("Transcribing audio…")
+            let ticker = Task {
+                while !Task.isCancelled {
+                    self.progressReporter.update(transcription, fraction: local.transcriptionProgress())
+                    try? await Task.sleep(nanoseconds: 250_000_000)
+                }
+            }
+            defer { ticker.cancel(); progressReporter.end(transcription) }
             let results = try await local.transcribe(work.path, options)
             var segments: [TranscriptSegment] = []
             for result in results {
@@ -294,6 +340,14 @@ final class WhisperTranscriber: @unchecked Sendable {
         }
         session.outputURL = dest
         session.outputFileType = .m4a
+        let activity = progressReporter.begin("Extracting system audio…")
+        let ticker = Task {
+            while !Task.isCancelled {
+                self.progressReporter.update(activity, fraction: Double(session.progress))
+                try? await Task.sleep(nanoseconds: 250_000_000)
+            }
+        }
+        defer { ticker.cancel(); progressReporter.end(activity) }
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             session.exportAsynchronously { continuation.resume() }
         }

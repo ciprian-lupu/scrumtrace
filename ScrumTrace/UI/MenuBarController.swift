@@ -12,6 +12,7 @@ final class MenuBarController: NSObject {
     private let openSettings: () -> Void
     private let openLogs: () -> Void
     private let openMain: () -> Void
+    private let openRecordings: () -> Void
     private var isMenuOpen = false
     private var checkingUpdates = false
     private var hud: RecordingHUDWindow?
@@ -21,6 +22,7 @@ final class MenuBarController: NSObject {
     private var screenObserver: NSObjectProtocol?
     private var lastStartEnabled: Bool?
     private let contextPresenter = RecordingContextPresenter()
+    var openBriefURL: @MainActor (URL) -> Bool = { NSWorkspace.shared.open($0) }
     /// True while the recording-context window or the capture-area overlay of a Start is up.
     /// The main window reads it to disable its own Start recording button.
     private(set) var isPreparingRecording = false
@@ -30,13 +32,15 @@ final class MenuBarController: NSObject {
         hud: RecordingHUDWindow? = nil,
         openSettings: @escaping () -> Void,
         openLogs: @escaping () -> Void,
-        openMain: @escaping () -> Void = {}
+        openMain: @escaping () -> Void = {},
+        openRecordings: (() -> Void)? = nil
     ) {
         self.controller = controller
         self.hud = hud
         self.openSettings = openSettings
         self.openLogs = openLogs
         self.openMain = openMain
+        self.openRecordings = openRecordings ?? openMain
         item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         super.init()
         menu.autoenablesItems = false
@@ -114,12 +118,20 @@ final class MenuBarController: NSObject {
             lastMenuSignature = signature
             rebuild()
         }
-        statusMenuItem?.title = controller.statusLine
+        statusMenuItem?.title = menuStatusTitle
+        statusMenuItem?.toolTip = controller.displayStatusLine
         statusMenuItem?.isHidden = false
     }
 
     private func rebuild() {
         menu.removeAllItems()
+        let status = NSMenuItem(title: menuStatusTitle, action: nil, keyEquivalent: "")
+        status.toolTip = controller.displayStatusLine
+        status.isEnabled = false
+        status.isHidden = false
+        menu.addItem(status)
+        statusMenuItem = status
+        menu.addItem(.separator())
         if controller.isRecording {
             let pauseItem = actionItem(
                 controller.captureState == .paused ? "Resume" : "Pause",
@@ -138,9 +150,10 @@ final class MenuBarController: NSObject {
             menu.addItem(actionItem("Stop & process", #selector(stop)))
         } else {
             let start = actionItem(
-                "Start recording — \(controller.settings.captureSummary)",
+                "Start recording…",
                 #selector(start)
             )
+            start.toolTip = "Start recording — \(controller.settings.captureSummary)"
             start.isEnabled = !controller.isBusy && !controller.startInFlight && !isPreparingRecording
             if lastStartEnabled != start.isEnabled {
                 lastStartEnabled = start.isEnabled
@@ -192,140 +205,158 @@ final class MenuBarController: NSObject {
             areaRoot.submenu = areaMenu
             menu.addItem(areaRoot)
         }
-        let status = NSMenuItem(title: controller.statusLine, action: nil, keyEquivalent: "")
-        status.isEnabled = false
-        status.isHidden = false
-        menu.addItem(status)
-        statusMenuItem = status
         let readiness = CapturePermissions.readiness(requireMicrophone: controller.settings.includeMicrophone)
-        let perm = NSMenuItem(title: readiness.menuLabel, action: nil, keyEquivalent: "")
-        perm.isEnabled = false
-        menu.addItem(perm)
         if !readiness.allowsStart {
-            let relaunch = actionItem("Relaunch ScrumTrace", #selector(relaunch))
-            relaunch.isEnabled = controller.canChangeCaptureSettings
-            menu.addItem(relaunch)
+            let permission = NSMenuItem(title: readiness.menuLabel, action: nil, keyEquivalent: "")
+            permission.isEnabled = false
+            menu.addItem(permission)
+            let fix: NSMenuItem
+            switch readiness {
+            case .screenGrantedNeedsRelaunch:
+                fix = actionItem("Relaunch ScrumTrace", #selector(relaunch))
+                fix.isEnabled = controller.canChangeCaptureSettings
+            case .microphoneDenied:
+                fix = actionItem("Open Microphone settings", #selector(openMicSettings))
+            case .screenDenied, .ready:
+                fix = actionItem("Open Screen Recording settings", #selector(openScreenSettings))
+            }
+            menu.addItem(fix)
         }
         menu.addItem(.separator())
-        let retry = actionItem("Retry analysis", #selector(retry))
-        retry.isEnabled = controller.lastSessionId != nil && controller.canChangeCaptureSettings
-        menu.addItem(retry)
-        let compareSpeech = actionItem("Compare transcriptions", #selector(compareTranscriptions))
-        compareSpeech.isEnabled = controller.lastSessionId != nil && controller.canChangeCaptureSettings
-        menu.addItem(compareSpeech)
-        let reviewSpeech = actionItem("Review transcription results", #selector(reviewTranscriptions))
-        reviewSpeech.isEnabled = controller.lastSessionId != nil && controller.canChangeCaptureSettings
-        menu.addItem(reviewSpeech)
-        let reveal = actionItem("Reveal last session", #selector(reveal))
-        reveal.isEnabled = controller.lastSessionId != nil
-        menu.addItem(reveal)
-        let claude = actionItem("Open last session in Claude", #selector(openLastInClaude))
-        claude.isEnabled = controller.lastSessionId != nil
-        menu.addItem(claude)
-        let chatGPT = actionItem("Open last export in Codex", #selector(openLastInChatGPT))
-        chatGPT.isEnabled = controller.lastSessionId != nil
-        menu.addItem(chatGPT)
-        let codexArchive = actionItem("Open last archive in Codex…", #selector(openLastArchiveInCodex))
-        codexArchive.isEnabled = controller.lastSessionId != nil && controller.canChangeCaptureSettings
-        menu.addItem(codexArchive)
-        let recent = NSMenuItem(title: "Recent", action: nil, keyEquivalent: "")
-        let recentMenu = NSMenu()
-        recentMenu.autoenablesItems = false
-        let sessions = controller.vault.recentSessions()
+        let sessions = controller.vault.recentSessions(limit: 5)
+        let last = NSMenuItem(title: "Last recording", action: nil, keyEquivalent: "")
+        last.isEnabled = controller.lastSessionId != nil
+        last.submenu = recordingMenu(sessionId: controller.lastSessionId, isLast: true)
+        menu.addItem(last)
+
+        let recent = NSMenuItem(title: "Recent recordings", action: nil, keyEquivalent: "")
+        let recentMenu = makeSubmenu()
         if sessions.isEmpty {
-            let empty = NSMenuItem(title: "No sessions yet", action: nil, keyEquivalent: "")
+            let empty = NSMenuItem(title: "No recordings yet", action: nil, keyEquivalent: "")
             empty.isEnabled = false
             recentMenu.addItem(empty)
         } else {
             for session in sessions {
-                let item = NSMenuItem(
-                    title: "\(session.sessionId) · \(PipelineStatusOrder.label(session.pipelineStatus))",
-                    action: nil,
-                    keyEquivalent: ""
-                )
-                let sub = NSMenu()
-                sub.autoenablesItems = false
-                let revealItem = NSMenuItem(
-                    title: "Reveal export/",
-                    action: #selector(openRecent(_:)),
-                    keyEquivalent: ""
-                )
-                revealItem.representedObject = session.sessionId
-                revealItem.target = self
-                let retryItem = NSMenuItem(
-                    title: "Retry analysis",
-                    action: #selector(retryRecent(_:)),
-                    keyEquivalent: ""
-                )
-                retryItem.representedObject = session.sessionId
-                retryItem.target = self
-                retryItem.isEnabled = controller.canChangeCaptureSettings
-                let compareItem = NSMenuItem(
-                    title: "Compare transcriptions",
-                    action: #selector(compareRecentTranscriptions(_:)),
-                    keyEquivalent: ""
-                )
-                compareItem.representedObject = session.sessionId
-                compareItem.target = self
-                compareItem.isEnabled = controller.canChangeCaptureSettings
-                let claudeItem = NSMenuItem(
-                    title: "Open in Claude",
-                    action: #selector(openRecentInClaude(_:)),
-                    keyEquivalent: ""
-                )
-                claudeItem.representedObject = session.sessionId
-                claudeItem.target = self
-                let chatGPTItem = NSMenuItem(
-                    title: "Open export in Codex",
-                    action: #selector(openRecentInChatGPT(_:)),
-                    keyEquivalent: ""
-                )
-                chatGPTItem.representedObject = session.sessionId
-                chatGPTItem.target = self
-                let archiveItem = actionItem("Open archive in Codex…", #selector(openRecentArchiveInCodex(_:)))
-                archiveItem.representedObject = session.sessionId
-                archiveItem.isEnabled = controller.canChangeCaptureSettings
-                sub.addItem(revealItem)
-                sub.addItem(claudeItem)
-                sub.addItem(chatGPTItem)
-                sub.addItem(archiveItem)
-                sub.addItem(retryItem)
-                sub.addItem(compareItem)
-                item.submenu = sub
-                recentMenu.addItem(item)
+                let recording = NSMenuItem(title: Self.recordingLabel(session), action: nil, keyEquivalent: "")
+                recording.submenu = recordingMenu(sessionId: session.sessionId, isLast: false)
+                recentMenu.addItem(recording)
             }
+            recentMenu.addItem(.separator())
         }
+        recentMenu.addItem(actionItem("Show all recordings…", #selector(showAllRecordings)))
         recent.submenu = recentMenu
         menu.addItem(recent)
         menu.addItem(.separator())
         // Enabled in every state: opening the window never changes capture.
         menu.addItem(actionItem("Open ScrumTrace…", #selector(openMainWindow)))
-        let settingsRoot = NSMenuItem(title: "Settings", action: nil, keyEquivalent: "")
-        let settingsMenu = NSMenu()
-        settingsMenu.autoenablesItems = false
-        settingsMenu.addItem(actionItem("Settings Window…", #selector(settings)))
-        settingsMenu.addItem(actionItem("Agent Log…", #selector(agentLog)))
-        settingsMenu.addItem(.separator())
-        settingsMenu.addItem(actionItem("Log permission probe", #selector(probePermissions)))
-        settingsMenu.addItem(actionItem("Reveal agent log", #selector(revealLog)))
-        settingsMenu.addItem(actionItem("Export diagnostic bundle", #selector(exportDiagnostics)))
-        settingsMenu.addItem(actionItem("Reveal recordings folder", #selector(revealSessions)))
-        settingsMenu.addItem(.separator())
-        settingsMenu.addItem(actionItem("Ask for Screen Recording", #selector(askScreen)))
-        settingsMenu.addItem(actionItem("Open Screen Recording settings", #selector(openScreenSettings)))
-        settingsMenu.addItem(actionItem("Open Microphone settings", #selector(openMicSettings)))
-        let settingsRelaunch = actionItem("Relaunch ScrumTrace", #selector(relaunch))
-        settingsRelaunch.isEnabled = controller.canChangeCaptureSettings
-        settingsMenu.addItem(settingsRelaunch)
+        menu.addItem(actionItem("Settings…", #selector(settings)))
+        let diagnostics = NSMenuItem(title: "Diagnostics", action: nil, keyEquivalent: "")
+        diagnostics.submenu = diagnosticMenu(readiness: readiness)
+        menu.addItem(diagnostics)
+        menu.addItem(.separator())
+        menu.addItem(actionItem("Quit ScrumTrace", #selector(quit)))
+    }
+
+    /// Keep the menu narrow while preserving the measured percentage and elapsed time.
+    private var menuStatusTitle: String {
+        func shortened(_ text: String, limit: Int) -> String {
+            let line = text.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
+            return line.count > limit ? String(line.prefix(limit - 1)) + "…" : line
+        }
+        if controller.isBusy, let progress = controller.processingProgress {
+            return [progress.percent.map { "\($0)%" }, shortened(progress.message, limit: 48), progress.elapsedLabel]
+                .compactMap { $0 }.joined(separator: " · ")
+        }
+        return shortened(controller.statusLine, limit: 64)
+    }
+
+    private func makeSubmenu() -> NSMenu {
+        let submenu = NSMenu()
+        submenu.autoenablesItems = false
+        return submenu
+    }
+
+    /// Dates, duration and pipeline state come from manifest metadata only.
+    static func recordingLabel(_ session: SessionManifest) -> String {
+        let date = DateFormatter.localizedString(from: session.createdAt, dateStyle: .short, timeStyle: .short)
+        let seconds = session.duration.mediaSeconds
+        let duration = seconds.isFinite && seconds >= 0 && seconds < Double(Int.max) / 2
+            ? SessionController.clock(seconds) : "—"
+        return "\(date) · \(duration) · \(PipelineStatusOrder.label(session.pipelineStatus))"
+    }
+
+    private func recordingMenu(sessionId: String?, isLast: Bool) -> NSMenu {
+        let submenu = makeSubmenu()
+        guard let sessionId else {
+            let empty = NSMenuItem(title: "No recordings yet", action: nil, keyEquivalent: "")
+            empty.isEnabled = false
+            submenu.addItem(empty)
+            return submenu
+        }
+        if isLast, let session = try? controller.vault.loadManifest(id: sessionId) {
+            let summary = NSMenuItem(title: Self.recordingLabel(session), action: nil, keyEquivalent: "")
+            summary.isEnabled = false
+            submenu.addItem(summary)
+            submenu.addItem(.separator())
+        }
+        let brief = actionItem("Open brief", isLast ? #selector(openLastBrief) : #selector(openRecentBrief(_:)))
+        brief.isEnabled = SessionFileAccess.briefURL(vault: controller.vault, id: sessionId) != nil
+        let reveal = actionItem("Reveal export/", isLast ? #selector(reveal) : #selector(openRecent(_:)))
+        let codex = actionItem("Open export in Codex", isLast ? #selector(openLastInChatGPT) : #selector(openRecentInChatGPT(_:)))
+        let claude = actionItem("Open in Claude", isLast ? #selector(openLastInClaude) : #selector(openRecentInClaude(_:)))
+        if isLast {
+            claude.toolTip = "Open last session in Claude"
+            codex.toolTip = "Open last export in Codex"
+        }
+        for item in [brief, reveal, codex, claude] {
+            item.representedObject = sessionId
+            submenu.addItem(item)
+        }
+        submenu.addItem(.separator())
+        let retry = actionItem("Retry analysis", isLast ? #selector(retry) : #selector(retryRecent(_:)))
+        let review = actionItem("Review transcription results", isLast ? #selector(reviewTranscriptions) : #selector(reviewRecentTranscriptions(_:)))
+        let compare = actionItem("Compare transcriptions", isLast ? #selector(compareTranscriptions) : #selector(compareRecentTranscriptions(_:)))
+        for item in [retry, review, compare] {
+            item.representedObject = sessionId
+            item.isEnabled = controller.canChangeCaptureSettings
+            submenu.addItem(item)
+        }
+        submenu.addItem(.separator())
+        let archive = actionItem("Open archive in Codex…", isLast ? #selector(openLastArchiveInCodex) : #selector(openRecentArchiveInCodex(_:)))
+        archive.representedObject = sessionId
+        archive.isEnabled = controller.canChangeCaptureSettings
+        archive.toolTip = isLast ? "Open last archive in Codex — copies private originals after confirmation" : "Copies private originals after confirmation"
+        submenu.addItem(archive)
+        return submenu
+    }
+
+    private func diagnosticMenu(readiness: CaptureReadiness) -> NSMenu {
+        let submenu = makeSubmenu()
+        let permissions = NSMenuItem(title: readiness.menuLabel, action: nil, keyEquivalent: "")
+        permissions.isEnabled = false
+        submenu.addItem(permissions)
+        submenu.addItem(.separator())
+        submenu.addItem(actionItem("View logs…", #selector(agentLog)))
+        submenu.addItem(actionItem("Reveal agent log", #selector(revealLog)))
+        submenu.addItem(actionItem("Export diagnostic bundle", #selector(exportDiagnostics)))
+        submenu.addItem(actionItem("Log permission probe", #selector(probePermissions)))
+        submenu.addItem(actionItem("Reveal recordings folder", #selector(revealSessions)))
+        submenu.addItem(.separator())
+        let permissionsRoot = NSMenuItem(title: "Permissions", action: nil, keyEquivalent: "")
+        let permissionsMenu = makeSubmenu()
+        permissionsMenu.addItem(actionItem("Ask for Screen Recording", #selector(askScreen)))
+        permissionsMenu.addItem(actionItem("Open Screen Recording settings", #selector(openScreenSettings)))
+        permissionsMenu.addItem(actionItem("Open Microphone settings", #selector(openMicSettings)))
+        permissionsRoot.submenu = permissionsMenu
+        submenu.addItem(permissionsRoot)
+        let relaunch = actionItem("Relaunch ScrumTrace", #selector(relaunch))
+        relaunch.isEnabled = controller.canChangeCaptureSettings
+        submenu.addItem(relaunch)
+        submenu.addItem(.separator())
         let updates = actionItem(checkingUpdates ? "Checking for updates…" : "Check for updates", #selector(checkUpdates))
         updates.isEnabled = !checkingUpdates
-        settingsMenu.addItem(updates)
-        settingsRoot.submenu = settingsMenu
-        menu.addItem(settingsRoot)
-        menu.addItem(actionItem("Quit ScrumTrace", #selector(quit)))
-        for item in menu.items where item.action != nil && item.target == nil {
-            item.target = self
-        }
+        submenu.addItem(updates)
+        return submenu
     }
 
     private func actionItem(_ title: String, _ selector: Selector) -> NSMenuItem {
@@ -567,6 +598,29 @@ final class MenuBarController: NSObject {
         AgentLog.event("menu_open_main", [:])
         openMain()
     }
+    @objc private func showAllRecordings() {
+        AgentLog.event("menu_open_recordings", [:])
+        openRecordings()
+    }
+
+    @objc private func openLastBrief() {
+        guard let id = controller.lastSessionId else { return }
+        openBrief(sessionId: id)
+    }
+
+    @objc private func openRecentBrief(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? String else { return }
+        openBrief(sessionId: id)
+    }
+
+    private func openBrief(sessionId: String) {
+        guard let url = SessionFileAccess.briefURL(vault: controller.vault, id: sessionId) else {
+            controller.statusLine = "The brief is not available yet."
+            return
+        }
+        AgentLog.event("menu_open_brief", ["session": sessionId])
+        if !openBriefURL(url) { controller.statusLine = "Could not open the recording brief." }
+    }
     @objc private func settings() {
         AgentLog.event("menu_settings", [:])
         openSettings()
@@ -681,6 +735,12 @@ final class MenuBarController: NSObject {
         controller.compareTranscriptions(sessionId: id)
     }
 
+    @objc private func reviewRecentTranscriptions(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? String else { return }
+        AgentLog.event("menu_transcription_review", ["session": id])
+        controller.reviewTranscriptions(sessionId: id)
+    }
+
     @objc private func openRecentInClaude(_ sender: NSMenuItem) {
         guard let id = sender.representedObject as? String else { return }
         AgentLog.event("menu_claude", ["session": id])
@@ -703,7 +763,7 @@ final class MenuBarController: NSObject {
 extension MenuBarController: NSMenuDelegate {
     func menuWillOpen(_ menu: NSMenu) {
         // Refresh in the same menu before tracking begins. Replacing the status
-        // item's menu while it is open dismisses nested Settings/Recent menus.
+        // item's menu while it is open dismisses recording/diagnostic submenus.
         rebuild()
         isMenuOpen = true
     }

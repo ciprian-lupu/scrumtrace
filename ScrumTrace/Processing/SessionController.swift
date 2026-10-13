@@ -10,7 +10,30 @@ final class SessionController: ObservableObject {
     @Published var phase: PipelineStatus = .idle
     @Published var mediaElapsed: TimeInterval = 0
     @Published var wallElapsed: TimeInterval = 0
-    @Published var statusLine: String = "Ready"
+    @Published var statusLine: String = "Ready" {
+        didSet { if isBusy { reportProcessingProgress(statusLine) } }
+    }
+    @Published private(set) var processingProgress: ProcessingProgress?
+    private var pipelineProgress: ProcessingProgress?
+
+    var displayStatusLine: String {
+        isBusy ? processingProgress?.statusLine ?? statusLine : statusLine
+    }
+
+    func reportProcessingProgress(_ message: String, fraction: Double? = nil) {
+        if var current = pipelineProgress, current.message == message {
+            current.fraction = ProcessingProgress.validFraction(fraction)
+            pipelineProgress = current
+        } else {
+            pipelineProgress = ProcessingProgress(message: message, fraction: fraction)
+        }
+        sampleProcessingProgress()
+    }
+
+    func sampleProcessingProgress(at now: Date = Date()) {
+        let speech = (phase == .transcribing || transcriber.isPreparing) ? transcriber.progressReporter.snapshot : nil
+        processingProgress = (speech ?? pipelineProgress)?.refreshed(at: now)
+    }
     @Published var lastError: String?
     @Published var lastSessionId: String?
     @Published var isBusy = false
@@ -1039,7 +1062,17 @@ final class SessionController: ObservableObject {
 
     private func runProcessor(sessionId: String, retry: RetryOrigin? = nil, localOnly: Bool = false) async {
         isBusy = true
+        reportProcessingProgress("Preparing recording for processing…")
+        let progressTicker = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                self?.sampleProcessingProgress()
+                try? await Task.sleep(nanoseconds: 500_000_000)
+            }
+        }
         defer {
+            progressTicker.cancel()
+            processingProgress = nil
+            pipelineProgress = nil
             AgentLog.clearSessionContext(matching: sessionId)
         }
         // The main window deleted this session while a Retry Analysis of it started, from a menu item built before the
@@ -1152,6 +1185,9 @@ final class SessionController: ObservableObject {
                 whisperModel: whisperModel,
                 identifySpeakers: settings.identifySpeakers,
                 localOnly: localOnly,
+                onProgress: { [weak self] message, fraction in
+                    self?.reportProcessingProgress(message, fraction: fraction)
+                },
                 onStatus: { [weak self] status, line in
                     AgentLog.event("pipeline_status", [
                         "status": status.rawValue,

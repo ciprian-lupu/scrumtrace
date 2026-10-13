@@ -38,15 +38,16 @@ final class MenuAccessTests: XCTestCase {
                 openSettings: { presenter.show(section: .settings) },
                 openLogs: { presenter.show(tab: .logs) }
             )
-            let settings = try XCTUnwrap(menuBar.menu.item(withTitle: "Settings")?.submenu)
-            settings.performActionForItem(at: settings.indexOfItem(withTitle: "Settings Window…"))
+            let menu = menuBar.menu
+            menu.performActionForItem(at: menu.indexOfItem(withTitle: "Settings…"))
             let window = try XCTUnwrap(presenter.window)
             XCTAssertTrue(window.isVisible)
             XCTAssertEqual(presenter.navigation.section, .settings)
             XCTAssertEqual(presenter.navigation.settings.selectedTab, .speech)
             window.close()
             XCTAssertFalse(window.isVisible)
-            settings.performActionForItem(at: settings.indexOfItem(withTitle: "Agent Log…"))
+            let diagnostics = try XCTUnwrap(menu.item(withTitle: "Diagnostics")?.submenu)
+            diagnostics.performActionForItem(at: diagnostics.indexOfItem(withTitle: "View logs…"))
             XCTAssertTrue(presenter.window === window)
             XCTAssertTrue(window.isVisible)
             XCTAssertEqual(presenter.navigation.section, .settings)
@@ -103,17 +104,22 @@ final class MenuAccessTests: XCTestCase {
             menu.update()
             XCTAssertFalse(menu.autoenablesItems)
             XCTAssertFalse(try XCTUnwrap(menu.items.first(where: { $0.title.hasPrefix("Start recording") })).isEnabled)
-            XCTAssertFalse(try XCTUnwrap(menu.item(withTitle: "Retry analysis")).isEnabled)
+            let last = try XCTUnwrap(menu.item(withTitle: "Last recording")?.submenu)
+            last.update()
+            XCTAssertFalse(last.autoenablesItems)
+            XCTAssertFalse(try XCTUnwrap(last.item(withTitle: "Retry analysis")).isEnabled)
+            XCTAssertFalse(try XCTUnwrap(last.item(withTitle: "Compare transcriptions")).isEnabled)
+            XCTAssertFalse(try XCTUnwrap(last.item(withTitle: "Open archive in Codex…")).isEnabled)
             let area = try XCTUnwrap(menu.items.first(where: { $0.title.hasPrefix("Capture area:") })?.submenu)
             area.update()
             XCTAssertFalse(area.autoenablesItems)
             XCTAssertFalse(try XCTUnwrap(area.item(withTitle: "Select area on screen…")).isEnabled)
-            let settings = try XCTUnwrap(menu.item(withTitle: "Settings")?.submenu)
-            settings.update()
-            XCTAssertFalse(settings.autoenablesItems)
-            XCTAssertFalse(try XCTUnwrap(settings.item(withTitle: "Relaunch ScrumTrace")).isEnabled)
-            XCTAssertTrue(try XCTUnwrap(settings.item(withTitle: "Settings Window…")).isEnabled)
-            XCTAssertTrue(try XCTUnwrap(settings.item(withTitle: "Agent Log…")).isEnabled)
+            let diagnostics = try XCTUnwrap(menu.item(withTitle: "Diagnostics")?.submenu)
+            diagnostics.update()
+            XCTAssertFalse(diagnostics.autoenablesItems)
+            XCTAssertFalse(try XCTUnwrap(diagnostics.item(withTitle: "Relaunch ScrumTrace")).isEnabled)
+            XCTAssertTrue(try XCTUnwrap(menu.item(withTitle: "Settings…")).isEnabled)
+            XCTAssertTrue(try XCTUnwrap(diagnostics.item(withTitle: "View logs…")).isEnabled)
             let retrySession = controller.lastSessionId
             controller.retryAnalysis(sessionId: "another-session")
             XCTAssertEqual(controller.lastSessionId, retrySession)
@@ -135,9 +141,111 @@ final class MenuAccessTests: XCTestCase {
             XCTAssertFalse(try XCTUnwrap(menu.items.first(where: { $0.title.hasPrefix("Shot  ") })).isEnabled)
             XCTAssertFalse(try XCTUnwrap(menu.items.first(where: { $0.title.hasPrefix("Pin  ") })).isEnabled)
             XCTAssertTrue(try XCTUnwrap(menu.item(withTitle: "Stop & process")).isEnabled)
-            let settings = try XCTUnwrap(menu.item(withTitle: "Settings")?.submenu)
-            settings.update()
-            XCTAssertFalse(try XCTUnwrap(settings.item(withTitle: "Relaunch ScrumTrace")).isEnabled)
+            let diagnostics = try XCTUnwrap(menu.item(withTitle: "Diagnostics")?.submenu)
+            diagnostics.update()
+            XCTAssertFalse(try XCTUnwrap(diagnostics.item(withTitle: "Relaunch ScrumTrace")).isEnabled)
+        }
+    }
+
+    @MainActor
+    func testCompactMenuKeepsAdvancedActionsGroupedAndLibraryAccessibleWhenEmpty() throws {
+        try withController { controller in
+            var openedLibrary = 0
+            let menuBar = MenuBarController(controller: controller, openSettings: {}, openLogs: {},
+                openRecordings: { openedLibrary += 1 })
+            let menu = menuBar.menu
+            XCTAssertLessThanOrEqual(menu.items.filter { !$0.isSeparatorItem }.count, 11)
+            XCTAssertNil(menu.item(withTitle: "Retry analysis"))
+            XCTAssertNil(menu.item(withTitle: "Compare transcriptions"))
+            XCTAssertNil(menu.item(withTitle: "Export diagnostic bundle"))
+            XCTAssertNil(menu.item(withTitle: "Settings Window…"))
+            XCTAssertNotNil(menu.item(withTitle: "Settings…")?.action)
+            XCTAssertFalse(try XCTUnwrap(menu.item(withTitle: "Last recording")).isEnabled)
+            let recent = try XCTUnwrap(menu.item(withTitle: "Recent recordings")?.submenu)
+            XCTAssertNotNil(recent.item(withTitle: "No recordings yet"))
+            recent.performActionForItem(at: recent.indexOfItem(withTitle: "Show all recordings…"))
+            XCTAssertEqual(openedLibrary, 1)
+        }
+    }
+
+    @MainActor
+    func testRecentRecordingsUseOnlyMetadataAndBindActionsToTheRightRecording() throws {
+        try withController { controller in
+            var sessions: [SessionManifest] = []
+            for index in 0..<6 {
+                var manifest = try controller.vault.createSession(product: .empty).manifest
+                manifest.createdAt = Date(timeIntervalSince1970: 1_700_000_000 + Double(index * 60))
+                manifest.duration.mediaSeconds = 125
+                manifest.productContext.appName = "PRIVATE-CONTEXT-NOT-FOR-MENU"
+                try controller.vault.write(manifest: &manifest)
+                sessions.append(manifest)
+            }
+            controller.lastSessionId = sessions.last?.sessionId
+            let menuBar = MenuBarController(controller: controller, openSettings: {}, openLogs: {})
+            let recent = try XCTUnwrap(menuBar.menu.item(withTitle: "Recent recordings")?.submenu)
+            let rows = recent.items.filter { $0.submenu != nil }
+            XCTAssertEqual(rows.count, 5)
+            for (row, session) in zip(rows, sessions.reversed()) {
+                XCTAssertTrue(row.title.contains("02:05"))
+                XCTAssertFalse(row.title.contains(session.sessionId))
+                XCTAssertFalse(row.title.contains(session.productContext.appName))
+                let submenu = try XCTUnwrap(row.submenu)
+                XCTAssertFalse(submenu.autoenablesItems)
+                for item in submenu.items where item.action != nil {
+                    XCTAssertEqual(item.representedObject as? String, session.sessionId)
+                }
+            }
+            var invalid = sessions[0]
+            invalid.duration.mediaSeconds = .infinity
+            XCTAssertTrue(MenuBarController.recordingLabel(invalid).contains(" · — · "))
+        }
+    }
+
+    @MainActor
+    func testBriefActionUsesExportAndRejectsArchiveLinks() throws {
+        try withController { controller in
+            let session = try controller.vault.createSession(product: .empty)
+            let id = session.manifest.sessionId
+            controller.lastSessionId = id
+            try ExportRel.writeContainedData(Data("<html>fixture</html>".utf8), relative: ScrumTracePath.sessionBrief, sessionURL: session.url)
+            let menuBar = MenuBarController(controller: controller, openSettings: {}, openLogs: {})
+            var opened: [URL] = []
+            menuBar.openBriefURL = { opened.append($0); return true }
+            let last = try XCTUnwrap(menuBar.menu.item(withTitle: "Last recording")?.submenu)
+            XCTAssertTrue(try XCTUnwrap(last.item(withTitle: "Open brief")).isEnabled)
+            last.performActionForItem(at: last.indexOfItem(withTitle: "Open brief"))
+            XCTAssertEqual(opened, [session.url.appendingPathComponent(ScrumTracePath.sessionBrief)])
+            let brief = session.url.appendingPathComponent(ScrumTracePath.sessionBrief)
+            try FileManager.default.removeItem(at: brief)
+            try FileManager.default.createSymbolicLink(at: brief, withDestinationURL: session.url.appendingPathComponent("archive/private.html"))
+            menuBar.menuWillOpen(menuBar.menu)
+            let refreshed = try XCTUnwrap(menuBar.menu.item(withTitle: "Last recording")?.submenu)
+            XCTAssertFalse(try XCTUnwrap(refreshed.item(withTitle: "Open brief")).isEnabled)
+            menuBar.menuDidClose(menuBar.menu)
+        }
+    }
+
+    @MainActor
+    func testProgressUpdatesInPlaceWhileSubmenusAreOpen() throws {
+        try withController { controller in
+            controller.isBusy = true
+            controller.phase = .slicing
+            controller.lastSessionId = "fixture"
+            controller.reportProcessingProgress("Generating clips", fraction: 0.25)
+            let menuBar = MenuBarController(controller: controller, openSettings: {}, openLogs: {})
+            let menu = menuBar.menu
+            menuBar.menuWillOpen(menu)
+            let status = try XCTUnwrap(menu.items.first)
+            let last = try XCTUnwrap(menu.item(withTitle: "Last recording"))
+            controller.reportProcessingProgress("Generating clips", fraction: 0.5)
+            let deadline = Date().addingTimeInterval(2)
+            while !status.title.contains("50%") && Date() < deadline {
+                RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.02))
+            }
+            XCTAssertTrue(status.title.contains("50%"))
+            XCTAssertTrue(menu.items.first === status)
+            XCTAssertTrue(menu.item(withTitle: "Last recording") === last)
+            menuBar.menuDidClose(menu)
         }
     }
 }

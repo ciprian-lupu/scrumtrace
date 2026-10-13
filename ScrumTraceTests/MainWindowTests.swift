@@ -251,7 +251,7 @@ final class MainWindowTests: XCTestCase {
                 menuBar.menuWillOpen(menu)
                 let item = try XCTUnwrap(menu.item(withTitle: "Open ScrumTrace…"), state.name)
                 let index = menu.index(of: item)
-                XCTAssertEqual(index + 1, menu.indexOfItem(withTitle: "Settings"), "Open ScrumTrace… sits directly above Settings (\(state.name))")
+                XCTAssertEqual(index + 1, menu.indexOfItem(withTitle: "Settings…"), "Open ScrumTrace… sits directly above Settings (\(state.name))")
                 XCTAssertTrue(item.isEnabled, state.name)
                 menu.performActionForItem(at: index)
                 menuBar.menuDidClose(menu)

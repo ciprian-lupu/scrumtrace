@@ -278,12 +278,10 @@ final class ClaudeCLIHandoffTests: XCTestCase {
         let menuBar = MenuBarController(controller: controller, openSettings: {}, openLogs: {})
         let menu = menuBar.menu
         menu.update()
-        XCTAssertNotNil(menu.item(withTitle: "Open last session in Claude"))
-        XCTAssertTrue(try XCTUnwrap(menu.item(withTitle: "Open last session in Claude")).isEnabled)
-        XCTAssertNotNil(menu.item(withTitle: "Open last export in Codex"))
-        XCTAssertTrue(try XCTUnwrap(menu.item(withTitle: "Open last export in Codex")).isEnabled)
-        XCTAssertNotNil(menu.item(withTitle: "Open last archive in Codex…"))
-        XCTAssertTrue(try XCTUnwrap(menu.item(withTitle: "Open last archive in Codex…")).isEnabled)
+        let last = try XCTUnwrap(menu.item(withTitle: "Last recording")?.submenu)
+        XCTAssertTrue(try XCTUnwrap(last.item(withTitle: "Open in Claude")).isEnabled)
+        XCTAssertTrue(try XCTUnwrap(last.item(withTitle: "Open export in Codex")).isEnabled)
+        XCTAssertTrue(try XCTUnwrap(last.item(withTitle: "Open archive in Codex…")).isEnabled)
         XCTAssertNil(menu.item(withTitle: "Open last session in Cursor"))
     }
 }

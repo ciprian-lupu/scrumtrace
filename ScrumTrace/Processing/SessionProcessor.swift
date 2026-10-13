@@ -82,6 +82,7 @@ final class SessionProcessor: @unchecked Sendable {
         whisperModel: String,
         identifySpeakers: Bool = false,
         localOnly: Bool = false,
+        onProgress: @escaping @MainActor (String, Double?) -> Void = { _, _ in },
         onStatus: @escaping @MainActor (PipelineStatus, String) -> Void
     ) async throws -> SessionManifest {
         let sessionURL = vault.sessionURL(id: sessionId)
@@ -262,6 +263,7 @@ final class SessionProcessor: @unchecked Sendable {
                 )
                 var exported: [SliceRecord] = []
                 for slice in slices {
+                    await onProgress("Generating clip \(exported.count + 1) of \(slices.count)", Double(exported.count) / Double(max(1, slices.count)))
                     if ExportRel.existingSessionFile(ScrumTracePath.sessionMovie, sessionURL: sessionURL) != nil {
                         do {
                             let clipped = try await exporter.export(
@@ -281,6 +283,7 @@ final class SessionProcessor: @unchecked Sendable {
                     } else {
                         exported.append(slice.withExistingMedia(sessionURL: sessionURL))
                     }
+                    await onProgress("Generating clips", Double(exported.count) / Double(max(1, slices.count)))
                 }
                 manifest.slices = exported
                 manifest.markCompleted(.slicing)
@@ -347,6 +350,7 @@ final class SessionProcessor: @unchecked Sendable {
                     transcript: transcript,
                     sessionURL: sessionURL,
                     services: comparisonServices,
+                    onProgress: onProgress,
                     onStatus: onStatus
                 )
             } else if configuration.kind == .anthropic && (
@@ -391,6 +395,7 @@ final class SessionProcessor: @unchecked Sendable {
                 // Serial: a 401 must not leave other slices uploading stills (Gate 5).
                 // Persist after each slice so a crash does not re-upload successes (D14).
                 for slice in toRun {
+                    await onProgress("Analyzing item \(updatedSlices.count + 1) of \(manifest.slices.count)", Double(updatedSlices.count) / Double(max(1, manifest.slices.count)))
                     let result = await self.evaluateSlice(
                         slice: slice,
                         manifest: manifest,
@@ -411,6 +416,7 @@ final class SessionProcessor: @unchecked Sendable {
                     // slice so a crash cannot drop extras that later ranking needs.
                     manifest.tasks = tasks
                     try vault.write(manifest: &manifest)
+                    await onProgress("Analyzing items", Double(updatedSlices.count) / Double(max(1, manifest.slices.count)))
                 }
                 manifest.slices = updatedSlices.sorted { $0.sliceId < $1.sliceId }
                 mergeUncoveredReview(manifest: &manifest, kept: tasks)
@@ -1180,6 +1186,7 @@ final class SessionProcessor: @unchecked Sendable {
         transcript: FullTranscript,
         sessionURL: URL,
         services: [AIServiceConfiguration],
+        onProgress: @escaping @MainActor (String, Double?) -> Void = { _, _ in },
         onStatus: @escaping @MainActor (PipelineStatus, String) -> Void
     ) async throws {
         guard manifest.uploadConsent.approved,
@@ -1189,6 +1196,10 @@ final class SessionProcessor: @unchecked Sendable {
         resetEvalAuthGate()
         manifest.pipelineStatus = .evaluating
         let cache = ComparisonInputCache(slices: manifest.slices)
+        let total = services.reduce(0) { count, service in
+            count + manifest.slices.filter { !Self.completedEvaluation($0, service: service) }.count
+        }
+        var finished = 0
         for service in services {
             var config = service.configuration
             // A common wire contract is mandatory, including single-service runs
@@ -1202,11 +1213,13 @@ final class SessionProcessor: @unchecked Sendable {
                 return nil
             }()
             if let invalid {
+                let skipped = manifest.slices.filter { !Self.completedEvaluation($0, service: service) }.count
                 for index in manifest.slices.indices {
                     guard !Self.completedEvaluation(manifest.slices[index], service: service) else { continue }
                     setServiceEvaluation(&manifest.slices[index], service: service, status: .skipped, media: [], diagnostic: invalid)
                 }
                 AgentLog.event("eval_service", ["service": service.service.id, "status": "skipped", "error": invalid])
+                finished += skipped
                 try vault.write(manifest: &manifest)
                 continue
             }
@@ -1215,6 +1228,7 @@ final class SessionProcessor: @unchecked Sendable {
             for index in manifest.slices.indices {
                 guard !Self.completedEvaluation(manifest.slices[index], service: service) else { continue }
                 let source = manifest.slices[index]
+                await onProgress("Analyzing item \(finished + 1) of \(total) with \(service.service.name)", Double(finished) / Double(max(1, total)))
                 setServiceEvaluation(&manifest.slices[index], service: service, status: .pending, media: [])
                 try vault.write(manifest: &manifest)
                 let result = await evaluateSlice(
@@ -1233,6 +1247,8 @@ final class SessionProcessor: @unchecked Sendable {
                 manifest.tasks.removeAll { $0.serviceId == service.service.id && $0.sourceSliceId == source.sliceId }
                 manifest.tasks.append(contentsOf: tagged(result.1, service: service))
                 try vault.write(manifest: &manifest)
+                finished += 1
+                await onProgress("Analyzing items", Double(finished) / Double(max(1, total)))
             }
         }
         for index in manifest.slices.indices { refreshLegacyStatus(&manifest.slices[index]) }

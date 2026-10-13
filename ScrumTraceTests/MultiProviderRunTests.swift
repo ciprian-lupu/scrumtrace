@@ -5,9 +5,14 @@ import XCTest
 private actor ComparisonRecorder {
     var requests: [(String, SliceEvaluationRequest)] = []
     var failures: [String: Int] = [:]
+    var progressReporter: ProcessingProgressReporter?
+    var observedFractions: [Double?] = []
+    func observeProgress(_ reporter: ProcessingProgressReporter) { progressReporter = reporter }
+    func fractions() -> [Double?] { observedFractions }
     func fail(_ model: String, code: Int) { failures[model] = code }
     func receive(_ model: String, _ request: SliceEvaluationRequest) throws -> CandidateEvaluationResponse {
         requests.append((model, request))
+        if let progressReporter { observedFractions.append(progressReporter.snapshot?.fraction) }
         if let code = failures.removeValue(forKey: model) { throw AIProviderError.httpStatus(code, "fixture") }
         return CandidateEvaluationResponse(candidates: [])
     }
@@ -71,6 +76,24 @@ final class MultiProviderRunTests: XCTestCase {
         let calls = await recorder.recorded()
         XCTAssertEqual(calls.count, 2)
         XCTAssertTrue(manifest.slices.allSatisfy { $0.serviceEvaluations.first?.status == .success })
+    }
+
+    @MainActor
+    func testComparisonPercentageCountsCompletedRequestsAndExcludesCachedSuccesses() async throws {
+        try await run([service("cached")])
+        let services = [service("cached"), service("new-a"), service("new-b")]
+        manifest.uploadConsent.destinations = services.map(\.destination)
+        let reporter = ProcessingProgressReporter()
+        await recorder.observeProgress(reporter)
+        try await processor.evaluateComparison(manifest: &manifest, transcript: transcript,
+            sessionURL: vault.sessionURL(id: manifest.sessionId), services: services,
+            onProgress: { message, fraction in
+                let id = reporter.begin(message)
+                reporter.update(id, fraction: fraction)
+            }, onStatus: { _, _ in })
+        let fractions = await recorder.fractions()
+        XCTAssertEqual(fractions, [0, 0.25, 0.5, 0.75], "A request is counted only after its result is saved")
+        XCTAssertEqual(reporter.snapshot?.fraction, 1)
     }
 
     func testIdenticalInputsAcrossProvidersAndUniqueFindingsAcrossSlices() async throws {
