@@ -31,6 +31,48 @@ final class ProcessingProgressTests: XCTestCase {
         XCTAssertNil(reporter.snapshot)
     }
 
+    func testNestedAudioWorkRestoresTheParentClockAndRejectsEndedCallbacks() throws {
+        let reporter = ProcessingProgressReporter()
+        let parent = reporter.begin("Preparing audio")
+        let initial = try XCTUnwrap(reporter.snapshot)
+        let child = reporter.begin("Extracting audio")
+        reporter.update(child, fraction: 1)
+        reporter.end(child)
+        XCTAssertEqual(reporter.snapshot?.id, parent)
+        XCTAssertEqual(reporter.snapshot?.startedAt, initial.startedAt)
+        XCTAssertNil(reporter.snapshot?.percent)
+        reporter.update(child, fraction: 0.9)
+        reporter.end(child)
+        XCTAssertEqual(reporter.snapshot?.id, parent)
+        reporter.end(parent)
+        XCTAssertNil(reporter.snapshot)
+    }
+
+    @MainActor
+    func testChangingItemMessagesPreservesTheStageClockAndNextStageResetsIt() throws {
+        let name = "progress-clock-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: name))
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(name)
+        defer { defaults.removePersistentDomain(forName: name); try? FileManager.default.removeItem(at: root) }
+        let controller = SessionController(settings: AppSettings(defaults: defaults, keyStore: .empty), vault: SessionVault(rootURL: root))
+        controller.isBusy = true
+        controller.phase = .slicing
+        controller.reportProcessingProgress("Generating clip 1 of 8", fraction: 0)
+        let first = try XCTUnwrap(controller.processingProgress)
+        controller.reportProcessingProgress("Generating clips", fraction: 0.25)
+        controller.statusLine = "Generating clip 3 of 8"
+        controller.reportProcessingProgress("Generating clips", fraction: 0.1)
+        controller.sampleProcessingProgress(at: first.startedAt.addingTimeInterval(125))
+        XCTAssertEqual(controller.processingProgress?.id, first.id)
+        XCTAssertEqual(controller.processingProgress?.elapsedSeconds, 125)
+        XCTAssertEqual(controller.processingProgress?.percent, 25)
+        controller.phase = .evaluating
+        controller.statusLine = "Analyzing items"
+        XCTAssertNotEqual(controller.processingProgress?.id, first.id)
+        XCTAssertNil(controller.processingProgress?.percent)
+        XCTAssertEqual(controller.processingProgress?.elapsedSeconds, 0)
+    }
+
     @MainActor
     func testWorkerProgressAppearsInControllerAndMinifiedHUDWithoutRecordingClock() throws {
         let name = "progress-ui-\(UUID().uuidString)"
@@ -65,7 +107,10 @@ final class ProcessingProgressTests: XCTestCase {
 
         if let directory = ProcessInfo.processInfo.environment["SCRUMTRACE_PROGRESS_SNAPSHOT_DIR"] {
             controller.isBusy = true
-            controller.reportProcessingProgress("Generating clip 3 of 8", fraction: 0.25)
+            controller.phase = .slicing
+            controller.reportProcessingProgress("Generating clips", fraction: 0.25)
+            let started = try XCTUnwrap(controller.processingProgress).startedAt
+            controller.sampleProcessingProgress(at: started.addingTimeInterval(125))
             hud.setMinified(false)
             hud.refresh()
             let host = NSHostingView(rootView: MainProcessingBanner(controller: controller))

@@ -237,7 +237,11 @@ final class MenuBarController: NSObject {
             recentMenu.addItem(empty)
         } else {
             for session in sessions {
-                let recording = NSMenuItem(title: Self.recordingLabel(session), action: nil, keyEquivalent: "")
+                let isActive = (controller.isRecording || controller.isBusy) && controller.activeSessionId == session.sessionId
+                let probe = session.pipelineStatus == .offlineFailed
+                    ? SessionExportProbe.probe(sessionURL: controller.vault.sessionURL(id: session.sessionId)) : SessionExportProbe()
+                let recording = NSMenuItem(title: Self.recordingLabel(session, isActive: isActive,
+                    exportReady: session.hasCompleted(.synthesizing) && probe.hasBrief && probe.hasAgentContext), action: nil, keyEquivalent: "")
                 recording.submenu = recordingMenu(sessionId: session.sessionId, isLast: false)
                 recentMenu.addItem(recording)
             }
@@ -277,12 +281,12 @@ final class MenuBarController: NSObject {
     }
 
     /// Dates, duration and pipeline state come from manifest metadata only.
-    static func recordingLabel(_ session: SessionManifest) -> String {
+    static func recordingLabel(_ session: SessionManifest, isActive: Bool = false, exportReady: Bool = false) -> String {
         let date = DateFormatter.localizedString(from: session.createdAt, dateStyle: .short, timeStyle: .short)
         let seconds = session.duration.mediaSeconds
         let duration = seconds.isFinite && seconds >= 0 && seconds < Double(Int.max) / 2
             ? SessionController.clock(seconds) : "—"
-        return "\(date) · \(duration) · \(PipelineStatusOrder.label(session.pipelineStatus))"
+        return "\(date) · \(duration) · \(RecordingStatusText.label(session.pipelineStatus, isActive: isActive, exportReady: exportReady))"
     }
 
     private func recordingMenu(sessionId: String?, isLast: Bool) -> NSMenu {

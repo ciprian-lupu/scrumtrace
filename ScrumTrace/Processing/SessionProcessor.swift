@@ -134,6 +134,8 @@ final class SessionProcessor: @unchecked Sendable {
 
         var justFinishedTranscribing = false
         if !localOnly && !manifest.hasCompleted(.transcribing) {
+            timing.whisperIncomplete = false
+            try timing.write(sessionURL: sessionURL)
             await onStatus(.transcribing, "Loading Whisper model…")
             manifest.pipelineStatus = .transcribing
             try vault.write(manifest: &manifest)
@@ -263,7 +265,7 @@ final class SessionProcessor: @unchecked Sendable {
                 )
                 var exported: [SliceRecord] = []
                 for slice in slices {
-                    await onProgress("Generating clip \(exported.count + 1) of \(slices.count)", Double(exported.count) / Double(max(1, slices.count)))
+                    await onProgress("Generating clips", Double(exported.count) / Double(max(1, slices.count)))
                     if ExportRel.existingSessionFile(ScrumTracePath.sessionMovie, sessionURL: sessionURL) != nil {
                         do {
                             let clipped = try await exporter.export(
@@ -395,7 +397,7 @@ final class SessionProcessor: @unchecked Sendable {
                 // Serial: a 401 must not leave other slices uploading stills (Gate 5).
                 // Persist after each slice so a crash does not re-upload successes (D14).
                 for slice in toRun {
-                    await onProgress("Analyzing item \(updatedSlices.count + 1) of \(manifest.slices.count)", Double(updatedSlices.count) / Double(max(1, manifest.slices.count)))
+                    await onProgress("Analyzing items", Double(updatedSlices.count) / Double(max(1, manifest.slices.count)))
                     let result = await self.evaluateSlice(
                         slice: slice,
                         manifest: manifest,
@@ -1096,19 +1098,6 @@ final class SessionProcessor: @unchecked Sendable {
         let prepareTask = Task {
             try await self.transcriber.prepare(model: model)
         }
-        let ticker = Task { @MainActor in
-            var elapsed = 0
-            while !Task.isCancelled && !self.transcriber.isReady(for: model) {
-                try? await Task.sleep(nanoseconds: 2_000_000_000)
-                guard !Task.isCancelled else { return }
-                elapsed += 2
-                onStatus(
-                    .transcribing,
-                    "Loading Whisper model… \(elapsed)s (first run downloads ~632 MB)"
-                )
-            }
-        }
-        defer { ticker.cancel() }
         try await withThrowingTaskGroup(of: Void.self) { group in
             group.addTask {
                 try await prepareTask.value
@@ -1228,7 +1217,7 @@ final class SessionProcessor: @unchecked Sendable {
             for index in manifest.slices.indices {
                 guard !Self.completedEvaluation(manifest.slices[index], service: service) else { continue }
                 let source = manifest.slices[index]
-                await onProgress("Analyzing item \(finished + 1) of \(total) with \(service.service.name)", Double(finished) / Double(max(1, total)))
+                await onProgress("Analyzing items with \(service.service.name)", Double(finished) / Double(max(1, total)))
                 setServiceEvaluation(&manifest.slices[index], service: service, status: .pending, media: [])
                 try vault.write(manifest: &manifest)
                 let result = await evaluateSlice(
@@ -1248,7 +1237,7 @@ final class SessionProcessor: @unchecked Sendable {
                 manifest.tasks.append(contentsOf: tagged(result.1, service: service))
                 try vault.write(manifest: &manifest)
                 finished += 1
-                await onProgress("Analyzing items", Double(finished) / Double(max(1, total)))
+                await onProgress("Analyzing items with \(service.service.name)", Double(finished) / Double(max(1, total)))
             }
         }
         for index in manifest.slices.indices { refreshLegacyStatus(&manifest.slices[index]) }

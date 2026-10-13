@@ -4,6 +4,24 @@ import Foundation
 
 // MARK: - Rows
 
+/// Recording outcomes are distinct from the live stage names in the processing bar.
+enum RecordingStatusText {
+    static func label(_ status: PipelineStatus, isActive: Bool = false, exportReady: Bool = false) -> String {
+        if isActive { return PipelineStatusOrder.label(status) }
+        switch status {
+        case .recording, .paused: return "Interrupted"
+        case .transcribing, .slicing, .evaluating, .synthesizing: return "Incomplete · retry"
+        case .offlineFailed: return exportReady ? "Export ready · AI failed" : "Needs attention"
+        case .idle, .completed: return PipelineStatusOrder.label(status)
+        }
+    }
+
+    static func label(_ summary: SessionSummary, isActive: Bool = false) -> String {
+        label(summary.pipelineStatus, isActive: isActive,
+              exportReady: summary.completedStages.contains(.synthesizing) && summary.hasBrief && summary.hasExportContext)
+    }
+}
+
 /// Task outcomes of one session. Counts only, never titles or evidence.
 struct SessionTaskCounts: Sendable, Hashable {
     var confirmed = 0

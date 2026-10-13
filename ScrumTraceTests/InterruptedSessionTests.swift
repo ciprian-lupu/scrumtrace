@@ -111,7 +111,8 @@ final class InterruptedSessionTests: XCTestCase {
                 XCTAssertNil(controller.interruptedSessionId, "\(status) is not resumed on its own")
                 XCTAssertFalse(controller.resumeInterruptedSession())
                 XCTAssertEqual(controller.lastSessionId, unfinished)
-                XCTAssertEqual(controller.statusLine, "Last session is unfinished — Retry Analysis to finish", "The menu still points at Retry Analysis")
+                XCTAssertTrue(controller.statusLine.contains("Retry Analysis"), "The menu still points at Retry Analysis")
+                XCTAssertFalse(controller.statusLine.contains("unfinished"), "Capture interruption and failure have their own outcomes")
                 XCTAssertFalse(try logRows(at: bench.log).contains { $0["event"] == "resume_interrupted" })
             }
         }
@@ -139,6 +140,64 @@ final class InterruptedSessionTests: XCTestCase {
             XCTAssertEqual(controller.interruptedSessionId, stuck, "The session is still remembered for Retry Analysis")
             XCTAssertTrue(try logRows(at: bench.log).contains { $0["event"] == "resume_interrupted_skipped" && $0["session"] == stuck })
             controller.setStartInFlightForTesting(false)
+        }
+    }
+
+    @MainActor
+    func testAnIncompleteTranscriptionWaitsForManualRetryAcrossLaunches() async throws {
+        try await withBench { bench in
+            let id = try makeSession(in: bench.vault, status: .transcribing)
+            let url = bench.vault.sessionURL(id: id)
+            try PipelineTiming(whisperIncomplete: true).write(sessionURL: url)
+            for _ in 0..<2 {
+                let controller = makeController(bench)
+                XCTAssertNil(controller.interruptedSessionId)
+                XCTAssertFalse(controller.resumeInterruptedSession())
+                XCTAssertEqual(controller.statusLine, "Transcription is incomplete — Retry Analysis to try again")
+            }
+            XCTAssertFalse(try logRows(at: bench.log).contains { $0["event"] == "resume_interrupted" })
+            let controller = makeController(bench)
+            try FileManager.default.removeItem(at: url)
+            controller.retryAnalysis(sessionId: id)
+            let ended = await waitUntil { !controller.isBusy }
+            XCTAssertTrue(ended)
+            XCTAssertTrue(try logRows(at: bench.log).contains { $0["event"] == "retry_begin" })
+        }
+    }
+
+    @MainActor
+    func testFreshTranscriptionClearsThePreviousOutcomeBeforeSlowWork() async throws {
+        try await withBench { bench in
+            let id = try makeSession(in: bench.vault, status: .transcribing)
+            let url = bench.vault.sessionURL(id: id)
+            try PipelineTiming(whisperWallSeconds: 42, whisperIncomplete: true).write(sessionURL: url)
+            let transcriber = WhisperTranscriber(loadModel: { _ in
+                XCTAssertEqual(PipelineTiming.load(sessionURL: url)?.whisperIncomplete, false)
+                XCTAssertEqual(PipelineTiming.load(sessionURL: url)?.whisperWallSeconds, 42)
+                await MainActor.run {
+                    XCTAssertEqual(self.makeController(bench).interruptedSessionId, id, "A crash during this fresh pass is resumable")
+                }
+                throw SettingsValidationError("Fixture unavailable model")
+            })
+            let processor = SessionProcessor(vault: bench.vault, transcriber: transcriber)
+            let configuration = AIProviderConfiguration(kind: .openaiCompatible, baseURL: "https://example.invalid", model: "unused", apiKey: "", acceptsText: true, acceptsImages: false, acceptsVideo: false)
+            let result = try await processor.process(sessionId: id, pinTimes: [], configuration: configuration,
+                whisperModel: "tiny", identifySpeakers: false) { _, _ in }
+            XCTAssertEqual(result.pipelineStatus, .transcribing)
+            XCTAssertEqual(PipelineTiming.load(sessionURL: url)?.whisperIncomplete, true)
+            XCTAssertNil(makeController(bench).interruptedSessionId, "The failed pass finished rather than crashed")
+        }
+    }
+
+    @MainActor
+    func testCompletedTranscriptionIsNotBlockedByAnOlderIncompleteOutcome() async throws {
+        try await withBench { bench in
+            let id = try makeSession(in: bench.vault, status: .transcribing)
+            var manifest = try bench.vault.loadManifest(id: id)
+            manifest.markCompleted(.transcribing)
+            try bench.vault.write(manifest: &manifest)
+            try PipelineTiming(whisperIncomplete: true).write(sessionURL: bench.vault.sessionURL(id: id))
+            XCTAssertEqual(makeController(bench).interruptedSessionId, id)
         }
     }
 }

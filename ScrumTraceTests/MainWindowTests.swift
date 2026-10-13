@@ -2643,11 +2643,11 @@ final class MainWindowTests: XCTestCase {
                 ]
                 // Every status but the offline one may carry the needs-review marker: 4 pt of spacing and the symbol.
                 let marker: CGFloat = 4 + 16
-                let loaded = statuses.map { textWidth(PipelineStatusOrder.label($0)) + ($0 == .offlineFailed ? 0 : marker) }
+                let loaded = statuses.map { textWidth(RecordingStatusText.label($0)) + ($0 == .offlineFailed ? 0 : marker) }
+                    + [textWidth(RecordingStatusText.label(.offlineFailed, exportReady: true))]
                 let unreadable = [SessionEntry.decodingFailed, SessionEntry.notReadable, SessionEntry.sessionIdMismatch]
                     .map { textWidth(RecordingRowText.unreadableStatus($0)) }
                 let widest = (loaded + unreadable).max() ?? 0
-                XCTAssertEqual(widest, textWidth(PipelineStatusOrder.label(.offlineFailed)), "Offline — needs review is the widest")
                 // The column as drawn, intercell spacing included, less the cell's inset on each side.
                 let column = table.rect(ofColumn: 3).width
                 XCTAssertGreaterThanOrEqual(
@@ -3159,11 +3159,13 @@ final class MainWindowTests: XCTestCase {
                 XCTAssertTrue(overview.attention.unfinished.contains { $0.sessionId == id }, id)
                 XCTAssertTrue(recordings.isEnabled(.retryAnalysis, for: .loaded(item)), id)
             }
-            // Analysis that did not finish keeps its own sentence and is never shown as interrupted.
+            // Incomplete analysis and a failed run have distinct outcomes; neither is an interrupted capture.
             for id in [f.unfinished, offline] {
                 let item = try summary(id)
                 XCTAssertFalse(recordings.isInterrupted(item), id)
-                XCTAssertEqual(RecordingRowText.unfinishedNote(item), "Analysis did not finish.", id)
+                XCTAssertEqual(RecordingRowText.unfinishedNote(item), id == offline
+                    ? "This recording needs attention. Retry analysis can try again."
+                    : "Analysis did not finish.", id)
             }
             XCTAssertFalse(recordings.isInterrupted(try summary(f.completed)))
 

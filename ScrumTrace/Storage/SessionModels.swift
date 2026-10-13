@@ -2855,6 +2855,12 @@ struct PipelineTiming: Codable, Sendable, Hashable {
     var exportFolderBytes: Int?
     var omittedCount: Int
 
+    static func markTranscriptionStarted(sessionURL: URL) throws {
+        var timing = load(sessionURL: sessionURL) ?? PipelineTiming()
+        timing.whisperIncomplete = false
+        try timing.write(sessionURL: sessionURL)
+    }
+
     enum CodingKeys: String, CodingKey {
         case whisperWallSeconds = "whisper_wall_seconds"
         case whisperSources = "whisper_sources"

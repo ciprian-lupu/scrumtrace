@@ -40,12 +40,12 @@ struct ProcessingProgress: Equatable, Sendable {
 /// Worker callbacks publish only technical progress, without transcript text or model credentials.
 final class ProcessingProgressReporter: @unchecked Sendable {
     private let lock = NSLock()
-    private var value: ProcessingProgress?
+    private var activities: [ProcessingProgress] = []
 
     var snapshot: ProcessingProgress? {
         lock.lock()
         defer { lock.unlock() }
-        return value
+        return activities.last
     }
 
     @discardableResult
@@ -53,25 +53,26 @@ final class ProcessingProgressReporter: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         let progress = ProcessingProgress(message: message)
-        value = progress
+        activities.append(progress)
         return progress.id
     }
 
     func update(_ id: UUID, fraction: Double?) {
         lock.lock()
         defer { lock.unlock() }
-        guard var current = value, current.id == id else { return }
+        guard let index = activities.indices.last, activities[index].id == id else { return }
+        var current = activities[index]
         let fraction = ProcessingProgress.validFraction(fraction)
         // Model callbacks can arrive out of order. A completed operation never regresses.
         if let fraction {
             current.fraction = max(current.fraction ?? 0, fraction)
-            value = current
+            activities[index] = current
         }
     }
 
     func end(_ id: UUID) {
         lock.lock()
         defer { lock.unlock() }
-        if value?.id == id { value = nil }
+        activities.removeAll { $0.id == id }
     }
 }

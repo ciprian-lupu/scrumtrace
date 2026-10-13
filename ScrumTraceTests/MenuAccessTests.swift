@@ -4,6 +4,47 @@ import XCTest
 
 final class MenuAccessTests: XCTestCase {
     @MainActor
+    func testRecordingOutcomesDistinguishInactiveStagesAndAvailableExports() throws {
+        try withController { controller in
+            var manifest = try controller.vault.createSession(product: .empty).manifest
+            for status in [PipelineStatus.transcribing, .slicing, .evaluating, .synthesizing] {
+                manifest.pipelineStatus = status
+                XCTAssertTrue(MenuBarController.recordingLabel(manifest).hasSuffix("Incomplete · retry"))
+                XCTAssertTrue(MenuBarController.recordingLabel(manifest, isActive: true).hasSuffix(PipelineStatusOrder.label(status)))
+            }
+            for status in [PipelineStatus.recording, .paused] {
+                XCTAssertEqual(RecordingStatusText.label(status), "Interrupted")
+                XCTAssertEqual(RecordingStatusText.label(status, isActive: true), PipelineStatusOrder.label(status))
+            }
+            manifest.pipelineStatus = .offlineFailed
+            manifest.markCompleted(.synthesizing)
+            try controller.vault.write(manifest: &manifest)
+            let missing = SessionSummary(manifest: manifest, exportProbe: SessionExportProbe())
+            XCTAssertEqual(RecordingStatusText.label(missing), "Needs attention")
+            XCTAssertFalse(RecordingRowText.unfinishedNote(missing).contains("export is ready"))
+            let ready = SessionSummary(manifest: manifest, exportProbe: SessionExportProbe(hasAgentContext: true, hasBrief: true))
+            XCTAssertEqual(RecordingStatusText.label(ready), "Export ready · AI failed")
+            XCTAssertTrue(RecordingRowText.unfinishedNote(ready).contains("local export is ready"))
+            manifest.completedStages = []
+            XCTAssertEqual(RecordingStatusText.label(SessionSummary(manifest: manifest,
+                exportProbe: SessionExportProbe(hasAgentContext: true, hasBrief: true))), "Needs attention")
+
+            let menuBar = MenuBarController(controller: controller, openSettings: {}, openLogs: {})
+            @MainActor func recentTitle() throws -> String {
+                menuBar.menuWillOpen(menuBar.menu)
+                return try XCTUnwrap(menuBar.menu.item(withTitle: "Recent recordings")?.submenu?.items.first?.title)
+            }
+            XCTAssertTrue(try recentTitle().hasSuffix("Needs attention"))
+            let url = controller.vault.sessionURL(id: manifest.sessionId)
+            for relative in [ScrumTracePath.agentContext, ScrumTracePath.sessionBrief] {
+                try ExportRel.writeContainedData(Data("fixture".utf8), relative: relative, sessionURL: url)
+            }
+            XCTAssertTrue(try recentTitle().hasSuffix("Export ready · AI failed"))
+            XCTAssertEqual(RecordingStatusText.label(.completed), "Completed")
+        }
+    }
+
+    @MainActor
     private func withController(_ body: (SessionController) throws -> Void) throws {
         let id = "ScrumTrace.MenuAccessTests.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: id))
