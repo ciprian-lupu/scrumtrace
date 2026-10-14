@@ -74,7 +74,7 @@ final class ProcessingPanelTests: XCTestCase {
             // `isFloatingPanel` puts the panel at the floating level, as it does the pill; both sit above normal windows.
             XCTAssertGreaterThanOrEqual(panel.level.rawValue, NSWindow.Level.floating.rawValue)
             XCTAssertFalse(panel.isMovableByWindowBackground, "The content view drags the panel itself")
-            func views(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(views) }
+            @MainActor func views(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(views) }
             let content = try XCTUnwrap(panel.contentView)
             XCTAssertFalse(content.acceptsFirstResponder)
             let buttons = views(content).compactMap { $0 as? NSButton }
@@ -107,7 +107,7 @@ final class ProcessingPanelTests: XCTestCase {
             XCTAssertEqual(state.rows[1].elapsed, "01:34")
             XCTAssertEqual(state.rows[1].detail, "On this Mac a slow load took 9 min 52 s to 11 min 27 s and a fast one about 5 s (3 loads). The first load after a restart is usually the slow kind.")
             XCTAssertEqual(state.totalElapsed, "01:35")
-            func views(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(views) }
+            @MainActor func views(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(views) }
             let content = try XCTUnwrap(panel.contentView)
             let buttons = views(content).compactMap { $0 as? NSButton }
             let finishLater = try XCTUnwrap(buttons.first { $0.accessibilityIdentifier() == "processing.finishLater" })

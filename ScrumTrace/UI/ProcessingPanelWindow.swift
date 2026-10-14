@@ -226,8 +226,10 @@ final class ProcessingPanelWindow: NSPanel {
         stack.edgeInsets = NSEdgeInsets(top: 12, left: 14, bottom: 12, right: 14)
         stack.translatesAutoresizingMaskIntoConstraints = false
 
-        titleLabel.lineBreakMode = .byTruncatingTail
-        titleLabel.maximumNumberOfLines = 2
+        // The title wraps onto a second line rather than losing the date, which is the point of the panel.
+        titleLabel.lineBreakMode = .byWordWrapping
+        titleLabel.maximumNumberOfLines = 3
+        titleLabel.preferredMaxLayoutWidth = ProcessingPanelLayout.width - 28 - 64
         titleLabel.setAccessibilityIdentifier("processing.title")
         subtitleLabel.maximumNumberOfLines = 2
         footerLabel.maximumNumberOfLines = 3

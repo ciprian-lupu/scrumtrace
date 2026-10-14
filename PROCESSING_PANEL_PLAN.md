@@ -1,6 +1,6 @@
 # ScrumTrace — Processing Panel Plan (see what is being worked on, and finish it later)
 
-Status: **revision 2, being implemented on `feature/processing-panel`**, written 2026-10-13, branched
+Status: **implemented on `feature/processing-panel`** (tasks P01–P06; P07 not done), written 2026-10-13, branched
 from `develop` at `b3bed2c`. Revision 2 folds in the Codex CLI review of revision 1 (§6: four blockers,
 nine revisions, all verified against the code); §7 records where the build differs from the task text.
 The Mac checks in §3 have not been run.
@@ -544,7 +544,12 @@ The seven `MainWindowTests` failures the display-selection paragraph records wer
 `testDeleteAsksFirstCancelChangesNothingAndConfirmDeletesThenRefreshes`,
 `testDeleteWaitsForRecordingAndAnalysisAndRefusesAnUnlistedRowAndALiveRecordingLock`,
 `testFileAccessAndDragOfferOnlyRealFoldersInsideTheSession`) on unmodified `develop` at `b3bed2c`, run before any
-change (`scripts/mac_xcode_test.sh`, 15 skipped). The same four are the baseline for the final run.
+change (`scripts/mac_xcode_test.sh`, 15 skipped). The final run on the branch passed 486 tests and skipped 9, with
+those four plus `testOpeningFromTheAppIconGivesFocusBackToTheAppTheUserCameFrom`, whose `main_open` rows carried a
+session id from another test (the same leak the display-selection paragraph records) and which passed when rerun
+alone. The 24 new native tests pass; the Linux contract suite passes. Snapshots inspected: `overview-processing`,
+`overview-processing-failed`, `settings-minimum-processing` (light and dark) and `processing-panel-{loading,
+transcribing, deferred, done, failed}.png`.
 
 ---
 
