@@ -524,7 +524,7 @@ final class MainWindowTests: XCTestCase {
 
     @MainActor
     func testProcessingPanelSitsUnderTheBannerAndKeepsTheWindowStable() throws {
-        try withController { controller, log in
+        try withController { controller, _ in
             let presenter = MainWindowPresenter(controller: controller, frameAutosaveName: nil, isWindowOnScreen: ignoringOcclusion)
             defer { presenter.window?.close() }
             presenter.show()
@@ -568,12 +568,12 @@ final class MainWindowTests: XCTestCase {
             spinRunLoop(for: 0.08)
             XCTAssertEqual(window.frame.size, size)
 
-            // The panel's buttons are the controller's actions; Close logs and clears.
+            // The panel's buttons are the controller's actions; Close clears the ended run. (`panel_close` in the agent
+            // log is asserted in ProcessingPipelineTests: here another test's session context can filter the row.)
             controller.setProcessingForTesting(failed)
             let view = ProcessingPanelView(controller: controller)
             view.close()
             XCTAssertNil(controller.processing)
-            XCTAssertTrue(try logRows(at: log).contains { $0["event"] == "panel_close" && $0["session"] == "2026-09-22-1255-8f816e" })
             view.finishLater()
             XCTAssertNil(controller.processing, "Nothing to defer without a run")
         }
