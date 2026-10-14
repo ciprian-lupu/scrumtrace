@@ -254,6 +254,11 @@ struct MainWindowView: View {
         } detail: {
             VStack(spacing: 0) {
                 MainLiveBanner(controller: controller)
+                // The processing panel observes the controller on its own, like the banner, so sections do not
+                // re-render with every tick. It never opens or fronts the window: it is only a view inside it.
+                ProcessingPanelView(controller: controller)
+                // Operation percentages for busy work that is not a pipeline run (a transfer, a speaker update); the
+                // panel above covers pipeline runs.
                 MainProcessingBanner(controller: controller)
                 detail
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -297,7 +302,7 @@ struct MainProcessingBanner: View {
     @ObservedObject var controller: SessionController
 
     var body: some View {
-        if controller.isBusy {
+        if controller.isBusy && !controller.processingPanelShouldShow {
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 10) {
                     if let fraction = controller.processingProgress?.fraction {

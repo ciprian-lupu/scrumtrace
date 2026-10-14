@@ -2854,6 +2854,10 @@ struct PipelineTiming: Codable, Sendable, Hashable {
     var zipBytes: Int?
     var exportFolderBytes: Int?
     var omittedCount: Int
+    /// Wall seconds the speech model took to load inside this run; absent when it was already loaded.
+    var whisperLoadSeconds: TimeInterval?
+    /// Wall seconds per processing stage that ran, keyed by `ProcessingStage.rawValue`. Feeds the panel's expectations.
+    var stageSeconds: [String: TimeInterval]
 
     static func markTranscriptionStarted(sessionURL: URL) throws {
         var timing = load(sessionURL: sessionURL) ?? PipelineTiming()
@@ -2868,6 +2872,8 @@ struct PipelineTiming: Codable, Sendable, Hashable {
         case zipBytes = "zip_bytes"
         case exportFolderBytes = "export_folder_bytes"
         case omittedCount = "omitted_count"
+        case whisperLoadSeconds = "whisper_load_seconds"
+        case stageSeconds = "stage_seconds"
     }
 
     init(
@@ -2876,7 +2882,9 @@ struct PipelineTiming: Codable, Sendable, Hashable {
         whisperIncomplete: Bool = false,
         zipBytes: Int? = nil,
         exportFolderBytes: Int? = nil,
-        omittedCount: Int = 0
+        omittedCount: Int = 0,
+        whisperLoadSeconds: TimeInterval? = nil,
+        stageSeconds: [String: TimeInterval] = [:]
     ) {
         self.whisperWallSeconds = whisperWallSeconds
         self.whisperSources = whisperSources
@@ -2884,6 +2892,8 @@ struct PipelineTiming: Codable, Sendable, Hashable {
         self.zipBytes = zipBytes
         self.exportFolderBytes = exportFolderBytes
         self.omittedCount = omittedCount
+        self.whisperLoadSeconds = whisperLoadSeconds
+        self.stageSeconds = stageSeconds
     }
 
     init(from decoder: Decoder) throws {
@@ -2894,6 +2904,8 @@ struct PipelineTiming: Codable, Sendable, Hashable {
         zipBytes = try container.decodeIfPresent(Int.self, forKey: .zipBytes)
         exportFolderBytes = try container.decodeIfPresent(Int.self, forKey: .exportFolderBytes)
         omittedCount = try container.decodeIfPresent(Int.self, forKey: .omittedCount) ?? 0
+        whisperLoadSeconds = try container.decodeIfPresent(TimeInterval.self, forKey: .whisperLoadSeconds)
+        stageSeconds = try container.decodeIfPresent([String: TimeInterval].self, forKey: .stageSeconds) ?? [:]
     }
 
     func encode(to encoder: Encoder) throws {
@@ -2904,6 +2916,10 @@ struct PipelineTiming: Codable, Sendable, Hashable {
         try container.encodeIfPresent(zipBytes, forKey: .zipBytes)
         try container.encodeIfPresent(exportFolderBytes, forKey: .exportFolderBytes)
         try container.encode(omittedCount, forKey: .omittedCount)
+        try container.encodeIfPresent(whisperLoadSeconds, forKey: .whisperLoadSeconds)
+        if !stageSeconds.isEmpty {
+            try container.encode(stageSeconds, forKey: .stageSeconds)
+        }
     }
 
     static func load(sessionURL: URL) -> PipelineTiming? {

@@ -19,6 +19,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
     private var menuBar: MenuBarController?
     private var hud: RecordingHUDWindow?
+    private var processingPanel: ProcessingPanelWindow?
     private var hotkeys: HotkeyManager?
     private var mainPresenterStorage: MainWindowPresenter?
     var mainPresenter: MainWindowPresenter {
@@ -65,9 +66,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.accessory)
         let hud = RecordingHUDWindow(controller: controller)
         self.hud = hud
+        let processingPanel = ProcessingPanelWindow(controller: controller)
+        self.processingPanel = processingPanel
         menuBar = MenuBarController(
             controller: controller,
             hud: hud,
+            processingPanel: processingPanel,
             openSettings: { [weak self] in self?.showSettingsWindow(nil) },
             openLogs: { [weak self] in self?.showAgentLogWindow(nil) },
             openMain: { [weak self] in self?.showMainWindow(source: .menu) },

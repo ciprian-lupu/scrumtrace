@@ -49,6 +49,17 @@ final class SessionController: ObservableObject {
     @Published var isBusy = false
     @Published var suppressHUD = false
     @Published private(set) var startInFlight = false
+    /// The run the processing panel shows: set by `runProcessor`, cleared by Close, the Done auto-clear or the next
+    /// run. Read-only outside the controller; `setProcessingForTesting` is the test seam.
+    @Published private(set) var processing: ProcessingStatus?
+    /// The inner task of the current run (`runProcessorBody`). Finish later cancels it; the run's caller keeps its
+    /// own task and finishes its cleanup as before.
+    private var processingTask: Task<Void, Never>?
+    private var processingTicker: Task<Void, Never>?
+    private var processingHistoryTask: Task<Void, Never>?
+    private var processingAutoClear: Task<Void, Never>?
+    /// Tests shorten the Done auto-clear.
+    var processingDoneAutoClearSeconds: TimeInterval = ProcessingStatus.doneAutoClearSeconds
     @Published private(set) var allAudioMuted = false
     @Published private(set) var microphoneMuted = false
     var isMicrophoneEffectivelyMuted: Bool { allAudioMuted || microphoneMuted }
@@ -74,7 +85,7 @@ final class SessionController: ObservableObject {
 
     let settings: AppSettings
     let vault: SessionVault
-    let transcriber = WhisperTranscriber()
+    let transcriber: WhisperTranscriber
     let sampler = MetadataSampler()
     let privacy = PrivacyGuard()
     let clock = ClockSynchronizer()
@@ -123,10 +134,15 @@ final class SessionController: ObservableObject {
     }
     private(set) var codexArchiveTask: Task<Void, Never>?
 
-    init(settings: AppSettings, vault: SessionVault = SessionVault()) {
+    init(settings: AppSettings, vault: SessionVault = SessionVault(), transcriber: WhisperTranscriber = WhisperTranscriber()) {
         self.settings = settings
         self.vault = vault
+        self.transcriber = transcriber
         self.processor = SessionProcessor(vault: vault, transcriber: transcriber)
+        // Every load this process starts, including the one at recording start, feeds the panel's expectations.
+        transcriber.setModelLoadSink { [defaults = settings.processingDefaults] seconds in
+            ProcessingTimingHistory.recordModelLoad(seconds: seconds, defaults: defaults)
+        }
         let freeze = CaptureFreeze(sampler: sampler)
         self.captureFreeze = freeze
         privacy.freezeCapture = { freeze.freeze() }
@@ -202,7 +218,7 @@ final class SessionController: ObservableObject {
         interruptedSessionId = nil
         AgentLog.event("resume_interrupted", ["session": id])
         statusLine = "Finishing the interrupted session…"
-        retryAnalysis(sessionId: id)
+        retryAnalysis(sessionId: id, origin: .launchResume)
         return true
     }
 
@@ -254,8 +270,142 @@ final class SessionController: ObservableObject {
         return true
     }
 
+    /// The recording pill. A pipeline run shows the processing panel instead; other busy work (a transfer, a speaker
+    /// update, a Codex archive copy) keeps the pill with its status line.
     var hudShouldShow: Bool {
-        (isRecording || isBusy || startInFlight) && !suppressHUD
+        (isRecording || startInFlight || (isBusy && processing?.isRunning != true)) && !suppressHUD
+    }
+
+    // MARK: Processing panel
+
+    /// The processing panel, in the main window and floating next to where the HUD goes. A finished, failed or
+    /// deferred status stays until Close, the Done auto-clear or the next run, but steps aside while other busy
+    /// work shows the pill.
+    var processingPanelShouldShow: Bool {
+        guard let processing else { return false }
+        if isBusy && !processing.isRunning { return false }
+        return !suppressHUD
+    }
+
+    /// Finish later works while a run is before packaging.
+    var canFinishLater: Bool {
+        processing?.canFinishLater == true && processingTask != nil
+    }
+
+    /// Finish later: stops waiting on the current run at its next stage boundary, so Start recording comes back.
+    /// The recording keeps its manifest status and is resumable from Recordings, the menu and the next launch. A
+    /// speech model still loading keeps loading in the background for the next run.
+    func finishLater() {
+        guard let status = processing, status.canFinishLater, let task = processingTask else { return }
+        AgentLog.event("processing_defer", [
+            "session": status.sessionId,
+            "stage": status.current?.rawValue ?? "",
+            "elapsed": String(Int(status.totalElapsed))
+        ])
+        task.cancel()
+    }
+
+    /// The panel's Retry: the same Retry analysis as the menu, from the panel.
+    func retryFromProcessingPanel() {
+        guard let status = processing, status.outcome.needsRetry else { return }
+        AgentLog.event("panel_retry", ["session": status.sessionId])
+        retryAnalysis(sessionId: status.sessionId)
+    }
+
+    /// The panel's Close, for a run that has ended.
+    func dismissProcessing() {
+        guard let status = processing, !status.isRunning else { return }
+        AgentLog.event("panel_close", ["session": status.sessionId])
+        processingAutoClear?.cancel()
+        processingAutoClear = nil
+        processing = nil
+    }
+
+    private func beginProcessing(sessionId: String, origin: ProcessingOrigin, manifest: SessionManifest?) {
+        processingTicker?.cancel()
+        processingHistoryTask?.cancel()
+        processingAutoClear?.cancel()
+        processingAutoClear = nil
+        let status = ProcessingStatus(
+            sessionId: sessionId,
+            recordedAt: manifest?.createdAt,
+            mediaSeconds: manifest?.duration.mediaSeconds ?? 0,
+            origin: origin
+        )
+        processing = status
+        AgentLog.event("processing_stage", [
+            "session": sessionId,
+            "stage": ProcessingStage.resuming.rawValue,
+            "origin": origin.rawValue
+        ])
+        let runID = status.runID
+        processingTicker = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                guard !Task.isCancelled, let self, var current = self.processing, current.runID == runID, current.isRunning else { return }
+                current.now = Date()
+                self.processing = current
+            }
+        }
+        // Earlier runs' timing files and model loads: decoded off the main actor and merged when ready.
+        let vault = self.vault
+        let defaults = settings.processingDefaults
+        processingHistoryTask = Task.detached(priority: .utility) { [weak self] in
+            let history = ProcessingTimingHistory.load(vault: vault, defaults: defaults)
+            await MainActor.run {
+                guard let self, var current = self.processing, current.runID == runID else { return }
+                current.history = history
+                self.processing = current
+            }
+        }
+    }
+
+    private func applyProcessingEvent(_ event: ProcessingEvent) {
+        guard var status = processing, status.isRunning else { return }
+        let now = Date()
+        switch event {
+        case .stage(let stage):
+            let transition = status.enter(stage, at: now)
+            if transition.entered {
+                var fields = ["session": status.sessionId, "stage": stage.rawValue]
+                if let previous = transition.previous {
+                    fields["prev"] = previous.rawValue
+                    fields["prev_seconds"] = String(Int(transition.previousSeconds ?? 0))
+                }
+                AgentLog.event("processing_stage", fields)
+            }
+        case let .skipped(stage, reason):
+            status.skip(stage, reason: reason, at: now)
+            AgentLog.event("processing_skip", ["session": status.sessionId, "stage": stage.rawValue, "reason": reason])
+        case .progress(let value):
+            status.update(progress: value)
+        }
+        processing = status
+    }
+
+    private func finishProcessing(_ outcome: ProcessingOutcome, sessionId: String) {
+        processingTicker?.cancel()
+        processingTicker = nil
+        guard var status = processing, status.sessionId == sessionId, status.isRunning else { return }
+        let now = Date()
+        let open = status.current
+        status.finish(outcome, at: now)
+        processing = status
+        if case .done = outcome {
+            var fields = ["session": sessionId, "stage": ProcessingStage.done.rawValue]
+            if let open {
+                fields["prev"] = open.rawValue
+                fields["prev_seconds"] = String(Int(status.record(for: open)?.elapsed(at: now) ?? 0))
+            }
+            AgentLog.event("processing_stage", fields)
+            let runID = status.runID
+            let delay = processingDoneAutoClearSeconds
+            processingAutoClear = Task { @MainActor [weak self] in
+                try? await Task.sleep(nanoseconds: UInt64(max(0, delay) * 1_000_000_000))
+                guard !Task.isCancelled, let self, self.processing?.runID == runID else { return }
+                self.processing = nil
+            }
+        }
     }
 
     func startRecording() {
@@ -411,6 +561,10 @@ final class SessionController: ObservableObject {
     }
 
     func retryAnalysis(sessionId: String) {
+        retryAnalysis(sessionId: sessionId, origin: .retry)
+    }
+
+    private func retryAnalysis(sessionId: String, origin: ProcessingOrigin) {
         if (try? vault.loadManifest(id: sessionId).importOrigin?.kind) == .imported {
             statusLine = "Use Analyze a copy in Recordings to preserve the imported results."
             return
@@ -432,7 +586,7 @@ final class SessionController: ObservableObject {
         AgentLog.event("retry_begin", ["session": sessionId])
         let retry = RetryOrigin(lastSessionId: lastSessionId)
         lastSessionId = sessionId
-        Task { await runProcessor(sessionId: sessionId, retry: retry) }
+        Task { await runProcessor(sessionId: sessionId, origin: origin, retry: retry) }
     }
 
     func regenerateLocalExport(sessionId: String) {
@@ -453,7 +607,7 @@ final class SessionController: ObservableObject {
         AgentLog.event("local_export_begin", ["session": sessionId])
         let retry = RetryOrigin(lastSessionId: lastSessionId)
         lastSessionId = sessionId
-        Task { await runProcessor(sessionId: sessionId, retry: retry, localOnly: true) }
+        Task { await runProcessor(sessionId: sessionId, origin: .localExport, retry: retry, localOnly: true) }
     }
 
     /// A Retry Analysis run, with the last session the controller named before the retry started.
@@ -1029,7 +1183,7 @@ final class SessionController: ObservableObject {
             }
             manifest = local
             log(.stop, recorder?.captureFailureReason.map { ["error": $0] } ?? [:])
-            await runProcessor(sessionId: local.sessionId)
+            await runProcessor(sessionId: local.sessionId, origin: .stop)
         } else {
             isBusy = false
             phase = .offlineFailed
@@ -1085,7 +1239,7 @@ final class SessionController: ObservableObject {
         (try? FileManager.default.attributesOfItem(atPath: url.path)) != nil
     }
 
-    private func runProcessor(sessionId: String, retry: RetryOrigin? = nil, localOnly: Bool = false) async {
+    private func runProcessor(sessionId: String, origin: ProcessingOrigin, retry: RetryOrigin? = nil, localOnly: Bool = false) async {
         pipelineProgress = nil
         pipelineProgressOperation = nil
         isBusy = true
@@ -1119,6 +1273,36 @@ final class SessionController: ObservableObject {
         let diskManifest = try? vault.loadManifest(id: sessionId)
         if diskManifest == nil, ignoreRetryOfMissingSession() { return }
         AgentLog.event("processor_begin", ["session": sessionId])
+        beginProcessing(sessionId: sessionId, origin: origin, manifest: diskManifest)
+        // The pipeline runs in an inner task so Finish later can cancel it while this caller (Stop, Retry, the launch
+        // resume, the local export) keeps its own task and its cleanup. `isBusy` is released only after the inner
+        // task has unwound, so nothing in the pipeline can still write.
+        let work = Task { @MainActor [weak self] () -> Void in
+            guard let self else { return }
+            await self.runProcessorBody(
+                sessionId: sessionId,
+                diskManifest: diskManifest,
+                ignoreRetryOfMissingSession: ignoreRetryOfMissingSession,
+                localOnly: localOnly
+            )
+        }
+        processingTask = work
+        await work.value
+        processingTask = nil
+        if processing?.isRunning == true {
+            // The body returned without an outcome (the retry was ignored): nothing to show.
+            processingTicker?.cancel()
+            processing = nil
+        }
+        isBusy = false
+    }
+
+    private func runProcessorBody(
+        sessionId: String,
+        diskManifest: SessionManifest?,
+        ignoreRetryOfMissingSession: () -> Bool,
+        localOnly: Bool
+    ) async {
         do {
             var local = diskManifest
             if let memory = manifest, memory.sessionId == sessionId {
@@ -1200,6 +1384,10 @@ final class SessionController: ObservableObject {
                     whisperModel = settings.whisperModel
                 }
             } else if let speech = defaultSpeech {
+                if !hasReusablePrimary, !transcriber.isReady(for: speech.service.model) {
+                    // The saved speech profile loads before `process`; the panel shows the same stage for it.
+                    applyProcessingEvent(.stage(.loadingModel))
+                }
                 whisperModel = try await prepareLocalTranscriptionIfNeeded(
                     transcriber: transcriber,
                     service: speech.service,
@@ -1227,6 +1415,9 @@ final class SessionController: ObservableObject {
                     ])
                     self?.phase = status
                     self?.statusLine = line
+                },
+                onEvent: { [weak self] event in
+                    self?.applyProcessingEvent(event)
                 }
             )
             if let result {
@@ -1237,10 +1428,24 @@ final class SessionController: ObservableObject {
                 manifest = result
                 lastSessionId = result.sessionId
                 phase = result.pipelineStatus
+                // Done only when the manifest says so; an incomplete transcription or offline-failed evaluation
+                // returns normally and keeps Retry.
+                finishProcessing(ProcessingStatus.outcome(forReturned: result.pipelineStatus, line: statusLine), sessionId: sessionId)
                 if !localOnly { vault.revealInFinder(sessionId: result.sessionId) }
             } else {
                 AgentLog.event("processor_fail", ["session": sessionId, "error": "processor_missing"])
+                finishProcessing(.failed("The processor is missing."), sessionId: sessionId)
             }
+        } catch is CancellationError {
+            // Finish later. The manifest keeps the status the last stage wrote; nothing else was written.
+            let onDisk = (try? vault.loadManifest(id: sessionId))?.pipelineStatus ?? phase
+            phase = onDisk
+            statusLine = "Finish later — Retry analysis finishes this recording"
+            AgentLog.event("processor_deferred", [
+                "session": sessionId,
+                "stage": processing?.current?.rawValue ?? ""
+            ])
+            finishProcessing(.deferred, sessionId: sessionId)
         } catch {
             lastError = error.localizedDescription
             phase = .offlineFailed
@@ -1249,8 +1454,8 @@ final class SessionController: ObservableObject {
                 "session": sessionId,
                 "error": AgentLog.sanitize(error.localizedDescription)
             ])
+            finishProcessing(.failed(error.localizedDescription), sessionId: sessionId)
         }
-        isBusy = false
     }
 
     private func requestUploadConsent(destinations: [UploadDestination]) -> UploadConsent {
@@ -1873,6 +2078,13 @@ extension SessionController {
     /// real capture, so tests of views that follow the flag set it here.
     func setStartInFlightForTesting(_ value: Bool) {
         startInFlight = value
+    }
+
+    /// Tests only. The processing panel's status, for view and snapshot tests that do not run the pipeline.
+    func setProcessingForTesting(_ status: ProcessingStatus?) {
+        processingTicker?.cancel()
+        processingAutoClear?.cancel()
+        processing = status
     }
 
     /// Tests only. Leaves the controller as `runProcessor` leaves it when a recording or a retry finishes:

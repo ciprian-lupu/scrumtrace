@@ -16,6 +16,8 @@ final class MenuBarController: NSObject {
     private var isMenuOpen = false
     private var checkingUpdates = false
     private var hud: RecordingHUDWindow?
+    /// The floating processing panel, shown where the pill would be while a run goes on.
+    private var processingPanel: ProcessingPanelWindow?
     private var lastMenuSignature = ""
     private var statusMenuItem: NSMenuItem?
     private var hudObserver: NSObjectProtocol?
@@ -30,6 +32,7 @@ final class MenuBarController: NSObject {
     init(
         controller: SessionController,
         hud: RecordingHUDWindow? = nil,
+        processingPanel: ProcessingPanelWindow? = nil,
         openSettings: @escaping () -> Void,
         openLogs: @escaping () -> Void,
         openMain: @escaping () -> Void = {},
@@ -37,6 +40,7 @@ final class MenuBarController: NSObject {
     ) {
         self.controller = controller
         self.hud = hud
+        self.processingPanel = processingPanel
         self.openSettings = openSettings
         self.openLogs = openLogs
         self.openMain = openMain
@@ -84,6 +88,8 @@ final class MenuBarController: NSObject {
     private func sync() {
         hud?.refresh()
         hud?.setVisible(controller.hudShouldShow)
+        processingPanel?.refresh()
+        processingPanel?.setVisible(controller.processingPanelShouldShow)
         if let button = item.button {
             let symbol: String
             if controller.isBusy {
@@ -112,6 +118,7 @@ final class MenuBarController: NSObject {
             controller.privacy.isCurrentlyTripped ? "priv" : "ok",
             readiness.menuLabel,
             controller.lastError == nil ? "ok" : "err",
+            controller.canFinishLater ? "defer" : "nodefer",
             controller.settings.captureSummary
         ].joined(separator: "|")
         if signature != lastMenuSignature && !isMenuOpen {
@@ -131,6 +138,12 @@ final class MenuBarController: NSObject {
         status.isHidden = false
         menu.addItem(status)
         statusMenuItem = status
+        if controller.canFinishLater {
+            // Processing can be deferred from here too, because the floating panel can be closed with the window shut.
+            let finishLater = actionItem("Finish later", #selector(finishLater))
+            finishLater.toolTip = ProcessingPanelState.finishLaterHelp
+            menu.addItem(finishLater)
+        }
         menu.addItem(.separator())
         if controller.isRecording {
             let pauseItem = actionItem(
@@ -559,6 +572,11 @@ final class MenuBarController: NSObject {
         AgentLog.event("menu_pin", [:])
         controller.pin()
     }
+    @objc private func finishLater() {
+        AgentLog.event("menu_finish_later", [:])
+        controller.finishLater()
+    }
+
     @objc private func retry() {
         AgentLog.event("menu_retry", [:])
         controller.retryAnalysis()

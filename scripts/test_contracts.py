@@ -988,8 +988,8 @@ def test_dual_transcript_merge_wired() -> None:
     assert "Refusing to transcribe a symbolic link" in speech
     assert "parentIsSymbolicLink" in speech
     assert "isReadableSessionFile" in speech
-    assert "transcribeFile(at url: URL, sessionURL: URL? = nil)" in speech
-    assert "transcribeMovieAudio(at movie: URL, sessionURL: URL)" in speech
+    assert "transcribeFile(at url: URL, sessionURL: URL? = nil, onProgress: ProgressSink? = nil)" in speech
+    assert "transcribeMovieAudio(at movie: URL, sessionURL: URL, onProgress: ProgressSink? = nil)" in speech
     assert "copyContainedToTemporaryFile" in speech
     assert "scrumtrace-whisper" in speech
     transcribe_file = speech.split("func transcribeFile")[1].split("func transcribeVoiceNote")[0]
@@ -1006,7 +1006,7 @@ def test_dual_transcript_merge_wired() -> None:
     assert movie_audio.index("extractAudio(from: movie,") < movie_audio.index("copyContainedToTemporaryFile")
     assert "copyContainedToTemporaryFile" in movie_audio
     assert "scrumtrace-movie" in movie_audio
-    assert "transcribeFile(at: movieCopy)" in movie_audio
+    assert "transcribeFile(at: movieCopy, onProgress: onProgress)" in movie_audio
     assert "transcribeFile(at: movie," not in movie_audio
     assert "transcribeFile(at: movie)" not in movie_audio
     assert "unlinkLastComponentUnfollowed(movieCopy)" not in movie_audio
@@ -2134,8 +2134,8 @@ def test_phase45_clip_consent_and_budget() -> None:
     transcribe = processor.split("private func transcribe(")[1].split("private func loadTranscript")[0]
     assert "existingSessionFile(ScrumTracePath.audioWav" in transcribe
     assert "existingSessionFile(ScrumTracePath.sessionMovie" in transcribe
-    assert "transcribeFile(at: wav, sessionURL: sessionURL)" in transcribe
-    assert "transcribeMovieAudio(at: movie, sessionURL: sessionURL)" in transcribe
+    assert "transcribeFile(at: wav, sessionURL: sessionURL, onProgress:" in transcribe
+    assert "transcribeMovieAudio(at: movie, sessionURL: sessionURL, onProgress:" in transcribe
     assert "Keep shots/clips; Retry Analysis can transcribe again." in transcribe
     assert "requiredFailed" in transcribe
     assert "if passes.isEmpty {" in transcribe
@@ -2201,7 +2201,7 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "markCompleted(.synthesizing)" not in handoff
     assert "markCompleted(.completed)" not in handoff
     assert "hasCompleted(.transcribing)" in processor.split("try requireUsableSession(sessionURL, id: sessionId)")[-1].split("Writing AGENT_CONTEXT.md")[0]
-    assert "async -> (transcript: FullTranscript, incomplete: Bool)" in processor
+    assert "async throws -> (transcript: FullTranscript, incomplete: Bool, modelLoadSeconds: TimeInterval?)" in processor
     assert "justFinishedTranscribing" in processor
     retry_block = processor.split("if justFinishedTranscribing")[1].split("if !manifest.hasCompleted(.slicing)")[0]
     assert "completedStages.removeAll" in retry_block
@@ -2510,7 +2510,7 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "Skipped remaining slices after provider authentication failed." in processor
     eval_loop = processor.split("let toRun =")[1].split("manifest.slices = updatedSlices.sorted")[0]
     assert "withTaskGroup" not in eval_loop
-    assert "for slice in toRun" in eval_loop
+    assert "for (index, slice) in toRun.enumerated()" in eval_loop
     assert "await self.evaluateSlice" in eval_loop
     assert "try vault.write(manifest: &manifest)" in eval_loop
     assert "let remaining = toRun.filter" in eval_loop
@@ -3739,7 +3739,7 @@ def test_delete_retry_race_and_closing_dialog() -> None:
     assert '"reason": "session_missing"' in run
     assert run.index('"session_missing"') < run.index("local = memory")
     assert run.index('"session_missing"') < run.index('AgentLog.event("processor_begin"')
-    assert "await runProcessor(sessionId: sessionId, retry: retry)" in controller
+    assert "await runProcessor(sessionId: sessionId, origin: origin, retry: retry)" in controller
 
     # The window forgets a deleted session before its folder is removed and again after; the menu's last session moves
     # to the newest recording still listed instead of turning off.
@@ -3996,7 +3996,130 @@ def main() -> None:
     test_delete_retry_race_and_closing_dialog()
     test_single_window_capture_never_widens()
     test_display_selection_never_widens()
+    test_processing_panel_never_loses_a_recording_or_focus()
     print("contract tests ok")
+
+
+def test_processing_panel_never_loses_a_recording_or_focus() -> None:
+    """PROCESSING_PANEL_PLAN.md: one status, two surfaces, Finish later at stage boundaries, stage names in the log."""
+    model = (ROOT / "ScrumTrace" / "Processing" / "ProcessingStatus.swift").read_text()
+    controller = (ROOT / "ScrumTrace" / "Processing" / "SessionController.swift").read_text()
+    processor = (ROOT / "ScrumTrace" / "Processing" / "SessionProcessor.swift").read_text()
+    speech = (ROOT / "ScrumTrace" / "Speech" / "WhisperTranscriber.swift").read_text()
+    panel = (ROOT / "ScrumTrace" / "UI" / "ProcessingPanelWindow.swift").read_text()
+    view = (ROOT / "ScrumTrace" / "UI" / "ProcessingPanelView.swift").read_text()
+    window = (ROOT / "ScrumTrace" / "UI" / "MainWindow.swift").read_text()
+    menu = (ROOT / "ScrumTrace" / "UI" / "MenuBarController.swift").read_text()
+    models = (ROOT / "ScrumTrace" / "Storage" / "SessionModels.swift").read_text()
+    zipper = (ROOT / "ScrumTrace" / "Export" / "SessionPackZipper.swift").read_text()
+
+    # The seven stages, in order, with their log values.
+    for raw in ("resuming", "loading_model", "transcribing", "slicing", "evaluating", "packaging", "done"):
+        assert f'"{raw}"' in model or f"case {raw}" in model, raw
+    assert "enum ProcessingSkipReason: String, CaseIterable" in model
+    assert "case .loadingModel: return \"Loading speech model\"" in model
+
+    # One status on the controller; the processor reports typed events, never parsed status lines.
+    assert "@Published private(set) var processing: ProcessingStatus?" in controller
+    assert "onEvent: @escaping @MainActor (ProcessingEvent) -> Void = { _ in }" in processor
+    assert "onEvent: { [weak self] event in" in controller
+    assert "ProcessingStatus.outcome(forReturned: result.pipelineStatus" in controller
+
+    # The pill steps aside only for an active run; the panel steps aside while other busy work shows the pill.
+    hud_rule = controller.split("var hudShouldShow: Bool {")[1].split("}")[0]
+    assert "processing?.isRunning != true" in hud_rule
+    assert "var processingPanelShouldShow: Bool" in controller
+    assert "processingPanel?.setVisible(controller.processingPanelShouldShow)" in menu.split("private func sync()")[1].split("private func rebuild()")[0]
+    assert 'controller.canFinishLater ? "defer" : "nodefer"' in menu
+    assert 'actionItem("Finish later", #selector(finishLater))' in menu
+
+    # Finish later cancels the inner task; the pipeline checks before every write and never interrupts packaging.
+    finish = controller.split("func finishLater()")[1].split("func retryFromProcessingPanel()")[0]
+    assert "task.cancel()" in finish
+    assert "status.canFinishLater" in finish
+    assert "processingTask = work" in controller
+    assert "} catch is CancellationError {" in controller.split("private func runProcessorBody(")[1]
+    assert '"processor_deferred"' in controller
+    assert "isRunning && current != .packaging && record(for: .packaging) == nil" in model
+    process = processor.split("    func process(")[1].split("func updateSpeakers(")[0]
+    assert "try Task.checkCancellation()" in process.split("let transcribed = try await transcribe(")[1].split("var transcript = transcribed.transcript")[0]
+    assert process.index("try Task.checkCancellation()") < process.index("let slices = slicer.slice(")
+    slice_loop = process.split("for (index, slice) in slices.enumerated()")[1].split("manifest.slices = exported")[0]
+    assert "try Task.checkCancellation()" in slice_loop
+    assert "} catch is CancellationError {" in slice_loop
+    eval_loop = process.split("for (index, slice) in toRun.enumerated()")[1].split("manifest.slices = updatedSlices.sorted")[0]
+    assert eval_loop.index("await self.evaluateSlice(") < eval_loop.index("try Task.checkCancellation()\n                    updatedSlices.append")
+    packaging = process.split("packagingStartedAt = Date()")[0]
+    assert packaging.rstrip().endswith("try Task.checkCancellation()")
+    assert "await onEvent(.stage(.packaging))" in process
+    transcribe = processor.split("private func transcribe(")[1].split("private func loadTranscript")[0]
+    assert transcribe.count("} catch is CancellationError {") >= 3
+    comparison = processor.split("func evaluateComparison(")[1].split("static func completedEvaluation")[0]
+    assert comparison.index("let result = await evaluateSlice(") < comparison.index("try Task.checkCancellation()\n                let fingerprint")
+
+    # The model load outlives the wait: a cancellation-aware waiter, a structured child in waitForPrepare.
+    assert "enum CancellableAwait" in speech
+    assert "withTaskCancellationHandler" in speech
+    prepare = speech.split("func prepare(model: String")[1].split("private enum PreparationAction")[0]
+    assert prepare.count("try await CancellableAwait.value(of: work)") == 2
+    assert "catch is CancellationError { throw CancellationError() }" in prepare
+    assert "if pendingKey == cacheKey { throw error }" in prepare
+    wait = processor.split("private func waitForPrepare(")[1].split("private static func volumeHasRoom")[0]
+    assert "try await self.transcriber.prepare(model: model)" in wait.split("group.addTask {")[1]
+    assert "prepareTask" not in wait
+    movie_audio = speech.split("func transcribeMovieAudio")[1].split("func extractAudio")[0]
+    assert "} catch is CancellationError {" in movie_audio
+
+    # Real progress and measured history; timing stays in the archive.
+    assert "var fraction: @Sendable () -> Double?" in speech
+    assert "return progress.totalUnitCount > 0 ? progress.fractionCompleted : nil" in speech.split("fraction: {")[1]
+    assert "typealias ProgressSink" in speech
+    assert "stage_seconds" in models and "whisper_load_seconds" in models
+    assert "stage_seconds" not in zipper and "pipeline-timing.json" not in zipper
+    assert "transcriber.setModelLoadSink" in controller
+    assert "Task.detached(priority: .utility)" in controller.split("private func beginProcessing(")[1].split("private func applyProcessingEvent(")[0]
+    assert "manifest.importOrigin == nil" in model
+
+    # Two surfaces, both pure state; the floating panel keeps the HUD's focus rules; nothing opens the window.
+    assert "ProcessingPanelView(controller: controller)" in window.split("MainLiveBanner(controller: controller)")[1].split("detail")[0]
+    assert "NSApp.activate" not in view and "makeKey" not in view
+    for required in (
+        "styleMask: [.borderless, .nonactivatingPanel]",
+        "canBecomeKey: Bool { false }",
+        "canBecomeMain: Bool { false }",
+        "sharingType = .none",
+        "collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]",
+        "isFloatingPanel = true",
+        "becomesKeyOnlyIfNeeded = false",
+        "hidesOnDeactivate = false",
+        "refusesFirstResponder = true",
+        "performDrag(with: event)",
+    ):
+        assert required in panel, required
+    for forbidden in ("NSApp.activate", "NSHostingView", "import SwiftUI", "buttonStyle"):
+        assert forbidden not in panel, forbidden
+    assert "makeKey" not in panel.replace("makeKeyAndOrderFront(_ sender: Any?) {\n        orderFrontRegardless()", "")
+    hud = (ROOT / "ScrumTrace" / "UI" / "RecordingHUDWindow.swift").read_text()
+    assert "ProcessingStatus" not in hud, "The pill is unchanged; the panel is its own window"
+
+    # Log rows carry ids, enums and integers only; the stage names match the model.
+    for name in ("processing_stage", "processing_skip", "processing_defer", "processor_deferred", "panel_retry", "panel_close"):
+        assert f'"{name}"' in controller, name
+    stage_rows = [line for line in controller.splitlines() if '"processing_stage"' in line or '"processing_skip"' in line or '"processing_defer"' in line]
+    assert stage_rows
+    for key in ('"title"', '"url"', '"note"', '"transcript"', '"line"'):
+        assert key not in controller.split("private func beginProcessing(")[1].split("private func finishProcessing(")[0], key
+    debug = (ROOT / "AGENT_DEBUG.md").read_text()
+    agents = (ROOT / "AGENTS.md").read_text()
+    for doc in (debug, agents):
+        for name in ("processing_stage", "processing_skip", "processing_defer", "processor_deferred"):
+            assert name in doc, name
+    replay = (ROOT / "scripts" / "local_export_replay.py").read_text()
+    assert '"processor_deferred"' in replay
+    gate01 = (ROOT / "scripts" / "mac_gate01.sh").read_text()
+    assert "processor_deferred" in gate01
+    readme = (ROOT / "README.md").read_text()
+    assert "Finish later" in readme and "processing panel" in readme
 
 
 if __name__ == "__main__":

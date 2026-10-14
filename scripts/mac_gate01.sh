@@ -18,13 +18,35 @@ fi
 # recording: a killed pipeline leaves that recording unfinished until the next launch resumes it.
 # SCRUMTRACE_FORCE_INSTALL=1 overrides for a deliberate interruption.
 if pgrep -x ScrumTrace >/dev/null 2>&1 && [[ "${SCRUMTRACE_FORCE_INSTALL:-}" != "1" ]]; then
-  BUSY_SESSION="$(python3 - "$HOME/Movies/ScrumTrace/sessions" <<'PY'
+  # A recording deferred with Finish later also sits at a mid-pipeline status, so the newest manifest alone cannot
+  # tell a deferred run from an active one: the agent log's last processor_* row for that session decides.
+  # processor_deferred, processor_ok or processor_fail means nothing is writing; a trailing processor_begin blocks.
+  BUSY_SESSION="$(python3 - "$HOME/Movies/ScrumTrace/sessions" "$HOME/Library/Logs/ScrumTrace/agent.jsonl" <<'PY'
 import json, os, sys
 root = sys.argv[1]
+log = sys.argv[2]
 try:
     ids = sorted(d for d in os.listdir(root) if os.path.isdir(os.path.join(root, d)))
 except OSError:
     sys.exit(0)
+
+
+def last_processor_event(session):
+    last = None
+    try:
+        with open(log, encoding="utf-8", errors="ignore") as fh:
+            for line in fh:
+                try:
+                    row = json.loads(line)
+                except ValueError:
+                    continue
+                if row.get("session") == session and str(row.get("event", "")).startswith("processor_"):
+                    last = row.get("event")
+    except OSError:
+        return None
+    return last
+
+
 for session in reversed(ids):
     path = os.path.join(root, session, "session.manifest.json")
     try:
@@ -33,6 +55,8 @@ for session in reversed(ids):
     except (OSError, ValueError):
         continue
     if status in ("transcribing", "slicing", "evaluating", "synthesizing"):
+        if last_processor_event(session) in ("processor_deferred", "processor_ok", "processor_fail"):
+            break
         print(f"{session} ({status})")
     break
 PY
