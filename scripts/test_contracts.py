@@ -4072,7 +4072,7 @@ def test_processing_panel_never_loses_a_recording_or_focus() -> None:
 
     # Real progress and measured history; timing stays in the archive.
     assert "var fraction: @Sendable () -> Double?" in speech
-    assert "fraction: { loaded.progress.fractionCompleted }" in speech
+    assert "return progress.totalUnitCount > 0 ? progress.fractionCompleted : nil" in speech.split("fraction: {")[1]
     assert "typealias ProgressSink" in speech
     assert "stage_seconds" in models and "whisper_load_seconds" in models
     assert "stage_seconds" not in zipper and "pipeline-timing.json" not in zipper

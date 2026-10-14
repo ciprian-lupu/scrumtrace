@@ -2859,6 +2859,12 @@ struct PipelineTiming: Codable, Sendable, Hashable {
     /// Wall seconds per processing stage that ran, keyed by `ProcessingStage.rawValue`. Feeds the panel's expectations.
     var stageSeconds: [String: TimeInterval]
 
+    static func markTranscriptionStarted(sessionURL: URL) throws {
+        var timing = load(sessionURL: sessionURL) ?? PipelineTiming()
+        timing.whisperIncomplete = false
+        try timing.write(sessionURL: sessionURL)
+    }
+
     enum CodingKeys: String, CodingKey {
         case whisperWallSeconds = "whisper_wall_seconds"
         case whisperSources = "whisper_sources"

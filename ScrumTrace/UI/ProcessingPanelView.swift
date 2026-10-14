@@ -38,7 +38,7 @@ struct ProcessingPanelView: View {
             }
             .background(.bar)
             .accessibilityElement(children: .contain)
-            .accessibilityIdentifier("main.processing")
+            .accessibilityIdentifier("main.processingPanel")
         }
     }
 

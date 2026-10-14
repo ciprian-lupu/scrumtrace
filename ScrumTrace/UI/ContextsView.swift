@@ -803,7 +803,7 @@ struct ContextDetailView: View {
         HStack(spacing: 10) {
             Text(SessionSummary.formattedDate(summary.createdAt))
                 .monospacedDigit()
-            Text(PipelineStatusOrder.label(summary.pipelineStatus))
+            Text(RecordingStatusText.label(summary, isActive: !model.recordings.canChangeSessions && model.recordings.activeSessionId == summary.sessionId))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
             Spacer(minLength: 8)

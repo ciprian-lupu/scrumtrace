@@ -131,9 +131,12 @@ final class ProcessingPipelineTests: XCTestCase {
     /// Paths and modification dates of everything in the session folder, so a deferral can be shown to write nothing.
     private func snapshot(of folder: URL) throws -> [String: Date] {
         var result: [String: Date] = [:]
-        let enumerator = FileManager.default.enumerator(at: folder, includingPropertiesForKeys: [.contentModificationDateKey])
+        let enumerator = FileManager.default.enumerator(at: folder, includingPropertiesForKeys: [.contentModificationDateKey, .isRegularFileKey])
         while let url = enumerator?.nextObject() as? URL {
-            result[url.path] = try url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
+            let values = try url.resourceValues(forKeys: [.contentModificationDateKey, .isRegularFileKey])
+            // Files only: a folder's own date moves when a file is created inside it.
+            guard values.isRegularFile == true else { continue }
+            result[url.path] = values.contentModificationDate
         }
         return result
     }
@@ -244,12 +247,18 @@ final class ProcessingPipelineTests: XCTestCase {
             XCTAssertEqual(try bench.vault.loadManifest(id: id).pipelineStatus, .transcribing)
             XCTAssertFalse(try bench.vault.loadManifest(id: id).hasCompleted(.transcribing))
             XCTAssertNil(ExportRel.existingSessionFile(ScrumTracePath.fullTranscript, sessionURL: sessionURL), "No transcript was written")
-            XCTAssertNil(ExportRel.existingSessionFile(ScrumTracePath.pipelineTiming, sessionURL: sessionURL), "No timing was written")
+            // The run clears the previous pass's incomplete flag in the timing file before any slow work (develop's
+            // incomplete-session recovery); the cancelled pass itself records nothing.
+            let timing = PipelineTiming.load(sessionURL: sessionURL)
+            XCTAssertEqual(timing?.whisperIncomplete, false)
+            XCTAssertNil(timing?.whisperLoadSeconds)
+            XCTAssertTrue(timing?.stageSeconds.isEmpty ?? true, "No stage of the cancelled run was recorded")
             let after = try snapshot(of: sessionURL)
-            // The manifest is rewritten with the same status when the run starts; nothing else changes.
+            // The manifest is rewritten with the same status and the timing flag is reset when the run starts; nothing
+            // else changes.
             let changed = Set(before.keys).symmetricDifference(after.keys)
-            XCTAssertTrue(changed.isEmpty, "No file added or removed: \(changed)")
-            for (path, date) in before where !path.hasSuffix(ScrumTracePath.manifest) {
+            XCTAssertTrue(changed.allSatisfy { $0.hasSuffix("pipeline-timing.json") }, "No other file added or removed: \(changed)")
+            for (path, date) in before where !path.hasSuffix(ScrumTracePath.manifest) && !path.hasSuffix("pipeline-timing.json") {
                 XCTAssertEqual(after[path], date, path)
             }
         }
@@ -363,10 +372,13 @@ final class ProcessingPipelineTests: XCTestCase {
                 ProcessingPanelState.deferredModelFooter
             )
             let after = try snapshot(of: sessionURL)
-            XCTAssertEqual(Set(before.keys), Set(after.keys), "Nothing added or removed")
-            for (path, date) in before where !path.hasSuffix(ScrumTracePath.manifest) {
+            // The manifest and the timing file's incomplete flag are written when the run starts, before any slow work.
+            let changed = Set(before.keys).symmetricDifference(after.keys)
+            XCTAssertTrue(changed.allSatisfy { $0.hasSuffix("pipeline-timing.json") }, "Nothing else added or removed: \(changed)")
+            for (path, date) in before where !path.hasSuffix(ScrumTracePath.manifest) && !path.hasSuffix("pipeline-timing.json") {
                 XCTAssertEqual(after[path], date, path)
             }
+            XCTAssertNil(PipelineTiming.load(sessionURL: sessionURL)?.whisperLoadSeconds, "The deferred load recorded nothing")
 
             let rows = try logRows(at: bench.log)
             let first = try XCTUnwrap(rows.first { $0["event"] == "processing_stage" })

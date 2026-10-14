@@ -1355,9 +1355,15 @@ enum RecordingRowText {
     /// The sentence after an unfinished recording's context and duration in Overview's Needs attention. An analysis
     /// that did not finish keeps its own sentence.
     static func unfinishedNote(_ summary: SessionSummary) -> String {
-        captureWasInterrupted(summary)
-            ? "\(interruptedTitle). Retry analysis processes what was captured."
-            : "Analysis did not finish."
+        if captureWasInterrupted(summary) {
+            return "\(interruptedTitle). Retry analysis processes what was captured."
+        }
+        if summary.pipelineStatus == .offlineFailed {
+            return summary.completedStages.contains(.synthesizing) && summary.hasBrief && summary.hasExportContext
+                ? "The local export is ready. Retry analysis can retry the failed AI analysis."
+                : "This recording needs attention. Retry analysis can try again."
+        }
+        return "Analysis did not finish."
     }
 
     static let interruptedTitle = "Recording was interrupted"
@@ -1701,7 +1707,7 @@ struct RecordingsTable: View {
             // At the default 960×640 window, Duration, Shots, Tasks and Export sit at their minimum widths, which still fit
             // their widest text (a meeting over an hour, 99 / 99 tasks, a pack at its 35 MB cap), and Date, Context and
             // Status shrink by the same amount from their ideals. These ideals leave Date a 24-hour date and time, Context
-            // "Unreadable manifest" with its symbol, and Status "Offline — needs review". A 12-hour time, a long context
+            // "Unreadable manifest" with its symbol, and the recording outcome. A 12-hour time, a long context
             // and a narrower window truncate, with the full text in a help tag.
             TableColumn("Date") { entry in
                 let text = RecordingRowText.date(entry)
@@ -1721,7 +1727,7 @@ struct RecordingsTable: View {
             }
             .width(min: 52, ideal: 68)
             TableColumn("Status") { entry in
-                RecordingStatusCell(entry: entry)
+                RecordingStatusCell(entry: entry, isActive: !model.canChangeSessions && model.activeSessionId == entry.id)
             }
             .width(min: 110, ideal: 172)
             TableColumn("Shots") { entry in
@@ -1796,11 +1802,12 @@ private struct RecordingContextCell: View {
 
 private struct RecordingStatusCell: View {
     let entry: SessionEntry
+    let isActive: Bool
 
     var body: some View {
         switch entry {
         case .loaded(let summary):
-            let label = PipelineStatusOrder.label(summary.pipelineStatus)
+            let label = RecordingStatusText.label(summary, isActive: isActive)
             HStack(spacing: 4) {
                 Text(label)
                     .lineLimit(1)

@@ -1137,7 +1137,7 @@ struct OverviewView: View {
             systemImage: "exclamationmark.circle.fill",
             tint: .orange,
             title: RecordingRowText.date(entry),
-            status: PipelineStatusOrder.label(summary.pipelineStatus),
+            status: RecordingStatusText.label(summary),
             detail: "\(RecordingRowText.contextAndProduct(summary)) · \(SessionController.clock(summary.mediaSeconds)) recorded. \(RecordingRowText.unfinishedNote(summary))"
         ) {
             Button(RecordingAction.retryAnalysis.title) { model.retryAnalysis(summary.sessionId) }
@@ -1179,7 +1179,7 @@ struct OverviewView: View {
                     .font(.headline)
                     .monospacedDigit()
                 Spacer(minLength: 8)
-                Text(PipelineStatusOrder.label(summary.pipelineStatus))
+                Text(RecordingStatusText.label(summary, isActive: model.heldSessionId == summary.sessionId))
                     .foregroundStyle(.secondary)
             }
             Text("\(RecordingRowText.contextAndProduct(summary)) · \(SessionController.clock(summary.mediaSeconds)) recorded · \(shots) · \(tasks.confirmed) confirmed, \(tasks.needsReview) need review")

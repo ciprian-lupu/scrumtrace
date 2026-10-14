@@ -658,3 +658,10 @@ Raw review: the session scratchpad file `codex_review.md`.
   has its own private copies. Only the panel's origin is remembered; its height always follows the content.
 - **P06:** `test_processing_panel_never_loses_a_recording_or_focus()` in `scripts/test_contracts.py`; `mac_gate01.sh`
   reads the log's last `processor_*` row; `local_export_replay.py` treats `processor_deferred` as a run end.
+- **Merge with `develop` (2026-10-14):** `develop` gained a percentage-based `ProcessingProgress` (pill, menu status
+  row, a `MainProcessingBanner`), a simplified status-bar menu and incomplete-session recovery while this branch was
+  being built. Both kept: `SessionProcessor.process` takes `onProgress` (theirs) and `onEvent` (this plan);
+  `LoadedModel.fraction` is the one WhisperKit progress closure; the banner shows only while no panel does
+  (`isBusy && !processingPanelShouldShow`); *Finish later* sits under the new menu's status row; the run's
+  `markTranscriptionStarted` write means a deferral leaves the manifest and the timing file's incomplete flag
+  touched, nothing else (the deferral tests allow exactly those two).

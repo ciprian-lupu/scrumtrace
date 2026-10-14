@@ -257,6 +257,9 @@ struct MainWindowView: View {
                 // The processing panel observes the controller on its own, like the banner, so sections do not
                 // re-render with every tick. It never opens or fronts the window: it is only a view inside it.
                 ProcessingPanelView(controller: controller)
+                // Operation percentages for busy work that is not a pipeline run (a transfer, a speaker update); the
+                // panel above covers pipeline runs.
+                MainProcessingBanner(controller: controller)
                 detail
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
@@ -290,6 +293,40 @@ struct MainWindowView: View {
             )
         case .settings:
             settingsView()
+        }
+    }
+}
+
+/// Operation progress is shared with the HUD and menu; displaying it never activates the window.
+struct MainProcessingBanner: View {
+    @ObservedObject var controller: SessionController
+
+    var body: some View {
+        if controller.isBusy && !controller.processingPanelShouldShow {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 10) {
+                    if let fraction = controller.processingProgress?.fraction {
+                        ProgressView(value: fraction)
+                            .frame(width: 100)
+                            .accessibilityLabel("Current operation progress")
+                    } else {
+                        ProgressView().controlSize(.small)
+                    }
+                    Text(controller.displayStatusLine)
+                        .font(.callout.monospacedDigit())
+                        .lineLimit(2)
+                        .help(controller.displayStatusLine)
+                    Spacer(minLength: 0)
+                }
+                Text("Progress is for the current operation.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(.bar)
+            .accessibilityIdentifier("main.processing")
+            Divider()
         }
     }
 }

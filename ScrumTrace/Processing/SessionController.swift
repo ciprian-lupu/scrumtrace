@@ -10,7 +10,40 @@ final class SessionController: ObservableObject {
     @Published var phase: PipelineStatus = .idle
     @Published var mediaElapsed: TimeInterval = 0
     @Published var wallElapsed: TimeInterval = 0
-    @Published var statusLine: String = "Ready"
+    @Published var statusLine: String = "Ready" {
+        didSet { if isBusy { reportProcessingProgress(statusLine) } }
+    }
+    @Published private(set) var processingProgress: ProcessingProgress?
+    private var pipelineProgress: ProcessingProgress?
+    private enum ProgressOperation: Equatable {
+        case stage(PipelineStatus)
+        case speechActivity(String)
+    }
+    private var pipelineProgressOperation: ProgressOperation?
+
+    var displayStatusLine: String {
+        isBusy ? processingProgress?.statusLine ?? statusLine : statusLine
+    }
+
+    func reportProcessingProgress(_ message: String, fraction: Double? = nil) {
+        let operation: ProgressOperation = phase == .transcribing ? .speechActivity(message) : .stage(phase)
+        if var current = pipelineProgress, pipelineProgressOperation == operation {
+            current.message = message
+            if let fraction = ProcessingProgress.validFraction(fraction) {
+                current.fraction = max(current.fraction ?? 0, fraction)
+            }
+            pipelineProgress = current
+        } else {
+            pipelineProgress = ProcessingProgress(message: message, fraction: fraction)
+        }
+        pipelineProgressOperation = operation
+        sampleProcessingProgress()
+    }
+
+    func sampleProcessingProgress(at now: Date = Date()) {
+        let speech = (phase == .transcribing || transcriber.isPreparing) ? transcriber.progressReporter.snapshot : nil
+        processingProgress = (speech ?? pipelineProgress)?.refreshed(at: now)
+    }
     @Published var lastError: String?
     @Published var lastSessionId: String?
     @Published var isBusy = false
@@ -140,9 +173,24 @@ final class SessionController: ObservableObject {
             case .idle, .completed:
                 break
             case .recording, .paused, .transcribing, .slicing, .evaluating, .synthesizing, .offlineFailed:
-                statusLine = "Last session is unfinished — Retry Analysis to finish"
+                let sessionURL = vault.sessionURL(id: recent.sessionId)
+                let incompleteTranscription = recent.pipelineStatus == .transcribing
+                    && !recent.hasCompleted(.transcribing)
+                    && PipelineTiming.load(sessionURL: sessionURL)?.whisperIncomplete == true
+                if incompleteTranscription {
+                    statusLine = "Transcription is incomplete — Retry Analysis to try again"
+                } else if recent.pipelineStatus == .recording || recent.pipelineStatus == .paused {
+                    statusLine = "Recording was interrupted — Retry Analysis processes what was captured"
+                } else if recent.pipelineStatus == .offlineFailed {
+                    let probe = SessionExportProbe.probe(sessionURL: sessionURL)
+                    statusLine = probe.hasBrief && probe.hasAgentContext && recent.hasCompleted(.synthesizing)
+                        ? "Export is ready — AI analysis needs review; Retry Analysis to try again"
+                        : "Recording needs attention — Retry Analysis to try again"
+                } else {
+                    statusLine = "Last session is unfinished — Retry Analysis to finish"
+                }
                 AgentLog.event("interrupted_session", ["status": recent.pipelineStatus.rawValue])
-                if Self.autoResumableStatuses.contains(recent.pipelineStatus) {
+                if Self.autoResumableStatuses.contains(recent.pipelineStatus), !incompleteTranscription {
                     interruptedSessionId = recent.sessionId
                 }
             }
@@ -1192,8 +1240,21 @@ final class SessionController: ObservableObject {
     }
 
     private func runProcessor(sessionId: String, origin: ProcessingOrigin, retry: RetryOrigin? = nil, localOnly: Bool = false) async {
+        pipelineProgress = nil
+        pipelineProgressOperation = nil
         isBusy = true
+        reportProcessingProgress("Preparing recording for processing…")
+        let progressTicker = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                self?.sampleProcessingProgress()
+                try? await Task.sleep(nanoseconds: 500_000_000)
+            }
+        }
         defer {
+            progressTicker.cancel()
+            processingProgress = nil
+            pipelineProgress = nil
+            pipelineProgressOperation = nil
             AgentLog.clearSessionContext(matching: sessionId)
         }
         // The main window deleted this session while a Retry Analysis of it started, from a menu item built before the
@@ -1298,6 +1359,10 @@ final class SessionController: ObservableObject {
             // explicit comparison never promotes automatically.
             let defaultSpeech = settings.selectedTranscriptionServiceConfiguration()
             let hasReusablePrimary = processor!.hasValidPrimaryTranscript(sessionId: sessionId)
+            if !localOnly && !hasReusablePrimary {
+                // A manual retry has started a fresh pass, including any model preparation below.
+                try PipelineTiming.markTranscriptionStarted(sessionURL: vault.sessionURL(id: sessionId))
+            }
             let whisperModel: String
             if localOnly {
                 whisperModel = settings.whisperModel
@@ -1340,6 +1405,9 @@ final class SessionController: ObservableObject {
                 whisperModel: whisperModel,
                 identifySpeakers: settings.identifySpeakers,
                 localOnly: localOnly,
+                onProgress: { [weak self] message, fraction in
+                    self?.reportProcessingProgress(message, fraction: fraction)
+                },
                 onStatus: { [weak self] status, line in
                     AgentLog.event("pipeline_status", [
                         "status": status.rawValue,

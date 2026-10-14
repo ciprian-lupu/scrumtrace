@@ -527,7 +527,7 @@ final class MainWindowSnapshotTests: XCTestCase {
         var failed = try vault.createSession(product: .empty).manifest
         failed.createdAt = now.addingTimeInterval(-3 * 3_600)
         failed.pipelineStatus = .offlineFailed
-        failed.completedStages = [.transcribing, .slicing]
+        failed.completedStages = [.transcribing, .slicing, .evaluating, .synthesizing, .completed]
         failed.duration = DurationPair(wallSeconds: 640, mediaSeconds: 602)
         failed.slices = [
             SliceRecord(
@@ -543,7 +543,10 @@ final class MainWindowSnapshotTests: XCTestCase {
             )
         ]
         try vault.write(manifest: &failed)
-        try writeFile(Data(count: 64), to: ScrumTracePath.sessionMovie, in: vault.sessionURL(id: failed.sessionId))
+        let failedURL = vault.sessionURL(id: failed.sessionId)
+        try writeFile(Data(count: 64), to: ScrumTracePath.sessionMovie, in: failedURL)
+        try writeFile(Data("Fixture local export; AI analysis needs review.".utf8), to: ScrumTracePath.agentContext, in: failedURL)
+        try writeFile(Data("<html><body>Fixture local export</body></html>".utf8), to: ScrumTracePath.sessionBrief, in: failedURL)
 
         var unfinished = try vault.createSession(product: .empty).manifest
         unfinished.createdAt = now.addingTimeInterval(-20 * 60)

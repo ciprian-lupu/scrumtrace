@@ -189,18 +189,25 @@ final class RecordingHUDWindow: NSPanel {
         } else {
             dot.setRecording()
         }
-        mediaLabel.stringValue = SessionController.clock(controller.mediaElapsed)
+        mediaLabel.stringValue = controller.isBusy
+            ? controller.processingProgress?.compactLabel ?? "Processing…"
+            : SessionController.clock(controller.mediaElapsed)
         wallLabel.stringValue = "w \(SessionController.clock(controller.wallElapsed))"
         let busy = controller.isBusy
         let starting = controller.startInFlight
         if starting {
             dot.setBusy()
         }
-        statusLabel.stringValue = controller.statusLine
-        statusLabel.toolTip = controller.statusLine
+        if busy, let progress = controller.processingProgress {
+            statusLabel.stringValue = "\(progress.message) · \(progress.elapsedLabel)"
+        } else {
+            statusLabel.stringValue = controller.displayStatusLine
+        }
+        statusLabel.toolTip = controller.displayStatusLine
+        mediaLabel.toolTip = controller.isBusy ? controller.displayStatusLine : nil
         let controls = !busy && !starting && !isMinified
         statusLabel.isHidden = (!busy && !starting) || isMinified
-        wallLabel.isHidden = isMinified
+        wallLabel.isHidden = isMinified || busy
         divider.isHidden = isMinified
         shotButton.isHidden = !controls
         pinButton.isHidden = !controls

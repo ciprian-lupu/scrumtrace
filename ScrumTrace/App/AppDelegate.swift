@@ -74,7 +74,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             processingPanel: processingPanel,
             openSettings: { [weak self] in self?.showSettingsWindow(nil) },
             openLogs: { [weak self] in self?.showAgentLogWindow(nil) },
-            openMain: { [weak self] in self?.showMainWindow(source: .menu) }
+            openMain: { [weak self] in self?.showMainWindow(source: .menu) },
+            openRecordings: { [weak self] in self?.showMainWindow(section: .recordings, source: .menu) }
         )
         hotkeys = HotkeyManager(controller: controller, captureFreeze: controller.captureFreeze)
         hotkeys?.register()
