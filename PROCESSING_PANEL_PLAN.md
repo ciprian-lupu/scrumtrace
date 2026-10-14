@@ -547,7 +547,7 @@ The seven `MainWindowTests` failures the display-selection paragraph records wer
 change (`scripts/mac_xcode_test.sh`, 15 skipped). The final run on the branch passed 486 tests and skipped 9, with
 those four plus `testOpeningFromTheAppIconGivesFocusBackToTheAppTheUserCameFrom`, whose `main_open` rows carried a
 session id from another test (the same leak the display-selection paragraph records) and which passed when rerun
-alone. The 24 new native tests pass; the Linux contract suite passes. Snapshots inspected: `overview-processing`,
+alone. After the merge with `develop` (§7) the full run passed 491, skipped 16 and failed 8, all of that class and all passing alone. The 24 new native tests pass; the Linux contract suite passes. Snapshots inspected: `overview-processing`,
 `overview-processing-failed`, `settings-minimum-processing` (light and dark) and `processing-panel-{loading,
 transcribing, deferred, done, failed}.png`.
 
