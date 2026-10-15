@@ -126,6 +126,8 @@ final class ShotTalkState: ObservableObject {
     let screenshot: NSImage
     let transcriber: WhisperTranscriber
     var whisperModel: String
+    var whisperSource: WhisperModelSource
+    var speechLanguage: SpeechLanguage
     var allowsNewCapture: () -> Bool
     var onSave: (String, NSImage, ShotSource) -> Void
     var recorder: AVAudioRecorder?
@@ -135,12 +137,16 @@ final class ShotTalkState: ObservableObject {
         screenshot: NSImage,
         transcriber: WhisperTranscriber,
         whisperModel: String,
+        whisperSource: WhisperModelSource = .standard,
+        speechLanguage: SpeechLanguage = .automatic,
         allowsNewCapture: @escaping () -> Bool,
         onSave: @escaping (String, NSImage, ShotSource) -> Void
     ) {
         self.screenshot = screenshot
         self.transcriber = transcriber
         self.whisperModel = whisperModel
+        self.whisperSource = whisperSource
+        self.speechLanguage = speechLanguage
         self.allowsNewCapture = allowsNewCapture
         self.onSave = onSave
         canvas.sourceImage = screenshot
@@ -286,7 +292,7 @@ final class ShotTalkState: ObservableObject {
         defer { isTranscribing = false }
         AgentLog.event("talk_transcribe_begin", [:])
         do {
-            try await transcriber.prepare(model: whisperModel)
+            try await transcriber.prepare(target: LocalSpeechTarget(model: whisperModel, source: whisperSource, language: speechLanguage))
             let text = try await transcriber.transcribeVoiceNote(at: url)
             guard !text.isEmpty else {
                 talkError = "No speech detected"
@@ -325,6 +331,8 @@ final class ShotNoteWindow: NSPanel, NSTextFieldDelegate {
         screenshot: NSImage,
         transcriber: WhisperTranscriber,
         whisperModel: String = WhisperTranscriber.defaultStoredModel,
+        whisperSource: WhisperModelSource = .standard,
+        speechLanguage: SpeechLanguage = .automatic,
         allowsNewCapture: @escaping () -> Bool = { true },
         onSave: @escaping (String, NSImage, ShotSource) -> Void
     ) {
@@ -332,6 +340,8 @@ final class ShotNoteWindow: NSPanel, NSTextFieldDelegate {
             screenshot: screenshot,
             transcriber: transcriber,
             whisperModel: whisperModel,
+            whisperSource: whisperSource,
+            speechLanguage: speechLanguage,
             allowsNewCapture: allowsNewCapture,
             onSave: { _, _, _ in }
         )

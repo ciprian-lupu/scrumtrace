@@ -367,6 +367,61 @@ final class SettingsUsabilityTests: XCTestCase {
         XCTAssertEqual(romanian.task, .transcribe)
     }
 
+    @MainActor
+    func testLocalSpeechTargetFollowsSelectedProfileWithoutReadingCredentials() throws {
+        try withSettings { settings, _, keys in
+            try settings.selectTranscriptionService(id: nil)
+            settings.whisperModel = "tiny"
+            settings.speechLanguage = .english
+            XCTAssertEqual(settings.localSpeechTarget, LocalSpeechTarget(model: "tiny", language: .english))
+            let local = SavedTranscriptionService(name: "Romanian local", backend: .whisperKit, model: "base",
+                language: .one(.romanian), whisperSource: .folder("/tmp/test-model"))
+            try settings.saveTranscriptionService(local, isNew: true)
+            try settings.selectTranscriptionService(id: local.id)
+            let reads = keys.reads
+            XCTAssertEqual(settings.localSpeechTarget, LocalSpeechTarget(model: "base", source: .folder("/tmp/test-model"), language: .romanian))
+            XCTAssertEqual(settings.selectedLocalSpeechProfile?.id, local.id)
+            XCTAssertEqual(keys.reads, reads)
+            try settings.setLocalSpeechModel("small")
+            try settings.setLocalSpeechLanguage(.english)
+            XCTAssertEqual(settings.localSpeechTarget, LocalSpeechTarget(model: "small", source: .folder("/tmp/test-model"), language: .english))
+            XCTAssertEqual(settings.whisperModel, "tiny", "Changing the selected profile leaves the fallback intact")
+            let cloud = SavedTranscriptionService(name: "Cloud", backend: .openAITranscription, model: "cloud-model")
+            try settings.saveTranscriptionService(cloud, isNew: true)
+            try settings.selectTranscriptionService(id: cloud.id)
+            XCTAssertNil(settings.selectedLocalSpeechProfile)
+            XCTAssertEqual(settings.localSpeechTarget, LocalSpeechTarget(model: "tiny", language: .english))
+            try settings.selectTranscriptionService(id: nil)
+            XCTAssertEqual(settings.localSpeechTarget.model, "tiny")
+        }
+    }
+
+    func testReadinessAndPreparationRequireTheSameSourceAndReuseProfilePreload() async throws {
+        let loader = ModelLoader()
+        let transcriber = WhisperTranscriber(loadModelWithSource: { model, _ in try await loader.load(model) })
+        let service = SavedTranscriptionService(name: "Local", backend: .whisperKit, model: "base",
+            language: .one(.romanian), whisperSource: .folder("/tmp/test-model"))
+        let target = LocalSpeechTarget(service: service)
+        try await transcriber.prepare(target: target)
+        XCTAssertTrue(transcriber.isReady(for: target))
+        XCTAssertFalse(transcriber.isReady(for: "base"), "A standard model cannot reuse a custom source")
+        XCTAssertFalse(transcriber.isReady(for: "base", source: .repository("/tmp/test-model")), "Source kind matters too")
+        _ = try await prepareLocalTranscriptionIfNeeded(transcriber: transcriber, service: service, reusingPrimaryTranscript: false)
+        let reusedCalls = await loader.models
+        XCTAssertEqual(reusedCalls.count, 1, "Processing must reuse the model prepared before recording")
+        try await transcriber.prepare(model: "base")
+        XCTAssertTrue(transcriber.isReady(for: "base"))
+        XCTAssertFalse(transcriber.isReady(for: target))
+        let switchedCalls = await loader.models
+        XCTAssertEqual(switchedCalls.count, 2)
+    }
+
+    func testExpectedLanguagesKeepAutomaticDetectionInTheSharedTarget() {
+        let service = SavedTranscriptionService(name: "Mixed", backend: .whisperKit,
+            language: .init(mode: .expected, languages: [.romanian, .english]))
+        XCTAssertEqual(LocalSpeechTarget(service: service).language, .automatic)
+    }
+
     func testModelSwitchLoadsRequestedModelAndReusesOnlyMatchingModel() async throws {
         let loader = ModelLoader()
         let transcriber = WhisperTranscriber(loadModel: { try await loader.load($0) })

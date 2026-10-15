@@ -2,6 +2,26 @@ import AVFoundation
 import Foundation
 import WhisperKit
 
+/// The same local choice is used by preload, readiness, voice notes and processing.
+struct LocalSpeechTarget: Equatable, Sendable {
+    var model: String
+    var source: WhisperModelSource = .standard
+    var language: SpeechLanguage = .automatic
+
+    init(model: String, source: WhisperModelSource = .standard, language: SpeechLanguage = .automatic) {
+        self.model = model
+        self.source = source
+        self.language = language
+    }
+
+    init(service: SavedTranscriptionService) {
+        model = service.model
+        source = service.whisperSource ?? .standard
+        language = service.language.mode == .single && service.language.languages.count == 1
+            ? service.language.languages[0] : .automatic
+    }
+}
+
 /// Local WhisperKit CoreML / ANE transcriber.
 /// Default: compressed turbo `openai_whisper-large-v3-v20240930_turbo_632MB`.
 /// Uncompressed `openai_whisper-large-v3_turbo` is opt-in (multi-GB first download).
@@ -40,6 +60,7 @@ final class WhisperTranscriber: @unchecked Sendable {
 
     private var kit: LoadedModel?
     private let loadModel: (@Sendable (String) async throws -> LoadedModel)?
+    private let loadModelWithSource: (@Sendable (String, WhisperModelSource) async throws -> LoadedModel)?
     let progressReporter = ProcessingProgressReporter()
     private let lock = NSLock()
     private var preparing: (id: UUID, model: String, task: Task<Void, Error>)?
@@ -51,6 +72,12 @@ final class WhisperTranscriber: @unchecked Sendable {
 
     init(loadModel: (@Sendable (String) async throws -> LoadedModel)? = nil) {
         self.loadModel = loadModel
+        self.loadModelWithSource = nil
+    }
+
+    init(loadModelWithSource: @escaping @Sendable (String, WhisperModelSource) async throws -> LoadedModel) {
+        self.loadModel = nil
+        self.loadModelWithSource = loadModelWithSource
     }
 
     var isReady: Bool { withStateLock { ready } }
@@ -62,9 +89,22 @@ final class WhisperTranscriber: @unchecked Sendable {
         withStateLock { modelLoadSink = sink }
     }
 
-    func isReady(for model: String) -> Bool {
-        let resolved = Self.whisperKitModelName(model)
-        return withStateLock { ready && (loadedModel == resolved || loadedModel?.hasPrefix("\(resolved)|") == true) }
+    private static func modelKey(_ model: String, source: WhisperModelSource) -> String {
+        "\(whisperKitModelName(model))|\(source.value ?? "standard")|\(source.title)"
+    }
+
+    func isReady(for model: String, source: WhisperModelSource = .standard) -> Bool {
+        let key = Self.modelKey(model, source: source)
+        return withStateLock { ready && loadedModel == key }
+    }
+
+    func isReady(for target: LocalSpeechTarget) -> Bool {
+        isReady(for: target.model, source: target.source)
+    }
+
+    func prepare(target: LocalSpeechTarget) async throws {
+        setLanguage(target.language)
+        try await prepare(model: target.model, source: target.source)
     }
 
     /// Call at the start of a recording or analysis. In-flight decodes keep their snapshot.
@@ -92,7 +132,7 @@ final class WhisperTranscriber: @unchecked Sendable {
         try source.validated()
         let started = Date()
         let resolved = Self.whisperKitModelName(model)
-        let cacheKey = "\(resolved)|\(source.value ?? "standard")|\(source.title)"
+        let cacheKey = Self.modelKey(model, source: source)
         while true {
             let action = preparationAction(resolved: cacheKey, model: resolved, source: source)
             switch action {
@@ -146,7 +186,9 @@ final class WhisperTranscriber: @unchecked Sendable {
                 AgentLog.event("whisper_prepare_begin", ["model": resolved])
                 do {
                     let loaded: LoadedModel
-                    if case .standard = source, let loadModel = self.loadModel {
+                    if let loadModelWithSource = self.loadModelWithSource {
+                        loaded = try await loadModelWithSource(model, source)
+                    } else if case .standard = source, let loadModel = self.loadModel {
                         loaded = try await loadModel(model)
                     } else {
                         loaded = try await Self.loadWhisperKit(model, source: source, reporter: self.progressReporter)
@@ -188,14 +230,18 @@ final class WhisperTranscriber: @unchecked Sendable {
         let config = WhisperKitConfig(model: resolved, modelFolder: folder, tokenizerFolder: tokenizerFolder,
                                       verbose: false, logLevel: .error, prewarm: false, load: false, download: false)
         let loaded = try await WhisperKit(config)
+        let prewarmStarted = Date()
         let prewarm = reporter.begin("Preparing speech model for this Mac…")
         do { try await loaded.prewarmModels() }
         catch { reporter.end(prewarm); throw error }
         reporter.end(prewarm)
+        AgentLog.event("whisper_model_phase", ["phase": "prewarm", "elapsed_ms": String(Int(Date().timeIntervalSince(prewarmStarted) * 1000))])
+        let loadStarted = Date()
         let loading = reporter.begin("Loading speech model…")
         do { try await loaded.loadModels() }
         catch { reporter.end(loading); throw error }
         reporter.end(loading)
+        AgentLog.event("whisper_model_phase", ["phase": "load", "elapsed_ms": String(Int(Date().timeIntervalSince(loadStarted) * 1000))])
         return LoadedModel(
             transcribe: { path, options in
                 try await loaded.transcribe(audioPath: path, decodeOptions: options)

@@ -87,6 +87,7 @@ final class SessionProcessor: @unchecked Sendable {
         configuration: AIProviderConfiguration,
         serviceConfigurations: [AIServiceConfiguration]? = nil,
         whisperModel: String,
+        whisperSource: WhisperModelSource = .standard,
         identifySpeakers: Bool = false,
         localOnly: Bool = false,
         onProgress: @escaping @MainActor (String, Double?) -> Void = { _, _ in },
@@ -154,6 +155,7 @@ final class SessionProcessor: @unchecked Sendable {
             let transcribed = try await transcribe(
                 sessionURL: sessionURL,
                 model: whisperModel,
+                source: whisperSource,
                 onStatus: onStatus,
                 onEvent: onEvent
             )
@@ -302,6 +304,8 @@ final class SessionProcessor: @unchecked Sendable {
                 )
                 await onEvent(.progress(.count(done: 0, total: slices.count, unit: "clips")))
                 var exported: [SliceRecord] = []
+                let clipSource = ClipExporter.PreparedSource(sessionURL: sessionURL)
+                defer { clipSource.cleanup() }
                 for (index, slice) in slices.enumerated() {
                     try Task.checkCancellation()
                     await onProgress("Generating clips", Double(exported.count) / Double(max(1, slices.count)))
@@ -310,7 +314,8 @@ final class SessionProcessor: @unchecked Sendable {
                             let clipped = try await exporter.export(
                                 sessionURL: sessionURL,
                                 slice: slice,
-                                mediaDuration: manifest.duration.mediaSeconds
+                                mediaDuration: manifest.duration.mediaSeconds,
+                                preparedSource: clipSource
                             )
                             exported.append(clipped.withExistingMedia(sessionURL: sessionURL))
                         } catch is CancellationError {
@@ -561,8 +566,10 @@ final class SessionProcessor: @unchecked Sendable {
         // analysis also refreshes those clips with microphone + call audio.
         if reanalyze {
             await onStatus(.slicing, "Updating clips with room and call audio…")
+            let clipSource = ClipExporter.PreparedSource(sessionURL: sessionURL)
+            defer { clipSource.cleanup() }
             for index in manifest.slices.indices where manifest.slices[index].clipPath != nil {
-                manifest.slices[index] = try await exporter.export(sessionURL: sessionURL, slice: manifest.slices[index], mediaDuration: manifest.duration.mediaSeconds)
+                manifest.slices[index] = try await exporter.export(sessionURL: sessionURL, slice: manifest.slices[index], mediaDuration: manifest.duration.mediaSeconds, preparedSource: clipSource)
             }
         }
         try vault.write(manifest: &manifest)
@@ -1073,16 +1080,17 @@ final class SessionProcessor: @unchecked Sendable {
     private func transcribe(
         sessionURL: URL,
         model: String,
+        source: WhisperModelSource,
         onStatus: @escaping @MainActor (PipelineStatus, String) -> Void,
         onEvent: @escaping @MainActor (ProcessingEvent) -> Void = { _ in }
     ) async throws -> (transcript: FullTranscript, incomplete: Bool, modelLoadSeconds: TimeInterval?) {
         let resolved = WhisperTranscriber.whisperKitModelName(model)
         var modelLoadSeconds: TimeInterval?
         do {
-            if !transcriber.isReady(for: model) {
+            if !transcriber.isReady(for: model, source: source) {
                 await onEvent(.stage(.loadingModel))
                 let loadStarted = Date()
-                try await waitForPrepare(model: model, resolved: resolved, onStatus: onStatus)
+                try await waitForPrepare(model: model, source: source, resolved: resolved, onStatus: onStatus)
                 modelLoadSeconds = Date().timeIntervalSince(loadStarted)
             } else {
                 await onEvent(.skipped(.loadingModel, reason: ProcessingSkipReason.alreadyLoaded.rawValue))
@@ -1201,6 +1209,7 @@ final class SessionProcessor: @unchecked Sendable {
 
     private func waitForPrepare(
         model: String,
+        source: WhisperModelSource,
         resolved: String,
         onStatus: @escaping @MainActor (PipelineStatus, String) -> Void
     ) async throws {
@@ -1210,7 +1219,7 @@ final class SessionProcessor: @unchecked Sendable {
         // next caller. The panel shows the elapsed time, so there is no status ticker here any more.
         try await withThrowingTaskGroup(of: Void.self) { group in
             group.addTask {
-                try await self.transcriber.prepare(model: model)
+                try await self.transcriber.prepare(model: model, source: source)
             }
             group.addTask {
                 try await Task.sleep(

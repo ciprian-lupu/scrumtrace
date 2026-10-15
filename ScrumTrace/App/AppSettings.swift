@@ -592,6 +592,36 @@ final class AppSettings: ObservableObject {
         }
     }
 
+    /// Cloud speech never changes the local model used for voice notes and manual preload.
+    var localSpeechTarget: LocalSpeechTarget {
+        if let service = transcriptionLibrary.selected, service.backend == .whisperKit {
+            return LocalSpeechTarget(service: service)
+        }
+        return LocalSpeechTarget(model: whisperModel, language: speechLanguage)
+    }
+
+    var selectedLocalSpeechProfile: SavedTranscriptionService? {
+        transcriptionLibrary.selected.flatMap { $0.backend == .whisperKit ? $0 : nil }
+    }
+
+    func setLocalSpeechModel(_ model: String) throws {
+        if var service = selectedLocalSpeechProfile {
+            service.model = model
+            try saveTranscriptionService(service, isNew: false)
+        } else {
+            whisperModel = model
+        }
+    }
+
+    func setLocalSpeechLanguage(_ language: SpeechLanguage) throws {
+        if var service = selectedLocalSpeechProfile {
+            service.language = language == .automatic ? .automatic : .one(language)
+            try saveTranscriptionService(service, isNew: false)
+        } else {
+            speechLanguage = language
+        }
+    }
+
     func selectedTranscriptionServiceConfiguration() -> TranscriptionServiceConfiguration? {
         guard let service = transcriptionLibrary.selected else { return nil }
         return TranscriptionServiceConfiguration(service: service, apiKey: service.credentialID.flatMap { keyStore.get(Self.transcriptionKeyAccount(id: $0)) } ?? "")

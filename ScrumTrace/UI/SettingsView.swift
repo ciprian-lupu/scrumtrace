@@ -55,7 +55,7 @@ struct SettingsView: View {
         .sheet(isPresented: $showSpeakerReview) {
             SpeakerReviewView(controller: controller)
         }
-        .onChange(of: settings.whisperModel) { _, _ in preloadLine = "" }
+        .onChange(of: settings.localSpeechTarget) { _, _ in preloadLine = "" }
         .onChange(of: settings.provider) { _, _ in
             keyStatus = ""
             connectionLine = ""
@@ -78,44 +78,48 @@ struct SettingsView: View {
     private var speechTab: some View {
         Form {
             Section("Local transcription") {
-                Picker("Meeting language", selection: $settings.speechLanguage) {
+                Picker("Meeting language", selection: localSpeechLanguageBinding) {
                     ForEach(SpeechLanguage.allCases) { language in Text(language.title).tag(language) }
                 }
                 .disabled(!controller.canChangeCaptureSettings)
                 Text("Choose Romanian for meetings mainly in Romanian. Automatic detects the spoken language. This applies to the next recording or analysis and to voice notes; existing transcripts are kept.")
                     .font(.caption).foregroundStyle(.secondary)
-                Picker("Speech model", selection: $settings.whisperModel) {
+                Picker("Speech model", selection: localSpeechModelBinding) {
                     Text("Compressed turbo (632 MB, recommended)").tag(WhisperTranscriber.defaultStoredModel)
                     Text("Uncompressed turbo (multi-GB)").tag("large-v3_turbo_uncompressed")
                     Text("Base (faster, less accurate)").tag("base")
                     Text("Tiny (quick checks)").tag("tiny")
-                    if ![WhisperTranscriber.defaultStoredModel, "large-v3_turbo_uncompressed", "base", "tiny"].contains(settings.whisperModel) {
-                        Text("Custom model").tag(settings.whisperModel)
+                    if ![WhisperTranscriber.defaultStoredModel, "large-v3_turbo_uncompressed", "base", "tiny"].contains(settings.localSpeechTarget.model) {
+                        Text("Custom model").tag(settings.localSpeechTarget.model)
                     }
                 }
                 .disabled(speechControlsDisabled)
-                LabeledContent("Selected model", value: controller.transcriber.isReady(for: settings.whisperModel)
+                if let profile = settings.selectedLocalSpeechProfile {
+                    Text("Using \(profile.name). Model and language changes update this profile. Its source is configured below.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                LabeledContent("Selected model", value: controller.transcriber.isReady(for: settings.localSpeechTarget)
                                ? "Ready" : controller.transcriber.isPreparing ? "Loading…" : "Not loaded")
                 if let loaded = controller.transcriber.loadedModelName,
-                   !controller.transcriber.isReady(for: settings.whisperModel) {
+                   !controller.transcriber.isReady(for: settings.localSpeechTarget) {
                     Text("Previously loaded: \(loaded). Load the selected model to switch.")
                         .font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
                 }
                 Button(preloadingWhisper || controller.transcriber.isPreparing ? "Loading Whisper model…" : "Preload Whisper model") {
                     guard !speechControlsDisabled else { return }
-                    let model = settings.whisperModel
+                    let target = settings.localSpeechTarget
                     preloadingWhisper = true
                     preloadLine = "Loading the local model. The first download can take several minutes."
                     AgentLog.event("settings_action", ["action": "preload_whisper"])
                     Task {
                         defer { preloadingWhisper = false }
                         do {
-                            try await controller.transcriber.prepare(model: model)
+                            try await controller.transcriber.prepare(target: target)
                             preloadLine = "The selected model is ready. No relaunch is needed."
                         } catch { preloadLine = "Could not load Whisper: \(error.localizedDescription)" }
                     }
                 }
-                .disabled(speechControlsDisabled || settings.whisperModel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .disabled(speechControlsDisabled || settings.localSpeechTarget.model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 if !preloadLine.isEmpty { Text(preloadLine).font(.caption).textSelection(.enabled) }
                 Text("Speech is processed on this Mac. Preload before a meeting to finish the model download and preparation in advance.")
                     .font(.caption).foregroundStyle(.secondary)
@@ -149,9 +153,9 @@ struct SettingsView: View {
             }
             Section {
                 DisclosureGroup("Advanced model settings", isExpanded: $showAdvancedSpeech) {
-                    TextField("WhisperKit model ID", text: $settings.whisperModel)
+                    TextField("WhisperKit model ID", text: localSpeechModelBinding)
                         .disabled(speechControlsDisabled)
-                    Text("Resolved model: \(WhisperTranscriber.whisperKitModelName(settings.whisperModel))")
+                    Text("Resolved model: \(WhisperTranscriber.whisperKitModelName(settings.localSpeechTarget.model))")
                         .font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
                     Button("Reveal downloaded models") {
                         NSWorkspace.shared.open(WhisperTranscriber.modelDownloadBase)
@@ -161,6 +165,20 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
+    }
+
+    private var localSpeechModelBinding: Binding<String> {
+        Binding(get: { settings.localSpeechTarget.model }, set: { model in
+            do { try settings.setLocalSpeechModel(model) }
+            catch { preloadLine = error.localizedDescription }
+        })
+    }
+
+    private var localSpeechLanguageBinding: Binding<SpeechLanguage> {
+        Binding(get: { settings.localSpeechTarget.language }, set: { language in
+            do { try settings.setLocalSpeechLanguage(language) }
+            catch { preloadLine = error.localizedDescription }
+        })
     }
 
     private var speechControlsDisabled: Bool {

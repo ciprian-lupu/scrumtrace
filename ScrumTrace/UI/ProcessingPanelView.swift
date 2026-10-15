@@ -13,10 +13,10 @@ struct ProcessingPanelView: View {
             VStack(spacing: 0) {
                 VStack(alignment: .leading, spacing: 6) {
                     header(state)
-                    ProcessingStageFlow(spacing: 14, rowSpacing: 4) {
-                        ForEach(state.rows) { row in
-                            ProcessingStageChip(row: row)
-                        }
+                    if let activity = state.activityTitle {
+                        Text(activity)
+                            .font(.subheadline.weight(.semibold))
+                            .accessibilityIdentifier("main.processing.activity")
                     }
                     if let detail = Self.detailLine(state) {
                         Text(detail)
@@ -26,10 +26,24 @@ struct ProcessingPanelView: View {
                             .help(detail)
                             .accessibilityIdentifier("main.processing.detail")
                     }
-                    if let fraction = state.rows.first(where: { $0.state == .active })?.fraction {
+                    if let fraction = state.activeRow?.fraction {
                         ProgressView(value: fraction)
                             .progressViewStyle(.linear)
                             .accessibilityIdentifier("main.processing.progress")
+                    } else if state.isRunning {
+                        ProgressView().controlSize(.small)
+                            .accessibilityLabel(state.activeRow?.title ?? "Processing recording")
+                    }
+                    ProcessingStageFlow(spacing: 14, rowSpacing: 4) {
+                        ForEach(state.rows) { row in
+                            ProcessingStageChip(row: row)
+                        }
+                    }
+                    if state.showsFinishLater {
+                        Text(ProcessingPanelState.finishLaterHelp)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .accessibilityIdentifier("main.processing.finishLaterHelp")
                     }
                 }
                 .padding(.horizontal, 16)
@@ -45,7 +59,7 @@ struct ProcessingPanelView: View {
     /// The line under the strip: the active row's expectation or progress, the failed row's reason, or the footer.
     static func detailLine(_ state: ProcessingPanelState) -> String? {
         if state.isRunning {
-            return state.rows.first { $0.state == .active }?.detail
+            return state.activeRow?.progressSummary
         }
         return state.footer ?? state.rows.first { $0.state == .failed }?.detail
     }
@@ -121,7 +135,7 @@ struct ProcessingStageChip: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .foregroundStyle(row.state == .pending ? Color.secondary : Color.primary)
+        .foregroundStyle(row.state == .active || row.state == .failed ? Color.primary : Color.secondary)
         .opacity(row.state == .pending ? 0.7 : 1)
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("main.processing.stage.\(row.stage.rawValue)")

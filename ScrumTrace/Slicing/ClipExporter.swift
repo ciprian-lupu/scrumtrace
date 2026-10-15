@@ -7,10 +7,58 @@ import CoreVideo
 import Foundation
 
 struct ClipExporter {
+    /// One private snapshot per serial batch, shared by every clip and still. Never retained across runs.
+    /// Laziness avoids copying a multi-GB movie when there are no clips; failures are also reused.
+    final class PreparedSource {
+        let sessionURL: URL
+        private let copyMovie: (URL) throws -> URL
+        private var movieResult: Result<URL, Error>?
+        private var mediaResult: Result<SessionPlaybackMedia, Error>?
+        private var closed = false
+
+        init(sessionURL: URL, copyMovie: @escaping (URL) throws -> URL = {
+            try ExportRel.copyContainedToTemporaryFile(relative: ScrumTracePath.sessionMovie, sessionURL: $0, prefix: "scrumtrace-movie")
+        }) {
+            self.sessionURL = sessionURL.standardizedFileURL
+            self.copyMovie = copyMovie
+        }
+
+        func movie() throws -> URL {
+            try Task.checkCancellation()
+            guard !closed else { throw SessionRecorderError.writerFailed("Clip source was released.") }
+            if movieResult == nil { movieResult = Result { try copyMovie(sessionURL) } }
+            return try movieResult!.get()
+        }
+
+        func media() async throws -> SessionPlaybackMedia {
+            let movie = try movie()
+            if let mediaResult { return try mediaResult.get() }
+            do {
+                let media = try await SessionPlaybackMedia.prepare(sessionURL: sessionURL, privateMovie: movie)
+                mediaResult = .success(media)
+                return media
+            } catch {
+                mediaResult = .failure(error)
+                throw error
+            }
+        }
+
+        func cleanup() {
+            if case let .success(media) = mediaResult { media.cleanup() }
+            if case let .success(movie) = movieResult { ExportRel.removePrivateTemporaryURL(movie) }
+            mediaResult = nil
+            movieResult = nil
+            closed = true
+        }
+
+        deinit { cleanup() }
+    }
+
     func export(
         sessionURL: URL,
         slice: SliceRecord,
-        mediaDuration: TimeInterval
+        mediaDuration: TimeInterval,
+        preparedSource: PreparedSource? = nil
     ) async throws -> SliceRecord {
         guard ExportRel.isUsableSessionRoot(sessionURL) else {
             throw SessionRecorderError.writerFailed("session.mp4 is missing.")
@@ -20,17 +68,12 @@ struct ClipExporter {
               ExportRel.isReadableSessionFile(source, sessionRoot: sessionURL) else {
             throw SessionRecorderError.writerFailed("session.mp4 is missing.")
         }
-        let movieCopy: URL
-        do {
-            movieCopy = try ExportRel.copyContainedToTemporaryFile(
-                relative: ScrumTracePath.sessionMovie,
-                sessionURL: sessionURL,
-                prefix: "scrumtrace-movie"
-            )
-        } catch {
-            throw SessionRecorderError.writerFailed("session.mp4 is missing.")
+        let batch = preparedSource ?? PreparedSource(sessionURL: sessionURL)
+        guard batch.sessionURL == sessionURL.standardizedFileURL else {
+            throw SessionRecorderError.writerFailed("Clip source belongs to another recording.")
         }
-        defer { ExportRel.removePrivateTemporaryURL(movieCopy) }
+        defer { if preparedSource == nil { batch.cleanup() } }
+        let movieCopy = try batch.movie()
         guard let relativeClip = slice.clipPath else {
             throw SessionRecorderError.writerFailed("Slice is missing clip_path.")
         }
@@ -51,12 +94,14 @@ struct ClipExporter {
         updated.clipPath = prepared
         do {
             try await reencode(
-                source: movieCopy,
+                asset: try await batch.media().asset,
                 destRelative: prepared,
                 slice: slice,
                 mediaDuration: mediaDuration,
                 sessionURL: sessionURL
             )
+        } catch is CancellationError {
+            throw CancellationError()
         } catch {
             if ExportRel.existingSessionFile(prepared, sessionURL: sessionURL) == nil {
                 updated.clipPath = nil
@@ -86,6 +131,7 @@ struct ClipExporter {
         ].filter { $0.isFinite && $0 >= slice.startMedia && $0 <= slice.endMedia && $0 <= mediaDuration }
         var extracted = false
         for time in stillTimes {
+            try Task.checkCancellation()
             do {
                 let frame = try await extractStill(source: movieCopy, at: time)
                 guard frame.actualMedia.isFinite,
@@ -103,6 +149,8 @@ struct ClipExporter {
                 )
                 extracted = true
                 break
+            } catch is CancellationError {
+                throw CancellationError()
             } catch {
                 continue
             }
@@ -257,7 +305,7 @@ struct ClipExporter {
     }
 
     private func reencode(
-        source: URL,
+        asset: AVAsset,
         destRelative: String,
         slice: SliceRecord,
         mediaDuration: TimeInterval,
@@ -265,16 +313,18 @@ struct ClipExporter {
     ) async throws {
         let range = try clipTimeRange(slice: slice, mediaDuration: mediaDuration)
         let temp = try ExportRel.makePrivateTemporaryURL(prefix: "scrumtrace-clip", ext: "mp4")
-        let media = try await SessionPlaybackMedia.prepare(sessionURL: sessionURL, privateMovie: source)
-        defer { media.cleanup() }
-        let asset = media.asset
+        defer { ExportRel.removePrivateTemporaryURL(temp) }
         do {
             try await writeMainProfileClip(asset: asset, destination: temp, timeRange: range)
+            try Task.checkCancellation()
+        } catch is CancellationError {
+            throw CancellationError()
         } catch {
             ExportRel.removePrivateTemporaryURL(temp)
             let retry = try ExportRel.makePrivateTemporaryURL(prefix: "scrumtrace-clip", ext: "mp4")
             do {
                 try await exportPresetClip(asset: asset, destination: retry, timeRange: range)
+                try Task.checkCancellation()
                 try ExportRel.moveIntoSession(from: retry, relative: destRelative, sessionURL: sessionURL)
                 ExportRel.removePrivateTemporaryURL(retry)
                 return

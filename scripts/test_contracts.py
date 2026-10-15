@@ -443,15 +443,19 @@ def test_clip_exporter_macos14() -> None:
     export_fn = clip.split("func export(")[1].split("func tightenExportClips")[0]
     assert "isUsableSessionRoot" in export_fn
     assert "isReadableSessionFile" in export_fn
-    assert "copyContainedToTemporaryFile" in export_fn
-    assert "removePrivateTemporaryURL(movieCopy)" in export_fn
+    assert "let movieCopy = try batch.movie()" in export_fn
+    prepared_source = clip.split("final class PreparedSource")[1].split("func export(")[0]
+    assert "copyContainedToTemporaryFile" in prepared_source
+    assert "removePrivateTemporaryURL(movie)" in prepared_source
+    assert "batch.sessionURL == sessionURL.standardizedFileURL" in export_fn
+    assert "defer { if preparedSource == nil { batch.cleanup() } }" in export_fn
     assert "unlinkLastComponentUnfollowed(movieCopy)" not in export_fn
     assert "FileManager.default.removeItem(at: movieCopy)" not in export_fn
     assert "extractStill(source: movieCopy" in export_fn
     assert "extractStill(source: source" not in export_fn
     assert "slice.startMedia + 0.5" in export_fn
     assert export_fn.count("extractStill(source: movieCopy") >= 1
-    assert "reencode(\n            source: movieCopy" in export_fn or "source: movieCopy" in export_fn
+    assert "asset: try await batch.media().asset" in export_fn
     assert "clip_path escaped" in clip
     assert "clip_path is not a working or export clip" in clip
     assert "isAllowedClipDest" in clip
@@ -971,7 +975,7 @@ def test_audio_split_and_brief_loader() -> None:
 
 def test_dual_transcript_merge_wired() -> None:
     speech = (ROOT / "ScrumTrace" / "Speech" / "WhisperTranscriber.swift").read_text()
-    prepare_fn = speech.split("func prepare")[1].split("func transcribeFile")[0]
+    prepare_fn = speech.split("func prepare(model:")[1].split("func transcribeFile")[0]
     assert "Task.detached" in prepare_fn
     assert "func merge" in speech
     assert "func transcribeMovieAudio" in speech
@@ -2850,7 +2854,11 @@ def test_write_contained_data_refuses_directory_symlinks() -> None:
     assert "isAllowedClipDest" in export_fn
     assert export_fn.index("isAllowedClipDest") < export_fn.index("prepareContainedWrite")
     assert "writeContainedData(frame.jpeg, relative: stillRelative" in export_fn
-    assert "copyContainedToTemporaryFile" in export_fn
+    assert "let movieCopy = try batch.movie()" in export_fn
+    prepared_source = clip.split("final class PreparedSource")[1].split("func export(")[0]
+    assert "copyContainedToTemporaryFile" in prepared_source
+    assert "removePrivateTemporaryURL(movie)" in prepared_source
+    assert "batch.sessionURL == sessionURL.standardizedFileURL" in export_fn
     assert "extractStill(source: movieCopy" in export_fn
     vault = (ROOT / "ScrumTrace" / "Storage" / "SessionVault.swift").read_text()
     write_man = vault.split("func write(manifest")[1].split("func appendEvent")[0]
@@ -4065,7 +4073,7 @@ def test_processing_panel_never_loses_a_recording_or_focus() -> None:
     assert "catch is CancellationError { throw CancellationError() }" in prepare
     assert "if pendingKey == cacheKey { throw error }" in prepare
     wait = processor.split("private func waitForPrepare(")[1].split("private static func volumeHasRoom")[0]
-    assert "try await self.transcriber.prepare(model: model)" in wait.split("group.addTask {")[1]
+    assert "try await self.transcriber.prepare(model: model, source: source)" in wait.split("group.addTask {")[1]
     assert "prepareTask" not in wait
     movie_audio = speech.split("func transcribeMovieAudio")[1].split("func extractAudio")[0]
     assert "} catch is CancellationError {" in movie_audio

@@ -130,14 +130,14 @@ struct OverviewReadiness: Equatable, Sendable {
 
         @MainActor
         static func live(settings: AppSettings, transcriber: WhisperTranscriber) -> Inputs {
-            let model = settings.whisperModel
+            let target = settings.localSpeechTarget
             return Inputs(
                 capture: CapturePermissions.readiness(requireMicrophone: settings.includeMicrophone),
                 microphoneEnabled: settings.includeMicrophone,
                 microphoneStatus: CapturePermissions.microphoneStatus(),
                 accessibilityTrusted: MetadataSampler.requestTrust(prompt: false),
-                speechModel: model,
-                speechModelReady: transcriber.isReady(for: model),
+                speechModel: target.model,
+                speechModelReady: transcriber.isReady(for: target),
                 speechModelLoading: transcriber.isPreparing,
                 aiServiceSelected: settings.connectionLibrary.selected != nil,
                 aiKeySaved: settings.provider.usesSubscription || settings.hasSavedAPIKey,
@@ -537,7 +537,7 @@ struct OverviewDependencies {
             openScreenRecordingSettings: { SystemPrivacySettings.openScreenRecording() },
             openMicrophoneSettings: { SystemPrivacySettings.openMicrophone() },
             relaunch: { controller.relaunchForPermissions() },
-            preloadSpeechModel: { try await transcriber.prepare(model: $0) },
+            preloadSpeechModel: { _ in try await transcriber.prepare(target: settings.localSpeechTarget) },
             revealSessionsFolder: { vault.revealRootInFinder() },
             openReleasesPage: { NSWorkspace.shared.open(UpdateChecker.releasesURL) }
         )

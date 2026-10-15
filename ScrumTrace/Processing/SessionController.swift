@@ -1098,11 +1098,10 @@ final class SessionController: ObservableObject {
             startTimer()
             log(.start, [:])
             let transcriber = self.transcriber
-            transcriber.setLanguage(settings.speechLanguage)
-            let model = settings.whisperModel
+            let target = settings.localSpeechTarget
             Task.detached {
                 do {
-                    try await transcriber.prepare(model: model)
+                    try await transcriber.prepare(target: target)
                 } catch {
                     let message = error.localizedDescription
                     await MainActor.run { [weak self] in
@@ -1363,6 +1362,7 @@ final class SessionController: ObservableObject {
                 // A manual retry has started a fresh pass, including any model preparation below.
                 try PipelineTiming.markTranscriptionStarted(sessionURL: vault.sessionURL(id: sessionId))
             }
+            let localTarget = settings.localSpeechTarget
             let whisperModel: String
             if localOnly {
                 whisperModel = settings.whisperModel
@@ -1384,7 +1384,7 @@ final class SessionController: ObservableObject {
                     whisperModel = settings.whisperModel
                 }
             } else if let speech = defaultSpeech {
-                if !hasReusablePrimary, !transcriber.isReady(for: speech.service.model) {
+                if !hasReusablePrimary, !transcriber.isReady(for: LocalSpeechTarget(service: speech.service)) {
                     // The saved speech profile loads before `process`; the panel shows the same stage for it.
                     applyProcessingEvent(.stage(.loadingModel))
                 }
@@ -1394,8 +1394,8 @@ final class SessionController: ObservableObject {
                     reusingPrimaryTranscript: hasReusablePrimary
                 )
             } else {
-                transcriber.setLanguage(settings.speechLanguage)
-                whisperModel = settings.whisperModel
+                transcriber.setLanguage(localTarget.language)
+                whisperModel = localTarget.model
             }
             let result = try await processor?.process(
                 sessionId: sessionId,
@@ -1403,6 +1403,7 @@ final class SessionController: ObservableObject {
                 configuration: services.first?.configuration ?? settings.providerConfiguration(includeKey: false),
                 serviceConfigurations: localOnly ? nil : services,
                 whisperModel: whisperModel,
+                whisperSource: localTarget.source,
                 identifySpeakers: settings.identifySpeakers,
                 localOnly: localOnly,
                 onProgress: { [weak self] message, fraction in
@@ -1596,7 +1597,9 @@ final class SessionController: ObservableObject {
         shotWindow = ShotNoteWindow(
             screenshot: image,
             transcriber: transcriber,
-            whisperModel: settings.whisperModel,
+            whisperModel: settings.localSpeechTarget.model,
+            whisperSource: settings.localSpeechTarget.source,
+            speechLanguage: settings.localSpeechTarget.language,
             allowsNewCapture: { [weak self] in
                 self?.captureState.allowsNewCapture == true
             }
@@ -1954,9 +1957,7 @@ func prepareLocalTranscriptionIfNeeded(
     reusingPrimaryTranscript: Bool
 ) async throws -> String {
     guard !reusingPrimaryTranscript else { return service.model }
-    let language = service.language
-    transcriber.setLanguage(language.mode == .single && language.languages.count == 1 ? language.languages[0] : .automatic)
-    try await transcriber.prepare(model: service.model, source: service.whisperSource ?? .standard)
+    try await transcriber.prepare(target: LocalSpeechTarget(service: service))
     return service.model
 }
 

@@ -511,13 +511,19 @@ struct ProcessingPanelRow: Equatable, Identifiable {
     let fraction: Double?
 
     var id: ProcessingStage { stage }
+
+    var progressSummary: String? {
+        guard let fraction else { return detail }
+        let percentage = "\(Int(fraction * 100))%"
+        return detail.map { "\($0) · \(percentage)" } ?? percentage
+    }
 }
 
 struct ProcessingPanelState: Equatable {
     static let finishLaterTitle = "Finish later"
     static let retryTitle = "Retry"
     static let closeTitle = "Close"
-    static let finishLaterHelp = "Stop working on this recording for now. Start recording becomes available; Retry analysis finishes it later."
+    static let finishLaterHelp = "Choose Finish later to record again. Completed stages are saved; Retry analysis restarts the unfinished stage."
     static let deferredFooter = "Stopped for now. Retry analysis in Recordings or the menu finishes this recording; nothing was lost."
     static let deferredModelFooter = "Stopped for now. The speech model keeps loading in the background; Retry analysis or your next recording will use it."
 
@@ -531,6 +537,13 @@ struct ProcessingPanelState: Equatable {
     let showsClose: Bool
     /// The run's total time so far, for the header.
     let totalElapsed: String
+
+    var activeRow: ProcessingPanelRow? { rows.first { $0.state == .active } }
+
+    var activityTitle: String? {
+        guard let row = activeRow else { return nil }
+        return row.elapsed.map { "\(row.title) · \($0) elapsed" } ?? row.title
+    }
 
     /// `modelStillLoading` is `WhisperTranscriber.isPreparing` at the time of the deferral.
     static func make(_ status: ProcessingStatus, modelStillLoading: Bool = false) -> ProcessingPanelState {

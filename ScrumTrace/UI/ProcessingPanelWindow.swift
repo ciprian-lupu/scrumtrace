@@ -58,6 +58,9 @@ final class ProcessingPanelWindow: NSPanel {
     private let subtitleLabel = PanelLabel(size: 11, weight: .regular, alpha: 0.7)
     private let elapsedLabel = PanelLabel(size: 11, weight: .medium, alpha: 0.6, monospaced: true)
     private let footerLabel = PanelLabel(size: 11, weight: .regular, alpha: 0.85)
+    private let activityLabel = PanelLabel(size: 13, weight: .semibold, alpha: 1)
+    private let activityDetail = PanelLabel(size: 11, weight: .regular, alpha: 0.85)
+    private let finishLaterHelpLabel = PanelLabel(size: 10.5, weight: .regular, alpha: 0.7)
     private let progress = NSProgressIndicator()
     private let finishLaterButton = PanelTextButton(title: ProcessingPanelState.finishLaterTitle)
     private let retryButton = PanelTextButton(title: ProcessingPanelState.retryTitle)
@@ -130,15 +133,20 @@ final class ProcessingPanelWindow: NSPanel {
         subtitleLabel.stringValue = next.subtitle ?? ""
         subtitleLabel.isHidden = next.subtitle == nil
         elapsedLabel.stringValue = next.totalElapsed
+        activityLabel.stringValue = next.activityTitle ?? ""
+        activityLabel.isHidden = next.activityTitle == nil
+        activityDetail.stringValue = next.activeRow?.progressSummary ?? ""
+        activityDetail.isHidden = next.activeRow?.progressSummary == nil
+        finishLaterHelpLabel.isHidden = !next.showsFinishLater
         for row in next.rows {
-            rows[row.stage]?.apply(row)
+            rows[row.stage]?.apply(row, compact: next.isRunning)
         }
         let active = next.rows.first { $0.state == .active }
         if let fraction = active?.fraction {
+            progress.stopAnimation(nil)
             progress.isIndeterminate = false
             progress.doubleValue = fraction
             progress.isHidden = false
-            progress.stopAnimation(nil)
         } else if next.isRunning {
             progress.isIndeterminate = true
             progress.isHidden = false
@@ -233,8 +241,15 @@ final class ProcessingPanelWindow: NSPanel {
         titleLabel.setAccessibilityIdentifier("processing.title")
         subtitleLabel.maximumNumberOfLines = 2
         footerLabel.maximumNumberOfLines = 3
+        activityLabel.maximumNumberOfLines = 2
+        activityDetail.maximumNumberOfLines = 4
+        finishLaterHelpLabel.maximumNumberOfLines = 3
+        finishLaterHelpLabel.stringValue = ProcessingPanelState.finishLaterHelp
+        activityLabel.setAccessibilityIdentifier("processing.activity")
+        activityDetail.setAccessibilityIdentifier("processing.activityDetail")
+        finishLaterHelpLabel.setAccessibilityIdentifier("processing.finishLaterHelp")
         footerLabel.setAccessibilityIdentifier("processing.footer")
-        for label in [titleLabel, subtitleLabel, footerLabel] {
+        for label in [titleLabel, subtitleLabel, footerLabel, activityLabel, activityDetail, finishLaterHelpLabel] {
             label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
             label.setContentHuggingPriority(.defaultLow, for: .horizontal)
         }
@@ -271,6 +286,9 @@ final class ProcessingPanelWindow: NSPanel {
 
         stack.addArrangedSubview(header)
         stack.addArrangedSubview(subtitleLabel)
+        stack.addArrangedSubview(activityLabel)
+        stack.addArrangedSubview(activityDetail)
+        stack.addArrangedSubview(progress)
         for stage in ProcessingStage.allCases {
             let row = ProcessingPanelRowView()
             row.setAccessibilityIdentifier("processing.stage.\(stage.rawValue)")
@@ -278,9 +296,12 @@ final class ProcessingPanelWindow: NSPanel {
             stack.addArrangedSubview(row)
             row.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -28).isActive = true
         }
-        stack.addArrangedSubview(progress)
         stack.addArrangedSubview(footerLabel)
         stack.addArrangedSubview(buttons)
+        stack.addArrangedSubview(finishLaterHelpLabel)
+        for label in [activityLabel, activityDetail, finishLaterHelpLabel] {
+            label.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -28).isActive = true
+        }
         header.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -28).isActive = true
         progress.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -28).isActive = true
         subtitleLabel.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -28).isActive = true
@@ -355,16 +376,17 @@ final class ProcessingPanelRowView: NSView {
 
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
-    func apply(_ row: ProcessingPanelRow) {
+    func apply(_ row: ProcessingPanelRow, compact: Bool = false) {
         self.row = row
         title.stringValue = row.title
         elapsed.stringValue = row.elapsed ?? ""
         detail.stringValue = row.detail ?? ""
-        detail.isHidden = row.detail == nil
+        detail.isHidden = row.detail == nil || compact
         dot.apply(row.state)
         let dimmed = row.state == .pending
-        title.alphaValue = dimmed ? 0.45 : 1
-        elapsed.alphaValue = dimmed ? 0.45 : 1
+        let emphasis: CGFloat = dimmed ? 0.45 : compact && row.state != .active ? 0.65 : 1
+        title.alphaValue = emphasis
+        elapsed.alphaValue = emphasis
         title.font = NSFont.systemFont(ofSize: 12, weight: row.state == .active ? .semibold : .medium)
         setAccessibilityValue(ProcessingStageChip.spoken(row.state))
     }

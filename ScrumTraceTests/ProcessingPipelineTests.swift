@@ -155,6 +155,40 @@ final class ProcessingPipelineTests: XCTestCase {
 
     // MARK: - Processor events
 
+    private actor SourceLoads {
+        var sources: [WhisperModelSource] = []
+        func record(_ source: WhisperModelSource) { sources.append(source) }
+    }
+
+    @MainActor
+    func testProcessorUsesCustomSourceAndReusesMatchingPreload() async throws {
+        try await withBench { bench in
+            for preload in [false, true] {
+                let id = try makeAudioSession(in: bench.vault)
+                let loads = SourceLoads()
+                let target = LocalSpeechTarget(model: "base", source: .folder("/tmp/synthetic-model"), language: .romanian)
+                let transcriber = WhisperTranscriber(loadModelWithSource: { _, source in
+                    await loads.record(source)
+                    return WhisperTranscriber.LoadedModel { _, _ in
+                        [TranscriptionResult(text: " hello there",
+                            segments: [TranscriptionSegment(id: 0, seek: 0, start: 0, end: 1.5, text: " hello there")],
+                            language: "en", timings: TranscriptionTimings())]
+                    }
+                })
+                if preload { try await transcriber.prepare(target: target) }
+                var events: [ProcessingEvent] = []
+                let result = try await SessionProcessor(vault: bench.vault, transcriber: transcriber).process(
+                    sessionId: id, pinTimes: [], configuration: localConfiguration,
+                    whisperModel: target.model, whisperSource: target.source, onStatus: { _, _ in }, onEvent: { events.append($0) })
+                XCTAssertEqual(result.pipelineStatus, .completed)
+                let observed = await loads.sources
+                XCTAssertEqual(observed, [target.source], "The custom model loads once, whether preloaded or cold")
+                XCTAssertTrue(transcriber.isReady(for: target))
+                XCTAssertEqual(events.contains(.skipped(.loadingModel, reason: "already_loaded")), preload)
+            }
+        }
+    }
+
     @MainActor
     func testTheProcessorReportsEveryStageAndRealProgress() async throws {
         try await withBench { bench in

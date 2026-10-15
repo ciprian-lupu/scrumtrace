@@ -140,6 +140,23 @@ final class ProcessingStatusTests: XCTestCase {
         XCTAssertNotEqual(status().runID, status().runID)
     }
 
+    func testActiveSummaryShowsMeasuredStageProgressWithoutAnOverallEstimate() {
+        var run = status()
+        run.enter(.transcribing, at: t0.addingTimeInterval(1))
+        run.update(progress: .audioSeconds(done: 720, total: 2400))
+        run.now = t0.addingTimeInterval(61)
+        let state = ProcessingPanelState.make(run)
+        XCTAssertEqual(state.activityTitle, "Transcribing · 01:00 elapsed")
+        XCTAssertEqual(state.activeRow?.progressSummary, "12:00 of 40:00 of audio · 30%")
+        run.enter(.loadingModel)
+        let loading = ProcessingPanelState.make(run)
+        XCTAssertNil(loading.activeRow?.fraction)
+        XCTAssertFalse(loading.activeRow?.progressSummary?.contains("%") ?? true)
+        run.finish(.deferred)
+        XCTAssertNil(ProcessingPanelState.make(run).activeRow)
+        XCTAssertTrue(ProcessingPanelState.finishLaterHelp.contains("restarts the unfinished stage"))
+    }
+
     func testTitleNamesTheRecordingDateAndLength() {
         let run = status()
         XCTAssertTrue(run.title.hasPrefix("Processing the recording from "), run.title)

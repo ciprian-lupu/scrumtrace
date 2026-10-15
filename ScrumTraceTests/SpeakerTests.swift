@@ -359,6 +359,82 @@ final class SpeakerTests: XCTestCase {
         XCTAssertFalse(omittedHTML.contains("data-clip=\"media/s1/clip.mp4\""))
     }
 
+    func testClipBatchReusesPrivateMovieAndAudioAndCleansUp() async throws {
+        let movie = root.appendingPathComponent("archive/session.mp4")
+        try FileManager.default.createDirectory(at: movie.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try await makeMovie(movie)
+        try writeWav(root.appendingPathComponent("archive/audio.wav"), amplitude: 0.4, seconds: 3)
+        try CaptureAudioLayout(microphoneWav: true, systemAudioInMovie: false, wavStartMediaSeconds: 2).write(sessionURL: root)
+        var copies = 0
+        var copiedMovie: URL?
+        let batch = ClipExporter.PreparedSource(sessionURL: root) { session in
+            copies += 1
+            let copy = try ExportRel.copyContainedToTemporaryFile(relative: ScrumTracePath.sessionMovie, sessionURL: session, prefix: "test-clip-batch")
+            copiedMovie = copy
+            return copy
+        }
+        defer { batch.cleanup() }
+        XCTAssertEqual(copies, 0, "An empty batch does no I/O")
+        let media = try await batch.media()
+        let reusedMedia = try await batch.media()
+        XCTAssertTrue(media.asset === reusedMedia.asset, "The microphone composition is prepared once too")
+        for id in ["first", "second"] {
+            let slice = SliceRecord(sliceId: id, startMedia: 1, endMedia: 6, trigger: .pin, associatedShotId: nil,
+                clipPath: "archive/media-work/\(id)/clip.mp4", stills: [], analysisStatus: .skipped, score: 1)
+            let result = try await ClipExporter().export(sessionURL: root, slice: slice, mediaDuration: 6, preparedSource: batch)
+            let clip = root.appendingPathComponent(try XCTUnwrap(result.clipPath))
+            let values = try await audioEnergy(clip)
+            XCTAssertGreaterThan(values.voiced, 0.1)
+            XCTAssertEqual(values.onset, 1, accuracy: 0.08)
+            XCTAssertFalse(result.stills.isEmpty, "Still extraction shares the same movie")
+        }
+        XCTAssertEqual(copies, 1)
+        let copy = try XCTUnwrap(copiedMovie)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: copy.path))
+        batch.cleanup()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: copy.path))
+        XCTAssertThrowsError(try batch.movie(), "A closed batch cannot start copying again")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: movie.path))
+    }
+
+    func testClipBatchCachesFailureAndRejectsOtherSessions() async throws {
+        var attempts = 0
+        let failed = ClipExporter.PreparedSource(sessionURL: root) { _ in
+            attempts += 1
+            throw SettingsValidationError("Fixture failure")
+        }
+        XCTAssertThrowsError(try failed.movie())
+        XCTAssertThrowsError(try failed.movie())
+        XCTAssertEqual(attempts, 1, "Every clip must not retry a failed multi-GB copy")
+        let movie = root.appendingPathComponent("archive/session.mp4")
+        try FileManager.default.createDirectory(at: movie.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("fixture".utf8).write(to: movie)
+        let other = ClipExporter.PreparedSource(sessionURL: root.appendingPathComponent("other")) { _ in
+            XCTFail("Another recording must never be copied")
+            throw SettingsValidationError("Wrong recording")
+        }
+        let slice = SliceRecord(sliceId: "s1", startMedia: 0, endMedia: 5, trigger: .pin, associatedShotId: nil,
+            clipPath: "archive/media-work/s1/clip.mp4", stills: [], analysisStatus: .skipped, score: 1)
+        do {
+            _ = try await ClipExporter().export(sessionURL: root, slice: slice, mediaDuration: 6, preparedSource: other)
+            XCTFail("Expected a cross-session refusal")
+        } catch { XCTAssertTrue(error.localizedDescription.contains("another recording")) }
+    }
+
+    func testCancelledClipBatchDoesNotCopySource() async throws {
+        let session = root!
+        let work = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            let batch = ClipExporter.PreparedSource(sessionURL: session) { _ in
+                XCTFail("Cancellation must precede copying")
+                throw SettingsValidationError("Unexpected copy")
+            }
+            return try batch.movie()
+        }
+        do { _ = try await work.value; XCTFail("Expected cancellation") }
+        catch is CancellationError { }
+    }
+
     func testMicrophoneSurvivesClipExportAtItsActualOffset() async throws {
         let movie = root.appendingPathComponent("archive/session.mp4")
         try FileManager.default.createDirectory(at: movie.deletingLastPathComponent(), withIntermediateDirectories: true)

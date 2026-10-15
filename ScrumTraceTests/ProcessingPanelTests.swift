@@ -166,6 +166,35 @@ final class ProcessingPanelTests: XCTestCase {
         }
     }
 
+    @MainActor
+    func testMeasuredProgressReplacesIndeterminateLoadingInTheNativeControl() throws {
+        try withPanel { panel, controller, _ in
+            var status = loadingStatus()
+            controller.setProcessingForTesting(status)
+            panel.refresh()
+            @MainActor func views(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(views) }
+            let content = try XCTUnwrap(panel.contentView)
+            let indicator = try XCTUnwrap(views(content).compactMap { $0 as? NSProgressIndicator }.first)
+            XCTAssertTrue(indicator.isIndeterminate)
+            status.enter(.transcribing)
+            status.update(progress: .audioSeconds(done: 720, total: 2400))
+            controller.setProcessingForTesting(status)
+            panel.refresh()
+            XCTAssertFalse(indicator.isIndeterminate)
+            XCTAssertFalse(indicator.isHidden)
+            XCTAssertEqual(indicator.doubleValue, 0.3, accuracy: 0.0001)
+            let detail = try XCTUnwrap(views(content).compactMap { $0 as? NSTextField }.first {
+                $0.accessibilityIdentifier() == "processing.activityDetail"
+            })
+            XCTAssertEqual(detail.stringValue, "12:00 of 40:00 of audio · 30%")
+            status.finish(.done("Session pack ready"))
+            controller.setProcessingForTesting(status)
+            panel.refresh()
+            XCTAssertTrue(indicator.isHidden)
+            XCTAssertTrue(detail.isHidden)
+        }
+    }
+
     /// Writes `processing-panel-<state>.png` for a human visual review when SCRUMTRACE_SNAPSHOT_DIR is set.
     @MainActor
     func testRenderPanelStatesForReview() throws {

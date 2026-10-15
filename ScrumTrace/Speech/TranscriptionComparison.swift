@@ -303,11 +303,8 @@ protocol TranscriptionEngine: Sendable {
 struct WhisperKitTranscriptionEngine: TranscriptionEngine {
     let transcriber: WhisperTranscriber
     func transcribe(audioURL: URL, configuration: TranscriptionServiceConfiguration) async throws -> FullTranscript {
-        let selection = configuration.service.language
-        // Expected-language mode deliberately enables detection. Passing the
-        // first expected language here would silently misrepresent the setting.
-        transcriber.setLanguage(selection.mode == .single && selection.languages.count == 1 ? selection.languages[0] : .automatic)
-        try await transcriber.prepare(model: configuration.service.model, source: configuration.service.whisperSource ?? .standard)
+        // The shared target also keeps expected-language mode on automatic detection.
+        try await transcriber.prepare(target: LocalSpeechTarget(service: configuration.service))
         return try await transcriber.transcribeFile(at: audioURL)
     }
 }
