@@ -1641,7 +1641,34 @@ def test_pause_privacy_and_metadata_gate() -> None:
     assert "scrumTraceCaptureFailed" in controller
     persist = controller.split("func persistInterruptedCapture")[1].split("func startRecordingAsync")[0]
     assert "try? vault.write" not in persist
-    assert "pipelineStatus = .idle" in persist
+    # Quit never leaves an interrupted recording at idle: that hid it from the launch resume and Needs attention.
+    assert "pipelineStatus = .idle" not in persist
+    assert "pipelineStatusAfterQuit(" in persist
+    assert "hasMedia: local.duration.mediaSeconds > 0" in persist
+    assert "guard hasMedia else { return .idle }" in halt
+    assert "captureClosed ? .transcribing : .recording" in halt
+    assert halt.index("persistInterruptedCapture(captureClosed: false)") < halt.index("lock.wait")
+    assert halt.index("halt_stop_ok") < halt.index("persistInterruptedCapture(captureClosed: true)")
+    # Free disk: refused before a session folder exists, checked on the 30 s tick, and an almost full disk ends the
+    # recording through the normal Stop instead of a writer failure.
+    start_fn = controller.split("private func startRecordingAsync")[1].split("private func stopRecordingAsync")[0]
+    assert start_fn.index("RecordingDiskBudget.startRefusal") < start_fn.index("vault.createSession")
+    assert "self.checkDiskSpaceWhileRecording()" in controller.split("private func startTimer")[1].split("private func sampleMetadataTick")[0]
+    disk_fn = controller.split("func checkDiskSpaceWhileRecording")[1].split("private func persistLivePipelineStatus")[0]
+    assert "guard isRecording, !isBusy else { return }" in disk_fn
+    assert disk_fn.index("disk_low_stop") < disk_fn.index("stopRecording()")
+    assert disk_fn.count("stopRecording()") == 1
+    # Keep awake: the hold follows the two state properties, so no start or stop path can forget it.
+    assert controller.count("didSet { updateSleepGuard() }") >= 2
+    assert "sleepGuard.update(recording: isRecording, working: isBusy)" in controller
+    # A stream that already ended must not keep Stop from closing the movie and the WAV.
+    recorder_stop = (ROOT / "ScrumTrace" / "Capture" / "SessionRecorder.swift").read_text()
+    recorder_stop = recorder_stop.split("func stop() async throws")[1].split("func reclaimLiveCaptureIfRewritten")[0]
+    stop_capture = recorder_stop.split("try await live.stopCapture()")[1]
+    assert stop_capture.lstrip().startswith("} catch {")
+    assert "recorder_stop_capture_fail" in stop_capture
+    assert stop_capture.index("} catch {") < stop_capture.index("markAsFinished")
+    assert recorder_stop.rindex("throw stopError") > recorder_stop.index("finishWriting")
     app = (ROOT / "ScrumTrace" / "App" / "AppDelegate.swift").read_text()
     assert "haltCaptureForTermination" in app
     assert "captureFreeze: controller.captureFreeze" in app
@@ -2533,7 +2560,20 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert ".annotated" in merge_fn
     eval_slice = processor.split("private func evaluateSlice")[1].split("private func tasks(")[0]
     assert eval_slice.count("abortedForAuth") >= 3
-    assert eval_slice.rfind("abortedForAuth") < eval_slice.find("provider.evaluate")
+    # The one provider call of a slice goes through the bounded retry, still after the last sign-in gate.
+    assert "provider.evaluate(" not in eval_slice
+    assert eval_slice.count("evaluateWithRetry(provider: provider") == 1
+    assert eval_slice.rfind("abortedForAuth") < eval_slice.find("evaluateWithRetry(provider: provider")
+    retry_fn = processor.split("private func evaluateWithRetry")[1].split("private func resetEvalAuthGate")[0]
+    assert "ProviderRetryPolicy.isTransient(error)" in retry_fn
+    assert "attempt < retryPolicy.maxAttempts" in retry_fn
+    assert "takeEvalRetry()" in retry_fn
+    assert "!Task.isCancelled" in retry_fn
+    assert "evalRetriesSpent < retryPolicy.runBudget" in retry_fn
+    retry_policy = (ROOT / "ScrumTrace" / "AI" / "ProviderRetryPolicy.swift").read_text()
+    transient = retry_policy.split("static func isTransient")[1]
+    assert transient.index("AIProviderError.isAuthFailure(error) { return false }") < transient.index("return true")
+    assert "error is ComparisonInputError { return false }" in transient
     assert "jpegPayload(url: url, sessionRoot: sessionURL)" in eval_slice
     assert "readContainedData(url, sessionRoot: sessionURL)" not in eval_slice
     assert "skippedNoSendableMedia" in eval_slice

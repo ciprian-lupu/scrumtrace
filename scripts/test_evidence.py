@@ -190,7 +190,8 @@ def test_frame_ref_basename_resolves() -> None:
     assert "fileExists(atPath: url.path), seenImage" not in eval_slice
     assert "sessionURL: sessionURL" in eval_slice.split("SliceEvaluationRequest")[1]
     assert eval_slice.count("abortedForAuth") >= 3
-    assert eval_slice.rfind("abortedForAuth") < eval_slice.find("provider.evaluate")
+    assert eval_slice.rfind("abortedForAuth") < eval_slice.find("evaluateWithRetry(provider: provider")
+    assert "provider.evaluate(" not in eval_slice
     assert "jpegPayload(url: url, sessionRoot: sessionURL)" in eval_slice
     assert "skippedNoSendableMedia" in eval_slice
     assert "AIProviderError.emptyResponse" not in eval_slice

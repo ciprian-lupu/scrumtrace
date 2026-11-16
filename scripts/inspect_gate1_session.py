@@ -23,6 +23,7 @@ import argparse
 import json
 import math
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -52,6 +53,33 @@ def read_text(path: Path) -> str:
         return ""
 
 
+_PRINTABLE_RUN = re.compile(rb"[\x20-\x7e\t]{6,}")
+_PRINTABLE_TAIL = re.compile(rb"[\x20-\x7e\t]*\Z")
+
+
+def python_strings(path: Path) -> str:
+    """Printable ASCII runs of six or more bytes from the whole file, without the external `strings` tool."""
+    runs: list[str] = []
+    tail = b""
+    try:
+        with path.open("rb") as handle:
+            while True:
+                chunk = handle.read(4 * 1024 * 1024)
+                if not chunk:
+                    break
+                data = tail + chunk
+                # A run can straddle two chunks: hold back the printable suffix and scan it with the next one.
+                keep = len(_PRINTABLE_TAIL.search(data).group(0))
+                keep = min(keep, 65536)
+                body = data[: len(data) - keep] if keep else data
+                tail = data[len(data) - keep :] if keep else b""
+                runs.extend(m.group(0).decode("ascii") for m in _PRINTABLE_RUN.finditer(body))
+        runs.extend(m.group(0).decode("ascii") for m in _PRINTABLE_RUN.finditer(tail))
+    except OSError:
+        return ""
+    return "\n".join(runs)
+
+
 def strings_blob(path: Path) -> str:
     if not path.is_file():
         return ""
@@ -63,9 +91,13 @@ def strings_blob(path: Path) -> str:
             text=True,
             errors="replace",
         )
-        return out.stdout
     except OSError:
-        return path.read_bytes()[:2_000_000].decode("utf-8", errors="replace")
+        return python_strings(path)
+    if out.returncode != 0:
+        # `strings` can exit non-zero without scanning anything (on macOS it only prints a notice until the Xcode
+        # license is accepted). Its empty output would read as "token absent" and pass the check, so scan the bytes.
+        return python_strings(path)
+    return out.stdout
 
 
 def strings_bytes(data: bytes) -> str:

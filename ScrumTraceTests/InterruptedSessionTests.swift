@@ -118,6 +118,32 @@ final class InterruptedSessionTests: XCTestCase {
         }
     }
 
+    /// Quit used to leave the recording at "idle": no launch resume, not listed as unfinished, nothing under Needs
+    /// attention, so a clean Quit was treated worse than a crash.
+    @MainActor
+    func testAQuitWhileRecordingLeavesARecordingTheNextLaunchPicksUp() async throws {
+        let closed = SessionController.pipelineStatusAfterQuit(captureClosed: true, hasMedia: true)
+        let unclosed = SessionController.pipelineStatusAfterQuit(captureClosed: false, hasMedia: true)
+        XCTAssertEqual(closed, .transcribing, "The movie closed: only processing is missing, as after a normal Stop")
+        XCTAssertEqual(unclosed, .recording, "The close failed or timed out: what a crash leaves")
+        for captureClosed in [true, false] {
+            XCTAssertEqual(SessionController.pipelineStatusAfterQuit(captureClosed: captureClosed, hasMedia: false), .idle,
+                "A Quit during Start captured nothing: the abandoned-start prune removes the empty folder")
+        }
+        try await withBench { bench in
+            let id = try makeSession(in: bench.vault, status: closed)
+            let controller = makeController(bench)
+            XCTAssertEqual(controller.interruptedSessionId, id, "The next launch finishes it without a click")
+        }
+        try await withBench { bench in
+            let id = try makeSession(in: bench.vault, status: unclosed)
+            let controller = makeController(bench)
+            XCTAssertNil(controller.interruptedSessionId)
+            XCTAssertEqual(controller.lastSessionId, id)
+            XCTAssertTrue(controller.statusLine.contains("Retry Analysis"), "Still offered as a manual retry, never silent")
+        }
+    }
+
     @MainActor
     func testACompletedLastSessionNeedsNothing() async throws {
         try await withBench { bench in

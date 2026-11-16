@@ -14,8 +14,13 @@ final class SessionProcessor: @unchecked Sendable {
     private let agentRenderer = AgentContextRenderer()
     private let zipper = SessionPackZipper()
     private let providerFactory: @Sendable (AIProviderConfiguration) -> any AIProvider
+    private let retryPolicy: ProviderRetryPolicy
+    /// Waits between attempts. Tests replace it so a repeated call does not sleep.
+    private let retrySleep: @Sendable (TimeInterval) async throws -> Void
     private let evalLock = NSLock()
     private var evalAuthFailed = false
+    /// Extra provider attempts this evaluation run has spent; guarded by `evalLock`.
+    private var evalRetriesSpent = 0
     /// Last transcript this processor wrote. `loadTranscript` prefers disk,
     /// then this, so a decode miss cannot slice as if the room was silent.
     private var writtenTranscript: FullTranscript?
@@ -27,7 +32,17 @@ final class SessionProcessor: @unchecked Sendable {
         timing.stageSeconds[ProcessingStage.packaging.rawValue] = Date().timeIntervalSince(packagingStartedAt)
     }
 
-    init(vault: SessionVault, transcriber: WhisperTranscriber, providerFactory: @escaping @Sendable (AIProviderConfiguration) -> any AIProvider = { AIEngine.make(configuration: $0) }) {
+    init(
+        vault: SessionVault,
+        transcriber: WhisperTranscriber,
+        retryPolicy: ProviderRetryPolicy = .standard,
+        retrySleep: @escaping @Sendable (TimeInterval) async throws -> Void = { seconds in
+            try await Task.sleep(nanoseconds: UInt64(max(0, seconds) * 1_000_000_000))
+        },
+        providerFactory: @escaping @Sendable (AIProviderConfiguration) -> any AIProvider = { AIEngine.make(configuration: $0) }
+    ) {
+        self.retryPolicy = retryPolicy
+        self.retrySleep = retrySleep
         self.providerFactory = providerFactory
         self.vault = vault
         self.transcriber = transcriber
@@ -1573,7 +1588,7 @@ final class SessionProcessor: @unchecked Sendable {
             return aborted
         }
         do {
-            let response = try await provider.evaluate(request: request)
+            let response = try await evaluateWithRetry(provider: provider, request: request, sliceId: slice.sliceId)
             slice.analysisStatus = .success
             AgentLog.event("eval_slice", [
                 "slice": slice.sliceId,
@@ -1938,9 +1953,49 @@ final class SessionProcessor: @unchecked Sendable {
         ))
     }
 
+    /// One provider call, repeated while the failure is transient, the call has attempts left and the run still has
+    /// retry budget. The last error is thrown unchanged, so the caller's sign-in gate and diagnostics see what they saw
+    /// before. Cancellation (Finish later) ends the wait and is never retried.
+    private func evaluateWithRetry(
+        provider: any AIProvider,
+        request: SliceEvaluationRequest,
+        sliceId: String
+    ) async throws -> CandidateEvaluationResponse {
+        var attempt = 1
+        while true {
+            do {
+                return try await provider.evaluate(request: request)
+            } catch {
+                guard attempt < retryPolicy.maxAttempts,
+                      ProviderRetryPolicy.isTransient(error),
+                      !Task.isCancelled,
+                      takeEvalRetry() else {
+                    throw error
+                }
+                attempt += 1
+                AgentLog.event("eval_retry", [
+                    "slice": sliceId,
+                    "attempt": String(attempt),
+                    "error": AIProviderError.diagnosticCode(error)
+                ])
+                try await retrySleep(retryPolicy.delay(beforeAttempt: attempt))
+            }
+        }
+    }
+
+    /// Spends one extra attempt from the run's budget. False when the budget is used up.
+    private func takeEvalRetry() -> Bool {
+        evalLock.lock()
+        defer { evalLock.unlock() }
+        guard evalRetriesSpent < retryPolicy.runBudget else { return false }
+        evalRetriesSpent += 1
+        return true
+    }
+
     private func resetEvalAuthGate() {
         evalLock.lock()
         evalAuthFailed = false
+        evalRetriesSpent = 0
         evalLock.unlock()
     }
 
