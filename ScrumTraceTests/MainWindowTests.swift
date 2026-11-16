@@ -856,7 +856,28 @@ final class MainWindowTests: XCTestCase {
             try? FileManager.default.removeItem(at: root)
         }
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        try await body(makeRecordingsFixture(root: root, log: log))
+        let fixture = try makeRecordingsFixture(root: root, log: log)
+        do {
+            try await body(fixture)
+        } catch {
+            await settleLogSessionContext()
+            throw error
+        }
+        await settleLogSessionContext()
+    }
+
+    /// A processing run clears its log session context a moment after `isBusy` drops, so this waits for it. A run that
+    /// never clears it would scope or drop the log rows of every later test in this process: that is how one stale
+    /// test failed six others on CI for five weeks. Fail here, in the test that left it, and clear it.
+    private func settleLogSessionContext(file: StaticString = #filePath, line: UInt = #line) async {
+        let deadline = Date().addingTimeInterval(2)
+        while AgentLog.sessionContextForTesting != nil && Date() < deadline {
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+        if let leaked = AgentLog.resetSessionContextForTesting() {
+            XCTFail("A processing run still held the log session context for \(leaked) when the test ended",
+                file: file, line: line)
+        }
     }
 
     /// A controller over the fixture vault, with its own defaults suite.
@@ -1640,9 +1661,16 @@ final class MainWindowTests: XCTestCase {
             let suite = "ScrumTrace.MainWindowTests.Controller.\(UUID().uuidString)"
             let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
             defer { defaults.removePersistentDomain(forName: suite) }
-            // A stored key, so the retry asks for upload consent again: the fixture's consent names another provider.
             let keys = SettingsKeyStore(get: { _ in "sk-test" }, contains: { _ in true }, set: { _, _ in }, remove: { _ in })
-            let controller = SessionController(settings: AppSettings(defaults: defaults, keyStore: keys), vault: f.vault)
+            let settings = AppSettings(defaults: defaults, keyStore: keys)
+            // A subscription service included in the analysis, so the retry asks for upload consent again: the fixture's
+            // consent names another provider. A stored API key alone selects no destination since the AI settings went
+            // subscription-only; without a destination the retry skipped the question and went on to load the speech
+            // model, holding the log session context past the end of this test.
+            let service = try settings.addAIConnection(name: "Claude", provider: .claudeSubscription)
+            try settings.setComparisonIncluded(true, id: service.id)
+            XCTAssertEqual(settings.comparisonServiceConfigurations.map(\.service.id), [service.id])
+            let controller = SessionController(settings: settings, vault: f.vault)
             let folder = f.vault.sessionURL(id: f.completed)
             controller.lastSessionId = f.unfinished
             // The manifest and the folder are there when the retry starts. The window's delete removes the folder while
