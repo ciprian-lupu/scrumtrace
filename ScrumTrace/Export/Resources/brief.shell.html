@@ -1,63 +1,36 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{{TITLE}} · ScrumTrace</title>
-  <style>{{CSS}}</style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{TITLE}} · ScrumTrace</title>
+<style>{{CSS}}</style>
 </head>
 <body>
-  <div class="sprocket" aria-hidden="true"></div>
-  <div class="shell">
-    <header class="slate">
-      <div>
-        <div class="clapper">ScrumTrace · session slate</div>
-        <h1>{{TITLE}}<br><em>{{SESSION_ID}}</em></h1>
-      </div>
-      <div class="meta">
-        <span>t_media {{MEDIA_DURATION}}</span>
-        <span>wall {{WALL_DURATION}}</span>
-        <span>{{PAUSE_COUNT}}</span>
-        <span>{{CONFIRMED_COUNT}} confirmed</span>
-        <span>{{REVIEW_COUNT}} review</span>
-      </div>
-      <div class="meta">
-        {{CONTEXT_BADGE}}
-        <span>{{PRODUCT_NAME}}</span>
-        <span>{{TECH_STACK}}</span>
-        <a href="{{REPO_HREF}}">{{REPO_URL}}</a>
-        <span>{{CREATED_AT}}</span>
-      </div>
-    </header>
-    <nav class="brief-nav" aria-label="Brief sections">
-      <a href="#summary">Summary</a><a href="#decisions">Decisions</a><a href="#actions">Actions</a>
-      <a href="#questions">Questions</a><a href="#evidence">Evidence</a><a href="#transcript">Transcript</a><a href="#exports">Export</a>
-    </nav>
-    {{STATUS_HTML}}
-    {{SUMMARY_HTML}}
-    {{SPEAKERS_HTML}}
-    {{TIMELINE_HTML}}
-    <section id="evidence">
-      <h2>Confirmed evidence</h2>
-      {{TASKS_HTML}}
-    </section>
-    <section class="review">
-      <details {{REVIEW_OPEN}}>
-        <summary>Needs review</summary>
-        {{NEEDS_REVIEW_HTML}}
-      </details>
-    </section>
-    {{OMITTED_HTML}}
-    <section>
-      <h2>Contact sheet</h2>
-      <div class="contact">{{SHOTS_HTML}}</div>
-    </section>
-    <section id="transcript" class="brief-panel">
-      <h2>Transcript excerpts</h2>
-      {{TRANSCRIPT_HTML}}
-    </section>
-    {{DOWNLOADS_HTML}}
-  </div>
-  <script>{{JS}}</script>
+<a class="skip-link" href="#main">Skip to session</a>
+<div class="shell">
+<header class="session-header">
+  <div class="brand"><span class="brand-mark" aria-hidden="true">S</span> ScrumTrace <span class="brand-label">Conversation brief</span></div>
+  <h1>{{TITLE}}</h1>
+  <div class="session-facts"><time datetime="{{CREATED_AT}}">{{DISPLAY_DATE}}</time><span>{{MEDIA_DURATION}} recorded</span><a href="#evidence">{{CONFIRMED_COUNT}} confirmed findings</a><a href="#review">{{REVIEW_COUNT}} to review</a></div>
+  <details class="session-details"><summary>Session details</summary><div class="meta"><span>Session: {{SESSION_ID}}</span><span>Elapsed: {{WALL_DURATION}} · {{PAUSE_COUNT}}</span>{{CONTEXT_BADGE}}<span>{{TECH_STACK}}</span><a href="{{REPO_HREF}}">{{REPO_URL}}</a></div></details>
+</header>
+<div class="nav-wrap"><nav class="brief-nav section-nav" aria-label="Brief sections">
+  <a href="#summary">Overview</a><a href="#transcript">Conversation</a><a href="#evidence">Evidence</a><a href="#captures">Screenshots</a><a href="#exports">Files</a>
+</nav><span class="nav-more" aria-hidden="true">›</span></div>
+<main id="main" tabindex="-1">
+<details class="supporting-details {{STATUS_CLASS}}"><summary>{{STATUS_LABEL}} <span class="muted">· View status</span></summary>{{STATUS_HTML}}{{SPEAKERS_HTML}}</details>
+{{SUMMARY_HTML}}
+<section id="transcript" class="brief-panel conversation" aria-labelledby="conversation-title"><div class="section-heading"><div><span class="eyebrow">The discussion</span><h2 id="conversation-title">Conversation</h2></div></div>{{TRANSCRIPT_HTML}}<noscript><p class="muted">Passage playback shortcuts need JavaScript. Use the video controls in Evidence to play included clips.</p></noscript></section>
+<section id="evidence" aria-labelledby="evidence-title"><div class="section-heading"><div><span class="eyebrow">Supporting material</span><h2 id="evidence-title">Confirmed evidence</h2></div><span class="count">{{CONFIRMED_COUNT}} findings</span></div><p class="muted evidence-note">Confirmed means automatically checked against evidence, not human approval. Review before implementation.</p>{{TIMELINE_HTML}}{{TASKS_HTML}}</section>
+<section id="review" class="review"><details {{REVIEW_OPEN}}><summary>Needs review <span class="count">{{REVIEW_COUNT}}</span></summary>{{NEEDS_REVIEW_HTML}}</details></section>
+{{COMPARISON_HTML}}
+<section id="captures" class="brief-panel" aria-labelledby="captures-title"><div class="section-heading"><h2 id="captures-title">Screenshots</h2><div class="image-tools"></div></div><div class="contact">{{SHOTS_HTML}}</div></section>
+{{OMITTED_HTML}}
+{{DOWNLOADS_HTML}}
+</main>
+<footer class="page-footer"><span>ScrumTrace · Conversation brief</span><a href="#">Back to top ↑</a><p>Summary and findings reflect selected evidence. Conversation coverage is described above.</p></footer>
+</div>
+<script>{{JS}}</script>
 </body>
 </html>

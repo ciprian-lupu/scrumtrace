@@ -21,7 +21,7 @@ enum ComparisonReport {
         let body = values.map { row in
             "<tr>" + row.map { "<td style=\"overflow-wrap:anywhere\">\(HTMLEscaper.escape($0))</td>" }.joined() + "</tr>"
         }.joined()
-        return "<section class=\"brief-panel\"><h2>Model comparison</h2><p>\(explanation)</p><div style=\"overflow-x:auto\"><table><thead><tr>\(heading)</tr></thead><tbody>\(body)</tbody></table></div></section>"
+        return "<details class=\"brief-panel comparison-details\"><summary>Model comparison · input provenance</summary><p>\(explanation)</p><div class=\"table-scroll\" role=\"region\" aria-label=\"Model comparison inputs\" tabindex=\"0\"><table><thead><tr>\(heading)</tr></thead><tbody>\(body)</tbody></table></div></details>"
     }
 
     static func markdown(_ manifest: SessionManifest) -> String {

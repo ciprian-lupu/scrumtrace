@@ -2323,10 +2323,11 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "@import" not in css
     assert "--sans:" in css
     assert "--mono:" in css
-    assert "--display:" in css
-    assert ".take .conf" in css
-    assert "@media (max-width: 860px)" in css
-    assert ".meta { display: grid" in css.split("@media (max-width: 860px)")[1]
+    assert ".conf" in css
+    assert "@media(max-width:800px)" in css
+    assert ".meta{flex-direction:column}" in css
+    assert "@media print" in css
+    assert ".skip-link:focus" in css
     assert "IBM Plex" not in css
     assert "Cormorant" not in css
     brief_html = (ROOT / "samples" / "mock-session" / "export" / "SESSION_BRIEF.html").read_text()
@@ -3056,9 +3057,9 @@ def test_audit_leftovers_are_implemented() -> None:
     assert "cgImage(forProposedRect" in jpeg_fn
     assert "image.size.width" not in jpeg_fn.split("if let cg")[0]
     css = (ROOT / "ScrumTrace" / "Export" / "Resources" / "brief.css").read_text()
-    assert "max-width: 100%" in css
+    assert "max-width:100%" in css
     assert ".still img, figure img { width: 100%;" not in css
-    assert "2560px" in css
+    assert "max-height:calc(100dvh - 110px)" in css
     assert ".still-size" in css
     assert "body.stills-full" in css
     start = snap.split("func startRecording()")[1].split("func stopRecording()")[0]

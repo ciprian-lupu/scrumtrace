@@ -11,6 +11,32 @@ struct BriefPresentation {
     private var review: [TaskRecord] { manifest.tasks.filter { $0.status == .needsReview } }
     private func escape(_ text: String) -> String { HTMLEscaper.escape(text) }
 
+    var needsAttention: Bool {
+        !manifest.hasCompleted(.transcribing) || transcript?.needsTranscriptionRetry == true
+            || manifest.localProcedure?.partial == true
+            || manifest.slices.contains { $0.analysisStatus == .offlineFailed || $0.serviceEvaluations.contains { $0.status == .offlineFailed } }
+    }
+
+    var statusLabel: String {
+        var states: [String] = []
+        if !manifest.hasCompleted(.transcribing) || transcript?.needsTranscriptionRetry == true {
+            states.append("Transcription incomplete")
+        } else {
+            states.append("Transcription stage complete")
+        }
+        if manifest.localProcedure?.partial == true {
+            states.append("Local outline partial")
+        }
+        if manifest.slices.contains(where: { $0.analysisStatus == .offlineFailed || $0.serviceEvaluations.contains(where: { $0.status == .offlineFailed }) }) {
+            states.append("AI analysis incomplete")
+        } else if manifest.slices.contains(where: { $0.analysisStatus == .success }) {
+            states.append("AI findings available")
+        } else {
+            states.append("Local evidence only")
+        }
+        return states.joined(separator: " · ")
+    }
+
     var statusHTML: String {
         let speech: String
         if let procedure = manifest.localProcedure {
@@ -31,16 +57,18 @@ struct BriefPresentation {
         } else if let transcript, transcript.hasUsableText {
             speech = transcript.needsTranscriptionRetry || !manifest.hasCompleted(.transcribing)
                 ? "Partial transcript · retry the missing source in ScrumTrace."
-                : "Transcript available · \(transcript.segments.count) \(transcript.segments.count == 1 ? "passage" : "passages")."
+                : (transcript.segments.isEmpty ? "Untimed transcript text available · review only." : "Transcript available · \(transcript.segments.count) \(transcript.segments.count == 1 ? "passage" : "passages").")
         } else if let analysis = transcript?.transcriptionAnalysis, !analysis.isEmpty,
                   analysis.allSatisfy({ $0.status == "no_speech" }) {
             speech = "No speech detected in the captured audio."
         } else {
-            speech = "No usable transcript · use Retry Analysis in ScrumTrace."
+            speech = manifest.hasCompleted(.transcribing)
+                ? "Full transcript not available in this export. This does not indicate a transcription failure."
+                : "No usable transcript · use Retry Analysis in ScrumTrace."
         }
         let speakers: String
         if transcript?.hasUsableText != true {
-            speakers = "No transcript passages to attribute."
+            speakers = "Speaker details are limited to the transcript content included in this export."
         } else if transcript?.speakerAnalysis?.contains(where: { $0.status == "failed" }) == true {
             speakers = "Speaker analysis incomplete · review in ScrumTrace."
         } else if transcript?.speakers?.isEmpty != false {
@@ -50,7 +78,7 @@ struct BriefPresentation {
         }
         let analysis: String
         let successful = manifest.slices.filter { $0.analysisStatus == .success }.count
-        let failed = manifest.slices.filter { $0.analysisStatus == .offlineFailed }.count
+        let failed = manifest.slices.filter { $0.analysisStatus == .offlineFailed || $0.serviceEvaluations.contains(where: { $0.status == .offlineFailed }) }.count
         if failed > 0 {
             analysis = "Analysis incomplete · \(failed) evidence windows need a retry."
         } else if successful > 0 {
@@ -77,7 +105,21 @@ struct BriefPresentation {
     }
 
     var summaryHTML: String {
-        if !ComparisonReport.rows(manifest).isEmpty { return localProcedureHTML + ComparisonReport.html(manifest) }
+        if !ComparisonReport.rows(manifest).isEmpty {
+            let evaluations = manifest.slices.flatMap(\.serviceEvaluations)
+            let groups = Dictionary(grouping: evaluations, by: \.serviceId)
+            let services = groups.keys.sorted().map { id -> String in
+                let entries = groups[id] ?? []
+                let tasks = manifest.tasks.filter { $0.serviceId == id && $0.status != .dropped }
+                let confirmedCount = tasks.filter { $0.status == .confirmed }.count
+                let reviewCount = tasks.filter { $0.status == .needsReview }.count
+                let name = escape(entries.first?.serviceName ?? id)
+                let link = tasks.first.map { "<a href=\"#\(escape($0.taskId))\">View findings</a>" } ?? "<span class=\"muted\">No findings available.</span>"
+                let failures = entries.filter { $0.status == .offlineFailed }.count
+                return "<li><strong>\(name)</strong><p>\(confirmedCount) confirmed · \(reviewCount) to review · \(failures) failed \(failures == 1 ? "window" : "windows")</p>\(link)</li>"
+            }.joined()
+            return "<section id=\"summary\" class=\"brief-panel\"><h2>Session overview</h2><p>Services analyze selected evidence independently. Completed findings remain separate; agreement is not assumed.</p><ul class=\"service-list\">\(services)</ul></section>" + localProcedureHTML
+        }
         let introduction: String
         if !confirmed.isEmpty {
             introduction = "Highlights from the selected evidence. Follow each item to its supporting clip, image and quotes."
@@ -89,11 +131,11 @@ struct BriefPresentation {
             introduction = "A discussion summary is not available because AI analysis has not completed. Captures and notes remain available for review."
         }
         let highlights = confirmed.prefix(5).map { linkedItem($0, includeStatement: false) }.joined()
-        return localProcedureHTML + """
+        return """
         <section id="summary" class="brief-panel" aria-labelledby="summary-title">
           <h2 id="summary-title">Session summary</h2>
           <p>\(escape(introduction))</p>
-          <p class="muted">\(manifest.shots.count) captures · \(manifest.slices.count) selected \(manifest.slices.count == 1 ? "window" : "windows") · \(confirmed.count) confirmed findings · \(review.count) to review</p>
+          <p class="muted">\(manifest.shots.count) captured screenshots · \(manifest.slices.count) selected \(manifest.slices.count == 1 ? "window" : "windows") · \(confirmed.count) confirmed findings · \(review.count) to review.\(manifest.omitted.isEmpty ? "" : " Some selected media were omitted; see the omission details below.")</p>
           \(highlights.isEmpty ? "" : "<ul class=\"brief-list\">\(highlights)</ul>")
         </section>
         <div class="outcome-grid">
@@ -101,6 +143,7 @@ struct BriefPresentation {
           \(outcome(id: "actions", title: "Next actions", kinds: [.actionItem, .bug, .improvement], empty: "No actions supported by confirmed evidence."))
           \(outcome(id: "questions", title: "Open questions", kinds: [.openQuestion], empty: "No open questions captured in confirmed evidence."))
         </div>
+        \(localProcedureHTML)
         """
     }
 
@@ -130,7 +173,7 @@ struct BriefPresentation {
             ? "<p class=\"muted\">Partial outline · \(procedure.omittedEntryCount) entries omitted/unavailable. This is not a completeness claim.</p>"
                 + (procedure.sizeLimitExceeded ? "<p class=\"muted\">The configured local outline size limit was exceeded; this export is not marked ready.</p>" : "")
             : ""
-        return "<section id=\"local-outline\" class=\"brief-panel\"><h2>Local extractive outline</h2><p>\(procedure.steps.count) passages · \(procedure.anchors.count) human anchors · \(procedure.selectedWindowCount) selected windows. Chronology and window overlap do not prove semantic order or visual coverage.</p>\(partial)<ol>\(rows)</ol></section>"
+        return "<details id=\"local-outline\" class=\"brief-panel\"><summary>Local extractive outline · \(procedure.steps.count) passages</summary><p>\(procedure.steps.count) passages · \(procedure.anchors.count) human anchors · \(procedure.selectedWindowCount) selected windows. Chronology and window overlap do not prove semantic order or visual coverage.</p>\(partial)<ol>\(rows)</ol></details>"
     }
 
     private func clock(_ seconds: TimeInterval) -> String {
@@ -210,20 +253,4 @@ struct BriefPresentation {
         """
     }
 
-    static let css = """
-    header.slate{grid-template-columns:minmax(0,1fr);align-items:start;gap:16px}
-    header.slate h1{overflow-wrap:anywhere}header.slate h1 em{font:14px var(--mono,monospace);line-height:1.6;letter-spacing:normal}
-    .brief-panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:20px;margin:0 0 20px;min-width:0}
-    .brief-panel h2{font-size:1.3rem;margin:0 0 12px}.brief-panel p{line-height:1.55}
-    .status-grid,.outcome-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}
-    .status-grid{margin:0}.status-grid dt{font-weight:600;margin-bottom:8px}.status-grid dd{margin:0;color:var(--muted);line-height:1.5}
-    .brief-nav,.export-links{display:flex;flex-wrap:wrap;gap:10px;margin:0 0 22px}.export-links{margin:0}
-    .brief-nav a,.export-link{display:inline-block;padding:10px 14px;border:1px solid var(--line);border-radius:8px;color:var(--paper);text-decoration:none}
-    .brief-nav a:hover,.export-link:hover{border-color:var(--amber)}a:focus-visible,summary:focus-visible{outline:3px solid var(--amber);outline-offset:4px}
-    .brief-list{padding-left:20px;line-height:1.5}.brief-list li+li{margin-top:12px}.brief-list a{color:var(--paper);text-decoration:underline;text-underline-offset:3px}
-    .brief-list p{font-size:.9rem;color:var(--muted);margin:6px 0}.muted{color:var(--muted)}
-    .take h3{font-size:1.4rem;line-height:1.3;margin:12px 0}.take h3,.brief-list a,.meta a,figcaption{overflow-wrap:anywhere}.clip-transcript{width:100%;margin-top:14px}
-    .clip-transcript summary{cursor:pointer;padding:10px 0}.clip-meta{font-size:.85rem;color:var(--muted)}
-    @media(max-width:900px){.status-grid,.outcome-grid{grid-template-columns:1fr}.shell{padding:24px 5vw 60px;margin-left:12px}.sprocket{display:none}}
-    """
 }

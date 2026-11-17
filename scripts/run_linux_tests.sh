@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
+python3 scripts/sync_brief_fallbacks.py --check
 python3 scripts/test_timeline.py
 python3 scripts/test_transcript.py
 python3 scripts/test_contracts.py

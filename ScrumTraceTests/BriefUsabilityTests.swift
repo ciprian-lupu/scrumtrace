@@ -89,9 +89,9 @@ final class BriefUsabilityTests: XCTestCase {
             try SpeakerTimeline.save(FullTranscript(sessionId: manifest.sessionId, language: "und", segments: []), sessionURL: root)
             let html = SessionBriefRenderer().render(manifest: manifest, excerpts: [:], sessionURL: root)
             XCTAssertTrue(html.contains("<details open>"))
-            XCTAssertTrue(html.contains("No usable transcript"))
+            XCTAssertTrue(html.contains("Full transcript not available in this export"))
             XCTAssertTrue(html.contains("sending evidence for AI analysis was not approved"))
-            XCTAssertTrue(html.contains("No transcript excerpts are available"))
+            XCTAssertTrue(html.contains("No additional clip excerpts are available"))
             XCTAssertFalse(html.contains("API Offline"))
             XCTAssertFalse(html.contains("Select a transcript passage to play it.</p>"))
             XCTAssertFalse(html.contains("{{"))
@@ -156,6 +156,82 @@ final class BriefUsabilityTests: XCTestCase {
         }
     }
 
+    func testExportCoverageDistinguishesUntimedSilenceAndIncomplete() throws {
+        try withRoot { root in
+            var manifest = makeManifest()
+            manifest.includeFullTranscriptInZip = true
+            var transcript = makeTranscript()
+            transcript.untimedText = "Untimed <script>conversation</script>"
+            try ExportRel.writeContainedData(JSONEncoder().encode(transcript), relative: "export/full_transcript.json", sessionURL: root)
+            var html = SessionBriefRenderer().render(manifest: manifest, excerpts: [:], sessionURL: root)
+            XCTAssertTrue(html.contains("Text without timestamps"))
+            XCTAssertTrue(html.contains("Untimed &lt;script&gt;conversation&lt;/script&gt;"))
+            XCTAssertFalse(html.contains("No usable transcript"))
+            transcript.segments = []
+            try ExportRel.writeContainedData(JSONEncoder().encode(transcript), relative: "export/full_transcript.json", sessionURL: root)
+            html = SessionBriefRenderer().render(manifest: manifest, excerpts: [:], sessionURL: root)
+            XCTAssertTrue(html.contains("Untimed &lt;script&gt;conversation&lt;/script&gt;"))
+            manifest.completedStages = []
+            html = SessionBriefRenderer().render(manifest: manifest, excerpts: [:], sessionURL: root)
+            XCTAssertTrue(html.contains("Included transcript · incomplete transcription"))
+            transcript.untimedText = nil
+            transcript.transcriptionAnalysis = [.init(source: "room", status: "no_speech")]
+            manifest.completedStages = [.transcribing]
+            try ExportRel.writeContainedData(JSONEncoder().encode(transcript), relative: "export/full_transcript.json", sessionURL: root)
+            html = SessionBriefRenderer().render(manifest: manifest, excerpts: [:], sessionURL: root)
+            XCTAssertTrue(html.contains("No speech detected"))
+            XCTAssertFalse(html.contains("full transcript is not included"))
+            XCTAssertFalse(html.contains("use Retry Analysis"))
+            manifest.includeFullTranscriptInZip = false
+            html = SessionBriefRenderer().render(manifest: manifest, excerpts: [:], sessionURL: root)
+            XCTAssertTrue(html.contains("Selected excerpts only"))
+            XCTAssertFalse(html.contains("No speech detected"))
+            XCTAssertFalse(html.contains("use Retry Analysis"))
+        }
+    }
+
+    func testConversationSortsPassagesAndDoesNotReadPrivateFallback() throws {
+        try withRoot { root in
+            var manifest = makeManifest()
+            manifest.includeFullTranscriptInZip = true
+            var full = makeTranscript("EARLY_PASSAGE")
+            full.segments.insert(.init(start: 20, end: 24, text: "LATE_PASSAGE", speaker: nil, words: [], source: "room"), at: 0)
+            try ExportRel.writeContainedData(JSONEncoder().encode(full), relative: "export/full_transcript.json", sessionURL: root)
+            var html = SessionBriefRenderer().render(manifest: manifest, excerpts: [:], sessionURL: root)
+            XCTAssertLessThan(try XCTUnwrap(html.range(of: "EARLY_PASSAGE")?.lowerBound), try XCTUnwrap(html.range(of: "LATE_PASSAGE")?.lowerBound))
+            try SpeakerTimeline.save(makeTranscript("PRIVATE_ARCHIVE_SECRET"), sessionURL: root)
+            try ExportRel.writeContainedData(Data("invalid json".utf8), relative: "export/full_transcript.json", sessionURL: root)
+            html = SessionBriefRenderer().render(manifest: manifest, excerpts: [:], sessionURL: root)
+            XCTAssertFalse(html.contains("PRIVATE_ARCHIVE_SECRET"))
+            XCTAssertFalse(html.contains("EARLY_PASSAGE"))
+            XCTAssertTrue(html.contains("Selected excerpts only"))
+            XCTAssertFalse(html.contains("{{"))
+            XCTAssertTrue(html.contains("<main id=\"main\""))
+        }
+    }
+
+    func testComparisonSummaryKeepsServiceOutcomesSeparateAndFlagsPartialFailure() throws {
+        try withRoot { root in
+            var manifest = makeManifest()
+            manifest.slices[0].analysisStatus = .success
+            manifest.slices[0].serviceEvaluations = [
+                .init(serviceId: "a", serviceName: "Service A", provider: "codex", model: "model-a", status: .success, mediaSent: ["transcript"]),
+                .init(serviceId: "b", serviceName: "Service B", provider: "codex", model: "model-b", status: .offlineFailed, mediaSent: [], diagnostic: "failed")]
+            manifest.tasks[0].serviceId = "a"
+            let html = SessionBriefRenderer().render(manifest: manifest, excerpts: [:], sessionURL: root)
+            XCTAssertTrue(html.contains("id=\"summary\""))
+            XCTAssertTrue(html.contains("0 confirmed · 1 to review · 0 failed windows"))
+            XCTAssertTrue(html.contains("0 confirmed · 0 to review · 1 failed window"))
+            XCTAssertTrue(html.contains("AI analysis incomplete"))
+            XCTAssertTrue(html.contains("supporting-details status-attention"))
+            XCTAssertTrue(html.contains("href=\"#TASK-01\">View findings"))
+            XCTAssertTrue(html.contains("class=\"comparison-details\"") || html.contains("brief-panel comparison-details"))
+            XCTAssertFalse(html.contains("<div class=\"ruler\""))
+            XCTAssertFalse(html.contains("href=\"#decisions\""))
+            XCTAssertFalse(html.contains("{{"))
+        }
+    }
+
     func testSpeakerOverviewDoesNotExposeUnselectedNames() throws {
         try withRoot { root in
             var transcript = makeTranscript()
@@ -194,11 +270,11 @@ final class BriefUsabilityTests: XCTestCase {
         }
         let root = URL(fileURLWithPath: path, isDirectory: true)
         XCTAssertTrue(root.path.hasPrefix("/private/tmp/scrumtrace-brief-ui"))
-        for mode in ["local", "analyzed"] {
+        for mode in ["local", "analyzed", "long", "partial", "untimed", "silent", "comparison"] {
             let folder = root.appendingPathComponent(mode)
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
             var manifest = makeManifest()
-            if mode == "analyzed" {
+            if mode != "local" {
                 manifest.uploadConsent.approved = true
                 manifest.slices[0].analysisStatus = .success
                 manifest.tasks = [makeTask("TASK-01", kind: .actionItem, status: .confirmed),
@@ -211,11 +287,53 @@ final class BriefUsabilityTests: XCTestCase {
                 var transcript = makeTranscript()
                 transcript.segments.append(.init(start: 4, end: 6, text: manifest.tasks[1].stated, speaker: "room_speaker_1", words: [], source: "room"))
                 transcript.segments.append(.init(start: 7, end: 9, text: manifest.tasks[2].stated, speaker: "room_speaker_1", words: [], source: "room"))
+                if mode == "comparison" {
+                    manifest.slices[0].serviceEvaluations = [
+                        .init(serviceId: "service-a", serviceName: "First service", provider: "codex", model: "sample-model-a", status: .success, mediaSent: ["transcript", "JPEG"], inputFingerprint: String(repeating: "a", count: 64)),
+                        .init(serviceId: "service-b", serviceName: "Second service", provider: "claude_code", model: "sample-model-b", status: .offlineFailed, mediaSent: ["transcript"], diagnostic: "Synthetic connection failure")]
+                    for index in manifest.tasks.indices {
+                        manifest.tasks[index].serviceId = "service-a"
+                        manifest.tasks[index].serviceName = "First service"
+                        manifest.tasks[index].serviceModel = "sample-model-a"
+                    }
+                }
+                if mode == "long" {
+                    manifest.productContext.appName = "A longer product discussion — recording controls, export clarity and next steps"
+                    var longSegments: [TranscriptSegment] = []
+                    for index in 0..<80 {
+                        let text = index % 2 == 0
+                            ? "Vrem ca exportul conversației să fie clar, elegant și ușor de parcurs. Discutăm despre context, decizii și dovezile disponibile."
+                            : "Păstrăm informațiile importante, iar detaliile tehnice pot fi consultate separat. Nu presupunem că un rezumat surprinde întreaga conversație."
+                        let start = Double(index * 12)
+                        longSegments.append(TranscriptSegment(start: start, end: start + 10, text: text, speaker: "room_speaker_1", words: [], source: "room"))
+                    }
+                    transcript.segments = longSegments
+                    manifest.duration = DurationPair(wallSeconds: 1000, mediaSeconds: 960)
+                }
+                if mode == "partial" {
+                    manifest.completedStages = []
+                    transcript.transcriptionAnalysis?.append(.init(source: "system", status: "failed"))
+                }
+                if mode == "untimed" {
+                    transcript.segments = []
+                    transcript.untimedText = "Această conversație nu are marcaje temporale. Textul rămâne disponibil pentru verificare."
+                }
+                if mode == "silent" {
+                    transcript.segments = []
+                    transcript.transcriptionAnalysis = [.init(source: "room", status: "no_speech")]
+                }
                 try SpeakerTimeline.save(transcript, sessionURL: folder)
                 manifest.includeFullTranscriptInZip = true
                 try ExportRel.writeContainedData(JSONEncoder().encode(transcript), relative: "export/full_transcript.json", sessionURL: folder)
             } else {
                 try SpeakerTimeline.save(FullTranscript(sessionId: "brief-demo", language: "und", segments: []), sessionURL: folder)
+            }
+            let sample = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("samples/mock-session/export")
+            if mode == "analyzed" || mode == "comparison" {
+                let imagePath = "shots/demo.png"
+                try ExportRel.writeContainedData(Data(contentsOf: sample.appendingPathComponent("shots/001.annotated.png")), relative: "export/" + imagePath, sessionURL: folder)
+                try ExportRel.writeContainedData(Data(contentsOf: sample.appendingPathComponent("media/task-02/clip.mp4")), relative: "export/media/demo/clip.mp4", sessionURL: folder)
+                for index in manifest.tasks.indices { manifest.tasks[index].evidenceMedia.append(imagePath) }
             }
             for item in [ScrumTracePath.agentContext, ScrumTracePath.agentPrompt] {
                 try ExportRel.writeContainedData(Data("Synthetic browser QA fixture".utf8), relative: item, sessionURL: folder)
