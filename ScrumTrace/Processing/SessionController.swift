@@ -7,7 +7,9 @@ import CoreGraphics
 
 @MainActor
 final class SessionController: ObservableObject {
-    @Published var phase: PipelineStatus = .idle
+    @Published var phase: PipelineStatus = .idle {
+        didSet { updateSleepGuard() }
+    }
     @Published var mediaElapsed: TimeInterval = 0
     @Published var wallElapsed: TimeInterval = 0
     @Published var statusLine: String = "Ready" {
@@ -46,7 +48,23 @@ final class SessionController: ObservableObject {
     }
     @Published var lastError: String?
     @Published var lastSessionId: String?
-    @Published var isBusy = false
+    @Published var isBusy = false {
+        didSet { updateSleepGuard() }
+    }
+    /// Keeps the Mac awake while a recording or its processing runs. Tests replace it to observe the holds.
+    var sleepGuard = SleepGuard() {
+        didSet {
+            oldValue.update(recording: false, working: false)
+            updateSleepGuard()
+        }
+    }
+    private func updateSleepGuard() {
+        sleepGuard.update(recording: isRecording, working: isBusy)
+    }
+    /// Free bytes on the volume holding a folder; nil when unknown. Tests replace it.
+    var freeDiskBytes: @MainActor (URL) -> Int64? = { RecordingDiskBudget.freeBytes(at: $0) }
+    /// One low-disk warning per recording.
+    private var diskLowWarned = false
     @Published var suppressHUD = false
     @Published private(set) var startInFlight = false
     /// The run the processing panel shows: set by `runProcessor`, cleared by Close, the Done auto-clear or the next
@@ -885,7 +903,9 @@ final class SessionController: ObservableObject {
         }
         NotificationCenter.default.post(name: .scrumTraceCaptureGate, object: CaptureSessionState.paused)
         NotificationCenter.default.post(name: .scrumTraceSessionEnding, object: nil)
-        persistInterruptedCapture()
+        // Written before the movie closes: if the process is killed during the wait below, the manifest says what a
+        // crash would have left.
+        persistInterruptedCapture(captureClosed: false)
         let rec = recorder
         recorder = nil
         captureFreeze.attach(nil)
@@ -914,6 +934,8 @@ final class SessionController: ObservableObject {
             log(.error, ["reason": "quit-stop-timeout"])
         } else {
             AgentLog.event("halt_stop_ok", [:])
+            // The movie and WAV are closed: the next launch finishes this recording on its own.
+            persistInterruptedCapture(captureClosed: true)
         }
         if let sessionId = manifest?.sessionId {
             AgentLog.clearSessionContext(matching: sessionId)
@@ -921,21 +943,38 @@ final class SessionController: ObservableObject {
         AgentLog.setRecording(false, sessionId: nil)
     }
 
-    private func persistInterruptedCapture() {
+    /// The manifest status a Quit leaves on the recording it interrupted. Once the movie and WAV have closed, the
+    /// archive is complete and only processing is missing, which is what a normal Stop writes: the next launch
+    /// finishes it without a click. If the close failed or timed out, the recording is in the state a crash leaves and
+    /// stays a manual Retry Analysis. Never `.idle`, which reads as "nothing to do" and hid the recording from the
+    /// launch resume, the Unfinished filter and Needs attention. The one exception is a Quit that landed before
+    /// anything was captured (during Start): that stays `.idle`, the only state the abandoned-start prune removes, so
+    /// an empty folder is not listed as an interrupted recording or processed for nothing.
+    static func pipelineStatusAfterQuit(captureClosed: Bool, hasMedia: Bool) -> PipelineStatus {
+        guard hasMedia else { return .idle }
+        return captureClosed ? .transcribing : .recording
+    }
+
+    private func persistInterruptedCapture(captureClosed: Bool) {
         guard var local = manifest else { return }
         local.duration = DurationPair(
             wallSeconds: clock.currentWallSeconds(),
             mediaSeconds: clock.currentMediaSeconds()
         )
         local.pauses = clock.snapshotPauses()
-        local.pipelineStatus = .idle
+        local.pipelineStatus = Self.pipelineStatusAfterQuit(
+            captureClosed: captureClosed,
+            hasMedia: local.duration.mediaSeconds > 0
+        )
         do {
             try vault.write(manifest: &local)
         } catch {
             lastError = error.localizedDescription
         }
         manifest = local
-        log(.stop, ["reason": "quit"])
+        if !captureClosed {
+            log(.stop, ["reason": "quit"])
+        }
     }
 
     private func startRecordingAsync(product: ProductContext, window: CaptureWindowTarget?) async {
@@ -951,6 +990,13 @@ final class SessionController: ObservableObject {
         lastError = nil
         var abandonedId: String?
         do {
+            // Before any folder is created: a recording that cannot fit must not leave an abandoned session behind.
+            let freeAtStart = freeDiskBytes(vault.rootURL)
+            if let refusal = RecordingDiskBudget.startRefusal(freeBytes: freeAtStart) {
+                AgentLog.event("start_disk_low", ["free_mb": String((freeAtStart ?? 0) / 1_000_000)])
+                throw SessionRecorderError.writerFailed(refusal)
+            }
+            diskLowWarned = false
             let created = try vault.createSession(product: product)
             abandonedId = created.manifest.sessionId
             guard AgentLog.setSessionContext(created.manifest.sessionId) else {
@@ -1776,6 +1822,7 @@ final class SessionController: ObservableObject {
                 self.hudTickCount += 1
                 if self.isRecording && self.hudTickCount % 300 == 0 {
                     self.persistLivePipelineStatus()
+                    self.checkDiskSpaceWhileRecording()
                 }
             }
         }
@@ -1835,6 +1882,29 @@ final class SessionController: ObservableObject {
             return true
         case .pin, .url, .window:
             return captureState.allowsNewCapture
+        }
+    }
+
+    /// Runs on the 30 s recording tick. Warns once when the disk is getting full and stops the recording through the
+    /// normal Stop while there is still room to close the movie and process it; waiting for the writer to fail leaves
+    /// an unfinished movie and a manifest that can no longer be written.
+    func checkDiskSpaceWhileRecording() {
+        guard isRecording, !isBusy else { return }
+        guard let free = freeDiskBytes(sessionURL ?? vault.rootURL) else { return }
+        switch RecordingDiskBudget.level(freeBytes: free) {
+        case .enough:
+            break
+        case .low:
+            // A paused recording shows its own status line; the warning waits for a tick that can show it.
+            guard !diskLowWarned, captureState == .recording else { return }
+            diskLowWarned = true
+            AgentLog.event("disk_low", ["free_mb": String(free / 1_000_000)])
+            statusLine = RecordingDiskBudget.lowMessage(freeBytes: free)
+        case .stop:
+            AgentLog.event("disk_low_stop", ["free_mb": String(free / 1_000_000)])
+            lastError = RecordingDiskBudget.stopMessage(freeBytes: free)
+            statusLine = "Disk almost full — stopping the recording"
+            stopRecording()
         }
     }
 

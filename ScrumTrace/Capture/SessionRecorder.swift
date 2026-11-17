@@ -517,8 +517,24 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         } catch {
             // Tear down the stream even if archive/capture-layout.json cannot be written.
         }
+        // A stream that already ended on its own (permission revoked, display gone, window closed) can refuse a
+        // second stop. That must not skip the block below: without markAsFinished / finishWriting the movie has no
+        // final header and the WAV keeps zero sizes. The error is kept and thrown once the files are closed, unless
+        // the capture failure was already reported by the stream delegate.
+        var stopError: Error?
         if let live = snapshot.stream {
-            try await live.stopCapture()
+            do {
+                try await live.stopCapture()
+            } catch {
+                let alreadyReported = syncWriter { self.captureWriteFailed }
+                AgentLog.event("recorder_stop_capture_fail", [
+                    "error": AgentLog.sanitize(error.localizedDescription),
+                    "after_failure": alreadyReported ? "1" : "0"
+                ])
+                if !alreadyReported {
+                    stopError = error
+                }
+            }
         }
         snapshot.engine?.stop()
         do {
@@ -541,7 +557,6 @@ final class SessionRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
                 continuation.resume()
             }
         }
-        var stopError: Error?
         do {
             try reclaimLiveCaptureIfRewritten()
         } catch {

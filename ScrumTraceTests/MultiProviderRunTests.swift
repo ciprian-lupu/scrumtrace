@@ -4,19 +4,32 @@ import XCTest
 
 private actor ComparisonRecorder {
     var requests: [(String, SliceEvaluationRequest)] = []
-    var failures: [String: Int] = [:]
+    var failures: [String: (code: Int, left: Int)] = [:]
     var progressReporter: ProcessingProgressReporter?
     var observedFractions: [Double?] = []
     func observeProgress(_ reporter: ProcessingProgressReporter) { progressReporter = reporter }
     func fractions() -> [Double?] { observedFractions }
-    func fail(_ model: String, code: Int) { failures[model] = code }
+    func fail(_ model: String, code: Int, times: Int = 1) { failures[model] = (code: code, left: times) }
     func receive(_ model: String, _ request: SliceEvaluationRequest) throws -> CandidateEvaluationResponse {
         requests.append((model, request))
         if let progressReporter { observedFractions.append(progressReporter.snapshot?.fraction) }
-        if let code = failures.removeValue(forKey: model) { throw AIProviderError.httpStatus(code, "fixture") }
+        if let failure = failures[model] {
+            if failure.left > 1 {
+                failures[model] = (code: failure.code, left: failure.left - 1)
+            } else {
+                failures[model] = nil
+            }
+            throw AIProviderError.httpStatus(failure.code, "fixture")
+        }
         return CandidateEvaluationResponse(candidates: [])
     }
     func recorded() -> [(String, SliceEvaluationRequest)] { requests }
+}
+
+private actor RetrySleepLog {
+    var seconds: [TimeInterval] = []
+    func add(_ value: TimeInterval) { seconds.append(value) }
+    func recorded() -> [TimeInterval] { seconds }
 }
 
 private struct RecordingComparisonProvider: AIProvider {
@@ -50,9 +63,17 @@ final class MultiProviderRunTests: XCTestCase {
         ])
         recorder = ComparisonRecorder()
         let recorder = recorder!
-        processor = SessionProcessor(vault: vault, transcriber: WhisperTranscriber(), providerFactory: {
+        // One attempt per call: these tests pin what a failed pair leaves behind and how Retry Analysis resumes it.
+        // The automatic retry inside a run has its own tests at the end of this file.
+        processor = SessionProcessor(vault: vault, transcriber: WhisperTranscriber(), retryPolicy: .none, providerFactory: {
             RecordingComparisonProvider(kind: $0.kind, model: $0.model, recorder: recorder)
         })
+    }
+    private func retryingProcessor(_ policy: ProviderRetryPolicy, sleeps: RetrySleepLog) -> SessionProcessor {
+        let recorder: ComparisonRecorder = self.recorder
+        return SessionProcessor(vault: vault, transcriber: WhisperTranscriber(), retryPolicy: policy,
+            retrySleep: { await sleeps.add($0) },
+            providerFactory: { RecordingComparisonProvider(kind: $0.kind, model: $0.model, recorder: recorder) })
     }
     override func tearDownWithError() throws {
         AgentLog.setFileURLForTesting(nil)
@@ -62,9 +83,9 @@ final class MultiProviderRunTests: XCTestCase {
         AIServiceConfiguration(service: SavedAIConnection(id: id, name: id, provider: kind, baseURL: "https://example.invalid", model: id),
             configuration: AIProviderConfiguration(kind: kind, baseURL: "https://example.invalid", model: id, apiKey: key, acceptsText: true, acceptsImages: true, acceptsVideo: false))
     }
-    func run(_ services: [AIServiceConfiguration]) async throws {
+    func run(_ services: [AIServiceConfiguration], using other: SessionProcessor? = nil) async throws {
         manifest.uploadConsent = UploadConsent(approved: true, approvedAt: Date(), provider: "", endpoint: "", model: "", includesClipAudio: false, includesClipVideo: false, includesStills: true, destinations: services.map(\.destination))
-        try await processor.evaluateComparison(manifest: &manifest, transcript: transcript,
+        try await (other ?? processor!).evaluateComparison(manifest: &manifest, transcript: transcript,
             sessionURL: vault.sessionURL(id: manifest.sessionId), services: services) { _, _ in }
     }
 
@@ -231,5 +252,82 @@ final class MultiProviderRunTests: XCTestCase {
         XCTAssertEqual(request.imagePayloads, original.images)
         request.preparedInput = nil
         XCTAssertNotEqual(try ComparisonInput(request: request).fingerprint(), try original.fingerprint())
+    }
+
+    // MARK: - Automatic retry inside a run
+
+    func testATransientFailureIsRetriedInsideTheSameRun() async throws {
+        let sleeps = RetrySleepLog()
+        await recorder.fail("second", code: 503)
+        try await run([service("first"), service("second")], using: retryingProcessor(.standard, sleeps: sleeps))
+        let calls = await recorder.recorded()
+        XCTAssertEqual(calls.map(\.0), ["first", "first", "second", "second", "second"], "The failed call is repeated at once")
+        XCTAssertEqual(calls[2].1.slice.sliceId, "slice-0")
+        XCTAssertEqual(calls[3].1.slice.sliceId, "slice-0")
+        XCTAssertTrue(manifest.slices.allSatisfy { $0.serviceEvaluations.allSatisfy { $0.status == .success } })
+        XCTAssertNotEqual(manifest.pipelineStatus, .offlineFailed, "No manual Retry Analysis is needed")
+        let waited = await sleeps.recorded()
+        XCTAssertEqual(waited, [2])
+    }
+
+    func testRetriesStopAtTheAttemptLimitAndAtTheRunBudget() async throws {
+        let sleeps = RetrySleepLog()
+        await recorder.fail("down", code: 500, times: 100)
+        let policy = ProviderRetryPolicy(maxAttempts: 3, delays: [2, 6], runBudget: 3)
+        try await run([service("down")], using: retryingProcessor(policy, sleeps: sleeps))
+        let calls = await recorder.recorded()
+        XCTAssertEqual(calls.map { $0.1.slice.sliceId }, ["slice-0", "slice-0", "slice-0", "slice-1", "slice-1"],
+            "Three attempts for the first slice, then the run's budget of three extra attempts ends the second one early")
+        XCTAssertTrue(manifest.slices.allSatisfy { $0.serviceEvaluations.first?.status == .offlineFailed })
+        XCTAssertEqual(manifest.pipelineStatus, .offlineFailed, "An outage still ends in a manual Retry Analysis")
+        let waited = await sleeps.recorded()
+        XCTAssertEqual(waited, [2, 6, 2])
+    }
+
+    func testSignInAndPermanentFailuresAreNeverRetried() async throws {
+        let sleeps = RetrySleepLog()
+        let retrying = retryingProcessor(.standard, sleeps: sleeps)
+        await recorder.fail("auth", code: 401, times: 100)
+        try await run([service("auth")], using: retrying)
+        let afterAuth = await recorder.recorded().count
+        XCTAssertEqual(afterAuth, 1, "A sign-in failure stops the run after one call")
+
+        for index in manifest.slices.indices { manifest.slices[index].serviceEvaluations = [] }
+        await recorder.fail("bad-request", code: 400, times: 100)
+        try await run([service("bad-request")], using: retrying)
+        let afterPermanent = await recorder.recorded().count
+        XCTAssertEqual(afterPermanent - afterAuth, 2, "One call per slice")
+        let waited = await sleeps.recorded()
+        XCTAssertEqual(waited, [])
+    }
+
+    func testOnlyTransientFailuresCountAsRetryable() {
+        for code in [408, 429, 500, 502, 503, 504] {
+            XCTAssertTrue(ProviderRetryPolicy.isTransient(AIProviderError.httpStatus(code, "")), "HTTP \(code)")
+        }
+        for code in [400, 401, 403, 404, 422] {
+            XCTAssertFalse(ProviderRetryPolicy.isTransient(AIProviderError.httpStatus(code, "")), "HTTP \(code)")
+        }
+        XCTAssertTrue(ProviderRetryPolicy.isTransient(LocalAgentError.failed))
+        XCTAssertFalse(ProviderRetryPolicy.isTransient(LocalAgentError.timedOut), "A three-minute local timeout is not repeated")
+        XCTAssertFalse(ProviderRetryPolicy.isTransient(LocalAgentError.signInRequired))
+        XCTAssertFalse(ProviderRetryPolicy.isTransient(LocalAgentError.notInstalled))
+        XCTAssertFalse(ProviderRetryPolicy.isTransient(LocalAgentError.unsupported))
+        XCTAssertTrue(ProviderRetryPolicy.isTransient(URLError(.networkConnectionLost)))
+        XCTAssertTrue(ProviderRetryPolicy.isTransient(URLError(.timedOut)))
+        XCTAssertFalse(ProviderRetryPolicy.isTransient(URLError(.badURL)))
+        XCTAssertFalse(ProviderRetryPolicy.isTransient(AIProviderError.missingAPIKey))
+        XCTAssertFalse(ProviderRetryPolicy.isTransient(AIProviderError.decoding("fixture")))
+        XCTAssertFalse(ProviderRetryPolicy.isTransient(CancellationError()))
+    }
+
+    func testRetryDelaysFollowThePolicyAndRepeatTheLastValue() {
+        let policy = ProviderRetryPolicy.standard
+        XCTAssertEqual(policy.delay(beforeAttempt: 1), 0)
+        XCTAssertEqual(policy.delay(beforeAttempt: 2), 2)
+        XCTAssertEqual(policy.delay(beforeAttempt: 3), 6)
+        XCTAssertEqual(policy.delay(beforeAttempt: 9), 6)
+        XCTAssertEqual(ProviderRetryPolicy.none.delay(beforeAttempt: 2), 0)
+        XCTAssertEqual(ProviderRetryPolicy.none.maxAttempts, 1)
     }
 }

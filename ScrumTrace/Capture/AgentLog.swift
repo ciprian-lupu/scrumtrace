@@ -110,6 +110,23 @@ enum AgentLog {
         }
     }
 
+    /// Tests only: the session id log rows are currently scoped to, if any.
+    static var sessionContextForTesting: String? {
+        queue.sync { activeSessionID }
+    }
+
+    /// Tests only. Drops a session context a test left behind and returns it. While one is set, rows naming another
+    /// session are dropped and every other row is stamped with it, so a single test that ends with a run still
+    /// holding the context changes what every later test in the same process reads from the log.
+    @discardableResult
+    static func resetSessionContextForTesting() -> String? {
+        queue.sync {
+            let leaked = activeSessionID
+            activeSessionID = nil
+            return leaked
+        }
+    }
+
     static func snapshotFieldsForTesting(
         _ extra: [String: String] = [:]
     ) -> [String: String]? {
