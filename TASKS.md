@@ -41,6 +41,6 @@ Branch `feature/improve-codebase-architecture-917bd9`, based on `develop` at 91f
 - [x] 3. Migrate the `SessionProcessor` writes (22). Update the matching pins in `test_contracts.py` in the same commit.
 - [x] 4. Migrate the `SessionController` writes (7) and switch the live phase to `CapturePhase` where it feeds the saved status.
 - [x] 5. Migrate `SessionTransfer` and `SessionLibrary`. Route the classifications through the module in Library, Controller launch, MenuBarController, RecordingsView, OverviewView and Vault retention.
-- [ ] 6. Lock: remove the forwarding setters. Add the guard grep to `test_contracts.py` and update AGENTS.md where it describes the lifecycle.
+- [x] 6. Lock: remove the forwarding setters. Add the guard grep to `test_contracts.py` and update AGENTS.md where it describes the lifecycle.
 - [ ] 7. Trim disk-backed tests that duplicate the table tests, each removal listed for the PR.
 - [ ] 8. Merge `develop`, run both suites, and hand over the push and PR commands.

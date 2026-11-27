@@ -33,8 +33,8 @@ final class BriefUsabilityTests: XCTestCase {
         var manifest = SessionManifest.makeNew(sessionId: "brief-demo", product: .empty)
         manifest.productContext.appName = "ScrumTrace"
         manifest.duration = DurationPair(wallSeconds: 30, mediaSeconds: 30)
-        manifest.completedStages = [.transcribing, .slicing, .evaluating, .completed]
-        manifest.pipelineStatus = .completed
+        manifest.fixtureStages = [.transcribing, .slicing, .evaluating, .completed]
+        manifest.fixtureStatus = .completed
         manifest.slices = [SliceRecord(sliceId: "s1", startMedia: 0, endMedia: 10, trigger: .pin,
             associatedShotId: nil, clipPath: "media/demo/clip.mp4", stills: [], analysisStatus: .skipped, score: 1)]
         manifest.tasks = [makeTask("TASK-01", kind: .unknown, status: .needsReview)]
@@ -171,12 +171,12 @@ final class BriefUsabilityTests: XCTestCase {
             try ExportRel.writeContainedData(JSONEncoder().encode(transcript), relative: "export/full_transcript.json", sessionURL: root)
             html = SessionBriefRenderer().render(manifest: manifest, excerpts: [:], sessionURL: root)
             XCTAssertTrue(html.contains("Untimed &lt;script&gt;conversation&lt;/script&gt;"))
-            manifest.completedStages = []
+            manifest.fixtureStages = []
             html = SessionBriefRenderer().render(manifest: manifest, excerpts: [:], sessionURL: root)
             XCTAssertTrue(html.contains("Included transcript · incomplete transcription"))
             transcript.untimedText = nil
             transcript.transcriptionAnalysis = [.init(source: "room", status: "no_speech")]
-            manifest.completedStages = [.transcribing]
+            manifest.fixtureStages = [.transcribing]
             try ExportRel.writeContainedData(JSONEncoder().encode(transcript), relative: "export/full_transcript.json", sessionURL: root)
             html = SessionBriefRenderer().render(manifest: manifest, excerpts: [:], sessionURL: root)
             XCTAssertTrue(html.contains("No speech detected"))
@@ -311,7 +311,7 @@ final class BriefUsabilityTests: XCTestCase {
                     manifest.duration = DurationPair(wallSeconds: 1000, mediaSeconds: 960)
                 }
                 if mode == "partial" {
-                    manifest.completedStages = []
+                    manifest.fixtureStages = []
                     transcript.transcriptionAnalysis?.append(.init(source: "system", status: "failed"))
                 }
                 if mode == "untimed" {

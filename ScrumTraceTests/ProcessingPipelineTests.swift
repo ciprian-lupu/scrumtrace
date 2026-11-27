@@ -64,7 +64,7 @@ final class ProcessingPipelineTests: XCTestCase {
     /// A recording that stopped mid-pipeline: a manifest at `transcribing`, two seconds of room audio, no movie.
     private func makeAudioSession(in vault: SessionVault, seconds: Double = 2) throws -> String {
         var manifest = try vault.createSession(product: .empty).manifest
-        manifest.pipelineStatus = .transcribing
+        manifest.fixtureStatus = .transcribing
         manifest.duration = DurationPair(wallSeconds: seconds, mediaSeconds: seconds)
         try vault.write(manifest: &manifest)
         let sessionURL = vault.sessionURL(id: manifest.sessionId)

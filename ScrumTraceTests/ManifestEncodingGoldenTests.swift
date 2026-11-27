@@ -29,8 +29,8 @@ final class ManifestEncodingGoldenTests: XCTestCase {
             product: ProductContext(appName: "Golden", repoURL: "", techStack: "Swift")
         )
         manifest.createdAt = Date(timeIntervalSince1970: 1_800_000_000)
-        manifest.pipelineStatus = status
-        manifest.completedStages = done
+        manifest.fixtureStatus = status
+        manifest.fixtureStages = done
         return manifest
     }
 

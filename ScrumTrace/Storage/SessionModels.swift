@@ -3014,22 +3014,9 @@ struct SessionManifest: Codable, Sendable {
         completedStages.contains(stage)
     }
 
-    mutating func markCompleted(_ stage: PipelineStatus) {
-        if !completedStages.contains(stage) {
-            completedStages.append(stage)
-        }
-    }
-
-    // Forwarding while callers move to `lifecycle`; the setters go once every write is migrated.
-    var pipelineStatus: PipelineStatus {
-        get { lifecycle.status }
-        set { lifecycle = SessionLifecycle(status: newValue, completedStages: lifecycle.completedStages) }
-    }
-
-    var completedStages: [PipelineStatus] {
-        get { lifecycle.completedStages }
-        set { lifecycle = SessionLifecycle(status: lifecycle.status, completedStages: newValue) }
-    }
+    /// Read-only views of the lifecycle. Every change goes through `lifecycle`.
+    var pipelineStatus: PipelineStatus { lifecycle.status }
+    var completedStages: [PipelineStatus] { lifecycle.completedStages }
 }
 
 /// Hand-written to keep the lifecycle flat in the saved JSON; it matches what Swift synthesized before.

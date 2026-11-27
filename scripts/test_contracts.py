@@ -4018,6 +4018,29 @@ def test_display_selection_never_widens() -> None:
             assert "display_name" not in call and "displayName" not in call, path
 
 
+def test_session_lifecycle_has_one_writer():
+    """The Session status and done Stages change only through SessionLifecycle's transitions."""
+    sources = sorted((ROOT / "ScrumTrace").rglob("*.swift"))
+    write = re.compile(r"\.(pipelineStatus|completedStages)\s*=(?!=)|completedStages\.(append|removeAll|insert|remove)\b"
+                       r"|\.markCompleted\(\.")
+    construct = re.compile(r"SessionLifecycle\(status:")
+    construct_allowed = {"SessionLifecycle.swift", "SessionModels.swift", "SessionLibrary.swift"}
+    for path in sources:
+        if path.name == "SessionLifecycle.swift":
+            continue
+        text = path.read_text()
+        hit = write.search(text)
+        assert not hit, (path.name, hit.group(0))
+        if path.name not in construct_allowed:
+            assert not construct.search(text), (path.name, "builds a SessionLifecycle from raw fields")
+    models = (ROOT / "ScrumTrace" / "Storage" / "SessionModels.swift").read_text()
+    assert "var lifecycle: SessionLifecycle" in models
+    assert "var pipelineStatus: PipelineStatus { lifecycle.status }" in models
+    lifecycle = (ROOT / "ScrumTrace" / "Storage" / "SessionLifecycle.swift").read_text()
+    assert "private(set) var status: PipelineStatus" in lifecycle
+    assert "private(set) var completedStages: [PipelineStatus]" in lifecycle
+
+
 def main() -> None:
     test_export_has_no_archive_and_no_tokens()
     test_agent_context_uses_export_relative_paths()
@@ -4035,6 +4058,7 @@ def main() -> None:
     test_pipeline_timing_stays_in_archive()
     test_pause_privacy_and_metadata_gate()
     test_phase45_clip_consent_and_budget()
+    test_session_lifecycle_has_one_writer()
     test_write_contained_data_refuses_directory_symlinks()
     test_audit_leftovers_are_implemented()
     test_claude_cli_handoff()

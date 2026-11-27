@@ -66,8 +66,8 @@ final class SessionLibraryTests: XCTestCase {
             contextName: "Orbit web"
         )
         completed.createdAt = now.addingTimeInterval(-2 * 86_400)
-        completed.pipelineStatus = .completed
-        completed.completedStages = [.transcribing, .slicing, .evaluating, .synthesizing, .completed]
+        completed.fixtureStatus = .completed
+        completed.fixtureStages = [.transcribing, .slicing, .evaluating, .synthesizing, .completed]
         completed.duration = DurationPair(wallSeconds: 700, mediaSeconds: 600)
         completed.pauses = [
             PauseInterval(pauseWall: 10, resumeWall: 20),
@@ -114,7 +114,7 @@ final class SessionLibraryTests: XCTestCase {
             contextName: "Orbit web"
         )
         unfinished.createdAt = now.addingTimeInterval(-3_600)
-        unfinished.pipelineStatus = .transcribing
+        unfinished.fixtureStatus = .transcribing
         unfinished.duration = DurationPair(wallSeconds: 90, mediaSeconds: 80)
         try vault.write(manifest: &unfinished)
 
@@ -126,8 +126,8 @@ final class SessionLibraryTests: XCTestCase {
             contextName: "Atlas mobile"
         )
         offline.createdAt = now.addingTimeInterval(-5 * 86_400)
-        offline.pipelineStatus = .offlineFailed
-        offline.completedStages = [.transcribing, .slicing, .evaluating]
+        offline.fixtureStatus = .offlineFailed
+        offline.fixtureStages = [.transcribing, .slicing, .evaluating]
         offline.slices = [slice("slice-01", .offlineFailed), slice("slice-02", .success)]
         try vault.write(manifest: &offline)
         let offlineURL = vault.sessionURL(id: offline.sessionId)
@@ -824,8 +824,8 @@ final class SessionLibraryTests: XCTestCase {
             // A pipeline stage adds a clip under an existing archive/ folder and rewrites the manifest.
             try write(Data(count: 100), to: ScrumTracePath.mediaWork + "/clip.mp4", in: f.vault.sessionURL(id: f.unfinished))
             var manifest = try f.vault.loadManifest(id: f.unfinished)
-            manifest.pipelineStatus = .slicing
-            manifest.markCompleted(.transcribing)
+            manifest.fixtureStatus = .slicing
+            manifest.lifecycle.complete(.transcribing)
             try f.vault.write(manifest: &manifest)
             await library.refresh().value
             XCTAssertEqual(library.totalArchiveBytes, transcriptBytes + 4_096 + 100)
@@ -863,8 +863,8 @@ final class SessionLibraryTests: XCTestCase {
             XCTAssertEqual(library.entries.first?.summary?.hasBrief, true)
 
             var manifest = try f.vault.loadManifest(id: f.unfinished)
-            manifest.pipelineStatus = .slicing
-            manifest.markCompleted(.transcribing)
+            manifest.fixtureStatus = .slicing
+            manifest.lifecycle.complete(.transcribing)
             try f.vault.write(manifest: &manifest)
             await library.refresh().value
             XCTAssertEqual(counter.value, 5, "Only the rewritten manifest is decoded again")

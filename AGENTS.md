@@ -152,6 +152,8 @@ python3 scripts/serve_preview.py --host 127.0.0.1 --port 43147
 
 `scripts/test_contracts.py` is **string-based**: keep the snippets it greps for.
 
+A Session's status and done stages change only through `SessionLifecycle` (`Storage/SessionLifecycle.swift`), which also answers Unfinished, Interrupted, Resumable, Export ready, Needs attention and Prunable; terms are in `GLOSSARY.md`. `test_session_lifecycle_has_one_writer` fails on any other write.
+
 macOS 14+ (Apple Silicon recommended):
 
 ```bash

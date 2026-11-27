@@ -472,7 +472,7 @@ final class ContractTests: XCTestCase {
         try Data("DO-NOT-OVERWRITE".utf8).write(to: secret)
         try FileManager.default.removeItem(at: dest)
         try FileManager.default.createSymbolicLink(at: dest, withDestinationURL: secret)
-        manifest.pipelineStatus = .completed
+        manifest.fixtureStatus = .completed
         try vault.write(manifest: &manifest)
         XCTAssertEqual(try String(contentsOf: secret, encoding: .utf8), "DO-NOT-OVERWRITE")
         XCTAssertNotEqual((try dest.resourceValues(forKeys: [.isSymbolicLinkKey])).isSymbolicLink, true)
@@ -573,7 +573,7 @@ final class ContractTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: outside) }
         try FileManager.default.createDirectory(at: outside, withIntermediateDirectories: true)
         var planted = SessionManifest.makeNew(sessionId: "2026-09-09-1530-abc123", product: .empty)
-        planted.pipelineStatus = .completed
+        planted.fixtureStatus = .completed
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         try encoder.encode(planted).write(to: outside.appendingPathComponent(ScrumTracePath.manifest))
@@ -597,7 +597,7 @@ final class ContractTests: XCTestCase {
         try FileManager.default.copyItem(at: session, to: outside)
         try FileManager.default.removeItem(at: session)
         try FileManager.default.createSymbolicLink(at: session, withDestinationURL: outside)
-        manifest.pipelineStatus = .completed
+        manifest.fixtureStatus = .completed
         XCTAssertThrowsError(try vault.write(manifest: &manifest))
         let plantedData = try Data(
             contentsOf: outside.appendingPathComponent(ScrumTracePath.manifest)
@@ -876,19 +876,19 @@ final class ContractTests: XCTestCase {
         let completed = try vault.createSession(product: .empty)
         var completedManifest = completed.manifest
         completedManifest.createdAt = Date().addingTimeInterval(-3 * 86_400)
-        completedManifest.pipelineStatus = .completed
+        completedManifest.fixtureStatus = .completed
         try vault.write(manifest: &completedManifest)
 
         let retryable = try vault.createSession(product: .empty)
         var retryableManifest = retryable.manifest
         retryableManifest.createdAt = Date().addingTimeInterval(-3 * 86_400)
-        retryableManifest.pipelineStatus = .offlineFailed
+        retryableManifest.fixtureStatus = .offlineFailed
         try vault.write(manifest: &retryableManifest)
 
         let unfinished = try vault.createSession(product: .empty)
         var unfinishedManifest = unfinished.manifest
         unfinishedManifest.createdAt = Date().addingTimeInterval(-3 * 86_400)
-        unfinishedManifest.pipelineStatus = .transcribing
+        unfinishedManifest.fixtureStatus = .transcribing
         try vault.write(manifest: &unfinishedManifest)
 
         vault.pruneCompletedOlderThan(days: 1)

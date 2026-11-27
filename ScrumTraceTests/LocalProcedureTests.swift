@@ -99,8 +99,8 @@ final class LocalExportReplayTests: XCTestCase {
             manifest.localProcedure = nil
             manifest.slices = []
             manifest.tasks = []
-            manifest.completedStages.removeAll { $0 != .transcribing }
-            manifest.pipelineStatus = .transcribing
+            manifest.fixtureStages.removeAll { $0 != .transcribing }
+            manifest.fixtureStatus = .transcribing
             manifest.uploadConsent = .denied
             manifest.includeFullTranscriptInZip = false
             manifest.omitted = []

@@ -900,8 +900,8 @@ final class MainWindowTests: XCTestCase {
             contextName: "Orbit web"
         )).manifest
         completed.createdAt = Date().addingTimeInterval(-7_200)
-        completed.pipelineStatus = .completed
-        completed.completedStages = PipelineStatusOrder.processingFlow
+        completed.fixtureStatus = .completed
+        completed.fixtureStages = PipelineStatusOrder.processingFlow
         completed.duration = DurationPair(wallSeconds: 700, mediaSeconds: 600)
         completed.uploadConsent = UploadConsent(
             approved: true,
@@ -924,7 +924,7 @@ final class MainWindowTests: XCTestCase {
 
         var unfinished = try vault.createSession(product: .empty).manifest
         unfinished.createdAt = Date().addingTimeInterval(-600)
-        unfinished.pipelineStatus = .transcribing
+        unfinished.fixtureStatus = .transcribing
         try vault.write(manifest: &unfinished)
         try writeFile(Data(count: 64), to: ScrumTracePath.sessionMovie, in: vault.sessionURL(id: unfinished.sessionId))
 
@@ -946,7 +946,7 @@ final class MainWindowTests: XCTestCase {
 
     private func makeSession(in vault: SessionVault, status: PipelineStatus) throws -> String {
         var manifest = try vault.createSession(product: .empty).manifest
-        manifest.pipelineStatus = status
+        manifest.fixtureStatus = status
         try vault.write(manifest: &manifest)
         try writeFile(Data(count: 64), to: ScrumTracePath.sessionMovie, in: vault.sessionURL(id: manifest.sessionId))
         return manifest.sessionId
@@ -2859,8 +2859,8 @@ final class MainWindowTests: XCTestCase {
                 sessionId: "2026-09-13-1200-abc123",
                 product: ProductContext(appName: product, repoURL: "", techStack: "", contextID: context.map { _ in "ctx" }, contextName: context)
             )
-            manifest.pipelineStatus = status
-            manifest.completedStages = done
+            manifest.fixtureStatus = status
+            manifest.fixtureStages = done
             return SessionSummary(manifest: manifest, exportProbe: SessionExportProbe())
         }
         func states(_ summary: SessionSummary) -> [SessionStageStep.State] {
@@ -3964,7 +3964,7 @@ final class MainWindowTests: XCTestCase {
 
             // Analysis of that recording: the card shows its progress.
             var manifest = try f.vault.loadManifest(id: capturing)
-            manifest.pipelineStatus = .transcribing
+            manifest.fixtureStatus = .transcribing
             try f.vault.write(manifest: &manifest)
             await recordings.refresh().value
             XCTAssertEqual(overview.lastRecording?.sessionId, capturing)
@@ -5017,7 +5017,7 @@ extension MainWindowTests {
 
             // Analysis finishes, so nothing is unfinished and the badge goes.
             var manifest = try controller.vault.loadManifest(id: unfinished)
-            manifest.pipelineStatus = .completed
+            manifest.fixtureStatus = .completed
             try controller.vault.write(manifest: &manifest)
             recordings.refresh()
             XCTAssertTrue(

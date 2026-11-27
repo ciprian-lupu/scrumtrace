@@ -449,8 +449,8 @@ final class MainWindowSnapshotTests: XCTestCase {
         let now = Date()
         var completed = try vault.createSession(product: orbit.snapshot).manifest
         completed.createdAt = now.addingTimeInterval(-26 * 3_600)
-        completed.pipelineStatus = .completed
-        completed.completedStages = PipelineStatusOrder.processingFlow
+        completed.fixtureStatus = .completed
+        completed.fixtureStages = PipelineStatusOrder.processingFlow
         completed.duration = DurationPair(wallSeconds: 1_520, mediaSeconds: 1_384)
         completed.pauses = [
             PauseInterval(pauseWall: 300, resumeWall: 380),
@@ -526,8 +526,8 @@ final class MainWindowSnapshotTests: XCTestCase {
 
         var failed = try vault.createSession(product: .empty).manifest
         failed.createdAt = now.addingTimeInterval(-3 * 3_600)
-        failed.pipelineStatus = .offlineFailed
-        failed.completedStages = [.transcribing, .slicing, .evaluating, .synthesizing, .completed]
+        failed.fixtureStatus = .offlineFailed
+        failed.fixtureStages = [.transcribing, .slicing, .evaluating, .synthesizing, .completed]
         failed.duration = DurationPair(wallSeconds: 640, mediaSeconds: 602)
         failed.slices = [
             SliceRecord(
@@ -550,14 +550,14 @@ final class MainWindowSnapshotTests: XCTestCase {
 
         var unfinished = try vault.createSession(product: .empty).manifest
         unfinished.createdAt = now.addingTimeInterval(-20 * 60)
-        unfinished.pipelineStatus = .transcribing
+        unfinished.fixtureStatus = .transcribing
         unfinished.duration = DurationPair(wallSeconds: 310, mediaSeconds: 296)
         try vault.write(manifest: &unfinished)
         try writeFile(Data(count: 64), to: ScrumTracePath.sessionMovie, in: vault.sessionURL(id: unfinished.sessionId))
 
         var interrupted = try vault.createSession(product: .empty).manifest
         interrupted.createdAt = now.addingTimeInterval(-50 * 3_600)
-        interrupted.pipelineStatus = .paused
+        interrupted.fixtureStatus = .paused
         interrupted.duration = DurationPair(wallSeconds: 910, mediaSeconds: 845)
         try vault.write(manifest: &interrupted)
         try writeFile(Data(count: 64), to: ScrumTracePath.sessionMovie, in: vault.sessionURL(id: interrupted.sessionId))
