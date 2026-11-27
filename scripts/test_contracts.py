@@ -2189,8 +2189,8 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "writtenTranscript" in repair
     assert "writeContainedData" in repair
     assert "recoveredReadableTranscript = true" in repair
-    assert "completedStages.removeAll" in repair
-    assert "pipelineStatus = .transcribing" in repair
+    assert "lifecycle.invalidate(from: .transcribing)" in repair
+    assert "lifecycle.begin(.transcribing)" in repair
     assert "manifest.tasks = []" in repair
     assert "justFinishedTranscribing || recoveredReadableTranscript" in processor
     written_before_load = processor.split("writeContainedData")[1].split("let transcript = loadTranscript")[0]
@@ -2214,28 +2214,28 @@ def test_phase45_clip_consent_and_budget() -> None:
     whisper_gate = processor.split("transcriber.isReady || !hadAudio")[1].split("let transcript = loadTranscript")[0]
     assert "transcript.sources" in whisper_gate
     assert "!transcribed.incomplete" in whisper_gate
-    assert "markCompleted(.transcribing)" in whisper_gate
+    assert "lifecycle.complete(.transcribing)" in whisper_gate
     slicing_gate = processor.split("if !manifest.hasCompleted(.slicing)")[1].split("let needsEvaluate")[0]
     assert "hasCompleted(.transcribing)" in slicing_gate
-    assert slicing_gate.index("hasCompleted(.transcribing)") < slicing_gate.index("markCompleted(.slicing)")
+    assert slicing_gate.index("hasCompleted(.transcribing)") < slicing_gate.index("lifecycle.complete(.slicing)")
     eval_gate = processor.split("if needsEvaluate")[1].split("await onStatus(.synthesizing")[0]
     assert "hasCompleted(.transcribing)" in eval_gate
     assert eval_gate.index("hasCompleted(.transcribing)") < eval_gate.index("uploadConsent.approved")
     incomplete = processor.split("Transcription is incomplete")[1].split("Writing AGENT_CONTEXT.md")[0]
     assert "return manifest" in incomplete
-    assert "pipelineStatus = .transcribing" in incomplete
+    assert "lifecycle.begin(.transcribing)" in incomplete
     assert "writeIncompleteHandoff" in incomplete
-    assert "markCompleted(.synthesizing)" not in incomplete
-    assert "markCompleted(.completed)" not in incomplete
+    assert "lifecycle.finish(" not in incomplete
+    assert "lifecycle.complete(.synthesizing)" not in incomplete
     handoff = processor.split("func writeIncompleteHandoff")[1].split("func writeExportDocuments")[0]
     assert "writeExportDocuments" in handoff
-    assert "markCompleted(.synthesizing)" not in handoff
-    assert "markCompleted(.completed)" not in handoff
+    assert "lifecycle.finish(" not in handoff
+    assert "lifecycle.complete(.synthesizing)" not in handoff
     assert "hasCompleted(.transcribing)" in processor.split("try requireUsableSession(sessionURL, id: sessionId)")[-1].split("Writing AGENT_CONTEXT.md")[0]
     assert "async throws -> (transcript: FullTranscript, incomplete: Bool, modelLoadSeconds: TimeInterval?)" in processor
     assert "justFinishedTranscribing" in processor
     retry_block = processor.split("if justFinishedTranscribing")[1].split("if !manifest.hasCompleted(.slicing)")[0]
-    assert "completedStages.removeAll" in retry_block
+    assert "lifecycle.invalidate(from: .slicing)" in retry_block
     assert "tasks = []" in retry_block
     assert "vault.write" in retry_block
     assert "zip failed" in processor
