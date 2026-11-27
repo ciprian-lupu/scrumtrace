@@ -42,5 +42,6 @@ Branch `feature/improve-codebase-architecture-917bd9`, based on `develop` at 91f
 - [x] 4. Migrate the `SessionController` writes (7) and switch the live phase to `CapturePhase` where it feeds the saved status.
 - [x] 5. Migrate `SessionTransfer` and `SessionLibrary`. Route the classifications through the module in Library, Controller launch, MenuBarController, RecordingsView, OverviewView and Vault retention.
 - [x] 6. Lock: remove the forwarding setters. Add the guard grep to `test_contracts.py` and update AGENTS.md where it describes the lifecycle.
-- [ ] 7. Trim disk-backed tests that duplicate the table tests, each removal listed for the PR.
-- [ ] 8. Merge `develop`, run both suites, and hand over the push and PR commands.
+- [x] 7. Trimmed one test: `InterruptedSessionTests.testOnlyProcessingStatesResumeOnTheirOwn` only checked `SessionController.autoResumableStatuses`, which the lifecycle replaced (covered by `SessionLifecycleTests.testResumableIsAProcessingStatusUnlessTheLastPassFailed`). The other nine interrupted-session tests drive the controller end to end and stay.
+- [x] 8. The branch contains local `develop` and `origin/develop` as last fetched (10 days old; no fetch was run). Final run: Linux suite passes; native 541 passed, 2 failed, 16 skipped, both failures in the baseline set.
+- [ ] 9. The Member fetches, merges any newer `develop`, pushes as `ciprian-lupu` and opens the PR.

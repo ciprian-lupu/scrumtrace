@@ -1469,7 +1469,7 @@ def test_pipeline_timing_stays_in_archive() -> None:
     # A quit, crash or reinstall during processing must not strand a recording at "transcribing".
     controller_src = (ROOT / "ScrumTrace" / "Processing" / "SessionController.swift").read_text()
     assert "func resumeInterruptedSession() -> Bool" in controller_src
-    assert "autoResumableStatuses: Set<PipelineStatus> = [.transcribing, .slicing, .evaluating, .synthesizing]" in controller_src
+    assert "if lifecycle.isResumable(facts) {" in controller_src
     delegate_src = (ROOT / "ScrumTrace" / "App" / "AppDelegate.swift").read_text()
     assert "controller.resumeInterruptedSession()" in delegate_src.split("func applicationDidFinishLaunching")[1].split("func applicationWillTerminate")[0]
     menu_quit = (ROOT / "ScrumTrace" / "UI" / "MenuBarController.swift").read_text().split("func quit()")[1].split("func openRecent")[0]

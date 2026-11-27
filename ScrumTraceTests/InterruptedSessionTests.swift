@@ -60,14 +60,6 @@ final class InterruptedSessionTests: XCTestCase {
         return condition()
     }
 
-    func testOnlyProcessingStatesResumeOnTheirOwn() {
-        let resumable = SessionController.autoResumableStatuses
-        XCTAssertEqual(resumable, [.transcribing, .slicing, .evaluating, .synthesizing])
-        for manual in [PipelineStatus.recording, .paused, .offlineFailed, .idle, .completed] {
-            XCTAssertFalse(resumable.contains(manual), "\(manual) stays a manual Retry Analysis")
-        }
-    }
-
     @MainActor
     func testAKilledTranscriptionIsPickedUpAtTheNextLaunch() async throws {
         try await withBench { bench in

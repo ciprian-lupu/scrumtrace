@@ -215,10 +215,6 @@ final class SessionController: ObservableObject {
         }
     }
 
-    /// Pipeline states a killed process leaves behind that Retry Analysis finishes on its own: the archive is complete,
-    /// only the processing stopped. A crash while recording or a run that already failed offline stays a manual Retry.
-    static let autoResumableStatuses: Set<PipelineStatus> = [.transcribing, .slicing, .evaluating, .synthesizing]
-
     /// The newest session when a previous process died mid-pipeline (the app was quit, killed or reinstalled while
     /// transcribing). Cleared once `resumeInterruptedSession()` has started the retry.
     private(set) var interruptedSessionId: String?
