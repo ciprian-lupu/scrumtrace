@@ -1400,10 +1400,10 @@ def test_pipeline_timing_stays_in_archive() -> None:
     assert "requestTrust" not in start_rec
     assert "clock.reset()" in start_rec
     assert "captureFreeze.attach(nil)" in start_rec
-    assert "pipelineStatus = phase" in start_rec
+    assert "lifecycle.recordCapture(capture)" in start_rec
     assert "try? vault.write" not in start_rec
-    assert start_rec.index("pipelineStatus = phase") < start_rec.index("try vault.write(manifest: &local)")
-    assert start_rec.index("try await recorder.start(") < start_rec.index("pipelineStatus = phase")
+    assert start_rec.index("lifecycle.recordCapture(capture)") < start_rec.index("try vault.write(manifest: &local)")
+    assert start_rec.index("try await recorder.start(") < start_rec.index("lifecycle.recordCapture(capture)")
     assert start_rec.index("try await recorder.start(") < start_rec.index("lastSessionId = created.manifest.sessionId")
     assert start_rec.index("try await recorder.start(") < start_rec.index("pinTimes = []")
     assert start_rec.index("try await recorder.start(") < start_rec.index(
@@ -1643,10 +1643,14 @@ def test_pause_privacy_and_metadata_gate() -> None:
     assert "try? vault.write" not in persist
     # Quit never leaves an interrupted recording at idle: that hid it from the launch resume and Needs attention.
     assert "pipelineStatus = .idle" not in persist
-    assert "pipelineStatusAfterQuit(" in persist
+    assert "lifecycle.recordQuit(" in persist
     assert "hasMedia: local.duration.mediaSeconds > 0" in persist
-    assert "guard hasMedia else { return .idle }" in halt
-    assert "captureClosed ? .transcribing : .recording" in halt
+    lifecycle_src = (ROOT / "ScrumTrace" / "Storage" / "SessionLifecycle.swift").read_text()
+    record_quit = lifecycle_src.split("func recordQuit")[1].split("// MARK: - Processing")[0]
+    assert "guard hasMedia else" in record_quit
+    assert "status = .idle" in record_quit
+    assert "captureClosed ? .transcribing : .recording" in record_quit
+    assert "lifecycle.recordQuit(" in halt
     assert halt.index("persistInterruptedCapture(captureClosed: false)") < halt.index("lock.wait")
     assert halt.index("halt_stop_ok") < halt.index("persistInterruptedCapture(captureClosed: true)")
     # Free disk: refused before a session folder exists, checked on the 30 s tick, and an almost full disk ends the
@@ -3197,7 +3201,7 @@ def test_audit_leftovers_are_implemented() -> None:
     inside = clock.split("func isInsidePause(hostTime")[1].split("func wallSecondsLocked")[0]
     assert "max(0, CMTimeGetSeconds" in inside
     merge = snap.split("func mergeLiveCatalog")[1]
-    assert "local.pipelineStatus = memory.pipelineStatus" in merge
+    assert "local.lifecycle.takeStatus(from: memory.lifecycle)" in merge
     persist_talk = shot.split("func persist()")[1].split("func startTalk()")[0]
     assert "Thread.isMainThread" in persist_talk
 

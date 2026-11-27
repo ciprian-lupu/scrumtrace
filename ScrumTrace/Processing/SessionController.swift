@@ -951,8 +951,9 @@ final class SessionController: ObservableObject {
     /// anything was captured (during Start): that stays `.idle`, the only state the abandoned-start prune removes, so
     /// an empty folder is not listed as an interrupted recording or processed for nothing.
     static func pipelineStatusAfterQuit(captureClosed: Bool, hasMedia: Bool) -> PipelineStatus {
-        guard hasMedia else { return .idle }
-        return captureClosed ? .transcribing : .recording
+        var lifecycle = SessionLifecycle.new
+        lifecycle.recordQuit(hasMedia: hasMedia, captureClosed: captureClosed)
+        return lifecycle.status
     }
 
     private func persistInterruptedCapture(captureClosed: Bool) {
@@ -962,9 +963,9 @@ final class SessionController: ObservableObject {
             mediaSeconds: clock.currentMediaSeconds()
         )
         local.pauses = clock.snapshotPauses()
-        local.pipelineStatus = Self.pipelineStatusAfterQuit(
-            captureClosed: captureClosed,
-            hasMedia: local.duration.mediaSeconds > 0
+        local.lifecycle.recordQuit(
+            hasMedia: local.duration.mediaSeconds > 0,
+            captureClosed: captureClosed
         )
         do {
             try vault.write(manifest: &local)
@@ -1133,7 +1134,9 @@ final class SessionController: ObservableObject {
                 }
             }
             if var local = manifest {
-                local.pipelineStatus = phase
+                if let capture = CapturePhase(phase) {
+                    local.lifecycle.recordCapture(capture)
+                }
                 do {
                     try vault.write(manifest: &local)
                 } catch {
@@ -1213,7 +1216,7 @@ final class SessionController: ObservableObject {
         metadataTimer?.invalidate()
         metadataTimer = nil
         var local = manifest
-        local?.pipelineStatus = .transcribing
+        local?.lifecycle.recordStop()
         local?.duration = DurationPair(
             wallSeconds: clock.currentWallSeconds(),
             mediaSeconds: clock.currentMediaSeconds()
@@ -1378,9 +1381,7 @@ final class SessionController: ObservableObject {
                     local.uploadConsent = uploadConsentPromptForTesting?() ?? requestUploadConsent(destinations: destinations)
                     if local.uploadConsent.approved && askedBefore && (previous.needsReprompt(destinations: destinations)
                         || previous.includesClipVideo != local.uploadConsent.includesClipVideo) {
-                        local.completedStages.removeAll {
-                            $0 == .evaluating || $0 == .synthesizing || $0 == .completed
-                        }
+                        local.lifecycle.invalidate(from: .evaluating)
                         let unchanged = Set(destinations.filter { previous.destinations.contains($0) }.map(\.serviceId))
                         local.tasks.removeAll { !unchanged.contains($0.serviceId ?? "") }
                         for index in local.slices.indices {
@@ -1913,14 +1914,14 @@ final class SessionController: ObservableObject {
     private func persistLivePipelineStatus() {
         guard var local = manifest else { return }
         if isRecording {
-            local.pipelineStatus = captureState == .paused ? .paused : .recording
+            local.lifecycle.recordCapture(captureState == .paused ? .paused : .recording)
             local.pauses = clock.snapshotPauses()
             local.duration = DurationPair(
                 wallSeconds: clock.currentWallSeconds(),
                 mediaSeconds: clock.currentMediaSeconds()
             )
-        } else {
-            local.pipelineStatus = phase
+        } else if let capture = CapturePhase(phase) {
+            local.lifecycle.recordCapture(capture)
         }
         do {
             try vault.write(manifest: &local)
@@ -2008,7 +2009,7 @@ final class SessionController: ObservableObject {
         }
         local.duration = memory.duration
         local.pauses = memory.pauses
-        local.pipelineStatus = memory.pipelineStatus
+        local.lifecycle.takeStatus(from: memory.lifecycle)
         return local
     }
 
