@@ -37,7 +37,7 @@ Branch `feature/improve-codebase-architecture-917bd9`, based on `develop` at 91f
     - `MainWindowTests.testTheDateAndContextColumnsFitAtTheDefaultWindowSize`
     - `SpeakerTests.testSpeakerReviewReadsTheVaultOffTheMainActorAndOpensTheRequestedSessionFirst`
 - [x] 1. Add `SessionLifecycle`, `Stage`, `CapturePhase`, `ArchiveFacts` and `SessionLifecycleTests` (table tests for every transition and classification). Not wired in yet.
-- [ ] 2. `SessionManifest` stores `lifecycle` with flattened Codable. Temporary forwarding accessors keep the existing callers compiling. Byte round-trip tests against `samples/mock-session` and a transferred-manifest fixture.
+- [x] 2. `SessionManifest` stores `lifecycle` with flattened Codable. Temporary forwarding accessors keep the existing callers compiling. Byte round-trip tests against `samples/mock-session` and a transferred-manifest fixture.
 - [ ] 3. Migrate the `SessionProcessor` writes (22). Update the matching pins in `test_contracts.py` in the same commit.
 - [ ] 4. Migrate the `SessionController` writes (7) and switch the live phase to `CapturePhase` where it feeds the saved status.
 - [ ] 5. Migrate `SessionTransfer` and `SessionLibrary`. Route the classifications through the module in Library, Controller launch, MenuBarController, RecordingsView, OverviewView and Vault retention.

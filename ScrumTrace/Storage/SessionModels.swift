@@ -2955,14 +2955,14 @@ struct SessionManifest: Codable, Sendable {
     var manifestVersion: String
     var sessionId: String
     var createdAt: Date
-    var pipelineStatus: PipelineStatus
+    /// The Session status and done Stages. Saved flat as `pipeline_status` and `completed_stages`.
+    var lifecycle: SessionLifecycle
     var duration: DurationPair
     var pauses: [PauseInterval]
     var productContext: ProductContext
     var shots: [ShotRecord]
     var slices: [SliceRecord]
     var tasks: [TaskRecord]
-    var completedStages: [PipelineStatus]
     var includeFullTranscriptInZip: Bool
     var uploadConsent: UploadConsent
     var omitted: [OmittedAsset]
@@ -2996,14 +2996,13 @@ struct SessionManifest: Codable, Sendable {
             manifestVersion: MediaBudget.manifestVersion,
             sessionId: sessionId,
             createdAt: Date(),
-            pipelineStatus: .idle,
+            lifecycle: .new,
             duration: DurationPair(wallSeconds: 0, mediaSeconds: 0),
             pauses: [],
             productContext: product,
             shots: [],
             slices: [],
             tasks: [],
-            completedStages: [],
             includeFullTranscriptInZip: false,
             uploadConsent: .denied,
             omitted: [],
@@ -3019,6 +3018,64 @@ struct SessionManifest: Codable, Sendable {
         if !completedStages.contains(stage) {
             completedStages.append(stage)
         }
+    }
+
+    // Forwarding while callers move to `lifecycle`; the setters go once every write is migrated.
+    var pipelineStatus: PipelineStatus {
+        get { lifecycle.status }
+        set { lifecycle = SessionLifecycle(status: newValue, completedStages: lifecycle.completedStages) }
+    }
+
+    var completedStages: [PipelineStatus] {
+        get { lifecycle.completedStages }
+        set { lifecycle = SessionLifecycle(status: lifecycle.status, completedStages: newValue) }
+    }
+}
+
+/// Hand-written to keep the lifecycle flat in the saved JSON; it matches what Swift synthesized before.
+extension SessionManifest {
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        manifestVersion = try container.decode(String.self, forKey: .manifestVersion)
+        sessionId = try container.decode(String.self, forKey: .sessionId)
+        createdAt = try container.decode(Date.self, forKey: .createdAt)
+        lifecycle = SessionLifecycle(
+            status: try container.decode(PipelineStatus.self, forKey: .pipelineStatus),
+            completedStages: try container.decode([PipelineStatus].self, forKey: .completedStages)
+        )
+        duration = try container.decode(DurationPair.self, forKey: .duration)
+        pauses = try container.decode([PauseInterval].self, forKey: .pauses)
+        productContext = try container.decode(ProductContext.self, forKey: .productContext)
+        shots = try container.decode([ShotRecord].self, forKey: .shots)
+        slices = try container.decode([SliceRecord].self, forKey: .slices)
+        tasks = try container.decode([TaskRecord].self, forKey: .tasks)
+        includeFullTranscriptInZip = try container.decode(Bool.self, forKey: .includeFullTranscriptInZip)
+        uploadConsent = try container.decode(UploadConsent.self, forKey: .uploadConsent)
+        omitted = try container.decode([OmittedAsset].self, forKey: .omitted)
+        captureEnvironment = try container.decodeIfPresent(SessionEnvironment.self, forKey: .captureEnvironment)
+        importOrigin = try container.decodeIfPresent(SessionImportOrigin.self, forKey: .importOrigin)
+        localProcedure = try container.decodeIfPresent(LocalProcedure.self, forKey: .localProcedure)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(manifestVersion, forKey: .manifestVersion)
+        try container.encode(sessionId, forKey: .sessionId)
+        try container.encode(createdAt, forKey: .createdAt)
+        try container.encode(lifecycle.status, forKey: .pipelineStatus)
+        try container.encode(duration, forKey: .duration)
+        try container.encode(pauses, forKey: .pauses)
+        try container.encode(productContext, forKey: .productContext)
+        try container.encode(shots, forKey: .shots)
+        try container.encode(slices, forKey: .slices)
+        try container.encode(tasks, forKey: .tasks)
+        try container.encode(lifecycle.completedStages, forKey: .completedStages)
+        try container.encode(includeFullTranscriptInZip, forKey: .includeFullTranscriptInZip)
+        try container.encode(uploadConsent, forKey: .uploadConsent)
+        try container.encode(omitted, forKey: .omitted)
+        try container.encodeIfPresent(captureEnvironment, forKey: .captureEnvironment)
+        try container.encodeIfPresent(importOrigin, forKey: .importOrigin)
+        try container.encodeIfPresent(localProcedure, forKey: .localProcedure)
     }
 }
 
