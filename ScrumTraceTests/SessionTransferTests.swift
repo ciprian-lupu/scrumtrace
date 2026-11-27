@@ -15,8 +15,8 @@ final class SessionTransferTests: XCTestCase {
         var manifest = try vault.createSession(product: .empty).manifest
         let id = manifest.sessionId
         let root = vault.sessionURL(id: id)
-        manifest.pipelineStatus = .offlineFailed
-        manifest.completedStages = [.transcribing, .slicing]
+        manifest.fixtureStatus = .offlineFailed
+        manifest.fixtureStages = [.transcribing, .slicing]
         manifest.uploadConsent = UploadConsent(
             approved: true, approvedAt: Date(), provider: "test", endpoint: "https://example.test",
             model: "model", includesClipAudio: false, includesClipVideo: false, includesStills: true
@@ -314,8 +314,8 @@ final class SessionTransferTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: base) }
         let source = SessionVault(rootURL: base.appendingPathComponent("source/sessions"))
         var original = try source.createSession(product: .empty).manifest
-        original.completedStages = [.transcribing, .slicing]
-        original.pipelineStatus = .offlineFailed
+        original.fixtureStages = [.transcribing, .slicing]
+        original.fixtureStatus = .offlineFailed
         try source.write(manifest: &original)
         let transcript = FullTranscript(sessionId: original.sessionId, language: "en", segments: [
             .init(start: 0, end: 1, text: "Synthetic passage for a local processing test.", speaker: nil, words: [])
@@ -356,7 +356,7 @@ final class SessionTransferTests: XCTestCase {
         try fixture { base, source, id in
             var original = try source.loadManifest(id: id)
             original.createdAt = Date().addingTimeInterval(-365 * 86400)
-            original.pipelineStatus = .completed
+            original.fixtureStatus = .completed
             try source.write(manifest: &original)
             let receiver = SessionVault(rootURL: base.appendingPathComponent("receiver/sessions"))
             let imported = try SessionTransfer(vault: receiver).importRecording(from: source.sessionURL(id: id))

@@ -921,12 +921,7 @@ final class OverviewModel: ObservableObject {
 
     /// Manifest states of a recording whose capture has not ended: created, recording or paused.
     nonisolated static func isCapturing(_ status: PipelineStatus) -> Bool {
-        switch status {
-        case .idle, .recording, .paused:
-            return true
-        case .transcribing, .slicing, .evaluating, .synthesizing, .completed, .offlineFailed:
-            return false
-        }
+        CapturePhase(status) != nil
     }
 
     /// Retry analysis through the Recordings action model: same checks, closure and log event.

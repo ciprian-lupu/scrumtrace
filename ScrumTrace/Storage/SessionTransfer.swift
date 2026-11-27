@@ -235,7 +235,7 @@ struct SessionTransfer {
         if scope == .evidence {
             // A projection's paths are export-relative. Keep that coordinate system; the existing
             // ExportRel accessor resolves it. Full reprocessing is disabled for evidence-only imports.
-            manifest.completedStages = []
+            manifest.lifecycle.clearAllStages()
         }
         try write(try Self.encoder().encode(manifest), to: ScrumTracePath.manifest, in: stage, replace: true)
         try updateTranscriptID(in: stage, id: localID)
@@ -282,7 +282,11 @@ struct SessionTransfer {
         )
         manifest.importOrigin?.retranscribed = retranscribe
         manifest.tasks = []
-        manifest.completedStages.removeAll { retranscribe || [.evaluating, .synthesizing, .completed].contains($0) }
+        if retranscribe {
+            manifest.lifecycle.clearAllStages()
+        } else {
+            manifest.lifecycle.invalidate(from: .evaluating)
+        }
         for i in manifest.slices.indices {
             manifest.slices[i].analysisStatus = .pending
             manifest.slices[i].serviceEvaluations = []
@@ -295,7 +299,7 @@ struct SessionTransfer {
                 }
             }
         }
-        manifest.pipelineStatus = manifest.hasCompleted(.transcribing) ? .evaluating : .transcribing
+        manifest.lifecycle.begin(manifest.hasCompleted(.transcribing) ? .evaluating : .transcribing)
         try write(try Self.encoder().encode(manifest), to: ScrumTracePath.manifest, in: stage, replace: true)
         try updateTranscriptID(in: stage, id: localID)
         try SessionTransferReviewReport.writeIfItFits(manifest: manifest, sessionURL: stage)

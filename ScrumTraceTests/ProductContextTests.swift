@@ -172,7 +172,7 @@ final class ProductContextTests: XCTestCase {
             try settings.deleteProductContext(id: scrum.id)
             let created = try vault.createSession(product: snapshot)
             var manifest = created.manifest
-            manifest.pipelineStatus = .completed
+            manifest.fixtureStatus = .completed
             try vault.write(manifest: &manifest)
             let saved = try vault.loadManifest(id: manifest.sessionId)
             XCTAssertEqual(saved.productContext.appName, "ScrumTrace")
@@ -311,7 +311,7 @@ final class ProductContextTests: XCTestCase {
     ) throws -> String {
         var manifest = try vault.createSession(product: product).manifest
         manifest.createdAt = createdAt
-        manifest.pipelineStatus = status
+        manifest.fixtureStatus = status
         try vault.write(manifest: &manifest)
         // A movie keeps controller start-up from pruning the folder as an abandoned start.
         let movie = vault.sessionURL(id: manifest.sessionId).appendingPathComponent(ScrumTracePath.sessionMovie)

@@ -31,8 +31,8 @@ final class SpeakerTests: XCTestCase {
         let vault = SessionVault(rootURL: root.appendingPathComponent("sessions"))
         let session = try vault.createSession(product: .empty)
         var manifest = session.manifest
-        manifest.pipelineStatus = .completed
-        manifest.completedStages = [.transcribing, .completed]
+        manifest.fixtureStatus = .completed
+        manifest.fixtureStages = [.transcribing, .completed]
         try vault.write(manifest: &manifest)
         var saved = assigned()
         saved.sessionId = session.manifest.sessionId
@@ -71,8 +71,8 @@ final class SpeakerTests: XCTestCase {
             let session = try vault.createSession(product: .empty)
             var manifest = session.manifest
             manifest.createdAt = createdAt
-            manifest.pipelineStatus = .completed
-            manifest.completedStages = [.transcribing, .completed]
+            manifest.fixtureStatus = .completed
+            manifest.fixtureStages = [.transcribing, .completed]
             try vault.write(manifest: &manifest)
             var saved = assigned()
             saved.sessionId = manifest.sessionId
@@ -468,8 +468,8 @@ final class SpeakerTests: XCTestCase {
     func testNameUpdateRebuildsPackWithoutTranscribingOrProviderCall() async throws {
         let vault = SessionVault(rootURL: root.appendingPathComponent("sessions"))
         var created = try vault.createSession(product: .empty)
-        created.manifest.pipelineStatus = .completed
-        created.manifest.completedStages = [.transcribing, .slicing, .evaluating, .synthesizing, .completed]
+        created.manifest.fixtureStatus = .completed
+        created.manifest.fixtureStages = [.transcribing, .slicing, .evaluating, .synthesizing, .completed]
         try vault.write(manifest: &created.manifest)
         var input = assigned(); input.sessionId = created.manifest.sessionId
         try SpeakerTimeline.save(input, sessionURL: created.url)
@@ -549,8 +549,8 @@ final class SpeakerTests: XCTestCase {
         let vault = SessionVault(rootURL: url.deletingLastPathComponent())
         var manifest = try vault.loadManifest(id: url.lastPathComponent)
         manifest.uploadConsent = .denied
-        manifest.completedStages = []
-        manifest.pipelineStatus = .transcribing
+        manifest.fixtureStages = []
+        manifest.fixtureStatus = .transcribing
         manifest.tasks = []
         try vault.write(manifest: &manifest)
         let transcriber = WhisperTranscriber()

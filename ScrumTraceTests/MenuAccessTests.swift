@@ -8,7 +8,7 @@ final class MenuAccessTests: XCTestCase {
         try withController { controller in
             var manifest = try controller.vault.createSession(product: .empty).manifest
             for status in [PipelineStatus.transcribing, .slicing, .evaluating, .synthesizing] {
-                manifest.pipelineStatus = status
+                manifest.fixtureStatus = status
                 XCTAssertTrue(MenuBarController.recordingLabel(manifest).hasSuffix("Incomplete · retry"))
                 XCTAssertTrue(MenuBarController.recordingLabel(manifest, isActive: true).hasSuffix(PipelineStatusOrder.label(status)))
             }
@@ -16,8 +16,8 @@ final class MenuAccessTests: XCTestCase {
                 XCTAssertEqual(RecordingStatusText.label(status), "Interrupted")
                 XCTAssertEqual(RecordingStatusText.label(status, isActive: true), PipelineStatusOrder.label(status))
             }
-            manifest.pipelineStatus = .offlineFailed
-            manifest.markCompleted(.synthesizing)
+            manifest.fixtureStatus = .offlineFailed
+            manifest.lifecycle.complete(.synthesizing)
             try controller.vault.write(manifest: &manifest)
             let missing = SessionSummary(manifest: manifest, exportProbe: SessionExportProbe())
             XCTAssertEqual(RecordingStatusText.label(missing), "Needs attention")
@@ -25,7 +25,7 @@ final class MenuAccessTests: XCTestCase {
             let ready = SessionSummary(manifest: manifest, exportProbe: SessionExportProbe(hasAgentContext: true, hasBrief: true))
             XCTAssertEqual(RecordingStatusText.label(ready), "Export ready · AI failed")
             XCTAssertTrue(RecordingRowText.unfinishedNote(ready).contains("local export is ready"))
-            manifest.completedStages = []
+            manifest.fixtureStages = []
             XCTAssertEqual(RecordingStatusText.label(SessionSummary(manifest: manifest,
                 exportProbe: SessionExportProbe(hasAgentContext: true, hasBrief: true))), "Needs attention")
 

@@ -480,11 +480,8 @@ final class SessionVault: @unchecked Sendable {
         let cutoff = Date().addingTimeInterval(-Double(days) * 86_400)
         for manifest in recentSessions(limit: 500) where manifest.createdAt < cutoff {
             if let imported = manifest.importOrigin?.importedAt, imported >= cutoff { continue }
-            switch manifest.pipelineStatus {
-            case .completed:
+            if manifest.lifecycle.isPrunable {
                 removeAbandonedSession(id: manifest.sessionId)
-            case .idle, .recording, .paused, .transcribing, .slicing, .evaluating, .synthesizing, .offlineFailed:
-                continue
             }
         }
     }

@@ -187,37 +187,33 @@ final class SessionController: ObservableObject {
         vault.pruneAbandonedStarts()
         if let recent = vault.recentSessions(limit: 1).first {
             lastSessionId = recent.sessionId
-            switch recent.pipelineStatus {
-            case .idle, .completed:
-                break
-            case .recording, .paused, .transcribing, .slicing, .evaluating, .synthesizing, .offlineFailed:
+            let lifecycle = recent.lifecycle
+            if lifecycle.isUnfinished {
                 let sessionURL = vault.sessionURL(id: recent.sessionId)
-                let incompleteTranscription = recent.pipelineStatus == .transcribing
-                    && !recent.hasCompleted(.transcribing)
-                    && PipelineTiming.load(sessionURL: sessionURL)?.whisperIncomplete == true
-                if incompleteTranscription {
+                // The timing file is read only when it can matter, as before.
+                let facts = ArchiveFacts(
+                    lastTranscriptionPassFailed: lifecycle.status == .transcribing && !lifecycle.isDone(.transcribing)
+                        && PipelineTiming.load(sessionURL: sessionURL)?.whisperIncomplete == true
+                )
+                if lifecycle.awaitsTranscriptionRetry(facts) {
                     statusLine = "Transcription is incomplete — Retry Analysis to try again"
-                } else if recent.pipelineStatus == .recording || recent.pipelineStatus == .paused {
+                } else if lifecycle.isInterrupted {
                     statusLine = "Recording was interrupted — Retry Analysis processes what was captured"
-                } else if recent.pipelineStatus == .offlineFailed {
+                } else if lifecycle.status == .offlineFailed {
                     let probe = SessionExportProbe.probe(sessionURL: sessionURL)
-                    statusLine = probe.hasBrief && probe.hasAgentContext && recent.hasCompleted(.synthesizing)
+                    statusLine = lifecycle.isExportReady(ArchiveFacts(probe))
                         ? "Export is ready — AI analysis needs review; Retry Analysis to try again"
                         : "Recording needs attention — Retry Analysis to try again"
                 } else {
                     statusLine = "Last session is unfinished — Retry Analysis to finish"
                 }
-                AgentLog.event("interrupted_session", ["status": recent.pipelineStatus.rawValue])
-                if Self.autoResumableStatuses.contains(recent.pipelineStatus), !incompleteTranscription {
+                AgentLog.event("interrupted_session", ["status": lifecycle.status.rawValue])
+                if lifecycle.isResumable(facts) {
                     interruptedSessionId = recent.sessionId
                 }
             }
         }
     }
-
-    /// Pipeline states a killed process leaves behind that Retry Analysis finishes on its own: the archive is complete,
-    /// only the processing stopped. A crash while recording or a run that already failed offline stays a manual Retry.
-    static let autoResumableStatuses: Set<PipelineStatus> = [.transcribing, .slicing, .evaluating, .synthesizing]
 
     /// The newest session when a previous process died mid-pipeline (the app was quit, killed or reinstalled while
     /// transcribing). Cleared once `resumeInterruptedSession()` has started the retry.
@@ -951,8 +947,9 @@ final class SessionController: ObservableObject {
     /// anything was captured (during Start): that stays `.idle`, the only state the abandoned-start prune removes, so
     /// an empty folder is not listed as an interrupted recording or processed for nothing.
     static func pipelineStatusAfterQuit(captureClosed: Bool, hasMedia: Bool) -> PipelineStatus {
-        guard hasMedia else { return .idle }
-        return captureClosed ? .transcribing : .recording
+        var lifecycle = SessionLifecycle.new
+        lifecycle.recordQuit(hasMedia: hasMedia, captureClosed: captureClosed)
+        return lifecycle.status
     }
 
     private func persistInterruptedCapture(captureClosed: Bool) {
@@ -962,9 +959,9 @@ final class SessionController: ObservableObject {
             mediaSeconds: clock.currentMediaSeconds()
         )
         local.pauses = clock.snapshotPauses()
-        local.pipelineStatus = Self.pipelineStatusAfterQuit(
-            captureClosed: captureClosed,
-            hasMedia: local.duration.mediaSeconds > 0
+        local.lifecycle.recordQuit(
+            hasMedia: local.duration.mediaSeconds > 0,
+            captureClosed: captureClosed
         )
         do {
             try vault.write(manifest: &local)
@@ -1133,7 +1130,9 @@ final class SessionController: ObservableObject {
                 }
             }
             if var local = manifest {
-                local.pipelineStatus = phase
+                if let capture = CapturePhase(phase) {
+                    local.lifecycle.recordCapture(capture)
+                }
                 do {
                     try vault.write(manifest: &local)
                 } catch {
@@ -1213,7 +1212,7 @@ final class SessionController: ObservableObject {
         metadataTimer?.invalidate()
         metadataTimer = nil
         var local = manifest
-        local?.pipelineStatus = .transcribing
+        local?.lifecycle.recordStop()
         local?.duration = DurationPair(
             wallSeconds: clock.currentWallSeconds(),
             mediaSeconds: clock.currentMediaSeconds()
@@ -1378,9 +1377,7 @@ final class SessionController: ObservableObject {
                     local.uploadConsent = uploadConsentPromptForTesting?() ?? requestUploadConsent(destinations: destinations)
                     if local.uploadConsent.approved && askedBefore && (previous.needsReprompt(destinations: destinations)
                         || previous.includesClipVideo != local.uploadConsent.includesClipVideo) {
-                        local.completedStages.removeAll {
-                            $0 == .evaluating || $0 == .synthesizing || $0 == .completed
-                        }
+                        local.lifecycle.invalidate(from: .evaluating)
                         let unchanged = Set(destinations.filter { previous.destinations.contains($0) }.map(\.serviceId))
                         local.tasks.removeAll { !unchanged.contains($0.serviceId ?? "") }
                         for index in local.slices.indices {
@@ -1913,14 +1910,14 @@ final class SessionController: ObservableObject {
     private func persistLivePipelineStatus() {
         guard var local = manifest else { return }
         if isRecording {
-            local.pipelineStatus = captureState == .paused ? .paused : .recording
+            local.lifecycle.recordCapture(captureState == .paused ? .paused : .recording)
             local.pauses = clock.snapshotPauses()
             local.duration = DurationPair(
                 wallSeconds: clock.currentWallSeconds(),
                 mediaSeconds: clock.currentMediaSeconds()
             )
-        } else {
-            local.pipelineStatus = phase
+        } else if let capture = CapturePhase(phase) {
+            local.lifecycle.recordCapture(capture)
         }
         do {
             try vault.write(manifest: &local)
@@ -2008,7 +2005,7 @@ final class SessionController: ObservableObject {
         }
         local.duration = memory.duration
         local.pauses = memory.pauses
-        local.pipelineStatus = memory.pipelineStatus
+        local.lifecycle.takeStatus(from: memory.lifecycle)
         return local
     }
 

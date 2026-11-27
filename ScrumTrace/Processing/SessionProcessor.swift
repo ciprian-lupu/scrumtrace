@@ -82,9 +82,9 @@ final class SessionProcessor: @unchecked Sendable {
         var manifest = try vault.loadManifest(id: sessionId)
         manifest.slices = []
         manifest.tasks = []
-        manifest.completedStages.removeAll { $0 == .slicing || $0 == .evaluating || $0 == .synthesizing || $0 == .completed }
-        manifest.markCompleted(.transcribing)
-        manifest.pipelineStatus = .transcribing
+        manifest.lifecycle.invalidate(from: .slicing)
+        manifest.lifecycle.complete(.transcribing)
+        manifest.lifecycle.begin(.transcribing)
         try vault.write(manifest: &manifest)
         // Remove stale brief, clips, projection and pack before any later Retry
         // can produce evidence from the newly selected transcript.
@@ -135,7 +135,7 @@ final class SessionProcessor: @unchecked Sendable {
                     manifest.pauses = rebuilt
                 }
             }
-            manifest.pipelineStatus = .transcribing
+            manifest.lifecycle.begin(.transcribing)
             try vault.write(manifest: &manifest)
         }
 
@@ -146,14 +146,14 @@ final class SessionProcessor: @unchecked Sendable {
         if !manifest.hasCompleted(.transcribing),
            let primary = SpeakerTimeline.load(sessionURL: sessionURL),
            primary.hasTimedSegments, !primary.needsTranscriptionRetry {
-            manifest.markCompleted(.transcribing)
-            manifest.pipelineStatus = .transcribing
+            manifest.lifecycle.complete(.transcribing)
+            manifest.lifecycle.begin(.transcribing)
             try vault.write(manifest: &manifest)
         }
         if manifest.hasCompleted(.transcribing),
            let archived = SpeakerTimeline.load(sessionURL: sessionURL), archived.needsTranscriptionRetry {
-            manifest.completedStages.removeAll { $0 == .transcribing || $0 == .slicing || $0 == .evaluating || $0 == .synthesizing || $0 == .completed }
-            manifest.pipelineStatus = .transcribing
+            manifest.lifecycle.invalidate(from: .transcribing)
+            manifest.lifecycle.begin(.transcribing)
             try vault.write(manifest: &manifest)
         }
 
@@ -163,7 +163,7 @@ final class SessionProcessor: @unchecked Sendable {
             timing.whisperIncomplete = false
             try timing.write(sessionURL: sessionURL)
             await onStatus(.transcribing, "Loading Whisper model…")
-            manifest.pipelineStatus = .transcribing
+            manifest.lifecycle.begin(.transcribing)
             try vault.write(manifest: &manifest)
             let whisperStarted = Date()
             try Task.checkCancellation()
@@ -222,7 +222,7 @@ final class SessionProcessor: @unchecked Sendable {
             if transcriber.isReady || !hadAudio {
                 let ranAPass = !(transcript.sources ?? []).isEmpty || !transcript.segments.isEmpty
                 if !hadAudio || (ranAPass && !transcribed.incomplete) {
-                    manifest.markCompleted(.transcribing)
+                    manifest.lifecycle.complete(.transcribing)
                     justFinishedTranscribing = true
                 }
             }
@@ -265,20 +265,15 @@ final class SessionProcessor: @unchecked Sendable {
                 )
                 recoveredReadableTranscript = true
             } else {
-                manifest.completedStages.removeAll {
-                    $0 == .transcribing || $0 == .slicing || $0 == .evaluating
-                        || $0 == .synthesizing || $0 == .completed
-                }
-                manifest.pipelineStatus = .transcribing
+                manifest.lifecycle.invalidate(from: .transcribing)
+                manifest.lifecycle.begin(.transcribing)
                 manifest.tasks = []
                 try vault.write(manifest: &manifest)
             }
         }
 
         if justFinishedTranscribing || recoveredReadableTranscript {
-            manifest.completedStages.removeAll {
-                $0 == .slicing || $0 == .evaluating || $0 == .synthesizing || $0 == .completed
-            }
+            manifest.lifecycle.invalidate(from: .slicing)
             manifest.tasks = []
             // Persist immediately so a crash during clip export cannot leave
             // slicing marked complete on disk while the new transcript is unused.
@@ -297,9 +292,7 @@ final class SessionProcessor: @unchecked Sendable {
         if localInputsChanged {
             invalidateStaleProviderResults(manifest: &manifest)
             manifest.localProcedure = nil
-            manifest.completedStages.removeAll {
-                $0 == .slicing || $0 == .evaluating || $0 == .synthesizing || $0 == .completed
-            }
+            manifest.lifecycle.invalidate(from: .slicing)
             manifest.slices = []
             try vault.write(manifest: &manifest)
         }
@@ -310,7 +303,7 @@ final class SessionProcessor: @unchecked Sendable {
                 let slicingStarted = Date()
                 await onEvent(.stage(.slicing))
                 await onStatus(.slicing, "Cutting evidence windows to the media budget")
-                manifest.pipelineStatus = .slicing
+                manifest.lifecycle.begin(.slicing)
                 let slices = slicer.slice(
                     shots: manifest.shots,
                     pins: effectivePins,
@@ -351,7 +344,7 @@ final class SessionProcessor: @unchecked Sendable {
                     await onProgress("Generating clips", Double(exported.count) / Double(max(1, slices.count)))
                 }
                 manifest.slices = exported
-                manifest.markCompleted(.slicing)
+                manifest.lifecycle.complete(.slicing)
                 timing.stageSeconds[ProcessingStage.slicing.rawValue] = Date().timeIntervalSince(slicingStarted)
                 AgentLog.event("slice_done", [
                     "session": sessionId,
@@ -403,7 +396,7 @@ final class SessionProcessor: @unchecked Sendable {
                 if manifest.slices.contains(where: { $0.analysisStatus != .success }) {
                     abandonEvaluate(manifest: &manifest, failedStatus: .skipped, markOffline: false)
                 } else {
-                    manifest.markCompleted(.evaluating)
+                    manifest.lifecycle.complete(.evaluating)
                 }
                 try vault.write(manifest: &manifest)
             } else if !manifest.uploadConsent.approved {
@@ -466,7 +459,7 @@ final class SessionProcessor: @unchecked Sendable {
                 await onEvent(.stage(.evaluating))
                 resetEvalAuthGate()
                 await onStatus(.evaluating, "Evaluating slices with the configured model")
-                manifest.pipelineStatus = .evaluating
+                manifest.lifecycle.begin(.evaluating)
                 let provider = providerFactory(configuration)
                 var tasks = manifest.tasks.filter { task in
                     manifest.slices.first { $0.sliceId == task.sourceSliceId }?.analysisStatus == .success
@@ -509,10 +502,10 @@ final class SessionProcessor: @unchecked Sendable {
                 manifest.slices = updatedSlices.sorted { $0.sliceId < $1.sliceId }
                 mergeUncoveredReview(manifest: &manifest, kept: tasks)
                 let anyFailed = manifest.slices.contains { $0.analysisStatus == .offlineFailed }
-                manifest.markCompleted(.evaluating)
+                manifest.lifecycle.complete(.evaluating)
                 timing.stageSeconds[ProcessingStage.evaluating.rawValue] = Date().timeIntervalSince(evaluatingStarted)
                 if anyFailed {
-                    manifest.pipelineStatus = .offlineFailed
+                    manifest.lifecycle.markOfflineFailed()
                 }
                 AgentLog.event("eval_done", [
                     "session": sessionId,
@@ -536,7 +529,7 @@ final class SessionProcessor: @unchecked Sendable {
                 .transcribing,
                 "Transcription is incomplete — the local export is available, and Retry Analysis can continue."
             )
-            manifest.pipelineStatus = .transcribing
+            manifest.lifecycle.begin(.transcribing)
             try vault.write(manifest: &manifest)
             try await writeIncompleteHandoff(
                 sessionId: sessionId, sessionURL: sessionURL, manifest: &manifest,
@@ -547,7 +540,7 @@ final class SessionProcessor: @unchecked Sendable {
         } else {
             await onStatus(.synthesizing, "Writing AGENT_CONTEXT.md and SESSION_BRIEF.html")
         }
-        manifest.pipelineStatus = .synthesizing
+        manifest.lifecycle.begin(.synthesizing)
         return try await finishExport(sessionId: sessionId, sessionURL: sessionURL, manifest: &manifest,
                                       transcript: transcript, pins: effectivePins, timing: &timing, onStatus: onStatus)
     }
@@ -606,9 +599,9 @@ final class SessionProcessor: @unchecked Sendable {
             manifest: manifest,
             includeFullTranscript: manifest.includeFullTranscriptInZip
         )
-        projection.manifest.markCompleted(.synthesizing)
-        projection.manifest.pipelineStatus = manifest.slices.contains(where: { $0.analysisStatus == .offlineFailed }) ? .offlineFailed : .completed
-        projection.manifest.markCompleted(.completed)
+        projection.manifest.lifecycle.finish(
+            offlineFailed: manifest.slices.contains(where: { $0.analysisStatus == .offlineFailed })
+        )
         projection.manifest.tasks = EvidenceValidator.applyExportEvidence(
             tasks: projection.manifest.tasks,
             sessionURL: sessionURL,
@@ -814,11 +807,9 @@ final class SessionProcessor: @unchecked Sendable {
             canonical: manifest.tasks,
             projected: projection.manifest.tasks
         )
-        manifest.markCompleted(.synthesizing)
-        manifest.pipelineStatus = manifest.slices.contains(where: { $0.analysisStatus == .offlineFailed })
-            ? .offlineFailed
-            : .completed
-        manifest.markCompleted(.completed)
+        manifest.lifecycle.finish(
+            offlineFailed: manifest.slices.contains(where: { $0.analysisStatus == .offlineFailed })
+        )
         try vault.write(manifest: &manifest)
         let exportReady = zipBytes > 0
             && zipBytes <= MediaBudget.maxZipBytes
@@ -865,9 +856,7 @@ final class SessionProcessor: @unchecked Sendable {
                 return stale
             }
         }
-        manifest.completedStages.removeAll {
-            $0 == .evaluating || $0 == .synthesizing || $0 == .completed
-        }
+        manifest.lifecycle.invalidate(from: .evaluating)
     }
 
     /// Build from the latest disk snapshot, then verify every source again
@@ -1318,7 +1307,7 @@ final class SessionProcessor: @unchecked Sendable {
             throw SettingsValidationError("Approve the selected comparison destinations before uploading.")
         }
         resetEvalAuthGate()
-        manifest.pipelineStatus = .evaluating
+        manifest.lifecycle.begin(.evaluating)
         let cache = ComparisonInputCache(slices: manifest.slices)
         let totalCalls = services.count * manifest.slices.count
         var doneCalls = 0
@@ -1390,9 +1379,9 @@ final class SessionProcessor: @unchecked Sendable {
             }
         }
         for index in manifest.slices.indices { refreshLegacyStatus(&manifest.slices[index]) }
-        manifest.markCompleted(.evaluating)
+        manifest.lifecycle.complete(.evaluating)
         if manifest.slices.contains(where: { $0.serviceEvaluations.contains { $0.status == .offlineFailed } }) {
-            manifest.pipelineStatus = .offlineFailed
+            manifest.lifecycle.markOfflineFailed()
         }
         AgentLog.event("eval_done", ["session": manifest.sessionId, "clips": String(manifest.slices.count), "services": String(services.count), "approved": manifest.uploadConsent.approved ? "1" : "0"])
         try vault.write(manifest: &manifest)
@@ -2045,7 +2034,7 @@ final class SessionProcessor: @unchecked Sendable {
                 }
                 refreshLegacyStatus(&manifest.slices[index])
             }
-            manifest.markCompleted(.evaluating)
+            manifest.lifecycle.complete(.evaluating)
             return
         }
         let kept = manifest.tasks.filter { task in
@@ -2057,9 +2046,9 @@ final class SessionProcessor: @unchecked Sendable {
         // D7: pin/keyword clips still in export/ must not vanish because a Shot
         // already produced a kept task (or because consent was denied on retry).
         mergeUncoveredReview(manifest: &manifest, kept: kept)
-        manifest.markCompleted(.evaluating)
+        manifest.lifecycle.complete(.evaluating)
         if markOffline {
-            manifest.pipelineStatus = .offlineFailed
+            manifest.lifecycle.markOfflineFailed()
         }
     }
 

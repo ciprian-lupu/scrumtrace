@@ -32,7 +32,7 @@ final class InterruptedSessionTests: XCTestCase {
 
     private func makeSession(in vault: SessionVault, status: PipelineStatus, age: TimeInterval = 0) throws -> String {
         var manifest = try vault.createSession(product: .empty).manifest
-        manifest.pipelineStatus = status
+        manifest.fixtureStatus = status
         manifest.createdAt = Date().addingTimeInterval(-age)
         try vault.write(manifest: &manifest)
         // A movie keeps controller start-up from pruning the session as an abandoned start.
@@ -58,14 +58,6 @@ final class InterruptedSessionTests: XCTestCase {
             try? await Task.sleep(nanoseconds: 10_000_000)
         }
         return condition()
-    }
-
-    func testOnlyProcessingStatesResumeOnTheirOwn() {
-        let resumable = SessionController.autoResumableStatuses
-        XCTAssertEqual(resumable, [.transcribing, .slicing, .evaluating, .synthesizing])
-        for manual in [PipelineStatus.recording, .paused, .offlineFailed, .idle, .completed] {
-            XCTAssertFalse(resumable.contains(manual), "\(manual) stays a manual Retry Analysis")
-        }
     }
 
     @MainActor
@@ -220,7 +212,7 @@ final class InterruptedSessionTests: XCTestCase {
         try await withBench { bench in
             let id = try makeSession(in: bench.vault, status: .transcribing)
             var manifest = try bench.vault.loadManifest(id: id)
-            manifest.markCompleted(.transcribing)
+            manifest.lifecycle.complete(.transcribing)
             try bench.vault.write(manifest: &manifest)
             try PipelineTiming(whisperIncomplete: true).write(sessionURL: bench.vault.sessionURL(id: id))
             XCTAssertEqual(makeController(bench).interruptedSessionId, id)

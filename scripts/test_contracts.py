@@ -1400,10 +1400,10 @@ def test_pipeline_timing_stays_in_archive() -> None:
     assert "requestTrust" not in start_rec
     assert "clock.reset()" in start_rec
     assert "captureFreeze.attach(nil)" in start_rec
-    assert "pipelineStatus = phase" in start_rec
+    assert "lifecycle.recordCapture(capture)" in start_rec
     assert "try? vault.write" not in start_rec
-    assert start_rec.index("pipelineStatus = phase") < start_rec.index("try vault.write(manifest: &local)")
-    assert start_rec.index("try await recorder.start(") < start_rec.index("pipelineStatus = phase")
+    assert start_rec.index("lifecycle.recordCapture(capture)") < start_rec.index("try vault.write(manifest: &local)")
+    assert start_rec.index("try await recorder.start(") < start_rec.index("lifecycle.recordCapture(capture)")
     assert start_rec.index("try await recorder.start(") < start_rec.index("lastSessionId = created.manifest.sessionId")
     assert start_rec.index("try await recorder.start(") < start_rec.index("pinTimes = []")
     assert start_rec.index("try await recorder.start(") < start_rec.index(
@@ -1469,7 +1469,7 @@ def test_pipeline_timing_stays_in_archive() -> None:
     # A quit, crash or reinstall during processing must not strand a recording at "transcribing".
     controller_src = (ROOT / "ScrumTrace" / "Processing" / "SessionController.swift").read_text()
     assert "func resumeInterruptedSession() -> Bool" in controller_src
-    assert "autoResumableStatuses: Set<PipelineStatus> = [.transcribing, .slicing, .evaluating, .synthesizing]" in controller_src
+    assert "if lifecycle.isResumable(facts) {" in controller_src
     delegate_src = (ROOT / "ScrumTrace" / "App" / "AppDelegate.swift").read_text()
     assert "controller.resumeInterruptedSession()" in delegate_src.split("func applicationDidFinishLaunching")[1].split("func applicationWillTerminate")[0]
     menu_quit = (ROOT / "ScrumTrace" / "UI" / "MenuBarController.swift").read_text().split("func quit()")[1].split("func openRecent")[0]
@@ -1643,10 +1643,14 @@ def test_pause_privacy_and_metadata_gate() -> None:
     assert "try? vault.write" not in persist
     # Quit never leaves an interrupted recording at idle: that hid it from the launch resume and Needs attention.
     assert "pipelineStatus = .idle" not in persist
-    assert "pipelineStatusAfterQuit(" in persist
+    assert "lifecycle.recordQuit(" in persist
     assert "hasMedia: local.duration.mediaSeconds > 0" in persist
-    assert "guard hasMedia else { return .idle }" in halt
-    assert "captureClosed ? .transcribing : .recording" in halt
+    lifecycle_src = (ROOT / "ScrumTrace" / "Storage" / "SessionLifecycle.swift").read_text()
+    record_quit = lifecycle_src.split("func recordQuit")[1].split("// MARK: - Processing")[0]
+    assert "guard hasMedia else" in record_quit
+    assert "status = .idle" in record_quit
+    assert "captureClosed ? .transcribing : .recording" in record_quit
+    assert "lifecycle.recordQuit(" in halt
     assert halt.index("persistInterruptedCapture(captureClosed: false)") < halt.index("lock.wait")
     assert halt.index("halt_stop_ok") < halt.index("persistInterruptedCapture(captureClosed: true)")
     # Free disk: refused before a session folder exists, checked on the 30 s tick, and an almost full disk ends the
@@ -2189,8 +2193,8 @@ def test_phase45_clip_consent_and_budget() -> None:
     assert "writtenTranscript" in repair
     assert "writeContainedData" in repair
     assert "recoveredReadableTranscript = true" in repair
-    assert "completedStages.removeAll" in repair
-    assert "pipelineStatus = .transcribing" in repair
+    assert "lifecycle.invalidate(from: .transcribing)" in repair
+    assert "lifecycle.begin(.transcribing)" in repair
     assert "manifest.tasks = []" in repair
     assert "justFinishedTranscribing || recoveredReadableTranscript" in processor
     written_before_load = processor.split("writeContainedData")[1].split("let transcript = loadTranscript")[0]
@@ -2214,28 +2218,28 @@ def test_phase45_clip_consent_and_budget() -> None:
     whisper_gate = processor.split("transcriber.isReady || !hadAudio")[1].split("let transcript = loadTranscript")[0]
     assert "transcript.sources" in whisper_gate
     assert "!transcribed.incomplete" in whisper_gate
-    assert "markCompleted(.transcribing)" in whisper_gate
+    assert "lifecycle.complete(.transcribing)" in whisper_gate
     slicing_gate = processor.split("if !manifest.hasCompleted(.slicing)")[1].split("let needsEvaluate")[0]
     assert "hasCompleted(.transcribing)" in slicing_gate
-    assert slicing_gate.index("hasCompleted(.transcribing)") < slicing_gate.index("markCompleted(.slicing)")
+    assert slicing_gate.index("hasCompleted(.transcribing)") < slicing_gate.index("lifecycle.complete(.slicing)")
     eval_gate = processor.split("if needsEvaluate")[1].split("await onStatus(.synthesizing")[0]
     assert "hasCompleted(.transcribing)" in eval_gate
     assert eval_gate.index("hasCompleted(.transcribing)") < eval_gate.index("uploadConsent.approved")
     incomplete = processor.split("Transcription is incomplete")[1].split("Writing AGENT_CONTEXT.md")[0]
     assert "return manifest" in incomplete
-    assert "pipelineStatus = .transcribing" in incomplete
+    assert "lifecycle.begin(.transcribing)" in incomplete
     assert "writeIncompleteHandoff" in incomplete
-    assert "markCompleted(.synthesizing)" not in incomplete
-    assert "markCompleted(.completed)" not in incomplete
+    assert "lifecycle.finish(" not in incomplete
+    assert "lifecycle.complete(.synthesizing)" not in incomplete
     handoff = processor.split("func writeIncompleteHandoff")[1].split("func writeExportDocuments")[0]
     assert "writeExportDocuments" in handoff
-    assert "markCompleted(.synthesizing)" not in handoff
-    assert "markCompleted(.completed)" not in handoff
+    assert "lifecycle.finish(" not in handoff
+    assert "lifecycle.complete(.synthesizing)" not in handoff
     assert "hasCompleted(.transcribing)" in processor.split("try requireUsableSession(sessionURL, id: sessionId)")[-1].split("Writing AGENT_CONTEXT.md")[0]
     assert "async throws -> (transcript: FullTranscript, incomplete: Bool, modelLoadSeconds: TimeInterval?)" in processor
     assert "justFinishedTranscribing" in processor
     retry_block = processor.split("if justFinishedTranscribing")[1].split("if !manifest.hasCompleted(.slicing)")[0]
-    assert "completedStages.removeAll" in retry_block
+    assert "lifecycle.invalidate(from: .slicing)" in retry_block
     assert "tasks = []" in retry_block
     assert "vault.write" in retry_block
     assert "zip failed" in processor
@@ -3197,7 +3201,7 @@ def test_audit_leftovers_are_implemented() -> None:
     inside = clock.split("func isInsidePause(hostTime")[1].split("func wallSecondsLocked")[0]
     assert "max(0, CMTimeGetSeconds" in inside
     merge = snap.split("func mergeLiveCatalog")[1]
-    assert "local.pipelineStatus = memory.pipelineStatus" in merge
+    assert "local.lifecycle.takeStatus(from: memory.lifecycle)" in merge
     persist_talk = shot.split("func persist()")[1].split("func startTalk()")[0]
     assert "Thread.isMainThread" in persist_talk
 
@@ -3440,7 +3444,7 @@ def test_main_window_routing_and_private_index() -> None:
     manifest_fields = set(re.findall(r"\bmanifest\s*\.\s*(\w+)", library_code))
     assert "sessionId" in manifest_fields
     assert manifest_fields <= {
-        "sessionId", "createdAt", "pipelineStatus", "completedStages", "duration", "pauses",
+        "sessionId", "createdAt", "pipelineStatus", "completedStages", "lifecycle", "duration", "pauses",
         "productContext", "shots", "slices", "tasks", "uploadConsent", "omitted", "importOrigin",
     }, manifest_fields
 
@@ -4014,6 +4018,29 @@ def test_display_selection_never_widens() -> None:
             assert "display_name" not in call and "displayName" not in call, path
 
 
+def test_session_lifecycle_has_one_writer():
+    """The Session status and done Stages change only through SessionLifecycle's transitions."""
+    sources = sorted((ROOT / "ScrumTrace").rglob("*.swift"))
+    write = re.compile(r"\.(pipelineStatus|completedStages)\s*=(?!=)|completedStages\.(append|removeAll|insert|remove)\b"
+                       r"|\.markCompleted\(\.")
+    construct = re.compile(r"SessionLifecycle\(status:")
+    construct_allowed = {"SessionLifecycle.swift", "SessionModels.swift", "SessionLibrary.swift"}
+    for path in sources:
+        if path.name == "SessionLifecycle.swift":
+            continue
+        text = path.read_text()
+        hit = write.search(text)
+        assert not hit, (path.name, hit.group(0))
+        if path.name not in construct_allowed:
+            assert not construct.search(text), (path.name, "builds a SessionLifecycle from raw fields")
+    models = (ROOT / "ScrumTrace" / "Storage" / "SessionModels.swift").read_text()
+    assert "var lifecycle: SessionLifecycle" in models
+    assert "var pipelineStatus: PipelineStatus { lifecycle.status }" in models
+    lifecycle = (ROOT / "ScrumTrace" / "Storage" / "SessionLifecycle.swift").read_text()
+    assert "private(set) var status: PipelineStatus" in lifecycle
+    assert "private(set) var completedStages: [PipelineStatus]" in lifecycle
+
+
 def main() -> None:
     test_export_has_no_archive_and_no_tokens()
     test_agent_context_uses_export_relative_paths()
@@ -4031,6 +4058,7 @@ def main() -> None:
     test_pipeline_timing_stays_in_archive()
     test_pause_privacy_and_metadata_gate()
     test_phase45_clip_consent_and_budget()
+    test_session_lifecycle_has_one_writer()
     test_write_contained_data_refuses_directory_symlinks()
     test_audit_leftovers_are_implemented()
     test_claude_cli_handoff()

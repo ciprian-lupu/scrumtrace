@@ -733,7 +733,7 @@ final class SettingsUsabilityTests: XCTestCase {
         try TranscriptionRunStore.save([run], sessionURL: session)
         try TranscriptionRunStore.saveTranscript(FullTranscript(sessionId: created.manifest.sessionId, language: "ro", segments: [.init(start: 0, end: 1, text: "chosen later", speaker: nil, words: [])]), id: run.id, sessionURL: session)
         var manifest = try vault.loadManifest(id: created.manifest.sessionId)
-        manifest.completedStages = [.transcribing, .slicing, .evaluating, .synthesizing, .completed]
+        manifest.fixtureStages = [.transcribing, .slicing, .evaluating, .synthesizing, .completed]
         manifest.slices = [.init(sliceId: "old", startMedia: 0, endMedia: 1, trigger: .pin, associatedShotId: nil, clipPath: "media/old.mp4", stills: [], analysisStatus: .success, score: 1)]
         try vault.write(manifest: &manifest)
 

@@ -18,7 +18,7 @@ enum RecordingStatusText {
 
     static func label(_ summary: SessionSummary, isActive: Bool = false) -> String {
         label(summary.pipelineStatus, isActive: isActive,
-              exportReady: summary.completedStages.contains(.synthesizing) && summary.hasBrief && summary.hasExportContext)
+              exportReady: summary.lifecycle.isExportReady(summary.archiveFacts))
     }
 }
 
@@ -38,6 +38,12 @@ extension SessionTaskCounts {
             case .dropped: dropped += 1
             }
         }
+    }
+}
+
+extension ArchiveFacts {
+    init(_ probe: SessionExportProbe) {
+        self.init(hasBrief: probe.hasBrief, hasAgentContext: probe.hasAgentContext)
     }
 }
 
@@ -134,12 +140,16 @@ struct SessionSummary: Sendable, Identifiable, Hashable {
         packBytes = exportProbe.packBytes
         hasFullTranscriptArchive = exportProbe.hasFullTranscriptArchive
         hasArchiveRecording = exportProbe.hasArchiveRecording
-        switch manifest.pipelineStatus {
-        case .idle, .completed:
-            isUnfinished = false
-        case .recording, .paused, .transcribing, .slicing, .evaluating, .synthesizing, .offlineFailed:
-            isUnfinished = true
-        }
+        isUnfinished = manifest.lifecycle.isUnfinished
+    }
+
+    /// The saved lifecycle this row was read from, for classifications.
+    var lifecycle: SessionLifecycle {
+        SessionLifecycle(status: pipelineStatus, completedStages: completedStages)
+    }
+
+    var archiveFacts: ArchiveFacts {
+        ArchiveFacts(hasBrief: hasBrief, hasAgentContext: hasExportContext)
     }
 
     /// The same manifest fields with export availability probed again.
