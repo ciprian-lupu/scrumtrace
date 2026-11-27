@@ -1349,7 +1349,7 @@ enum RecordingRowText {
     /// A manifest still at recording or paused: ScrumTrace stopped before the recording ended, because a normal quit
     /// writes idle. Callers leave out the recording a running capture holds, which is at these states too.
     static func captureWasInterrupted(_ summary: SessionSummary) -> Bool {
-        summary.pipelineStatus == .recording || summary.pipelineStatus == .paused
+        summary.lifecycle.isInterrupted
     }
 
     /// The sentence after an unfinished recording's context and duration in Overview's Needs attention. An analysis
@@ -1359,7 +1359,7 @@ enum RecordingRowText {
             return "\(interruptedTitle). Retry analysis processes what was captured."
         }
         if summary.pipelineStatus == .offlineFailed {
-            return summary.completedStages.contains(.synthesizing) && summary.hasBrief && summary.hasExportContext
+            return summary.lifecycle.isExportReady(summary.archiveFacts)
                 ? "The local export is ready. Retry analysis can retry the failed AI analysis."
                 : "This recording needs attention. Retry analysis can try again."
         }

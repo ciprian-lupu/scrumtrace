@@ -3444,7 +3444,7 @@ def test_main_window_routing_and_private_index() -> None:
     manifest_fields = set(re.findall(r"\bmanifest\s*\.\s*(\w+)", library_code))
     assert "sessionId" in manifest_fields
     assert manifest_fields <= {
-        "sessionId", "createdAt", "pipelineStatus", "completedStages", "duration", "pauses",
+        "sessionId", "createdAt", "pipelineStatus", "completedStages", "lifecycle", "duration", "pauses",
         "productContext", "shots", "slices", "tasks", "uploadConsent", "omitted", "importOrigin",
     }, manifest_fields
 

@@ -254,7 +254,7 @@ final class MenuBarController: NSObject {
                 let probe = session.pipelineStatus == .offlineFailed
                     ? SessionExportProbe.probe(sessionURL: controller.vault.sessionURL(id: session.sessionId)) : SessionExportProbe()
                 let recording = NSMenuItem(title: Self.recordingLabel(session, isActive: isActive,
-                    exportReady: session.hasCompleted(.synthesizing) && probe.hasBrief && probe.hasAgentContext), action: nil, keyEquivalent: "")
+                    exportReady: session.lifecycle.isExportReady(ArchiveFacts(probe))), action: nil, keyEquivalent: "")
                 recording.submenu = recordingMenu(sessionId: session.sessionId, isLast: false)
                 recentMenu.addItem(recording)
             }

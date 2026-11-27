@@ -97,6 +97,12 @@ final class SessionLifecycleTests: XCTestCase {
         XCTAssertFalse(value.isDone(.evaluating))
     }
 
+    func testClearAllStagesAlsoDropsValuesOutsideTheStagesAndKeepsTheStatus() {
+        var value = lifecycle(.evaluating, done: [.transcribing, .recording, .slicing])
+        value.clearAllStages()
+        XCTAssertEqual(value, lifecycle(.evaluating))
+    }
+
     func testFinishCompletesInSavedOrderAndReportsAnyOfflineFailure() {
         var clean = lifecycle(.synthesizing, done: [.transcribing, .slicing, .evaluating])
         clean.finish(offlineFailed: false)

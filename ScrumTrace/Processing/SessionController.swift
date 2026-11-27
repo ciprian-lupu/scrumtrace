@@ -187,28 +187,28 @@ final class SessionController: ObservableObject {
         vault.pruneAbandonedStarts()
         if let recent = vault.recentSessions(limit: 1).first {
             lastSessionId = recent.sessionId
-            switch recent.pipelineStatus {
-            case .idle, .completed:
-                break
-            case .recording, .paused, .transcribing, .slicing, .evaluating, .synthesizing, .offlineFailed:
+            let lifecycle = recent.lifecycle
+            if lifecycle.isUnfinished {
                 let sessionURL = vault.sessionURL(id: recent.sessionId)
-                let incompleteTranscription = recent.pipelineStatus == .transcribing
-                    && !recent.hasCompleted(.transcribing)
-                    && PipelineTiming.load(sessionURL: sessionURL)?.whisperIncomplete == true
-                if incompleteTranscription {
+                // The timing file is read only when it can matter, as before.
+                let facts = ArchiveFacts(
+                    lastTranscriptionPassFailed: lifecycle.status == .transcribing && !lifecycle.isDone(.transcribing)
+                        && PipelineTiming.load(sessionURL: sessionURL)?.whisperIncomplete == true
+                )
+                if lifecycle.awaitsTranscriptionRetry(facts) {
                     statusLine = "Transcription is incomplete — Retry Analysis to try again"
-                } else if recent.pipelineStatus == .recording || recent.pipelineStatus == .paused {
+                } else if lifecycle.isInterrupted {
                     statusLine = "Recording was interrupted — Retry Analysis processes what was captured"
-                } else if recent.pipelineStatus == .offlineFailed {
+                } else if lifecycle.status == .offlineFailed {
                     let probe = SessionExportProbe.probe(sessionURL: sessionURL)
-                    statusLine = probe.hasBrief && probe.hasAgentContext && recent.hasCompleted(.synthesizing)
+                    statusLine = lifecycle.isExportReady(ArchiveFacts(probe))
                         ? "Export is ready — AI analysis needs review; Retry Analysis to try again"
                         : "Recording needs attention — Retry Analysis to try again"
                 } else {
                     statusLine = "Last session is unfinished — Retry Analysis to finish"
                 }
-                AgentLog.event("interrupted_session", ["status": recent.pipelineStatus.rawValue])
-                if Self.autoResumableStatuses.contains(recent.pipelineStatus), !incompleteTranscription {
+                AgentLog.event("interrupted_session", ["status": lifecycle.status.rawValue])
+                if lifecycle.isResumable(facts) {
                     interruptedSessionId = recent.sessionId
                 }
             }

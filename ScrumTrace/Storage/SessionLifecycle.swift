@@ -85,6 +85,11 @@ struct SessionLifecycle: Equatable, Sendable {
         completedStages.removeAll { dropped.contains($0) }
     }
 
+    /// Nothing counts as done any more, including values an older manifest held outside `Stage`.
+    mutating func clearAllStages() {
+        completedStages = []
+    }
+
     /// Packaging finished: synthesizing and completed are done, and the status says whether any analysis failed.
     mutating func finish(offlineFailed: Bool) {
         complete(.synthesizing)
